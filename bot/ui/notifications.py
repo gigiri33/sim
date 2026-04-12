@@ -36,6 +36,37 @@ def _own_notif_on(key: str) -> bool:
 
 
 # ── Purchase delivery ──────────────────────────────────────────────────────────
+def _fmt_users_label_d(max_users):
+    if not max_users:
+        return "نامحدود"
+    if max_users == 1:
+        return "تک‌کاربره"
+    if max_users == 2:
+        return "دوکاربره"
+    return f"{max_users} کاربره"
+
+
+def _send_file_group_delivery(chat_id, file_ids, caption, kb):
+    """Send files as media album; attach kb after group if multi-file."""
+    if not file_ids:
+        bot.send_message(chat_id, caption, parse_mode="HTML", reply_markup=kb)
+        return
+    if len(file_ids) == 1:
+        bot.send_document(chat_id, file_ids[0], caption=caption, parse_mode="HTML", reply_markup=kb)
+        return
+    chunks = [file_ids[i:i + 10] for i in range(0, len(file_ids), 10)]
+    for idx, chunk in enumerate(chunks):
+        is_last = (idx == len(chunks) - 1)
+        if is_last:
+            media = [types.InputMediaDocument(fid) for fid in chunk[:-1]]
+            media.append(types.InputMediaDocument(chunk[-1], caption=caption, parse_mode="HTML"))
+        else:
+            media = [types.InputMediaDocument(fid) for fid in chunk]
+        bot.send_media_group(chat_id, media)
+    # keyboard can't attach to media group — send separately
+    bot.send_message(chat_id, "⬆️ فایل‌های کانفیگ شما", reply_markup=kb)
+
+
 def deliver_purchase_message(chat_id, purchase_id):
     item = get_purchase(purchase_id)
     if not item:
@@ -43,32 +74,84 @@ def deliver_purchase_message(chat_id, purchase_id):
         return
     cfg          = item["config_text"]
     service_name = urllib.parse.unquote(item["service_name"] or "")
+    inquiry_link = item["inquiry_link"] or ""
     show_pkg_name = ("show_name" not in item.keys()) or bool(item["show_name"])
     package_line = f"📦 پکیج: <b>{esc(item['package_name'])}</b>\n" if show_pkg_name and item["package_name"] else ""
     expired_note = "\n\n⚠️ <b>این سرویس توسط ادمین منقضی شده است.</b>" if item["is_expired"] else ""
-    text = (
-        f"✅ <b>{'تست رایگان' if item['is_test'] else 'سرویس شما آماده است'}</b>\n\n"
-        f"🔮 نام سرویس: <b>{esc(service_name)}</b>\n"
-        f"🧩 نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
-        f"{package_line}"
-        f"🔋 حجم: <b>{'نامحدود' if not item['volume_gb'] else item['volume_gb']}</b> {'گیگ' if item['volume_gb'] else ''}\n"
-        f"⏰ مدت: <b>{'نامحدود' if not item['duration_days'] else str(item['duration_days']) + ' روز'}</b>\n"
-        f"👥 تعداد کاربر: <b>{'نامحدود' if not (item['max_users'] if 'max_users' in item.keys() else 0) else str(item['max_users']) + ' کاربره'}</b>\n\n"
-        f"💝 <b>Config:</b>\n<code>{esc(cfg)}</code>\n\n"
-        f"🔋 Volume web: {esc(item['inquiry_link'] or '-')}"
-        f"{expired_note}"
-    )
-    qr_img = qrcode.make(cfg)
-    bio    = io.BytesIO()
-    qr_img.save(bio, format="PNG")
-    bio.seek(0)
-    bio.name = "qrcode.png"
+    title_line   = "تست رایگان" if item["is_test"] else "سرویس شما آماده است"
 
     kb = types.InlineKeyboardMarkup()
     if setting_get("manual_renewal_enabled", "1") == "1":
         kb.add(types.InlineKeyboardButton("♻️ تمدید", callback_data=f"renew:{purchase_id}"))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
-    bot.send_photo(chat_id, bio, caption=text, parse_mode="HTML", reply_markup=kb)
+
+    # Detect file-based configs (OpenVPN / WireGuard)
+    cfg_data = None
+    try:
+        parsed = json.loads(cfg)
+        if isinstance(parsed, dict) and parsed.get("type") in ("ovpn", "wg"):
+            cfg_data = parsed
+    except (json.JSONDecodeError, TypeError, ValueError):
+        pass
+
+    if cfg_data:
+        file_ids    = cfg_data.get("file_ids", [])
+        cfg_type    = cfg_data.get("type")
+        vol_text    = "نامحدود" if not item["volume_gb"] else f"{item['volume_gb']} گیگ"
+        dur_text    = "نامحدود" if not item["duration_days"] else f"{item['duration_days']} روز"
+        users_label = _fmt_users_label_d(item["max_users"] if "max_users" in item.keys() else 0)
+        inq_line    = f"\n🔋 Volume web: <a href=\"{inquiry_link}\">لینک استعلام</a>" if inquiry_link else ""
+
+        if cfg_type == "ovpn":
+            username = cfg_data.get("username", "")
+            password = cfg_data.get("password", "")
+            caption = (
+                f"✅ <b>{title_line}</b>\n\n"
+                f"🧩 نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
+                f"{package_line}"
+                f"🔋 حجم: <b>{esc(vol_text)}</b>\n"
+                f"⏰ مدت: <b>{esc(dur_text)}</b>\n"
+                f"👤 کاربر: <b>{esc(users_label)}</b>\n"
+                f"┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n"
+                f"🔐 اطلاعات اکانت\n"
+                f"username: <code>{esc(username)}</code>\n"
+                f"password: <code>{esc(password)}</code>"
+                f"{inq_line}"
+                f"{expired_note}"
+            )
+        else:  # wg
+            caption = (
+                f"✅ <b>{title_line}</b>\n\n"
+                f"🧩 نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
+                f"{package_line}"
+                f"🔋 حجم: <b>{esc(vol_text)}</b>\n"
+                f"⏰ مدت: <b>{esc(dur_text)}</b>\n"
+                f"👥 نوع کاربری: <b>{esc(users_label)}</b>\n"
+                f"🔮 نام سرویس: <b>{esc(service_name)}</b>"
+                f"{inq_line}"
+                f"{expired_note}"
+            )
+        _send_file_group_delivery(chat_id, file_ids, caption, kb)
+    else:
+        # V2Ray / text-based delivery
+        text = (
+            f"✅ <b>{title_line}</b>\n\n"
+            f"🔮 نام سرویس: <b>{esc(service_name)}</b>\n"
+            f"🧩 نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
+            f"{package_line}"
+            f"🔋 حجم: <b>{'نامحدود' if not item['volume_gb'] else item['volume_gb']}</b> {'گیگ' if item['volume_gb'] else ''}\n"
+            f"⏰ مدت: <b>{'نامحدود' if not item['duration_days'] else str(item['duration_days']) + ' روز'}</b>\n"
+            f"👥 تعداد کاربر: <b>{'نامحدود' if not (item['max_users'] if 'max_users' in item.keys() else 0) else str(item['max_users']) + ' کاربره'}</b>\n\n"
+            f"💝 <b>Config:</b>\n<code>{esc(cfg)}</code>\n\n"
+            f"🔋 Volume web: {esc(inquiry_link or '-')}"
+            f"{expired_note}"
+        )
+        qr_img = qrcode.make(cfg)
+        bio    = io.BytesIO()
+        qr_img.save(bio, format="PNG")
+        bio.seek(0)
+        bio.name = "qrcode.png"
+        bot.send_photo(chat_id, bio, caption=text, parse_mode="HTML", reply_markup=kb)
 
     # also mirror to is_test=1 → test_report topic, else → purchase_log topic
     if item["is_test"]:
