@@ -309,7 +309,7 @@ def send_payment_to_admins(payment_id):
 
 
 # ── Card payment approval / rejection ─────────────────────────────────────────
-def _clear_payment_admin_buttons(payment_id, status_text):
+def _clear_payment_admin_buttons(payment_id, status_text, file_id=None):
     """Remove approve/reject buttons from all admin notification messages."""
     msgs = get_payment_admin_messages(payment_id)
     for row in msgs:
@@ -318,7 +318,24 @@ def _clear_payment_admin_buttons(payment_id, status_text):
         except Exception:
             pass
         try:
-            bot.send_message(row["admin_id"], status_text, parse_mode="HTML")
+            if file_id:
+                # Send photo with full status text as caption (max 1024 chars)
+                caption = status_text[:1024]
+                sent = False
+                try:
+                    bot.send_photo(row["admin_id"], file_id, caption=caption, parse_mode="HTML")
+                    sent = True
+                except Exception:
+                    try:
+                        bot.send_document(row["admin_id"], file_id, caption=caption, parse_mode="HTML")
+                        sent = True
+                    except Exception:
+                        pass
+                # If media failed or text was truncated, also send as plain text
+                if not sent or len(status_text) > 1024:
+                    bot.send_message(row["admin_id"], status_text, parse_mode="HTML")
+            else:
+                bot.send_message(row["admin_id"], status_text, parse_mode="HTML")
         except Exception:
             pass
     delete_payment_admin_messages(payment_id)
@@ -327,9 +344,43 @@ def _clear_payment_admin_buttons(payment_id, status_text):
 def finish_card_payment_approval(payment_id, admin_note, approved):
     result = _finish_card_payment_approval_inner(payment_id, admin_note, approved)
     if result:
-        status_text = "✅ <b>تراکنش تأیید شد.</b>" if approved else "❌ <b>تراکنش رد شد.</b>"
+        header = "✅ <b>تراکنش تأیید شد.</b>" if approved else "❌ <b>تراکنش رد شد.</b>"
+        file_id = None
         try:
-            _clear_payment_admin_buttons(payment_id, status_text)
+            payment = get_payment(payment_id)
+            user = get_user(payment["user_id"]) if payment else None
+            package_row = get_package(payment["package_id"]) if payment and payment["package_id"] else None
+            if payment and user:
+                kind_label = "شارژ کیف پول" if payment["kind"] == "wallet_charge" else "خرید کانفیگ"
+                method_label = payment["payment_method"]
+                coin_key = payment["crypto_coin"]
+                if coin_key:
+                    method_label += f" ({coin_key})"
+                package_text = ""
+                if package_row:
+                    package_text = (
+                        f"\n🧩 نوع: {esc(package_row['type_name'])}"
+                        f"\n📦 پکیج: {esc(package_row['name'])}"
+                        f"\n🔋 حجم: {package_row['volume_gb']} گیگ"
+                        f"\n⏰ مدت: {package_row['duration_days']} روز"
+                    )
+                status_text = (
+                    f"{header}\n\n"
+                    f"🧾 نوع: {kind_label} | {method_label}\n"
+                    f"👤 کاربر: {esc(user['full_name'])}\n"
+                    f"🆔 نام کاربری: {esc(display_username(user['username']))}\n"
+                    f"🔢 آیدی: <code>{user['user_id']}</code>\n"
+                    f"💰 مبلغ: <b>{fmt_price(payment['amount'])}</b> تومان"
+                    f"{package_text}\n\n"
+                    f"📝 توضیح کاربر:\n{esc(payment['receipt_text'] or '-')}"
+                )
+                file_id = payment["receipt_file_id"]
+            else:
+                status_text = header
+        except Exception:
+            status_text = header
+        try:
+            _clear_payment_admin_buttons(payment_id, status_text, file_id)
         except Exception:
             pass
     return result
