@@ -1,11 +1,11 @@
 #!/bin/bash
 set -Eeuo pipefail
 
-REPO="https://github.com/gigiri33/sim.git"
-REPO_CACHE="/opt/.configflow-repo-cache"
-BASE_DIR="/opt/configflow"
-BASE_SERVICE="configflow"
-MANAGER_PATH="/usr/local/bin/configflow"
+REPO="https://github.com/gigiri33/fr.git"
+REPO_CACHE="/opt/.seamless-repo-cache"
+BASE_DIR="/opt/seamless"
+BASE_SERVICE="seamless"
+MANAGER_PATH="/usr/local/bin/seamless"
 DIR=""
 SERVICE=""
 INSTANCE_NUM=""
@@ -25,11 +25,14 @@ header() {
   clear 2>/dev/null || true
   echo ""
   echo -e "${C}╔══════════════════════════════════════════════════════════════════════════╗${N}"
-  echo -e "${C}║${N}         ${W}${B}⚙️  ConfigFlow — Telegram Config Sales Bot ⚙️${N}                  ${C}║${N}"
+  echo -e "${C}║${N}             ${W}${B}═? Seamless — Telegram Config Sales Bot ═?${N}                  ${C}║${N}"
   echo -e "${C}║${N}                                                                          ${C}║${N}"
   echo -e "${C}╠══════════════════════════════════════════════════════════════════════════╣${N}"
-  echo -e "${C}║${N}   ${B}${G}GitHub:${N}    github.com/gigiri33/sim                                    ${C}║${N}"
-  echo -e "${C}║${N}   ${B}${G}Developer:${N} ConfigFlow Team                                             ${C}║${N}"
+
+  echo -e "${C}║${N}   ${B}${G}GitHub:${N}    github.com/Emadhabibnia1385/Seamless                       ${C}║${N}"
+  echo -e "${C}║${N}   ${B}${G}Developer:${N} t.me/EmadHabibnia                                          ${C}║${N}"
+  echo -e "${C}║${N}   ${B}${G}Channel:${N}   @Emadhabibnia                                               ${C}║${N}"
+
   echo -e "${C}════════════════════════════════════════════════════════════════════════════${N}"
   echo ""
 }
@@ -68,7 +71,7 @@ install_manager_cli() {
   [[ -f "$src" ]] || return 0
   cp "$src" "$MANAGER_PATH"
   chmod +x "$MANAGER_PATH"
-  ok "Management CLI installed. Run 'configflow' any time."
+  ok "Management CLI installed. Run 'seamless' any time."
 }
 
 # ─────────────────────── helpers for name/time ───────────────────────────
@@ -120,7 +123,7 @@ get_autoupdate_status_label() {
 # ─────────────────────────── repo / venv ───────────────────────────
 
 clone_or_update_repo() {
-  info "Downloading ConfigFlow..."
+  info "Downloading Seamless..."
 
   mkdir -p "$REPO_CACHE"
   if [[ -d "$REPO_CACHE/.git" ]]; then
@@ -132,12 +135,14 @@ clone_or_update_repo() {
     git clone --depth 1 "$REPO" "$REPO_CACHE"
   fi
 
-  local src="$REPO_CACHE"
+  # Use seamless/ subfolder if it exists (new repo layout)
+  local src="$REPO_CACHE/seamless"
+  [[ -d "$src" ]] || src="$REPO_CACHE"
 
   mkdir -p "$DIR"
   for item in "$src"/*; do
     local bn; bn="$(basename "$item")"
-    case "$bn" in .git|venv|__pycache__|.venv|install.sh|install.sh.bak) continue;; esac
+    case "$bn" in .git|venv|__pycache__|license__Seamless|patches|.venv|fr) continue;; esac
     cp -r "$item" "$DIR/"
   done
 
@@ -269,7 +274,7 @@ create_systemd_service() {
   info "Creating systemd service for ${SERVICE}..."
   cat > "/etc/systemd/system/$SERVICE.service" << EOF
 [Unit]
-Description=ConfigFlow Telegram Bot — ${BOT_NAME}
+Description=Seamless Telegram Bot — ${BOT_NAME}
 After=network.target
 
 [Service]
@@ -293,7 +298,7 @@ create_worker_service() {
   info "Creating Iran Worker service for ${SERVICE}-worker..."
   cat > "/etc/systemd/system/${SERVICE}-worker.service" << EOF
 [Unit]
-Description=ConfigFlow Iran Worker — ${BOT_NAME}
+Description=Seamless Iran Worker — ${BOT_NAME}
 After=network.target
 
 [Service]
@@ -345,16 +350,10 @@ enable_auto_update() {
   local AUTOUPDATE_SVC="${SERVICE}-autoupdate"
 
   info "Creating auto-update script..."
-  # First part: inject actual values from the installer (unquoted heredoc)
-  cat > "$AUTOUPDATE_SCRIPT" << EOFHEAD
+  cat > "$AUTOUPDATE_SCRIPT" << EOFSCRIPT
 #!/bin/bash
-CACHE="${REPO_CACHE}"
-REPO_URL="${REPO}"
-BOT_DIR="${DIR}"
-BOT_SERVICE="${SERVICE}"
-EOFHEAD
-  # Second part: literal script logic (quoted heredoc, no expansion)
-  cat >> "$AUTOUPDATE_SCRIPT" << 'EOFSCRIPT'
+CACHE=""
+SRC="$CACHE/seamless"
 mkdir -p "$CACHE"
 if [[ -d "$CACHE/.git" ]]; then
   git -C "$CACHE" fetch --depth 1 origin main --prune 2>/dev/null
@@ -362,21 +361,22 @@ if [[ -d "$CACHE/.git" ]]; then
   git -C "$CACHE" reset --hard FETCH_HEAD 2>/dev/null
   REMOTE=$(git -C "$CACHE" rev-parse HEAD 2>/dev/null || echo "new")
 else
-  git clone --depth 1 "$REPO_URL" "$CACHE" 2>/dev/null
+  git clone --depth 1 "" "$CACHE" 2>/dev/null
   LOCAL=""
   REMOTE=$(git -C "$CACHE" rev-parse HEAD 2>/dev/null || echo "new")
 fi
 if [[ "$LOCAL" != "$REMOTE" ]]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') -- Update found (${LOCAL:0:7} -> ${REMOTE:0:7}), updating..."
-  for item in "$CACHE"/*; do
+  [[ -d "$SRC" ]] || SRC="$CACHE"
+  for item in "$SRC"/*; do
     bn="$(basename "$item")"
-    case "$bn" in .git|venv|__pycache__|.venv|install.sh|install.sh.bak) continue;; esac
-    cp -r "$item" "$BOT_DIR/"
+    case "$bn" in .git|venv|__pycache__|license__Seamless|patches|.venv|fr) continue;; esac
+    cp -r "$item" "$DIR/"
   done
-  "$BOT_DIR/venv/bin/pip" install -r "$BOT_DIR/requirements.txt" -q
-  date '+%Y-%m-%d %H:%M:%S' > "$BOT_DIR/.last_update"
-  systemctl restart "$BOT_SERVICE"
-  echo "$(date '+%Y-%m-%d %H:%M:%S') -- Updated and restarted $BOT_SERVICE"
+  "$DIR/venv/bin/pip" install -r "$DIR/requirements.txt" -q
+  date '+%Y-%m-%d %H:%M:%S' > "$DIR/.last_update"
+  systemctl restart "$SERVICE"
+  echo "$(date '+%Y-%m-%d %H:%M:%S') -- Updated and restarted $SERVICE"
 else
   echo "$(date '+%Y-%m-%d %H:%M:%S') -- Already up to date (${LOCAL:0:7})"
 fi
@@ -385,7 +385,7 @@ EOFSCRIPT
 
   cat > "/etc/systemd/system/${AUTOUPDATE_SVC}.service" << EOF
 [Unit]
-Description=ConfigFlow Auto Update — ${BOT_NAME}
+Description=Seamless Auto Update — ${BOT_NAME}
 After=network.target
 
 [Service]
@@ -397,7 +397,7 @@ EOF
 
   cat > "/etc/systemd/system/${AUTOUPDATE_SVC}.timer" << EOF
 [Unit]
-Description=ConfigFlow Auto Update Timer — ${BOT_NAME}
+Description=Seamless Auto Update Timer — ${BOT_NAME}
 
 [Timer]
 OnCalendar=minutely
@@ -571,9 +571,9 @@ _install_worker_local() {
 
 all_instances() {
   local list=()
-  for d in ${BASE_DIR}-*/; do
+  for d in /opt/seamless-*/; do
     [[ -d "$d" ]] || continue
-    local num; num="$(basename "$d" | sed "s/${BASE_SERVICE}-//")"
+    local num; num="$(basename "$d" | sed 's/seamless-//')"
     [[ "$num" =~ ^[0-9]+$ ]] && list+=("$num")
   done
   echo "${list[@]:-}"
@@ -701,9 +701,9 @@ list_instances_table() {
   echo -e "${C}┌────┬────────────────────────────┬───────────────┬──────────────────────═${N}"
   echo -e "${C}│${N} ${B}${W}#${N}  ${C}│${N} ${B}${W}Bot Name${N}                    ${C}│${N} ${B}${W}Status${N}         ${C}│${N} ${B}${W}Last Update${N}          ${C}│${N}"
   echo -e "${C}├────┼────────────────────────────┼───────────────┼──────────────────────┤${N}"
-  for d in ${BASE_DIR}-*/; do
+  for d in /opt/seamless-*/; do
     [[ -d "$d" ]] || continue
-    local num; num="$(basename "$d" | sed "s/${BASE_SERVICE}-//")"
+    local num; num="$(basename "$d" | sed 's/seamless-//')"
     [[ "$num" =~ ^[0-9]+$ ]] || continue
     local name; name="$(get_bot_name "$num")"
     local svc="${BASE_SERVICE}-${num}"
@@ -728,7 +728,7 @@ list_instances_table() {
 
 show_global_menu() {
   echo -e "${C}┌──────────────────────────────────────────═${N}"
-  echo -e "${C}│${N}        ${W}${B}??═ Main Menu — ConfigFlow${N}        ${C}│${N}"
+  echo -e "${C}│${N}        ${W}${B}??═ Main Menu — Seamless${N}          ${C}│${N}"
   echo -e "${C}├──────────────────────────────────────────┤${N}"
   echo -e "${C}│${N}  ${B}${G}m)${N} ??�� Manage a bot (select number)    ${C}│${N}"
   echo -e "${C}│${N}  ${B}${M}L)${N} ??�� License Bot Management          ${C}│${N}"
@@ -849,8 +849,8 @@ bot_loop() {
 # ─────────────────────────── LICENSE BOT ───────────────────────────
 
 LICENSE_REPO="https://github.com/gigiri33/fr.git"
-LICENSE_DIR="/opt/configflow-license"
-LICENSE_SERVICE="configflow-license"
+LICENSE_DIR="/opt/seamless-license"
+LICENSE_SERVICE="seamless-license"
 LICENSE_BRANCH="main"
 LICENSE_SUBDIR="license__Seamless"
 
@@ -895,7 +895,7 @@ ENVEOF
 
   echo ""
   echo -e "${Y}══════════════════════════════════════════════════════════${N}"
-  echo -e "${B}${W}   ??�� Use this URL in your ConfigFlow bots' .env:${N}"
+  echo -e "${B}${W}   ??�� Use this URL in your Seamless bots' .env:${N}"
   local server_ip
   server_ip=$(curl -s4 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
   echo -e "   ${B}${G}LICENSE_API_URL=http://${server_ip}:${LIC_PORT}${N}"
@@ -907,7 +907,7 @@ license_install() {
   ensure_safe_cwd
   install_prereqs
   info "Downloading License Bot..."
-  local tmpdir="/tmp/configflow-license-clone"
+  local tmpdir="/tmp/seamless-license-clone"
   rm -rf "$tmpdir"
   git clone --depth 1 -b "$LICENSE_BRANCH" "$LICENSE_REPO" "$tmpdir"
 
@@ -928,7 +928,7 @@ license_install() {
   info "Creating systemd service..."
   cat > "/etc/systemd/system/${LICENSE_SERVICE}.service" << EOF
 [Unit]
-Description=ConfigFlow License Bot
+Description=Seamless License Bot
 After=network.target
 
 [Service]
@@ -952,7 +952,7 @@ license_update() {
   ensure_safe_cwd
   [[ -d "$LICENSE_DIR" ]] || err "License bot not installed."
   info "Updating License Bot from GitHub..."
-  local tmpdir="/tmp/configflow-license-clone"
+  local tmpdir="/tmp/seamless-license-clone"
   rm -rf "$tmpdir"
   git clone --depth 1 -b "$LICENSE_BRANCH" "$LICENSE_REPO" "$tmpdir"
 
@@ -993,7 +993,7 @@ license_remove() {
 show_license_menu() {
   local status; status="$(license_get_status)"
   echo -e "${C}╔══════════════════════════════════════════════════════════════════════════╗${N}"
-  echo -e "${C}║${N}  ??�� ${B}${W}ConfigFlow License Bot${N}   Status: $status                         ${C}║${N}"
+  echo -e "${C}║${N}  ??�� ${B}${W}Seamless License Bot${N}   Status: $status                           ${C}║${N}"
   echo -e "${C}════════════════════════════════════════════════════════════════════════════${N}"
   echo ""
   echo -e "${C}┌──────────────────────────────────────═${N}"
@@ -1043,7 +1043,7 @@ main() {
     show_global_menu
 
 
-    read -r -p "$(echo -e "${C}ConfigFlow${N} ${B}═�${N} option ${W}[m/L/1-7/0]${N}: ")" choice
+    read -r -p "$(echo -e "${C}Seamless${N} ${B}═�${N} option ${W}[m/L/1-7/0]${N}: ")" choice
 
     case "${choice:-}" in
       m)
