@@ -36,10 +36,10 @@ def _get_own_service_name():
     except Exception:
         pass
 
-    # Fallback: infer from working-directory pattern /opt/seamless-N/
+    # Fallback: infer from working-directory pattern /opt/<service>-N/
     try:
         cwd = os.getcwd()
-        m = re.search(r'/opt/(seamless[-_][^/]+)', cwd)
+        m = re.search(r'/opt/((?:configflow|seamless)[-_][^/]+)', cwd)
         if m:
             return m.group(1)
     except Exception:
