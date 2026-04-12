@@ -64,6 +64,8 @@ from .callbacks import (
     _show_purchase_gateways, _show_renewal_gateways, _show_wallet_gateways,
     _render_discount_admin_list, _render_discount_code_detail,
     _generate_voucher_codes, _render_voucher_admin_list, _render_voucher_batch_detail,
+    _ovpn_finish_single, _ovpn_deliver_bulk_shared, _ovpn_deliver_bulk_diff,
+    _ovpn_send_file_group, _ovpn_caption, _fmt_users_label,
 )
 
 
@@ -1154,6 +1156,171 @@ def universal_handler(message):
             if errors:
                 result += "\n\n❌ خطاها:\n" + "\n".join(errors[:20])
             bot.send_message(uid, result, reply_markup=kb_admin_panel())
+            return
+
+        # ── OpenVPN: Single — collect .ovpn files ────────────────────────────
+        if sn == "ovpn_single_file" and is_admin(uid):
+            # Accept .ovpn document; accumulate multiple files
+            if message.document:
+                doc   = message.document
+                fname = (doc.file_name or "").lower()
+                if not fname.endswith(".ovpn"):
+                    bot.send_message(uid, "⚠️ فقط فایل با فرمت <b>.ovpn</b> پذیرفته می‌شود.", parse_mode="HTML")
+                    return
+                files = sd.get("ovpn_files", [])
+                files.append(doc.file_id)
+                state_set(uid, "ovpn_single_file", package_id=sd["package_id"], ovpn_files=files)
+                done_kb = types.InlineKeyboardMarkup()
+                done_kb.add(types.InlineKeyboardButton(
+                    f"✅ فایل‌ها کامل‌اند ({len(files)} فایل) — ادامه",
+                    callback_data=f"adm:ovpn:single_done:{sd['package_id']}"
+                ))
+                bot.send_message(uid,
+                    f"✅ فایل <code>{esc(doc.file_name)}</code> دریافت شد. (مجموع: {len(files)})\n"
+                    "اگر فایل دیگری دارید ارسال کنید، وگرنه دکمه ادامه را بزنید.",
+                    reply_markup=done_kb)
+            else:
+                bot.send_message(uid, "⚠️ لطفاً فایل <code>.ovpn</code> ارسال کنید.", parse_mode="HTML")
+            return
+
+        # ── OpenVPN: Single — after files done ───────────────────────────────
+        if sn == "ovpn_single_username" and is_admin(uid):
+            username = (message.text or "").strip()
+            if not username:
+                bot.send_message(uid, "⚠️ نام کاربری را وارد کنید.")
+                return
+            state_set(uid, "ovpn_single_password",
+                      package_id=sd["package_id"], ovpn_files=sd.get("ovpn_files", []),
+                      ovpn_username=username)
+            bot.send_message(uid, "🔑 <b>Password</b> اکانت را وارد کنید:", parse_mode="HTML")
+            return
+
+        if sn == "ovpn_single_password" and is_admin(uid):
+            password = (message.text or "").strip()
+            if not password:
+                bot.send_message(uid, "⚠️ رمز عبور را وارد کنید.")
+                return
+            state_set(uid, "ovpn_single_inquiry",
+                      package_id=sd["package_id"], ovpn_files=sd.get("ovpn_files", []),
+                      ovpn_username=sd["ovpn_username"], ovpn_password=password)
+            skip_kb = types.InlineKeyboardMarkup()
+            skip_kb.add(types.InlineKeyboardButton("⏭ Skip (بدون لینک استعلام)", callback_data=f"adm:ovpn:sinq_skip:{sd['package_id']}"))
+            bot.send_message(uid,
+                "🔋 <b>لینک استعلام حجم</b> را وارد کنید یا Skip بزنید:\n"
+                "(مثال: <code>http://panel.example.com/sub/abc</code>)",
+                reply_markup=skip_kb, parse_mode="HTML")
+            return
+
+        if sn == "ovpn_single_inquiry" and is_admin(uid):
+            inquiry = (message.text or "").strip()
+            _ovpn_finish_single(uid, sd, inquiry)
+            return
+
+        # ── OpenVPN: Bulk shared — collect .ovpn files ───────────────────────
+        if sn == "ovpn_bulk_shared_file" and is_admin(uid):
+            if message.document:
+                doc   = message.document
+                fname = (doc.file_name or "").lower()
+                if not fname.endswith(".ovpn"):
+                    bot.send_message(uid, "⚠️ فقط فایل با فرمت <b>.ovpn</b> پذیرفته می‌شود.", parse_mode="HTML")
+                    return
+                files = sd.get("shared_files", [])
+                files.append(doc.file_id)
+                state_set(uid, "ovpn_bulk_shared_file", package_id=sd["package_id"], shared_files=files)
+                bot.send_message(uid,
+                    f"✅ فایل <code>{esc(doc.file_name)}</code> دریافت شد. (مجموع: {len(files)})\n"
+                    "فایل دیگر ارسال کنید یا دکمه ✅ را بزنید.",
+                    parse_mode="HTML")
+            else:
+                bot.send_message(uid, "⚠️ لطفاً فایل <code>.ovpn</code> ارسال کنید.", parse_mode="HTML")
+            return
+
+        # ── OpenVPN: Bulk shared — account list (text) ───────────────────────
+        if sn == "ovpn_bulk_shared_data" and is_admin(uid):
+            raw     = (message.text or "").strip()
+            has_inq = sd.get("has_inquiry", False)
+            lines   = [l for l in raw.splitlines() if l.strip()]
+            step    = 3 if has_inq else 2
+            if len(lines) % step != 0:
+                expected = "۳ خطی (username / password / volume web)" if has_inq else "۲ خطی (username / password)"
+                bot.send_message(uid,
+                    f"⚠️ تعداد خطوط ({len(lines)}) با فرمت {expected} مطابقت ندارد.\n"
+                    "لطفاً دوباره ارسال کنید.")
+                return
+            accounts = []
+            for i in range(0, len(lines), step):
+                acc = {"username": lines[i], "password": lines[i + 1],
+                       "inquiry": lines[i + 2] if has_inq else ""}
+                accounts.append(acc)
+            shared_files = sd.get("shared_files", [])
+            pkg_row = get_package(sd["package_id"])
+            _ovpn_deliver_bulk_shared(uid, pkg_row, shared_files, accounts)
+            state_clear(uid)
+            return
+
+        # ── OpenVPN: Bulk diff — how many accounts ────────────────────────────
+        if sn == "ovpn_bulk_diff_count" and is_admin(uid):
+            total = parse_int(message.text or "")
+            if not total or total <= 0:
+                bot.send_message(uid, "⚠️ عدد معتبر وارد کنید.")
+                return
+            state_set(uid, "ovpn_bulk_diff_files",
+                      package_id=sd["package_id"], total_accts=total,
+                      acct_files={}, current_acct=1, pending_acct_files=[])
+            done_kb = types.InlineKeyboardMarkup()
+            done_kb.add(types.InlineKeyboardButton(
+                "✅ فایل‌های اکانت ۱ کامل‌اند",
+                callback_data=f"adm:ovpn:diffok:{sd['package_id']}:1"
+            ))
+            bot.send_message(uid,
+                f"📎 فایل‌های <code>.ovpn</code> <b>اکانت ۱</b> از {total} را ارسال کنید:",
+                reply_markup=done_kb, parse_mode="HTML")
+            return
+
+        # ── OpenVPN: Bulk diff — collect per-account files ───────────────────
+        if sn == "ovpn_bulk_diff_files" and is_admin(uid):
+            if message.document:
+                doc   = message.document
+                fname = (doc.file_name or "").lower()
+                if not fname.endswith(".ovpn"):
+                    bot.send_message(uid, "⚠️ فقط فایل با فرمت <b>.ovpn</b> پذیرفته می‌شود.", parse_mode="HTML")
+                    return
+                pending = sd.get("pending_acct_files", [])
+                pending.append(doc.file_id)
+                current = sd.get("current_acct", 1)
+                state_set(uid, "ovpn_bulk_diff_files",
+                          package_id=sd["package_id"], total_accts=sd.get("total_accts", 0),
+                          acct_files=sd.get("acct_files", {}), current_acct=current,
+                          pending_acct_files=pending)
+                bot.send_message(uid,
+                    f"✅ فایل <code>{esc(doc.file_name)}</code> برای اکانت {current} دریافت شد. (مجموع: {len(pending)})",
+                    parse_mode="HTML")
+            else:
+                bot.send_message(uid, "⚠️ لطفاً فایل <code>.ovpn</code> ارسال کنید.", parse_mode="HTML")
+            return
+
+        # ── OpenVPN: Bulk diff — account list (text) ──────────────────────────
+        if sn == "ovpn_bulk_diff_data" and is_admin(uid):
+            raw        = (message.text or "").strip()
+            has_inq    = sd.get("has_inquiry", False)
+            lines      = [l for l in raw.splitlines() if l.strip()]
+            total      = sd.get("total_accts", 0)
+            step       = 3 if has_inq else 2
+            if len(lines) != total * step:
+                expected = f"{total * step}"
+                bot.send_message(uid,
+                    f"⚠️ تعداد خطوط ({len(lines)}) با {total} اکانت × {step} خط = {expected} خط مطابقت ندارد.\n"
+                    "لطفاً دوباره درست وارد کنید.")
+                return
+            accounts = []
+            for i in range(0, len(lines), step):
+                acc = {"username": lines[i], "password": lines[i + 1],
+                       "inquiry": lines[i + 2] if has_inq else ""}
+                accounts.append(acc)
+            acct_files = sd.get("acct_files", {})
+            pkg_row    = get_package(sd["package_id"])
+            _ovpn_deliver_bulk_diff(uid, pkg_row, acct_files, accounts)
+            state_clear(uid)
             return
 
         # ── Admin: Settings ────────────────────────────────────────────────────
