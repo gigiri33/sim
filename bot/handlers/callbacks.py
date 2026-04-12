@@ -98,17 +98,18 @@ def _ovpn_caption(pkg_row, username, password, inquiry):
     users_label = _fmt_users_label(pkg_row["max_users"] if "max_users" in pkg_row.keys() else 0)
     vol_text    = "نامحدود" if not pkg_row["volume_gb"] else f"{pkg_row['volume_gb']} گیگ"
     dur_text    = "نامحدود" if not pkg_row["duration_days"] else f"{pkg_row['duration_days']} روز"
-    inq_text    = inquiry if inquiry else ""
+    inq_line    = f"\n🔋 Volume web: <a href=\"{inquiry}\">لینک استعلام</a>" if inquiry else ""
     return (
         f"🧩 نوع سرویس: <code>{esc(pkg_row['type_name'])}</code>\n"
         f"📦 پکیج: <code>{esc(pkg_row['name'])}</code>\n"
         f"🔋 حجم: <code>{esc(vol_text)}</code>\n"
         f"⏰ مدت: <code>{esc(dur_text)}</code>\n"
-        f"👤 کاربر: <code>{esc(users_label)}</code>\n\n"
-        f"اطلاعات اکانت\n"
-        f"<code>username:</code> <code>{esc(username)}</code>\n"
-        f"<code>password:</code> <code>{esc(password)}</code>\n\n"
-        f"🔋 <code>Volume web:</code> <code>{esc(inq_text)}</code>"
+        f"👤 کاربر: <code>{esc(users_label)}</code>\n"
+        f"┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n"
+        f"🔐 اطلاعات اکانت\n"
+        f"username: <code>{esc(username)}</code>\n"
+        f"password: <code>{esc(password)}</code>"
+        f"{inq_line}"
     )
 
 
@@ -118,12 +119,16 @@ def _ovpn_send_file_group(chat_id, file_ids, caption):
     if len(file_ids) == 1:
         bot.send_document(chat_id, file_ids[0], caption=caption, parse_mode="HTML")
         return
-    for fid in file_ids[:-1]:
-        try:
-            bot.send_document(chat_id, fid)
-        except Exception:
-            pass
-    bot.send_document(chat_id, file_ids[-1], caption=caption, parse_mode="HTML")
+    # Chunk into groups of 10 (Telegram media group limit)
+    chunks = [file_ids[i:i + 10] for i in range(0, len(file_ids), 10)]
+    for idx, chunk in enumerate(chunks):
+        is_last = (idx == len(chunks) - 1)
+        if is_last:
+            media = [types.InputMediaDocument(fid) for fid in chunk[:-1]]
+            media.append(types.InputMediaDocument(chunk[-1], caption=caption, parse_mode="HTML"))
+        else:
+            media = [types.InputMediaDocument(fid) for fid in chunk]
+        bot.send_media_group(chat_id, media)
 
 
 def _ovpn_finish_single(admin_id, sd, inquiry):
@@ -192,7 +197,7 @@ def _wg_caption(pkg_row, service_name, inquiry):
     users_label = _fmt_users_label(pkg_row["max_users"] if "max_users" in pkg_row.keys() else 0)
     vol_text    = "نامحدود" if not pkg_row["volume_gb"] else f"{pkg_row['volume_gb']} گیگ"
     dur_text    = "نامحدود" if not pkg_row["duration_days"] else f"{pkg_row['duration_days']} روز"
-    inq_line    = f"\n🔋 <code>Volume web:</code> <code>{esc(inquiry)}</code>" if inquiry else ""
+    inq_line    = f"\n🔋 Volume web: <a href=\"{inquiry}\">لینک استعلام</a>" if inquiry else ""
     return (
         f"🧩 نوع سرویس: <code>{esc(pkg_row['type_name'])}</code>\n"
         f"📦 پکیج: <code>{esc(pkg_row['name'])}</code>\n"
@@ -205,18 +210,22 @@ def _wg_caption(pkg_row, service_name, inquiry):
 
 
 def _wg_send_file_group(chat_id, file_ids, file_names, caption):
-    """Send WireGuard file group; caption on the last file."""
+    """Send WireGuard file group as media album; caption on the last file."""
     if not file_ids:
         return
     if len(file_ids) == 1:
         bot.send_document(chat_id, file_ids[0], caption=caption, parse_mode="HTML")
         return
-    for fid in file_ids[:-1]:
-        try:
-            bot.send_document(chat_id, fid)
-        except Exception:
-            pass
-    bot.send_document(chat_id, file_ids[-1], caption=caption, parse_mode="HTML")
+    # Chunk into groups of 10 (Telegram media group limit)
+    chunks = [file_ids[i:i + 10] for i in range(0, len(file_ids), 10)]
+    for idx, chunk in enumerate(chunks):
+        is_last = (idx == len(chunks) - 1)
+        if is_last:
+            media = [types.InputMediaDocument(fid) for fid in chunk[:-1]]
+            media.append(types.InputMediaDocument(chunk[-1], caption=caption, parse_mode="HTML"))
+        else:
+            media = [types.InputMediaDocument(fid) for fid in chunk]
+        bot.send_media_group(chat_id, media)
 
 
 def _wg_finish_single(admin_id, sd, inquiry):
