@@ -98,7 +98,7 @@ def _ovpn_caption(pkg_row, username, password, inquiry):
     users_label = _fmt_users_label(pkg_row["max_users"] if "max_users" in pkg_row.keys() else 0)
     vol_text    = "نامحدود" if not pkg_row["volume_gb"] else f"{pkg_row['volume_gb']} گیگ"
     dur_text    = "نامحدود" if not pkg_row["duration_days"] else f"{pkg_row['duration_days']} روز"
-    inq_line    = f"\n🔋 Volume web: <a href=\"{inquiry}\">لینک استعلام</a>" if inquiry else ""
+    inq_line    = f"\n🔋 Volume web: {inquiry}" if inquiry else ""
     return (
         f"🧩 نوع سرویس: <code>{esc(pkg_row['type_name'])}</code>\n"
         f"📦 پکیج: <code>{esc(pkg_row['name'])}</code>\n"
@@ -136,15 +136,16 @@ def _ovpn_finish_single(admin_id, sd, inquiry):
     ovpn_files = sd.get("ovpn_files", [])
     username   = sd.get("ovpn_username", "")
     password   = sd.get("ovpn_password", "")
-    caption    = _ovpn_caption(pkg_row, username, password, inquiry)
     state_clear(admin_id)
     if not ovpn_files:
         bot.send_message(admin_id, "⚠️ هیچ فایل .ovpn ثبت نشده بود.", parse_mode="HTML")
         return
-    _ovpn_send_file_group(admin_id, ovpn_files, caption)
     config_data = json.dumps({"type": "ovpn", "file_ids": ovpn_files, "username": username, "password": password}, ensure_ascii=False)
     add_config(pkg_row["type_id"], sd["package_id"], username or "ovpn", config_data, inquiry or "")
-    bot.send_message(admin_id, "✅ کانفیگ OpenVPN با موفقیت ثبت شد.", reply_markup=kb_admin_panel())
+    bot.send_message(admin_id,
+        f"✅ <b>1</b> کانفیگ OpenVPN با موفقیت ثبت شد.\n\n"
+        f"📋 یوزرنیم: <code>{esc(username)}</code>",
+        parse_mode="HTML", reply_markup=kb_admin_panel())
 
 
 def _ovpn_deliver_bulk_shared(admin_id, pkg_row, shared_files, accounts):
@@ -155,8 +156,6 @@ def _ovpn_deliver_bulk_shared(admin_id, pkg_row, shared_files, accounts):
         bot.send_message(admin_id, "⚠️ اطلاعات اکانتی وجود ندارد.")
         return
     for acct in accounts:
-        caption = _ovpn_caption(pkg_row, acct["username"], acct["password"], acct.get("inquiry", ""))
-        _ovpn_send_file_group(admin_id, shared_files, caption)
         config_data = json.dumps({"type": "ovpn", "file_ids": shared_files, "username": acct["username"], "password": acct["password"]}, ensure_ascii=False)
         add_config(pkg_row["type_id"], pkg_row["id"], acct["username"] or "ovpn", config_data, acct.get("inquiry", ""))
     lines = "\n".join(f"{i}. <code>{esc(a['username'])}</code>" for i, a in enumerate(accounts, 1))
@@ -172,12 +171,7 @@ def _ovpn_deliver_bulk_diff(admin_id, pkg_row, acct_files, accounts):
         bot.send_message(admin_id, "⚠️ فایل یا اطلاعات اکانت‌ها وجود ندارد.")
         return
     for i, acct in enumerate(accounts, 1):
-        files   = acct_files.get(i, [])
-        caption = _ovpn_caption(pkg_row, acct["username"], acct["password"], acct.get("inquiry", ""))
-        if not files:
-            bot.send_message(admin_id, f"⚠️ فایلی برای اکانت {i} ثبت نشده بود.")
-        else:
-            _ovpn_send_file_group(admin_id, files, caption)
+        files = acct_files.get(i, [])
         config_data = json.dumps({"type": "ovpn", "file_ids": files, "username": acct["username"], "password": acct["password"]}, ensure_ascii=False)
         add_config(pkg_row["type_id"], pkg_row["id"], acct["username"] or "ovpn", config_data, acct.get("inquiry", ""))
     lines = "\n".join(f"{i}. <code>{esc(a['username'])}</code>" for i, a in enumerate(accounts, 1))
@@ -203,7 +197,7 @@ def _wg_caption(pkg_row, service_name, inquiry):
     users_label = _fmt_users_label(pkg_row["max_users"] if "max_users" in pkg_row.keys() else 0)
     vol_text    = "نامحدود" if not pkg_row["volume_gb"] else f"{pkg_row['volume_gb']} گیگ"
     dur_text    = "نامحدود" if not pkg_row["duration_days"] else f"{pkg_row['duration_days']} روز"
-    inq_line    = f"\n🔋 Volume web: <a href=\"{inquiry}\">لینک استعلام</a>" if inquiry else ""
+    inq_line    = f"\n🔋 Volume web: {inquiry}" if inquiry else ""
     return (
         f"🧩 نوع سرویس: <code>{esc(pkg_row['type_name'])}</code>\n"
         f"📦 پکیج: <code>{esc(pkg_row['name'])}</code>\n"
@@ -235,19 +229,20 @@ def _wg_send_file_group(chat_id, file_ids, file_names, caption):
 
 
 def _wg_finish_single(admin_id, sd, inquiry):
-    pkg_row    = get_package(sd["package_id"])
-    wg_files   = sd.get("wg_files", [])
-    wg_names   = sd.get("wg_names", [])
+    pkg_row      = get_package(sd["package_id"])
+    wg_files     = sd.get("wg_files", [])
+    wg_names     = sd.get("wg_names", [])
     service_name = _wg_service_name_from_filename(wg_names[-1] if wg_names else "")
-    caption    = _wg_caption(pkg_row, service_name, inquiry)
     state_clear(admin_id)
     if not wg_files:
         bot.send_message(admin_id, "⚠️ هیچ فایل WireGuard ثبت نشده بود.", parse_mode="HTML")
         return
-    _wg_send_file_group(admin_id, wg_files, wg_names, caption)
     config_data = json.dumps({"type": "wg", "file_ids": wg_files}, ensure_ascii=False)
     add_config(pkg_row["type_id"], sd["package_id"], service_name, config_data, inquiry or "")
-    bot.send_message(admin_id, "✅ کانفیگ WireGuard با موفقیت ثبت شد.", reply_markup=kb_admin_panel())
+    bot.send_message(admin_id,
+        f"✅ <b>1</b> کانفیگ WireGuard با موفقیت ثبت شد.\n\n"
+        f"📋 نام سرویس: <code>{esc(service_name)}</code>",
+        parse_mode="HTML", reply_markup=kb_admin_panel())
 
 
 def _wg_deliver_bulk_shared(admin_id, pkg_row, shared_files, shared_names, inquiries):
@@ -258,8 +253,6 @@ def _wg_deliver_bulk_shared(admin_id, pkg_row, shared_files, shared_names, inqui
     service_name = _wg_service_name_from_filename(shared_names[-1] if shared_names else "")
     count = len(inquiries) if inquiries else 1
     for inq in (inquiries if inquiries else [""]):
-        caption = _wg_caption(pkg_row, service_name, inq)
-        _wg_send_file_group(admin_id, shared_files, shared_names, caption)
         config_data = json.dumps({"type": "wg", "file_ids": shared_files}, ensure_ascii=False)
         add_config(pkg_row["type_id"], pkg_row["id"], service_name, config_data, inq or "")
     lines = "\n".join(f"{i}. <code>{esc(service_name)}</code>" for i in range(1, count + 1))
@@ -282,11 +275,6 @@ def _wg_deliver_bulk_diff(admin_id, pkg_row, acct_files, acct_names, inquiries):
         inq   = inquiries[i - 1] if inquiries and i - 1 < len(inquiries) else ""
         service_name = _wg_service_name_from_filename(names[-1] if names else "")
         service_names.append(service_name)
-        caption = _wg_caption(pkg_row, service_name, inq)
-        if not files:
-            bot.send_message(admin_id, f"⚠️ فایلی برای کانفیگ {i} ثبت نشده بود.")
-        else:
-            _wg_send_file_group(admin_id, files, names, caption)
         config_data = json.dumps({"type": "wg", "file_ids": files}, ensure_ascii=False)
         add_config(pkg_row["type_id"], pkg_row["id"], service_name, config_data, inq or "")
     lines = "\n".join(f"{i}. <code>{esc(sn)}</code>" for i, sn in enumerate(service_names, 1))

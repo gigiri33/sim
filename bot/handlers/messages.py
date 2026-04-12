@@ -1229,10 +1229,15 @@ def universal_handler(message):
                 files = sd.get("shared_files", [])
                 files.append(doc.file_id)
                 state_set(uid, "ovpn_bulk_shared_file", package_id=sd["package_id"], shared_files=files)
+                done_kb = types.InlineKeyboardMarkup()
+                done_kb.add(types.InlineKeyboardButton(
+                    f"✅ فایل‌ها کامل‌اند ({len(files)} فایل) — ادامه",
+                    callback_data=f"adm:ovpn:sharedok:{sd['package_id']}"
+                ))
                 bot.send_message(uid,
                     f"✅ فایل <code>{esc(doc.file_name)}</code> دریافت شد. (مجموع: {len(files)})\n"
-                    "فایل دیگر ارسال کنید یا دکمه ✅ را بزنید.",
-                    parse_mode="HTML")
+                    "فایل دیگر ارسال کنید یا دکمه زیر را بزنید.",
+                    reply_markup=done_kb, parse_mode="HTML")
             else:
                 bot.send_message(uid, "⚠️ لطفاً فایل <code>.ovpn</code> ارسال کنید.", parse_mode="HTML")
             return
@@ -1294,9 +1299,14 @@ def universal_handler(message):
                           package_id=sd["package_id"], total_accts=sd.get("total_accts", 0),
                           acct_files=sd.get("acct_files", {}), current_acct=current,
                           pending_acct_files=pending)
+                done_kb = types.InlineKeyboardMarkup()
+                done_kb.add(types.InlineKeyboardButton(
+                    f"✅ فایل‌های اکانت {current} کامل‌اند",
+                    callback_data=f"adm:ovpn:diffok:{sd['package_id']}:{current}"
+                ))
                 bot.send_message(uid,
                     f"✅ فایل <code>{esc(doc.file_name)}</code> برای اکانت {current} دریافت شد. (مجموع: {len(pending)})",
-                    parse_mode="HTML")
+                    reply_markup=done_kb, parse_mode="HTML")
             else:
                 bot.send_message(uid, "⚠️ لطفاً فایل <code>.ovpn</code> ارسال کنید.", parse_mode="HTML")
             return
@@ -1367,10 +1377,15 @@ def universal_handler(message):
                 names.append(fname)
                 state_set(uid, "wg_bulk_shared_file",
                           package_id=sd["package_id"], shared_files=files, shared_names=names)
+                done_kb = types.InlineKeyboardMarkup()
+                done_kb.add(types.InlineKeyboardButton(
+                    f"✅ فایل‌ها کامل‌اند ({len(files)} فایل) — ادامه",
+                    callback_data=f"adm:wg:sharedok:{sd['package_id']}"
+                ))
                 bot.send_message(uid,
                     f"✅ فایل <code>{esc(fname)}</code> دریافت شد. (مجموع: {len(files)})\n"
-                    "فایل دیگر ارسال کنید یا دکمه ✅ را بزنید.",
-                    parse_mode="HTML")
+                    "فایل دیگر ارسال کنید یا دکمه زیر را بزنید.",
+                    reply_markup=done_kb, parse_mode="HTML")
             else:
                 bot.send_message(uid, "⚠️ لطفاً فایل کانفیگ WireGuard را ارسال کنید.",
                                  parse_mode="HTML")
@@ -1438,9 +1453,14 @@ def universal_handler(message):
                           acct_files=sd.get("acct_files", {}), acct_names=sd.get("acct_names", {}),
                           current_acct=current,
                           pending_acct_files=pending_files, pending_acct_names=pending_names)
+                done_kb = types.InlineKeyboardMarkup()
+                done_kb.add(types.InlineKeyboardButton(
+                    f"✅ فایل‌های کانفیگ {current} کامل‌اند",
+                    callback_data=f"adm:wg:diffok:{sd['package_id']}:{current}"
+                ))
                 bot.send_message(uid,
                     f"✅ فایل <code>{esc(fname)}</code> برای کانفیگ {current} دریافت شد. (مجموع: {len(pending_files)})",
-                    parse_mode="HTML")
+                    reply_markup=done_kb, parse_mode="HTML")
             else:
                 bot.send_message(uid, "⚠️ لطفاً فایل کانفیگ WireGuard را ارسال کنید.",
                                  parse_mode="HTML")

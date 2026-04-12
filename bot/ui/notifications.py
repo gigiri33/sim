@@ -100,7 +100,7 @@ def deliver_purchase_message(chat_id, purchase_id):
         vol_text    = "نامحدود" if not item["volume_gb"] else f"{item['volume_gb']} گیگ"
         dur_text    = "نامحدود" if not item["duration_days"] else f"{item['duration_days']} روز"
         users_label = _fmt_users_label_d(item["max_users"] if "max_users" in item.keys() else 0)
-        inq_line    = f"\n🔋 Volume web: <a href=\"{inquiry_link}\">لینک استعلام</a>" if inquiry_link else ""
+        inq_line    = f"\n🔋 Volume web: {inquiry_link}" if inquiry_link else ""
 
         if cfg_type == "ovpn":
             username = cfg_data.get("username", "")
