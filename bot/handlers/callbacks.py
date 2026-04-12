@@ -150,9 +150,11 @@ def _ovpn_deliver_bulk_shared(admin_id, pkg_row, shared_files, accounts):
     for acct in accounts:
         caption = _ovpn_caption(pkg_row, acct["username"], acct["password"], acct.get("inquiry", ""))
         _ovpn_send_file_group(admin_id, shared_files, caption)
+    lines = "\n".join(f"{i}. <code>{esc(a['username'])}</code>" for i, a in enumerate(accounts, 1))
     bot.send_message(admin_id,
-        f"✅ <b>{len(accounts)}</b> کانفیگ OpenVPN (فایل مشترک) با موفقیت ارسال شد.",
-        reply_markup=kb_admin_panel())
+        f"✅ <b>{len(accounts)}</b> کانفیگ OpenVPN با موفقیت ثبت شد.\n\n"
+        f"📋 لیست یوزرنیم‌ها:\n{lines}",
+        parse_mode="HTML", reply_markup=kb_admin_panel())
 
 
 def _ovpn_deliver_bulk_diff(admin_id, pkg_row, acct_files, accounts):
@@ -167,9 +169,110 @@ def _ovpn_deliver_bulk_diff(admin_id, pkg_row, acct_files, accounts):
             bot.send_message(admin_id, f"⚠️ فایلی برای اکانت {i} ثبت نشده بود.")
         else:
             _ovpn_send_file_group(admin_id, files, caption)
+    lines = "\n".join(f"{i}. <code>{esc(a['username'])}</code>" for i, a in enumerate(accounts, 1))
     bot.send_message(admin_id,
-        f"✅ <b>{total}</b> کانفیگ OpenVPN (فایل متفاوت) با موفقیت ارسال شد.",
-        reply_markup=kb_admin_panel())
+        f"✅ <b>{total}</b> کانفیگ OpenVPN با موفقیت ثبت شد.\n\n"
+        f"📋 لیست یوزرنیم‌ها:\n{lines}",
+        parse_mode="HTML", reply_markup=kb_admin_panel())
+
+
+# ── WireGuard helpers ─────────────────────────────────────────────────────────
+
+def _wg_service_name_from_filename(filename):
+    """Strip extension from filename to get service name."""
+    if not filename:
+        return "wireguard"
+    name = filename
+    if "." in name:
+        name = name.rsplit(".", 1)[0]
+    return name or "wireguard"
+
+
+def _wg_caption(pkg_row, service_name, inquiry):
+    users_label = _fmt_users_label(pkg_row["max_users"] if "max_users" in pkg_row.keys() else 0)
+    vol_text    = "نامحدود" if not pkg_row["volume_gb"] else f"{pkg_row['volume_gb']} گیگ"
+    dur_text    = "نامحدود" if not pkg_row["duration_days"] else f"{pkg_row['duration_days']} روز"
+    inq_line    = f"\n🔋 <code>Volume web:</code> <code>{esc(inquiry)}</code>" if inquiry else ""
+    return (
+        f"🧩 نوع سرویس: <code>{esc(pkg_row['type_name'])}</code>\n"
+        f"📦 پکیج: <code>{esc(pkg_row['name'])}</code>\n"
+        f"🔋 حجم: <code>{esc(vol_text)}</code>\n"
+        f"⏰ مدت: <code>{esc(dur_text)}</code>\n"
+        f"👥 نوع کاربری: <code>{esc(users_label)}</code>\n"
+        f"🔮 نام سرویس: <code>{esc(service_name)}</code>"
+        f"{inq_line}"
+    )
+
+
+def _wg_send_file_group(chat_id, file_ids, file_names, caption):
+    """Send WireGuard file group; caption on the last file."""
+    if not file_ids:
+        return
+    if len(file_ids) == 1:
+        bot.send_document(chat_id, file_ids[0], caption=caption, parse_mode="HTML")
+        return
+    for fid in file_ids[:-1]:
+        try:
+            bot.send_document(chat_id, fid)
+        except Exception:
+            pass
+    bot.send_document(chat_id, file_ids[-1], caption=caption, parse_mode="HTML")
+
+
+def _wg_finish_single(admin_id, sd, inquiry):
+    pkg_row    = get_package(sd["package_id"])
+    wg_files   = sd.get("wg_files", [])
+    wg_names   = sd.get("wg_names", [])
+    service_name = _wg_service_name_from_filename(wg_names[-1] if wg_names else "")
+    caption    = _wg_caption(pkg_row, service_name, inquiry)
+    state_clear(admin_id)
+    if not wg_files:
+        bot.send_message(admin_id, "⚠️ هیچ فایل WireGuard ثبت نشده بود.", parse_mode="HTML")
+        return
+    _wg_send_file_group(admin_id, wg_files, wg_names, caption)
+    bot.send_message(admin_id, "✅ کانفیگ WireGuard با موفقیت ثبت شد.", reply_markup=kb_admin_panel())
+
+
+def _wg_deliver_bulk_shared(admin_id, pkg_row, shared_files, shared_names, inquiries):
+    """Deliver bulk WireGuard configs where all configs share the same files."""
+    if not shared_files:
+        bot.send_message(admin_id, "⚠️ فایل مشترک وجود ندارد.")
+        return
+    service_name = _wg_service_name_from_filename(shared_names[-1] if shared_names else "")
+    count = len(inquiries) if inquiries else 1
+    for inq in (inquiries if inquiries else [""]):
+        caption = _wg_caption(pkg_row, service_name, inq)
+        _wg_send_file_group(admin_id, shared_files, shared_names, caption)
+    lines = "\n".join(f"{i}. <code>{esc(service_name)}</code>" for i in range(1, count + 1))
+    bot.send_message(admin_id,
+        f"✅ <b>{count}</b> کانفیگ WireGuard با موفقیت ثبت شد.\n\n"
+        f"📋 لیست نام سرویس‌ها:\n{lines}",
+        parse_mode="HTML", reply_markup=kb_admin_panel())
+
+
+def _wg_deliver_bulk_diff(admin_id, pkg_row, acct_files, acct_names, inquiries):
+    """Deliver bulk WireGuard configs where each config has different files."""
+    total = len(acct_files)
+    if not acct_files:
+        bot.send_message(admin_id, "⚠️ فایلی برای ارسال وجود ندارد.")
+        return
+    service_names = []
+    for i in range(1, total + 1):
+        files = acct_files.get(i, [])
+        names = acct_names.get(i, [])
+        inq   = inquiries[i - 1] if inquiries and i - 1 < len(inquiries) else ""
+        service_name = _wg_service_name_from_filename(names[-1] if names else "")
+        service_names.append(service_name)
+        caption = _wg_caption(pkg_row, service_name, inq)
+        if not files:
+            bot.send_message(admin_id, f"⚠️ فایلی برای کانفیگ {i} ثبت نشده بود.")
+        else:
+            _wg_send_file_group(admin_id, files, names, caption)
+    lines = "\n".join(f"{i}. <code>{esc(sn)}</code>" for i, sn in enumerate(service_names, 1))
+    bot.send_message(admin_id,
+        f"✅ <b>{total}</b> کانفیگ WireGuard با موفقیت ثبت شد.\n\n"
+        f"📋 لیست نام سرویس‌ها:\n{lines}",
+        parse_mode="HTML", reply_markup=kb_admin_panel())
 
 
 def _get_bulk_page_ids(sd):
@@ -3238,14 +3341,14 @@ def _dispatch_callback(call, uid, data):
             send_or_edit(call, "📝 روش ثبت کانفیگ OpenVPN را انتخاب کنید:", kb)
             return
 
-        # ── WireGuard: placeholder ────────────────────────────────────────────
+        # ── WireGuard ─────────────────────────────────────────────────────────
         if proto == "wg":
-            bot.answer_callback_query(call.id)
             kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("📝 ثبت تکی",    callback_data=f"adm:wg:single:{package_id}"))
+            kb.add(types.InlineKeyboardButton("📋 ثبت دسته‌ای", callback_data=f"adm:wg:bulk:{package_id}"))
             kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:cfg:p:{package_id}"))
-            send_or_edit(call,
-                "🛡 <b>WireGuard</b>\n\n"
-                "⚙️ پشتیبانی از پروتکل WireGuard به زودی اضافه خواهد شد.", kb)
+            bot.answer_callback_query(call.id)
+            send_or_edit(call, "📝 روش ثبت کانفیگ WireGuard را انتخاب کنید:", kb)
             return
 
         bot.answer_callback_query(call.id, "پروتکل ناشناخته", show_alert=True)
@@ -3468,6 +3571,232 @@ def _dispatch_callback(call, uid, data):
         sd = state_data(uid)
         _ovpn_finish_single(uid, sd, "")
         bot.answer_callback_query(call.id)
+        return
+
+    # ── WireGuard — Single ────────────────────────────────────────────────────
+    if data.startswith("adm:wg:single:"):
+        package_id = int(data.split(":")[3])
+        state_set(uid, "wg_single_file", package_id=package_id, wg_files=[], wg_names=[])
+        bot.answer_callback_query(call.id)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:cfg:proto:wg:{package_id}"))
+        send_or_edit(call,
+            "📎 <b>ثبت تکی WireGuard</b>\n\n"
+            "فایل یا فایل‌های کانفیگ WireGuard را ارسال کنید.\n"
+            "اگر چند فایل دارید، همه را بفرستید — همه متعلق به یک کانفیگ در نظر گرفته می‌شوند.\n\n"
+            "نام سرویس به صورت خودکار از نام فایل خوانده می‌شود.", kb)
+        return
+
+    # ── WireGuard — Single: files done ───────────────────────────────────────
+    if data.startswith("adm:wg:single_done:"):
+        package_id = int(data.split(":")[3])
+        sd = state_data(uid)
+        wg_files = sd.get("wg_files", [])
+        if not wg_files:
+            bot.answer_callback_query(call.id, "هیچ فایلی دریافت نشد.", show_alert=True)
+            return
+        state_set(uid, "wg_single_inquiry",
+                  package_id=package_id,
+                  wg_files=wg_files, wg_names=sd.get("wg_names", []))
+        bot.answer_callback_query(call.id)
+        skip_kb = types.InlineKeyboardMarkup()
+        skip_kb.add(types.InlineKeyboardButton("⏭ Skip (بدون لینک استعلام)", callback_data=f"adm:wg:sinq_skip:{package_id}"))
+        bot.send_message(uid,
+            "🔋 <b>لینک استعلام حجم</b> را وارد کنید یا Skip بزنید:\n"
+            "(مثال: <code>http://panel.example.com/sub/abc</code>)",
+            reply_markup=skip_kb, parse_mode="HTML")
+        return
+
+    # ── WireGuard — Single: skip inquiry ─────────────────────────────────────
+    if data.startswith("adm:wg:sinq_skip:"):
+        package_id = int(data.split(":")[3])
+        sd = state_data(uid)
+        _wg_finish_single(uid, sd, "")
+        bot.answer_callback_query(call.id)
+        return
+
+    # ── WireGuard — Bulk ──────────────────────────────────────────────────────
+    if data.startswith("adm:wg:bulk:"):
+        rest = data[len("adm:wg:bulk:"):]
+
+        # adm:wg:bulk:{pkg_id} → ask same/different files
+        if rest.isdigit():
+            package_id = int(rest)
+            state_set(uid, "wg_bulk_init", package_id=package_id)
+            kb = types.InlineKeyboardMarkup()
+            kb.row(
+                types.InlineKeyboardButton("✅ بله", callback_data=f"adm:wg:bulk:shared:{package_id}"),
+                types.InlineKeyboardButton("❌ خیر", callback_data=f"adm:wg:bulk:diff:{package_id}"),
+            )
+            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:cfg:proto:wg:{package_id}"))
+            bot.answer_callback_query(call.id)
+            send_or_edit(call, "📂 آیا فایل‌های <b>همه کانفیگ‌ها یکی</b> هستند؟", kb)
+            return
+
+        # adm:wg:bulk:shared:{pkg_id} → collect shared files
+        if rest.startswith("shared:"):
+            package_id = int(rest.split(":")[1])
+            state_set(uid, "wg_bulk_shared_file", package_id=package_id, shared_files=[], shared_names=[])
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:wg:bulk:{package_id}"))
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                "📎 <b>ثبت دسته‌ای WireGuard — فایل مشترک</b>\n\n"
+                "فایل یا فایل‌های مشترک WireGuard را ارسال کنید.\n"
+                "وقتی تمام فایل‌ها را فرستادید دکمه ✅ را بزنید.", kb)
+            done_kb = types.InlineKeyboardMarkup()
+            done_kb.add(types.InlineKeyboardButton("✅ فایل‌ها کامل‌اند، ادامه", callback_data=f"adm:wg:sharedok:{package_id}"))
+            bot.send_message(uid, "پس از ارسال همه فایل‌های مشترک، این دکمه را بزنید:", reply_markup=done_kb)
+            return
+
+        # adm:wg:bulk:diff:{pkg_id} → how many configs?
+        if rest.startswith("diff:"):
+            package_id = int(rest.split(":")[1])
+            state_set(uid, "wg_bulk_diff_count", package_id=package_id)
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:wg:bulk:{package_id}"))
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                "🔢 <b>ثبت دسته‌ای WireGuard — فایل متفاوت</b>\n\n"
+                "چند کانفیگ می‌خواهید ثبت کنید؟\n"
+                "عدد را تایپ کنید:", kb)
+            return
+
+        bot.answer_callback_query(call.id, "مسیر ناشناخته", show_alert=True)
+        return
+
+    # ── WireGuard — Shared files done, ask inquiry ────────────────────────────
+    if data.startswith("adm:wg:sharedok:"):
+        package_id = int(data.split(":")[2])
+        sd = state_data(uid)
+        shared_files = sd.get("shared_files", [])
+        if not shared_files:
+            bot.answer_callback_query(call.id, "هیچ فایلی دریافت نشد. لطفاً ابتدا فایل ارسال کنید.", show_alert=True)
+            return
+        state_set(uid, "wg_bulk_shared_inq",
+                  package_id=package_id,
+                  shared_files=shared_files, shared_names=sd.get("shared_names", []))
+        kb = types.InlineKeyboardMarkup()
+        kb.row(
+            types.InlineKeyboardButton("✅ بله", callback_data=f"adm:wg:shinq:y:{package_id}"),
+            types.InlineKeyboardButton("❌ خیر", callback_data=f"adm:wg:shinq:n:{package_id}"),
+        )
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "🔗 آیا کانفیگ‌ها <b>لینک استعلام حجم</b> دارند؟", kb)
+        return
+
+    # ── WireGuard — Shared: with/without inquiry ──────────────────────────────
+    if data.startswith("adm:wg:shinq:"):
+        parts      = data.split(":")
+        yn         = parts[3]
+        package_id = int(parts[4])
+        has_inq    = (yn == "y")
+        sd = state_data(uid)
+        state_set(uid, "wg_bulk_shared_data",
+                  package_id=package_id,
+                  shared_files=sd.get("shared_files", []),
+                  shared_names=sd.get("shared_names", []),
+                  has_inquiry=has_inq)
+        bot.answer_callback_query(call.id)
+        if has_inq:
+            fmt_text = (
+                "📋 <b>لینک‌های استعلام — فایل مشترک</b>\n\n"
+                "هر خط یک لینک استعلام برای یک کانفیگ:\n\n"
+                "💡 مثال:\n"
+                "<code>http://panel.com/sub/1\n"
+                "http://panel.com/sub/2\n"
+                "http://panel.com/sub/3</code>"
+            )
+        else:
+            fmt_text = (
+                "🔢 <b>تعداد کانفیگ‌ها</b>\n\n"
+                "چند نسخه از این فایل‌های مشترک می‌خواهید ارسال شود؟\n"
+                "عدد را وارد کنید:"
+            )
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:wg:bulk:{package_id}"))
+        send_or_edit(call, fmt_text, kb)
+        return
+
+    # ── WireGuard — Diff: per-config files done ───────────────────────────────
+    if data.startswith("adm:wg:diffok:"):
+        parts      = data.split(":")
+        package_id = int(parts[3])
+        cfg_idx    = int(parts[4])
+        sd         = state_data(uid)
+        acct_files = sd.get("acct_files", {})
+        acct_names = sd.get("acct_names", {})
+        pending_files = sd.get("pending_acct_files", [])
+        pending_names = sd.get("pending_acct_names", [])
+        if not pending_files:
+            bot.answer_callback_query(call.id, "هیچ فایلی برای این کانفیگ دریافت نشد.", show_alert=True)
+            return
+        acct_files[cfg_idx] = pending_files
+        acct_names[cfg_idx] = pending_names
+        total_cfgs = sd.get("total_accts", 0)
+        next_idx   = cfg_idx + 1
+        if next_idx <= total_cfgs:
+            state_set(uid, "wg_bulk_diff_files",
+                      package_id=package_id, total_accts=total_cfgs,
+                      acct_files=acct_files, acct_names=acct_names,
+                      current_acct=next_idx,
+                      pending_acct_files=[], pending_acct_names=[])
+            done_kb = types.InlineKeyboardMarkup()
+            done_kb.add(types.InlineKeyboardButton(
+                f"✅ فایل‌های کانفیگ {next_idx} کامل‌اند",
+                callback_data=f"adm:wg:diffok:{package_id}:{next_idx}"
+            ))
+            bot.answer_callback_query(call.id)
+            bot.send_message(uid,
+                f"📎 فایل‌های <b>کانفیگ {next_idx}</b> از {total_cfgs} را ارسال کنید:",
+                reply_markup=done_kb, parse_mode="HTML")
+        else:
+            # All files collected → ask inquiry
+            state_set(uid, "wg_bulk_diff_inq",
+                      package_id=package_id, total_accts=total_cfgs,
+                      acct_files=acct_files, acct_names=acct_names)
+            kb = types.InlineKeyboardMarkup()
+            kb.row(
+                types.InlineKeyboardButton("✅ بله", callback_data=f"adm:wg:dinq:y:{package_id}"),
+                types.InlineKeyboardButton("❌ خیر", callback_data=f"adm:wg:dinq:n:{package_id}"),
+            )
+            bot.answer_callback_query(call.id)
+            bot.send_message(uid, "🔗 آیا کانفیگ‌ها <b>لینک استعلام حجم</b> دارند؟", reply_markup=kb)
+        return
+
+    # ── WireGuard — Diff: with/without inquiry ────────────────────────────────
+    if data.startswith("adm:wg:dinq:"):
+        parts      = data.split(":")
+        yn         = parts[3]
+        package_id = int(parts[4])
+        has_inq    = (yn == "y")
+        sd = state_data(uid)
+        state_set(uid, "wg_bulk_diff_data",
+                  package_id=package_id, total_accts=sd.get("total_accts", 0),
+                  acct_files=sd.get("acct_files", {}), acct_names=sd.get("acct_names", {}),
+                  has_inquiry=has_inq)
+        bot.answer_callback_query(call.id)
+        if has_inq:
+            fmt_text = (
+                "📋 <b>لینک‌های استعلام — فایل متفاوت</b>\n\n"
+                "هر خط یک لینک استعلام به ترتیب کانفیگ‌ها:\n\n"
+                "💡 مثال:\n"
+                "<code>http://panel.com/sub/1\n"
+                "http://panel.com/sub/2</code>"
+            )
+        else:
+            fmt_text = "✅ فایل‌ها دریافت شدند. در حال ارسال کانفیگ‌ها..."
+            # No inquiry → deliver immediately
+            pkg_row = get_package(package_id)
+            _wg_deliver_bulk_diff(uid, pkg_row,
+                                  sd.get("acct_files", {}),
+                                  sd.get("acct_names", {}), [])
+            state_clear(uid)
+            send_or_edit(call, fmt_text, types.InlineKeyboardMarkup())
+            return
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:wg:bulk:{package_id}"))
+        bot.send_message(uid, fmt_text, reply_markup=kb)
         return
 
     if data.startswith("adm:cfg:single:"):

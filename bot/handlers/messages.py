@@ -66,6 +66,8 @@ from .callbacks import (
     _generate_voucher_codes, _render_voucher_admin_list, _render_voucher_batch_detail,
     _ovpn_finish_single, _ovpn_deliver_bulk_shared, _ovpn_deliver_bulk_diff,
     _ovpn_send_file_group, _ovpn_caption, _fmt_users_label,
+    _wg_finish_single, _wg_deliver_bulk_shared, _wg_deliver_bulk_diff,
+    _wg_send_file_group, _wg_caption, _wg_service_name_from_filename,
 )
 
 
@@ -1320,6 +1322,149 @@ def universal_handler(message):
             acct_files = sd.get("acct_files", {})
             pkg_row    = get_package(sd["package_id"])
             _ovpn_deliver_bulk_diff(uid, pkg_row, acct_files, accounts)
+            state_clear(uid)
+            return
+
+        # ── WireGuard: Single — collect files ─────────────────────────────────
+        if sn == "wg_single_file" and is_admin(uid):
+            if message.document:
+                doc   = message.document
+                fname = (doc.file_name or "")
+                files = sd.get("wg_files", [])
+                names = sd.get("wg_names", [])
+                files.append(doc.file_id)
+                names.append(fname)
+                state_set(uid, "wg_single_file",
+                          package_id=sd["package_id"], wg_files=files, wg_names=names)
+                done_kb = types.InlineKeyboardMarkup()
+                done_kb.add(types.InlineKeyboardButton(
+                    f"✅ فایل‌ها کامل‌اند ({len(files)} فایل) — ادامه",
+                    callback_data=f"adm:wg:single_done:{sd['package_id']}"
+                ))
+                bot.send_message(uid,
+                    f"✅ فایل <code>{esc(fname)}</code> دریافت شد. (مجموع: {len(files)})\n"
+                    "فایل دیگر ارسال کنید یا دکمه ادامه را بزنید.",
+                    reply_markup=done_kb, parse_mode="HTML")
+            else:
+                bot.send_message(uid, "⚠️ لطفاً فایل کانفیگ WireGuard را ارسال کنید.",
+                                 parse_mode="HTML")
+            return
+
+        # ── WireGuard: Single — inquiry text ─────────────────────────────────
+        if sn == "wg_single_inquiry" and is_admin(uid):
+            inquiry = (message.text or "").strip()
+            _wg_finish_single(uid, sd, inquiry)
+            return
+
+        # ── WireGuard: Bulk shared — collect files ────────────────────────────
+        if sn == "wg_bulk_shared_file" and is_admin(uid):
+            if message.document:
+                doc   = message.document
+                fname = (doc.file_name or "")
+                files = sd.get("shared_files", [])
+                names = sd.get("shared_names", [])
+                files.append(doc.file_id)
+                names.append(fname)
+                state_set(uid, "wg_bulk_shared_file",
+                          package_id=sd["package_id"], shared_files=files, shared_names=names)
+                bot.send_message(uid,
+                    f"✅ فایل <code>{esc(fname)}</code> دریافت شد. (مجموع: {len(files)})\n"
+                    "فایل دیگر ارسال کنید یا دکمه ✅ را بزنید.",
+                    parse_mode="HTML")
+            else:
+                bot.send_message(uid, "⚠️ لطفاً فایل کانفیگ WireGuard را ارسال کنید.",
+                                 parse_mode="HTML")
+            return
+
+        # ── WireGuard: Bulk shared — inquiry links list OR count ──────────────
+        if sn == "wg_bulk_shared_data" and is_admin(uid):
+            raw     = (message.text or "").strip()
+            has_inq = sd.get("has_inquiry", False)
+            pkg_row = get_package(sd["package_id"])
+            if has_inq:
+                inquiries = [l.strip() for l in raw.splitlines() if l.strip()]
+                if not inquiries:
+                    bot.send_message(uid, "⚠️ لیست لینک‌های استعلام خالی است.")
+                    return
+                _wg_deliver_bulk_shared(uid, pkg_row,
+                                        sd.get("shared_files", []),
+                                        sd.get("shared_names", []),
+                                        inquiries)
+            else:
+                # No inquiry: user types a count
+                count = parse_int(raw)
+                if not count or count <= 0:
+                    bot.send_message(uid, "⚠️ عدد معتبر وارد کنید.")
+                    return
+                _wg_deliver_bulk_shared(uid, pkg_row,
+                                        sd.get("shared_files", []),
+                                        sd.get("shared_names", []),
+                                        [""] * count)
+            state_clear(uid)
+            return
+
+        # ── WireGuard: Bulk diff — how many configs ───────────────────────────
+        if sn == "wg_bulk_diff_count" and is_admin(uid):
+            total = parse_int(message.text or "")
+            if not total or total <= 0:
+                bot.send_message(uid, "⚠️ عدد معتبر وارد کنید.")
+                return
+            state_set(uid, "wg_bulk_diff_files",
+                      package_id=sd["package_id"], total_accts=total,
+                      acct_files={}, acct_names={}, current_acct=1,
+                      pending_acct_files=[], pending_acct_names=[])
+            done_kb = types.InlineKeyboardMarkup()
+            done_kb.add(types.InlineKeyboardButton(
+                "✅ فایل‌های کانفیگ ۱ کامل‌اند",
+                callback_data=f"adm:wg:diffok:{sd['package_id']}:1"
+            ))
+            bot.send_message(uid,
+                f"📎 فایل‌های <b>کانفیگ ۱</b> از {total} را ارسال کنید:",
+                reply_markup=done_kb, parse_mode="HTML")
+            return
+
+        # ── WireGuard: Bulk diff — collect per-config files ───────────────────
+        if sn == "wg_bulk_diff_files" and is_admin(uid):
+            if message.document:
+                doc   = message.document
+                fname = (doc.file_name or "")
+                pending_files = sd.get("pending_acct_files", [])
+                pending_names = sd.get("pending_acct_names", [])
+                pending_files.append(doc.file_id)
+                pending_names.append(fname)
+                current = sd.get("current_acct", 1)
+                state_set(uid, "wg_bulk_diff_files",
+                          package_id=sd["package_id"], total_accts=sd.get("total_accts", 0),
+                          acct_files=sd.get("acct_files", {}), acct_names=sd.get("acct_names", {}),
+                          current_acct=current,
+                          pending_acct_files=pending_files, pending_acct_names=pending_names)
+                bot.send_message(uid,
+                    f"✅ فایل <code>{esc(fname)}</code> برای کانفیگ {current} دریافت شد. (مجموع: {len(pending_files)})",
+                    parse_mode="HTML")
+            else:
+                bot.send_message(uid, "⚠️ لطفاً فایل کانفیگ WireGuard را ارسال کنید.",
+                                 parse_mode="HTML")
+            return
+
+        # ── WireGuard: Bulk diff — inquiry links list ─────────────────────────
+        if sn == "wg_bulk_diff_data" and is_admin(uid):
+            raw     = (message.text or "").strip()
+            has_inq = sd.get("has_inquiry", False)
+            total   = sd.get("total_accts", 0)
+            if has_inq:
+                inquiries = [l.strip() for l in raw.splitlines() if l.strip()]
+                if len(inquiries) != total:
+                    bot.send_message(uid,
+                        f"⚠️ تعداد لینک‌های استعلام ({len(inquiries)}) با تعداد کانفیگ‌ها ({total}) مطابقت ندارد.\n"
+                        "لطفاً دوباره وارد کنید.")
+                    return
+            else:
+                inquiries = []
+            pkg_row = get_package(sd["package_id"])
+            _wg_deliver_bulk_diff(uid, pkg_row,
+                                  sd.get("acct_files", {}),
+                                  sd.get("acct_names", {}),
+                                  inquiries)
             state_clear(uid)
             return
 
