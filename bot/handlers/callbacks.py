@@ -3444,7 +3444,7 @@ def _dispatch_callback(call, uid, data):
 
     # ── OpenVPN — shared files done, ask about inquiry ────────────────────────
     if data.startswith("adm:ovpn:sharedok:"):
-        package_id = int(data.split(":")[2])
+        package_id = int(data.split(":")[3])
         sd = state_data(uid)
         shared_files = sd.get("shared_files", [])
         if not shared_files:
@@ -3688,7 +3688,7 @@ def _dispatch_callback(call, uid, data):
 
     # ── WireGuard — Shared files done, ask inquiry ────────────────────────────
     if data.startswith("adm:wg:sharedok:"):
-        package_id = int(data.split(":")[2])
+        package_id = int(data.split(":")[3])
         sd = state_data(uid)
         shared_files = sd.get("shared_files", [])
         if not shared_files:
