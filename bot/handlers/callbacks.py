@@ -1762,9 +1762,7 @@ def _dispatch_callback(call, uid, data):
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
             bot.answer_callback_query(call.id)
-            send_or_edit(call, "🔴 <b>فروشگاه موقتاً تعطیل است.</b>
-
-لطفاً بعداً مراجعه کنید.", kb)
+            send_or_edit(call, "🔴 <b>فروشگاه موقتاً تعطیل است.</b>\n\nلطفاً بعداً مراجعه کنید.", kb)
             return
         type_id   = int(data.split(":")[2])
         stock_only = setting_get("preorder_mode", "0") == "1"
@@ -1795,9 +1793,7 @@ def _dispatch_callback(call, uid, data):
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
             bot.answer_callback_query(call.id)
-            send_or_edit(call, "🔴 <b>فروشگاه موقتاً تعطیل است.</b>
-
-لطفاً بعداً مراجعه کنید.", kb)
+            send_or_edit(call, "🔴 <b>فروشگاه موقتاً تعطیل است.</b>\n\nلطفاً بعداً مراجعه کنید.", kb)
             return
         package_id  = int(data.split(":")[2])
         package_row = get_package(package_id)
@@ -2289,9 +2285,7 @@ def _dispatch_callback(call, uid, data):
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
             bot.answer_callback_query(call.id)
-            send_or_edit(call, "🔴 <b>فروشگاه موقتاً تعطیل است.</b>
-
-شارژ کیف پول در حال حاضر امکان‌پذیر نیست.", kb)
+            send_or_edit(call, "🔴 <b>فروشگاه موقتاً تعطیل است.</b>\n\nشارژ کیف پول در حال حاضر امکان‌پذیر نیست.", kb)
             return
         state_set(uid, "await_wallet_amount")
         kb = types.InlineKeyboardMarkup()
