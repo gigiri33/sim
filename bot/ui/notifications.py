@@ -53,7 +53,7 @@ def deliver_purchase_message(chat_id, purchase_id):
         f"{package_line}"
         f"🔋 حجم: <b>{item['volume_gb']}</b> گیگ\n"
         f"⏰ مدت: <b>{item['duration_days']}</b> روز\n"
-        f"👥 تعداد کاربر: <b>{'نامحدود' if not item.get('max_users') else str(item['max_users']) + ' کاربره'}</b>\n\n"
+        f"👥 تعداد کاربر: <b>{'نامحدود' if not (item['max_users'] if 'max_users' in item.keys() else 0) else str(item['max_users']) + ' کاربره'}</b>\n\n"
         f"💝 <b>Config:</b>\n<code>{esc(cfg)}</code>\n\n"
         f"🔋 Volume web: {esc(item['inquiry_link'] or '-')}"
         f"{expired_note}"
@@ -117,7 +117,7 @@ def admin_purchase_notify(method_label, user_row, package_row, purchase_id=None)
         f"{svc_line}"
         f"🔋 حجم: {package_row['volume_gb']} گیگ\n"
         f"⏰ مدت: {package_row['duration_days']} روز\n"
-        f"👥 تعداد کاربر: {'نامحدود' if not package_row.get('max_users') else str(package_row['max_users']) + ' کاربره'}"
+        f"👥 تعداد کاربر: {'نامحدود' if not (package_row['max_users'] if 'max_users' in package_row.keys() else 0) else str(package_row['max_users']) + ' کاربره'}"
     )
     if _own_notif_on("purchase_log"):
         for admin_id in ADMIN_IDS:
@@ -160,7 +160,7 @@ def admin_renewal_notify(user_id, purchase_item, package_row, amount, method_lab
         f"✏️ نام: {esc(package_row['name'])}\n"
         f"🔋 حجم: {package_row['volume_gb']} گیگ\n"
         f"⏰ مدت: {package_row['duration_days']} روز\n"
-        f"👥 تعداد کاربر: {'نامحدود' if not package_row.get('max_users') else str(package_row['max_users']) + ' کاربره'}"
+        f"👥 تعداد کاربر: {'نامحدود' if not (package_row['max_users'] if 'max_users' in package_row.keys() else 0) else str(package_row['max_users']) + ' کاربره'}"
     )
     kb = types.InlineKeyboardMarkup()
     kb.add(types.InlineKeyboardButton("✅ تمدید انجام شد",
@@ -202,7 +202,7 @@ def notify_pending_order_to_admins(pending_id, user_id, package_row, amount, met
         f"✏️ نام: {esc(package_row['name'])}\n"
         f"🔋 حجم: {package_row['volume_gb']} گیگ\n"
         f"⏰ مدت: {package_row['duration_days']} روز\n"
-        f"� تعداد کاربر: {'نامحدود' if not package_row.get('max_users') else str(package_row['max_users']) + ' کاربره'}\n"
+        f"👥 تعداد کاربر: {'نامحدود' if not (package_row['max_users'] if 'max_users' in package_row.keys() else 0) else str(package_row['max_users']) + ' کاربره'}\n"
         f"�💰 قیمت: {fmt_price(package_row['price'])} تومان\n\n"
         "⚠️ موجودی تحویل فوری برای این پکیج تمام شده است.\n"
         "لطفاً برای این سفارش یک کانفیگ ثبت کنید:"

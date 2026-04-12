@@ -220,7 +220,7 @@ def send_payment_to_admins(payment_id):
             f"\n📦 پکیج: {esc(package_row['name'])}"
             f"\n🔋 حجم: {package_row['volume_gb']} گیگ"
             f"\n⏰ مدت: {package_row['duration_days']} روز"
-            f"\n👥 تعداد کاربر: {'نامحدود' if not package_row.get('max_users') else str(package_row['max_users']) + ' کاربره'}"
+            f"\n👥 تعداد کاربر: {'نامحدود' if not (package_row['max_users'] if 'max_users' in package_row.keys() else 0) else str(package_row['max_users']) + ' کاربره'}"
         )
     # Crypto equivalent line (shown only for crypto payments)
     crypto_line = ""
@@ -364,7 +364,7 @@ def finish_card_payment_approval(payment_id, admin_note, approved):
                         f"\n📦 پکیج: {esc(package_row['name'])}"
                         f"\n🔋 حجم: {package_row['volume_gb']} گیگ"
                         f"\n⏰ مدت: {package_row['duration_days']} روز"
-                        f"\n👥 تعداد کاربر: {'نامحدود' if not package_row.get('max_users') else str(package_row['max_users']) + ' کاربره'}"
+                        f"\n👥 تعداد کاربر: {'نامحدود' if not (package_row['max_users'] if 'max_users' in package_row.keys() else 0) else str(package_row['max_users']) + ' کاربره'}"
                     )
                 status_text = (
                     f"{header}\n\n"
