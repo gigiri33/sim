@@ -1770,6 +1770,17 @@ def _dispatch_callback(call, uid, data):
             packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and p["stock"] > 0]
         else:
             packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0]
+        # If any package has a non-zero max_users, show the user-count selector first
+        user_limits = sorted(set(p.get("max_users", 0) for p in packages))
+        if any(u != 0 for u in user_limits):
+            kb = types.InlineKeyboardMarkup()
+            for u in user_limits:
+                label = "👥 نامحدود" if u == 0 else f"👥 {u} کاربره"
+                kb.add(types.InlineKeyboardButton(label, callback_data=f"buy:mu:{u}:{type_id}"))
+            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="buy:start"))
+            bot.answer_callback_query(call.id)
+            send_or_edit(call, "👥 تعداد کاربر مورد نظر را انتخاب کنید:", kb)
+            return
         kb   = types.InlineKeyboardMarkup()
         user = get_user(uid)
         for p in packages:
@@ -1780,6 +1791,40 @@ def _dispatch_callback(call, uid, data):
             title = f"{_name_part}{fmt_vol(p['volume_gb'])} | {fmt_dur(p['duration_days'])} | {fmt_price(price)} ت"
             kb.add(types.InlineKeyboardButton(title, callback_data=f"buy:p:{p['id']}"))
         kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="buy:start"))
+        bot.answer_callback_query(call.id)
+        agent_note = "\n\n🤝 <i>این قیمت‌ها مخصوص همکاری شماست</i>" if user and user["is_agent"] else ""
+        if not packages:
+            send_or_edit(call, "📭 در حال حاضر بسته‌ای برای فروش در این نوع موجود نیست.", kb)
+        else:
+            send_or_edit(call, f"📦 یکی از پکیج‌ها را انتخاب کنید:{agent_note}", kb)
+        return
+
+    if data.startswith("buy:mu:"):
+        if setting_get("shop_open", "1") != "1":
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+            bot.answer_callback_query(call.id)
+            send_or_edit(call, "🔴 <b>فروشگاه موقتاً تعطیل است.</b>\n\nلطفاً بعداً مراجعه کنید.", kb)
+            return
+        parts_mu     = data.split(":")
+        selected_mu  = int(parts_mu[2])
+        type_id      = int(parts_mu[3])
+        stock_only   = setting_get("preorder_mode", "0") == "1"
+        if stock_only:
+            all_pkgs = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and p["stock"] > 0]
+        else:
+            all_pkgs = [p for p in get_packages(type_id=type_id) if p["price"] > 0]
+        packages = [p for p in all_pkgs if p.get("max_users", 0) == selected_mu]
+        kb   = types.InlineKeyboardMarkup()
+        user = get_user(uid)
+        for p in packages:
+            price     = get_effective_price(uid, p)
+            stock_tag = "" if p["stock"] > 0 else " ⏳"
+            _sn       = p['show_name'] if 'show_name' in p.keys() else 1
+            _name_part = f"{p['name']}{stock_tag} | " if _sn else (f"{stock_tag} | " if stock_tag else "")
+            title = f"{_name_part}{fmt_vol(p['volume_gb'])} | {fmt_dur(p['duration_days'])} | {fmt_price(price)} ت"
+            kb.add(types.InlineKeyboardButton(title, callback_data=f"buy:p:{p['id']}"))
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"buy:t:{type_id}"))
         bot.answer_callback_query(call.id)
         agent_note = "\n\n🤝 <i>این قیمت‌ها مخصوص همکاری شماست</i>" if user and user["is_agent"] else ""
         if not packages:
@@ -2905,6 +2950,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("🔋 ویرایش حجم",   callback_data=f"admin:pkg:ef:volume:{package_id}"))
         kb.add(types.InlineKeyboardButton("⏰ ویرایش مدت",   callback_data=f"admin:pkg:ef:dur:{package_id}"))
         kb.add(types.InlineKeyboardButton("📌 جایگاه نمایش",  callback_data=f"admin:pkg:ef:position:{package_id}"))
+        kb.add(types.InlineKeyboardButton("👥 محدودیت کاربر", callback_data=f"admin:pkg:ef:maxusers:{package_id}"))
         kb.add(types.InlineKeyboardButton(show_name_lbl,      callback_data=f"admin:pkg:toggle_sn:{package_id}"))
         pkg_active = package_row['active'] if 'active' in package_row.keys() else 1
         pkg_status_label = "✅ فعال — کلیک برای غیرفعال" if pkg_active else "❌ غیرفعال — کلیک برای فعال"
@@ -2914,6 +2960,8 @@ def _dispatch_callback(call, uid, data):
         cur_pos = package_row['position'] if 'position' in package_row.keys() else 0
         pkg_status_line = "✅ فعال" if pkg_active else "❌ غیرفعال"
         sn_line = "✅ بله" if show_name_val else "❌ خیر"
+        mu_val  = package_row['max_users'] if 'max_users' in package_row.keys() else 0
+        mu_line = "نامحدود" if not mu_val else f"{mu_val} کاربره"
         text = (
             f"📦 <b>ویرایش پکیج</b>\n\n"
             f"نام: {esc(package_row['name'])}\n"
@@ -2921,6 +2969,7 @@ def _dispatch_callback(call, uid, data):
             f"حجم: {fmt_vol(package_row['volume_gb'])}\n"
             f"مدت: {fmt_dur(package_row['duration_days'])}\n"
             f"جایگاه: {cur_pos}\n"
+            f"محدودیت کاربر: {mu_line}\n"
             f"نمایش نام به کاربر: {sn_line}\n"
             f"وضعیت: {pkg_status_line}"
         )
@@ -2948,6 +2997,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("🔋 ویرایش حجم",   callback_data=f"admin:pkg:ef:volume:{package_id}"))
         kb.add(types.InlineKeyboardButton("⏰ ویرایش مدت",   callback_data=f"admin:pkg:ef:dur:{package_id}"))
         kb.add(types.InlineKeyboardButton("📌 جایگاه نمایش",  callback_data=f"admin:pkg:ef:position:{package_id}"))
+        kb.add(types.InlineKeyboardButton("👥 محدودیت کاربر", callback_data=f"admin:pkg:ef:maxusers:{package_id}"))
         kb.add(types.InlineKeyboardButton(show_name_lbl,      callback_data=f"admin:pkg:toggle_sn:{package_id}"))
         pkg_active = package_row['active'] if 'active' in package_row.keys() else 1
         pkg_status_label = "✅ فعال — کلیک برای غیرفعال" if pkg_active else "❌ غیرفعال — کلیک برای فعال"
@@ -2956,6 +3006,8 @@ def _dispatch_callback(call, uid, data):
         cur_pos = package_row['position'] if 'position' in package_row.keys() else 0
         pkg_status_line = "✅ فعال" if pkg_active else "❌ غیرفعال"
         sn_line = "✅ بله" if show_name_val else "❌ خیر"
+        mu_val  = package_row['max_users'] if 'max_users' in package_row.keys() else 0
+        mu_line = "نامحدود" if not mu_val else f"{mu_val} کاربره"
         text = (
             f"📦 <b>ویرایش پکیج</b>\n\n"
             f"نام: {esc(package_row['name'])}\n"
@@ -2963,6 +3015,7 @@ def _dispatch_callback(call, uid, data):
             f"حجم: {fmt_vol(package_row['volume_gb'])}\n"
             f"مدت: {fmt_dur(package_row['duration_days'])}\n"
             f"جایگاه: {cur_pos}\n"
+            f"محدودیت کاربر: {mu_line}\n"
             f"نمایش نام به کاربر: {sn_line}\n"
             f"وضعیت: {pkg_status_line}"
         )
@@ -2974,7 +3027,7 @@ def _dispatch_callback(call, uid, data):
         field_key  = parts[3]
         package_id = int(parts[4])
         state_set(uid, "admin_edit_pkg_field", field_key=field_key, package_id=package_id)
-        labels     = {"name": "نام", "price": "قیمت (تومان)", "volume": "حجم (GB)", "dur": "مدت (روز)", "position": "جایگاه نمایش"}
+        labels     = {"name": "نام", "price": "قیمت (تومان)", "volume": "حجم (GB)", "dur": "مدت (روز)", "position": "جایگاه نمایش", "maxusers": "محدودیت کاربر (0=نامحدود)"}
         bot.answer_callback_query(call.id)
         send_or_edit(call, f"✏️ مقدار جدید برای <b>{labels.get(field_key, field_key)}</b> را وارد کنید:",
                      back_button("admin:types"))

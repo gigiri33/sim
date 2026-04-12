@@ -810,20 +810,39 @@ def universal_handler(message):
             if price is None or price < 0:
                 bot.send_message(uid, "⚠️ قیمت معتبر وارد کنید.", reply_markup=back_button("admin:types"))
                 return
+            state_set(uid, "admin_add_package_max_users",
+                      type_id=sd["type_id"], package_name=sd["package_name"],
+                      volume=sd["volume"], duration=sd["duration"],
+                      price=price, show_name=sd.get("show_name", 1))
+            bot.send_message(uid,
+                f"✅ قیمت: <b>{'رایگان' if price == 0 else fmt_price(price) + ' تومان'}</b>\n\n"
+                "👥 محدودیت تعداد کاربر را وارد کنید:\n"
+                "💡 برای نامحدود عدد <b>0</b> بفرستید.",
+                reply_markup=back_button("admin:types"))
+            return
+
+        if sn == "admin_add_package_max_users" and is_admin(uid):
+            max_users = parse_int(message.text or "")
+            if max_users is None or max_users < 0:
+                bot.send_message(uid, "⚠️ عدد معتبر (صفر یا بیشتر) وارد کنید.", reply_markup=back_button("admin:types"))
+                return
             show_name_val = sd.get("show_name", 1)
-            add_package(sd["type_id"], sd["package_name"], sd["volume"], sd["duration"], price, show_name=show_name_val)
+            add_package(sd["type_id"], sd["package_name"], sd["volume"], sd["duration"], sd["price"],
+                        show_name=show_name_val, max_users=max_users)
             log_admin_action(uid, f"پکیج '{sd['package_name']}' ثبت شد")
             state_clear(uid)
             vol_label = "حجم نامحدود" if sd["volume"] == 0 else fmt_vol(sd["volume"])
             dur_label = "زمان نامحدود" if sd["duration"] == 0 else f"{sd['duration']} روز"
-            pri_label = "رایگان" if price == 0 else f"{fmt_price(price)} تومان"
+            pri_label = "رایگان" if sd["price"] == 0 else f"{fmt_price(sd['price'])} تومان"
             sn_label  = "بله" if show_name_val else "خیر"
+            mu_label  = "نامحدود" if max_users == 0 else f"{max_users} کاربره"
             bot.send_message(uid,
                 f"✅ پکیج با موفقیت ثبت شد.\n\n"
                 f"📦 <b>{esc(sd['package_name'])}</b>\n"
                 f"🔋 حجم: {vol_label}\n"
                 f"⏰ مدت: {dur_label}\n"
                 f"💰 قیمت: {pri_label}\n"
+                f"👥 تعداد کاربر: {mu_label}\n"
                 f"👁 نمایش نام به کاربر: {sn_label}")
             _show_admin_types(message)
             return
@@ -832,7 +851,7 @@ def universal_handler(message):
         if sn == "admin_edit_pkg_field" and is_admin(uid):
             field_key  = sd["field_key"]
             package_id = sd["package_id"]
-            db_field_map = {"name": "name", "price": "price", "volume": "volume_gb", "dur": "duration_days", "position": "position"}
+            db_field_map = {"name": "name", "price": "price", "volume": "volume_gb", "dur": "duration_days", "position": "position", "maxusers": "max_users"}
             db_field   = db_field_map.get(field_key)
             raw        = (message.text or "").strip()
             if field_key == "name":
@@ -864,10 +883,13 @@ def universal_handler(message):
                 kb.add(types.InlineKeyboardButton("🔋 ویرایش حجم",   callback_data=f"admin:pkg:ef:volume:{package_id}"))
                 kb.add(types.InlineKeyboardButton("⏰ ویرایش مدت",   callback_data=f"admin:pkg:ef:dur:{package_id}"))
                 kb.add(types.InlineKeyboardButton("🔢 جایگاه نمایش", callback_data=f"admin:pkg:ef:position:{package_id}"))
+                kb.add(types.InlineKeyboardButton("👥 محدودیت کاربر", callback_data=f"admin:pkg:ef:maxusers:{package_id}"))
                 kb.add(types.InlineKeyboardButton(show_name_lbl,     callback_data=f"admin:pkg:toggle_sn:{package_id}"))
                 kb.add(types.InlineKeyboardButton("🔙 بازگشت",       callback_data="admin:types"))
                 cur_pos = package_row["position"] if "position" in package_row.keys() else 0
                 sn_line = "✅ بله" if show_name_val else "❌ خیر"
+                mu_val  = package_row["max_users"] if "max_users" in package_row.keys() else 0
+                mu_line = "نامحدود" if not mu_val else f"{mu_val} کاربره"
                 text = (
                     f"✅ ویرایش انجام شد\n\n"
                     f"📦 <b>{esc(package_row['name'])}</b>\n"
@@ -875,6 +897,7 @@ def universal_handler(message):
                     f"حجم: {fmt_vol(package_row['volume_gb'])}\n"
                     f"مدت: {fmt_dur(package_row['duration_days'])}\n"
                     f"جایگاه: {cur_pos}\n"
+                    f"محدودیت کاربر: {mu_line}\n"
                     f"نمایش نام به کاربر: {sn_line}"
                 )
                 send_or_edit(message, text, kb)

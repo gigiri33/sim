@@ -365,6 +365,7 @@ def init_db():
             "CREATE TABLE IF NOT EXISTS agency_request_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, referee_uid INTEGER NOT NULL, chat_id INTEGER NOT NULL, message_id INTEGER NOT NULL)",
             "CREATE TABLE IF NOT EXISTS payment_admin_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, payment_id INTEGER NOT NULL, admin_id INTEGER NOT NULL, message_id INTEGER NOT NULL)",
             "ALTER TABLE packages ADD COLUMN show_name INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE packages ADD COLUMN max_users INTEGER NOT NULL DEFAULT 0",
             "CREATE TABLE IF NOT EXISTS discount_codes (id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL UNIQUE COLLATE NOCASE, discount_type TEXT NOT NULL DEFAULT 'pct', discount_value INTEGER NOT NULL DEFAULT 0, max_uses_total INTEGER NOT NULL DEFAULT 0, max_uses_per_user INTEGER NOT NULL DEFAULT 0, used_count INTEGER NOT NULL DEFAULT 0, is_active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL)",
             "CREATE TABLE IF NOT EXISTS discount_code_uses (id INTEGER PRIMARY KEY AUTOINCREMENT, code_id INTEGER NOT NULL REFERENCES discount_codes(id) ON DELETE CASCADE, user_id INTEGER NOT NULL, used_at TEXT NOT NULL)",
             "CREATE TABLE IF NOT EXISTS voucher_batches (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, gift_type TEXT NOT NULL DEFAULT 'wallet', gift_amount INTEGER, package_id INTEGER, total_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)",
@@ -684,15 +685,15 @@ def get_package(package_id):
         ).fetchone()
 
 
-def add_package(type_id, name, volume_gb, duration_days, price, show_name=1):
+def add_package(type_id, name, volume_gb, duration_days, price, show_name=1, max_users=0):
     with get_conn() as conn:
         max_pos = conn.execute(
             "SELECT COALESCE(MAX(position),0) FROM packages WHERE type_id=?", (type_id,)
         ).fetchone()[0]
         conn.execute(
-            "INSERT INTO packages(type_id,name,volume_gb,duration_days,price,active,position,show_name)"
-            " VALUES(?,?,?,?,?,1,?,?)",
-            (type_id, name.strip(), volume_gb, duration_days, price, max_pos + 1, show_name)
+            "INSERT INTO packages(type_id,name,volume_gb,duration_days,price,active,position,show_name,max_users)"
+            " VALUES(?,?,?,?,?,1,?,?,?)",
+            (type_id, name.strip(), volume_gb, duration_days, price, max_pos + 1, show_name, max_users)
         )
 
 
@@ -704,7 +705,7 @@ def toggle_package_active(package_id):
 
 
 def update_package_field(package_id, field, value):
-    allowed = {"name", "volume_gb", "duration_days", "price", "position", "show_name"}
+    allowed = {"name", "volume_gb", "duration_days", "price", "position", "show_name", "max_users"}
     if field not in allowed:
         return
     with get_conn() as conn:
@@ -924,7 +925,7 @@ def get_purchase(purchase_id):
     with get_conn() as conn:
         return conn.execute(
             """
-            SELECT pr.*, p.name AS package_name, p.show_name, p.volume_gb, p.duration_days, p.price,
+            SELECT pr.*, p.name AS package_name, p.show_name, p.volume_gb, p.duration_days, p.price, p.max_users,
                    t.name AS type_name, t.description AS type_description,
                    c.service_name, c.config_text, c.inquiry_link, c.is_expired
             FROM purchases pr
