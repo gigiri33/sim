@@ -238,7 +238,9 @@ def send_payment_to_admins(payment_id):
         f"🆔 نام کاربری: {esc(display_username(user['username']))}\n"
         f"🔢 آیدی: <code>{user['user_id']}</code>\n"
         f"💰 مبلغ: <b>{fmt_price(payment['amount'])}</b> تومان"
-        f"{crypto_line}"
+        + (f"\n🎲 مبلغ نهایی (رندوم): <b>{fmt_price(payment['final_amount'])}</b> تومان"
+           if payment.get('final_amount') and payment['final_amount'] != payment['amount'] else "")
+        + f"{crypto_line}"
         f"{package_text}\n\n"
         f"📝 توضیح کاربر:\n{esc(payment['receipt_text'] or '-')}"
     )

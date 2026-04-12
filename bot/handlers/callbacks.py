@@ -25,6 +25,7 @@ from ..db import (
     assign_config_to_user, reserve_first_config, release_reserved_config,
     update_config_field,
     get_payment, get_pending_payments_page, create_payment, approve_payment, reject_payment, complete_payment,
+    update_payment_final_amount,
     get_agency_price, set_agency_price,
     get_agency_price_config, set_agency_price_config,
     get_agency_type_discount, set_agency_type_discount,
@@ -619,6 +620,76 @@ def _show_wallet_gateways(target, uid, amount):
 
 # ── Voucher helpers ────────────────────────────────────────────────────────────
 import random
+
+
+def _generate_card_final_amount(base_amount, payment_id):
+    """Replace last 3 digits of base_amount with a random suffix (001-999).
+    Tries to avoid duplicates among currently pending card payments."""
+    base = (base_amount // 1000) * 1000
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT final_amount FROM payments "
+            "WHERE payment_method='card' AND status='pending' "
+            "AND final_amount IS NOT NULL AND id!=?",
+            (payment_id,)
+        ).fetchall()
+    used = {r["final_amount"] for r in rows}
+    for _ in range(50):
+        suffix = random.randint(1, 999)
+        candidate = base + suffix
+        if candidate not in used:
+            return candidate
+    return base + random.randint(1, 999)
+
+
+def _build_card_payment_page(card, bank, owner, price, final_amount):
+    """Return (text, kb) for the card-to-card payment page.
+    When final_amount != price (random mode active), shows prominent amount
+    with warning + copy buttons. Otherwise shows the standard layout.
+    """
+    is_random = (final_amount is not None and final_amount != price)
+    display_amount = final_amount if is_random else price
+    card_clean = card.replace("-", "").replace(" ", "")
+
+    card_info = (
+        f"🏦 {esc(bank or 'ثبت نشده')}\n"
+        f"👤 {esc(owner or 'ثبت نشده')}\n"
+        f"💳 <code>{esc(card)}</code>\n\n"
+    )
+
+    if is_random:
+        amount_rial = display_amount * 10
+        text = (
+            "💳 <b>کارت به کارت</b>\n\n"
+            f"{card_info}"
+            "┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅\n"
+            f"💰 <b>مبلغ قابل پرداخت</b>\n"
+            f"<b>{fmt_price(display_amount)} تومان</b>\n\n"
+            "⚠️ <b>حتما مبلغ را دقیقا به همین مقدار واریز نمایید.\n"
+            "در صورت واریز مبلغ غیر دقیق، مسئولیت تایید نشدن رسید بر عهده خود شما خواهد بود.</b>\n\n"
+            "📸 پس از واریز، تصویر رسید یا شماره پیگیری را ارسال کنید."
+        )
+        kb = types.InlineKeyboardMarkup()
+        kb.row(
+            types.InlineKeyboardButton("📋 کپی قیمت به تومان",
+                                       copy_text=types.CopyTextButton(text=str(display_amount))),
+            types.InlineKeyboardButton("📋 کپی قیمت به ریال",
+                                       copy_text=types.CopyTextButton(text=str(amount_rial))),
+        )
+        kb.add(types.InlineKeyboardButton("💳 کپی شماره کارت",
+                                          copy_text=types.CopyTextButton(text=card_clean)))
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+    else:
+        text = (
+            "💳 <b>کارت به کارت</b>\n\n"
+            f"لطفاً مبلغ <b>{fmt_price(price)}</b> تومان را به کارت زیر واریز کنید:\n\n"
+            f"{card_info}"
+            "📸 پس از واریز، تصویر رسید یا شماره پیگیری را ارسال کنید."
+        )
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+
+    return text, kb
 import string
 
 def _generate_voucher_codes(count, prefix="GIFT"):
@@ -1593,17 +1664,13 @@ def _dispatch_callback(call, uid, data):
             return
         payment_id = create_payment("renewal", uid, package_id, price, "card", status="pending",
                                      config_id=item["config_id"])
+        # Generate random amount if enabled
+        final_amount = None
+        if setting_get("gw_card_random_amount", "0") == "1":
+            final_amount = _generate_card_final_amount(price, payment_id)
+            update_payment_final_amount(payment_id, final_amount)
         state_set(uid, "await_renewal_receipt", payment_id=payment_id, purchase_id=purchase_id)
-        text = (
-            "💳 <b>کارت به کارت (تمدید)</b>\n\n"
-            f"لطفاً مبلغ <b>{fmt_price(price)}</b> تومان را به کارت زیر واریز کنید:\n\n"
-            f"🏦 {esc(bank or 'ثبت نشده')}\n"
-            f"👤 {esc(owner or 'ثبت نشده')}\n"
-            f"💳 <code>{esc(card)}</code>\n\n"
-            "📸 پس از واریز، تصویر رسید یا شماره پیگیری را ارسال کنید."
-        )
-        kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+        text, kb = _build_card_payment_page(card, bank, owner, price, final_amount)
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
         return
@@ -2133,17 +2200,13 @@ def _dispatch_callback(call, uid, data):
                 show_alert=True)
             return
         payment_id = create_payment("config_purchase", uid, package_id, price, "card", status="pending")
+        # Generate random amount if enabled
+        final_amount = None
+        if setting_get("gw_card_random_amount", "0") == "1":
+            final_amount = _generate_card_final_amount(price, payment_id)
+            update_payment_final_amount(payment_id, final_amount)
         state_set(uid, "await_purchase_receipt", payment_id=payment_id)
-        text = (
-            "💳 <b>کارت به کارت</b>\n\n"
-            f"لطفاً مبلغ <b>{fmt_price(price)}</b> تومان را به کارت زیر واریز کنید:\n\n"
-            f"🏦 {esc(bank or 'ثبت نشده')}\n"
-            f"👤 {esc(owner or 'ثبت نشده')}\n"
-            f"💳 <code>{esc(card)}</code>\n\n"
-            "📸 پس از واریز، تصویر رسید یا شماره پیگیری را ارسال کنید."
-        )
-        kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+        text, kb = _build_card_payment_page(card, bank, owner, price, final_amount)
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
         return
@@ -2563,17 +2626,13 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id, "اطلاعات پرداخت هنوز ثبت نشده است.", show_alert=True)
             return
         payment_id = create_payment("wallet_charge", uid, None, amount, "card", status="pending")
+        # Generate random amount if enabled
+        final_amount = None
+        if setting_get("gw_card_random_amount", "0") == "1":
+            final_amount = _generate_card_final_amount(amount, payment_id)
+            update_payment_final_amount(payment_id, final_amount)
         state_set(uid, "await_wallet_receipt", payment_id=payment_id, amount=amount)
-        text = (
-            "💳 <b>کارت به کارت</b>\n\n"
-            f"لطفاً مبلغ <b>{fmt_price(amount)}</b> تومان را به کارت زیر واریز کنید:\n\n"
-            f"🏦 {esc(bank or 'ثبت نشده')}\n"
-            f"👤 {esc(owner or 'ثبت نشده')}\n"
-            f"💳 <code>{esc(card)}</code>\n\n"
-            "📸 پس از واریز، تصویر رسید یا شماره پیگیری را ارسال کنید."
-        )
-        kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+        text, kb = _build_card_payment_page(card, bank, owner, amount, final_amount)
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
         return
@@ -6049,15 +6108,19 @@ def _dispatch_callback(call, uid, data):
         owner = setting_get("payment_owner", "")
         range_enabled = setting_get("gw_card_range_enabled", "0")
         display_name = setting_get("gw_card_display_name", "")
+        random_amount = setting_get("gw_card_random_amount", "0")
         enabled_label = "🟢 فعال" if enabled == "1" else "🔴 غیرفعال"
         vis_label = "👥 عمومی" if vis == "public" else "🔒 کاربران امن"
         range_label = "🟢 فعال" if range_enabled == "1" else "🔴 غیرفعال"
+        random_label = "🟢 فعال" if random_amount == "1" else "🔴 غیرفعال"
         kb = types.InlineKeyboardMarkup()
         kb.row(
             types.InlineKeyboardButton(f"وضعیت: {enabled_label}", callback_data="adm:gw:card:toggle"),
             types.InlineKeyboardButton(f"نمایش: {vis_label}", callback_data="adm:gw:card:vis"),
         )
         kb.add(types.InlineKeyboardButton(f"📊 بازه پرداختی: {range_label}", callback_data="adm:gw:card:range"))
+        kb.add(types.InlineKeyboardButton(f"🎲 قیمت رندوم برای بررسی سریعتر رسیدها: {random_label}",
+                                          callback_data="adm:gw:card:randamt"))
         kb.add(types.InlineKeyboardButton("🏷 نام نمایشی درگاه", callback_data="adm:gw:card:set_name"))
         kb.add(types.InlineKeyboardButton("💳 شماره کارت", callback_data="adm:set:card"))
         kb.add(types.InlineKeyboardButton("🏦 نام بانک", callback_data="adm:set:bank"))
@@ -6068,7 +6131,8 @@ def _dispatch_callback(call, uid, data):
             "💳 <b>درگاه کارت به کارت</b>\n\n"
             f"وضعیت: {enabled_label}\n"
             f"نمایش: {vis_label}\n"
-            f"نام نمایشی: {name_display}\n\n"
+            f"نام نمایشی: {name_display}\n"
+            f"🎲 قیمت رندوم: {random_label}\n\n"
             f"کارت: <code>{esc(card or 'ثبت نشده')}</code>\n"
             f"بانک: {esc(bank or 'ثبت نشده')}\n"
             f"صاحب: {esc(owner or 'ثبت نشده')}"
@@ -6093,6 +6157,17 @@ def _dispatch_callback(call, uid, data):
         enabled = setting_get("gw_card_enabled", "0")
         setting_set("gw_card_enabled", "0" if enabled == "1" else "1")
         log_admin_action(uid, f"درگاه کارت {'غیرفعال' if enabled == '1' else 'فعال'} شد")
+        bot.answer_callback_query(call.id, "تغییر یافت.")
+        _fake_call(call, "adm:set:gw:card")
+        return
+
+    if data == "adm:gw:card:randamt":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        cur = setting_get("gw_card_random_amount", "0")
+        setting_set("gw_card_random_amount", "0" if cur == "1" else "1")
+        log_admin_action(uid, f"قیمت رندوم کارت {'غیرفعال' if cur == '1' else 'فعال'} شد")
         bot.answer_callback_query(call.id, "تغییر یافت.")
         _fake_call(call, "adm:set:gw:card")
         return

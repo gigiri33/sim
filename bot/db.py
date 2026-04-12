@@ -280,6 +280,7 @@ def init_db():
             "gw_card_range_enabled":       "0",
             "gw_card_range_min":           "",
             "gw_card_range_max":           "",
+            "gw_card_random_amount":        "0",
             "gw_crypto_range_enabled":     "0",
             "gw_crypto_range_min":         "",
             "gw_crypto_range_max":         "",
@@ -370,6 +371,7 @@ def init_db():
             "CREATE TABLE IF NOT EXISTS discount_code_uses (id INTEGER PRIMARY KEY AUTOINCREMENT, code_id INTEGER NOT NULL REFERENCES discount_codes(id) ON DELETE CASCADE, user_id INTEGER NOT NULL, used_at TEXT NOT NULL)",
             "CREATE TABLE IF NOT EXISTS voucher_batches (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, gift_type TEXT NOT NULL DEFAULT 'wallet', gift_amount INTEGER, package_id INTEGER, total_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)",
             "CREATE TABLE IF NOT EXISTS voucher_codes (id INTEGER PRIMARY KEY AUTOINCREMENT, batch_id INTEGER NOT NULL REFERENCES voucher_batches(id) ON DELETE CASCADE, code TEXT NOT NULL UNIQUE COLLATE NOCASE, is_used INTEGER NOT NULL DEFAULT 0, used_by INTEGER, used_at TEXT)",
+            "ALTER TABLE payments ADD COLUMN final_amount INTEGER",
         ]
         for sql in migrations:
             try:
@@ -1067,15 +1069,23 @@ def get_agencies():
 
 # ── Payments ───────────────────────────────────────────────────────────────────
 def create_payment(kind, user_id, package_id, amount, payment_method,
-                   status="pending", config_id=None, crypto_coin=None):
+                   status="pending", config_id=None, crypto_coin=None, final_amount=None):
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO payments(kind,user_id,package_id,amount,payment_method,"
-            "status,created_at,config_id,crypto_coin) VALUES(?,?,?,?,?,?,?,?,?)",
+            "status,created_at,config_id,crypto_coin,final_amount) VALUES(?,?,?,?,?,?,?,?,?,?)",
             (kind, user_id, package_id, amount, payment_method,
-             status, now_str(), config_id, crypto_coin)
+             status, now_str(), config_id, crypto_coin, final_amount)
         )
         return conn.execute("SELECT last_insert_rowid() AS x").fetchone()["x"]
+
+
+def update_payment_final_amount(payment_id, final_amount):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE payments SET final_amount=? WHERE id=?",
+            (final_amount, payment_id)
+        )
 
 
 def get_payment(payment_id):
