@@ -1770,8 +1770,9 @@ def _dispatch_callback(call, uid, data):
             packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and p["stock"] > 0]
         else:
             packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0]
-        # If any package has a non-zero max_users, show the user-count selector first
-        user_limits = sorted(set(p["max_users"] if "max_users" in p.keys() else 0 for p in packages))
+        # For user-count selector, check ALL packages regardless of stock
+        all_type_packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0]
+        user_limits = sorted(set(p["max_users"] if "max_users" in p.keys() else 0 for p in all_type_packages))
         if any(u != 0 for u in user_limits):
             kb = types.InlineKeyboardMarkup()
             for u in user_limits:
