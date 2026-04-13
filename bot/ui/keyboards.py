@@ -15,7 +15,7 @@ def kb_main(user_id):
         types.InlineKeyboardButton("🛒 خرید کانفیگ جدید", callback_data="buy:start"),
         types.InlineKeyboardButton("📦 کانفیگ‌های من",    callback_data="my_configs"),
     )
-    if setting_get("referral_enabled", "1") == "1":
+    if setting_get("free_test_enabled", "1") == "1":
         kb.add(types.InlineKeyboardButton("🎁 تست رایگان", callback_data="test:start"))
     kb.row(
         types.InlineKeyboardButton("👤 حساب کاربری",    callback_data="profile"),

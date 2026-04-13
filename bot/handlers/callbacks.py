@@ -34,7 +34,7 @@ from ..db import (
     get_all_panels, get_panel, add_panel, delete_panel,
     get_panel_packages, add_panel_package, delete_panel_package, update_panel_field,
     get_conn, create_pending_order, get_pending_order, add_config, search_users,
-    reset_all_free_tests, user_has_any_test,
+    reset_all_free_tests, user_has_any_test, agent_test_count_in_period,
     get_all_pinned_messages, get_pinned_message, add_pinned_message,
     update_pinned_message, delete_pinned_message,
     save_pinned_send, get_pinned_sends, delete_pinned_sends,
