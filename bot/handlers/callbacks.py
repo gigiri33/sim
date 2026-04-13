@@ -2116,6 +2116,24 @@ def _dispatch_callback(call, uid, data):
         if not package_row:
             bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
             return
+        # --- Bulk purchase logic ---
+        bulk_mode = setting_get("bulk_purchase_mode", "all")
+        user = get_user(uid)
+        is_agent = user and user.get("is_agent")
+        ask_bulk = False
+        if bulk_mode == "all":
+            ask_bulk = True
+        elif bulk_mode == "agents" and is_agent:
+            ask_bulk = True
+        # اگر باید تعداد پرسیده شود
+        if ask_bulk:
+            state_set(uid, "await_bulk_count", package_id=package_id)
+            kb = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+            kb.add("1", "2", "3", "5", "10")
+            bot.answer_callback_query(call.id)
+            send_or_edit(call, f"📦 <b>پکیج انتخابی:</b> {package_row['name']}\n\nچند عدد از این پکیج می‌خواهید؟\n\n<code>مثلاً 1 یا 2 یا 5 ...</code>", kb)
+            return
+        # حالت عادی (بدون bulk)
         price = get_effective_price(uid, package_row)
         state_set(uid, "buy_select_method",
                   package_id=package_id, amount=price, original_amount=price,
@@ -2142,10 +2160,25 @@ def _dispatch_callback(call, uid, data):
         if user["balance"] < price:
             bot.answer_callback_query(call.id, "موجودی کیف پول کافی نیست.", show_alert=True)
             return
-        config_id = reserve_first_config(package_id)
-        if not config_id:
+        # --- Bulk delivery logic ---
+        from ..db import state_data
+        bulk_count = 1
+        sd = state_data(uid)
+        if sd and sd.get("bulk_count"):
+            try:
+                bulk_count = int(sd["bulk_count"])
+            except Exception:
+                bulk_count = 1
+        purchase_ids = []
+        config_ids = []
+        for _ in range(bulk_count):
+            config_id = reserve_first_config(package_id)
+            if not config_id:
+                break
+            config_ids.append(config_id)
+        if not config_ids or len(config_ids) < bulk_count:
             if preorder_on:
-                bot.answer_callback_query(call.id, "فعلاً کانفیگی موجود نیست.", show_alert=True)
+                bot.answer_callback_query(call.id, "فعلاً کانفیگ کافی موجود نیست.", show_alert=True)
                 return
             # preorder_mode OFF — deduct balance, create pending order, notify admin
             update_balance(uid, -price)
@@ -2163,19 +2196,23 @@ def _dispatch_callback(call, uid, data):
             return
         update_balance(uid, -price)
         try:
-            purchase_id = assign_config_to_user(config_id, uid, package_id, price, "wallet", is_test=0)
+            for config_id in config_ids:
+                purchase_id = assign_config_to_user(config_id, uid, package_id, price // bulk_count, "wallet", is_test=0)
+                purchase_ids.append(purchase_id)
         except Exception:
             update_balance(uid, price)
-            release_reserved_config(config_id)
+            for config_id in config_ids:
+                release_reserved_config(config_id)
             bot.answer_callback_query(call.id, "⚠️ خطایی رخ داد، مبلغ به کیف پول بازگردانده شد.", show_alert=True)
             return
         payment_id  = create_payment("config_purchase", uid, package_id, price, "wallet",
-                                     status="completed", config_id=config_id)
+                                     status="completed", config_id=','.join(map(str,config_ids)))
         complete_payment(payment_id)
         bot.answer_callback_query(call.id, "خرید با موفقیت انجام شد.")
-        send_or_edit(call, "✅ خرید شما انجام شد و سرویس در پیام بعدی ارسال می‌شود.", back_button("main"))
-        deliver_purchase_message(call.message.chat.id, purchase_id)
-        admin_purchase_notify("کیف پول", get_user(uid), package_row, purchase_id=purchase_id)
+        send_or_edit(call, f"✅ خرید شما انجام شد و {len(purchase_ids)} سرویس در پیام بعدی ارسال می‌شود.", back_button("main"))
+        for purchase_id in purchase_ids:
+            deliver_purchase_message(call.message.chat.id, purchase_id)
+            admin_purchase_notify("کیف پول", get_user(uid), package_row, purchase_id=purchase_id)
         state_clear(uid)
         return
 
@@ -2200,13 +2237,23 @@ def _dispatch_callback(call, uid, data):
                 "لطفاً درگاه دیگری متناسب با این مبلغ انتخاب کنید.",
                 show_alert=True)
             return
+        # Bulk logic: ذخیره تعداد bulk_count در state برای تحویل بعد از تایید رسید
+        from ..db import state_data
+        bulk_count = 1
+        sd = state_data(uid)
+        if sd and sd.get("bulk_count"):
+            try:
+                bulk_count = int(sd["bulk_count"])
+            except Exception:
+                bulk_count = 1
         payment_id = create_payment("config_purchase", uid, package_id, price, "card", status="pending")
         # Generate random amount if enabled
         final_amount = None
         if setting_get("gw_card_random_amount", "0") == "1":
             final_amount = _generate_card_final_amount(price, payment_id)
             update_payment_final_amount(payment_id, final_amount)
-        state_set(uid, "await_purchase_receipt", payment_id=payment_id)
+        # ذخیره bulk_count در state همراه با payment_id
+        state_set(uid, "await_purchase_receipt", payment_id=payment_id, bulk_count=bulk_count)
         text, kb = _build_card_payment_page(card, bank, owner, price, final_amount)
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
@@ -5384,6 +5431,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("📜 قوانین خرید",     callback_data="adm:set:rules"))
         kb.add(types.InlineKeyboardButton("🏪 مدیریت فروش",    callback_data="adm:set:shop"))
         kb.add(types.InlineKeyboardButton("🤖 مدیریت عملیات ربات", callback_data="adm:ops"))
+        kb.add(types.InlineKeyboardButton("🛒 خرید عمده (Bulk)", callback_data="adm:set:bulk"))
         kb.add(types.InlineKeyboardButton("🏢 مدیریت گروه",    callback_data="admin:group"))
         kb.add(types.InlineKeyboardButton("📌 پیام‌های پین شده", callback_data="adm:pin"))
         kb.add(types.InlineKeyboardButton("� مدیریت اعلان‌ها",  callback_data="adm:notif"))
@@ -5391,6 +5439,62 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("🔙 بازگشت",        callback_data="admin:panel"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "⚙️ <b>تنظیمات</b>", kb)
+        return
+    if data == "adm:set:bulk":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        cur = setting_get("bulk_purchase_mode", "all")
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("❌ غیرفعال", callback_data="adm:set:bulk:off"))
+        kb.add(types.InlineKeyboardButton("👤 فقط نمایندگان", callback_data="adm:set:bulk:agents"))
+        kb.add(types.InlineKeyboardButton("👥 تمامی افراد", callback_data="adm:set:bulk:all"))
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:settings"))
+        status = {
+            "off": "❌ غیرفعال",
+            "agents": "👤 فقط نمایندگان",
+            "all": "👥 تمامی افراد"
+        }.get(cur, cur)
+        send_or_edit(call, f"🛒 <b>تنظیم خرید عمده (Bulk)</b>\n\nوضعیت فعلی: <b>{status}</b>\n\nیکی از گزینه‌ها را انتخاب کنید:", kb)
+        return
+    if data.startswith("adm:set:bulk:"):
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        mode = data.split(":")[-1]
+        if mode not in ("off", "agents", "all"):
+            bot.answer_callback_query(call.id, "گزینه نامعتبر است.", show_alert=True)
+            return
+        setting_set("bulk_purchase_mode", mode)
+        bot.answer_callback_query(call.id, f"وضعیت خرید عمده روی '{mode}' قرار گرفت.")
+        # بازگشت به منوی تنظیمات
+        _fake_call_data = type('obj', (object,), {
+            'id': call.id, 'message': call.message,
+            'data': 'admin:settings', 'from_user': call.from_user
+        })()
+        _fake_call_data.id = call.id
+        try:
+            call = _fake_call_data
+            kb = types.InlineKeyboardMarkup()
+            kb.row(
+                types.InlineKeyboardButton("🎧 پشتیبانی",           callback_data="adm:set:support"),
+                types.InlineKeyboardButton("💳 درگاه‌های پرداخت",   callback_data="adm:set:gateways"),
+            )
+            kb.add(types.InlineKeyboardButton("📢 کانال قفل",        callback_data="adm:set:channel"))
+            kb.add(types.InlineKeyboardButton("✏️ ویرایش متن استارت", callback_data="adm:set:start_text"))
+            kb.add(types.InlineKeyboardButton("🎁 تست رایگان",      callback_data="adm:set:freetest"))
+            kb.add(types.InlineKeyboardButton("📜 قوانین خرید",     callback_data="adm:set:rules"))
+            kb.add(types.InlineKeyboardButton("🏪 مدیریت فروش",    callback_data="adm:set:shop"))
+            kb.add(types.InlineKeyboardButton("🤖 مدیریت عملیات ربات", callback_data="adm:ops"))
+            kb.add(types.InlineKeyboardButton("🛒 خرید عمده (Bulk)", callback_data="adm:set:bulk"))
+            kb.add(types.InlineKeyboardButton("🏢 مدیریت گروه",    callback_data="admin:group"))
+            kb.add(types.InlineKeyboardButton("📌 پیام‌های پین شده", callback_data="adm:pin"))
+            kb.add(types.InlineKeyboardButton("� مدیریت اعلان‌ها",  callback_data="adm:notif"))
+            kb.add(types.InlineKeyboardButton("�💾 بکاپ",            callback_data="admin:backup"))
+            kb.add(types.InlineKeyboardButton("🔙 بازگشت",        callback_data="admin:panel"))
+            send_or_edit(call, "⚙️ <b>تنظیمات</b>", kb)
+        except Exception:
+            pass
         return
 
     if data == "adm:set:agency_toggle":

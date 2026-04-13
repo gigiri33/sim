@@ -400,6 +400,54 @@ def universal_handler(message):
                 print(f"[purchase_receipt] send_payment_to_admins failed: {_e}")
             return
 
+        # ── Bulk purchase: دریافت تعداد ──────────────────────────────────────
+        if sn == "await_bulk_count":
+            count_raw = (message.text or "").strip()
+            try:
+                count = int(count_raw)
+            except Exception:
+                count = 0
+            if count < 1 or count > 100:
+                bot.send_message(message.chat.id,
+                    "❌ لطفاً فقط یک عدد صحیح مثبت (۱ تا ۱۰۰) وارد کنید.",
+                    reply_markup=types.ReplyKeyboardRemove())
+                return
+            package_id = sd.get("package_id")
+            if not package_id:
+                bot.send_message(message.chat.id, "❌ خطا: پکیج انتخابی یافت نشد.",
+                    reply_markup=types.ReplyKeyboardRemove())
+                state_clear(uid)
+                return
+            package_row = get_package(int(package_id))
+            if not package_row:
+                bot.send_message(message.chat.id, "❌ خطا: پکیج انتخابی یافت نشد.",
+                    reply_markup=types.ReplyKeyboardRemove())
+                state_clear(uid)
+                return
+            price = get_effective_price(uid, package_row)
+            total = price * count
+            state_set(uid, "buy_select_method",
+                      package_id=package_id, amount=total, original_amount=total,
+                      kind="config_purchase", bulk_count=count, unit_price=price)
+            # نمایش خلاصه سفارش
+            pkg_name = package_row['name']
+            summary = (
+                f"🛒 <b>خلاصه سفارش</b>\n\n"
+                f"📦 پکیج: <b>{esc(pkg_name)}</b>\n"
+                f"🔢 تعداد: <b>{count}</b> عدد\n"
+                f"💰 مبلغ کل: <b>{fmt_price(total)}</b> تومان"
+            )
+            bot.send_message(message.chat.id, summary, parse_mode="HTML",
+                             reply_markup=types.ReplyKeyboardRemove())
+            # ادامه به مرحله تخفیف یا انتخاب درگاه
+            if setting_get("discount_codes_enabled", "0") == "1":
+                from ..handlers.callbacks import _show_discount_prompt
+                _show_discount_prompt(message, total)
+            else:
+                from ..handlers.callbacks import _show_purchase_gateways
+                _show_purchase_gateways(message, uid, int(package_id), total, package_row)
+            return
+
         # ── Renewal receipt ────────────────────────────────────────────────────
         if sn == "await_renewal_receipt":
             payment_id  = sd.get("payment_id")
