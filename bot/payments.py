@@ -99,7 +99,7 @@ def show_payment_method_selection(target, uid, context_data):
         kb.add(types.InlineKeyboardButton(_lbl, callback_data="pm:swapwallet_crypto"))
         _gw_labels.append(("swapwallet_crypto", _lbl))
     if is_gateway_available("tronpays_rial", uid):
-        _lbl = _sg("gw_tronpays_rial_display_name", "").strip() or "💳 درگاه کارت به کارت (TronsPay)"
+        _lbl = _sg("gw_tronpays_rial_display_name", "").strip() or "💳 درگاه کارت به کارت (TronPay)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data="pm:tronpays_rial"))
         _gw_labels.append(("tronpays_rial", _lbl))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))

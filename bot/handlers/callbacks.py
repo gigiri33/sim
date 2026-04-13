@@ -490,7 +490,7 @@ def _show_purchase_gateways(target, uid, package_id, price, package_row):
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:swapwallet_crypto:{package_id}"))
         _gw_labels.append(("swapwallet_crypto", _lbl))
     if is_gateway_available("tronpays_rial", uid):
-        _lbl = setting_get("gw_tronpays_rial_display_name", "").strip() or "💳 درگاه کارت به کارت (TronsPay)"
+        _lbl = setting_get("gw_tronpays_rial_display_name", "").strip() or "💳 درگاه کارت به کارت (TronPay)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:tronpays_rial:{package_id}"))
         _gw_labels.append(("tronpays_rial", _lbl))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"buy:t:{package_row['type_id']}"))
@@ -542,7 +542,7 @@ def _show_renewal_gateways(target, uid, purchase_id, package_id, price, package_
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:swapwallet_crypto:{purchase_id}:{package_id}"))
         _gw_labels.append(("swapwallet_crypto", _lbl))
     if is_gateway_available("tronpays_rial", uid):
-        _lbl = setting_get("gw_tronpays_rial_display_name", "").strip() or "💳 درگاه کارت به کارت (TronsPay)"
+        _lbl = setting_get("gw_tronpays_rial_display_name", "").strip() or "💳 درگاه کارت به کارت (TronPay)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:tronpays_rial:{purchase_id}:{package_id}"))
         _gw_labels.append(("tronpays_rial", _lbl))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"renew:{purchase_id}"))
@@ -593,7 +593,7 @@ def _show_wallet_gateways(target, uid, amount):
         kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:swapwallet_crypto"))
         _gw_labels.append(("swapwallet_crypto", _lbl))
     if is_gateway_available("tronpays_rial", uid):
-        _lbl = setting_get("gw_tronpays_rial_display_name", "").strip() or "💳 درگاه کارت به کارت (TronsPay)"
+        _lbl = setting_get("gw_tronpays_rial_display_name", "").strip() or "💳 درگاه کارت به کارت (TronPay)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:tronpays_rial"))
         _gw_labels.append(("tronpays_rial", _lbl))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
@@ -1857,7 +1857,7 @@ def _dispatch_callback(call, uid, data):
         if not is_gateway_in_range("tronpays_rial", price):
             _rng = get_gateway_range_text("tronpays_rial")
             bot.answer_callback_query(call.id,
-                f"⛔️ مبلغ {fmt_price(price)} تومان برای درگاه TronsPay مجاز نیست.\n"
+                f"⛔️ مبلغ {fmt_price(price)} تومان برای درگاه TronPay مجاز نیست.\n"
                 f"محدوده مجاز: {_rng}\n\n"
                 "لطفاً درگاه دیگری متناسب با این مبلغ انتخاب کنید.",
                 show_alert=True)
@@ -2454,7 +2454,7 @@ def _dispatch_callback(call, uid, data):
         if not is_gateway_in_range("tronpays_rial", price):
             _rng = get_gateway_range_text("tronpays_rial")
             bot.answer_callback_query(call.id,
-                f"⛔️ مبلغ {fmt_price(price)} تومان برای درگاه TronsPay مجاز نیست.\n"
+                f"⛔️ مبلغ {fmt_price(price)} تومان برای درگاه TronPay مجاز نیست.\n"
                 f"محدوده مجاز: {_rng}\n\n"
                 "لطفاً درگاه دیگری متناسب با این مبلغ انتخاب کنید.",
                 show_alert=True)
@@ -2737,7 +2737,7 @@ def _dispatch_callback(call, uid, data):
         if not is_gateway_in_range("tronpays_rial", amount):
             _rng = get_gateway_range_text("tronpays_rial")
             bot.answer_callback_query(call.id,
-                f"⛔️ مبلغ {fmt_price(amount)} تومان برای درگاه TronsPay مجاز نیست.\n"
+                f"⛔️ مبلغ {fmt_price(amount)} تومان برای درگاه TronPay مجاز نیست.\n"
                 f"محدوده مجاز: {_rng}\n\n"
                 "لطفاً درگاه دیگری متناسب با این مبلغ انتخاب کنید.",
                 show_alert=True)
@@ -6089,7 +6089,7 @@ def _dispatch_callback(call, uid, data):
             ("crypto",           "💎 ارز دیجیتال"),
             ("tetrapay",         "💳 درگاه کارت به کارت (TetraPay)"),
             ("swapwallet_crypto","💳 درگاه کارت به کارت و ارز دیجیتال (SwapWallet)"),
-            ("tronpays_rial",    "💳 درگاه کارت به کارت (TronsPay)"),
+            ("tronpays_rial",    "💳 درگاه کارت به کارت (TronPay)"),
         ]:
             enabled = setting_get(f"gw_{gw_key}_enabled", "0")
             status_icon = "🟢" if enabled == "1" else "🔴"
@@ -6457,9 +6457,9 @@ def _dispatch_callback(call, uid, data):
                        if api_key else "❌ <b>ثبت نشده</b> — ابتدا از ربات @TronPaysBot کلید API دریافت کنید")
         cb_url = setting_get("tronpays_rial_callback_url", "").strip() or "https://example.com/"
         display_name_tp_rial = setting_get("gw_tronpays_rial_display_name", "")
-        name_display_tp_rial = display_name_tp_rial or "<i>پیش‌فرض: درگاه کارت به کارت (TronsPay)</i>"
+        name_display_tp_rial = display_name_tp_rial or "<i>پیش‌فرض: درگاه کارت به کارت (TronPay)</i>"
         text = (
-            "💳 <b>درگاه کارت به کارت (TronsPay)</b>\n\n"
+            "💳 <b>درگاه کارت به کارت (TronPay)</b>\n\n"
             f"وضعیت: {enabled_label}\n"
             f"نمایش: {vis_label}\n"
             f"نام نمایشی: {name_display_tp_rial}\n\n"
@@ -6479,7 +6479,7 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id)
         current = setting_get("gw_tronpays_rial_display_name", "")
         send_or_edit(call,
-            f"🏷 <b>نام نمایشی درگاه TronsPay</b>\n\n"
+            f"🏷 <b>نام نمایشی درگاه TronPay</b>\n\n"
             f"مقدار فعلی: <code>{esc(current or 'پیش‌فرض')}</code>\n\n"
             "نام دلخواه را ارسال کنید.\n"
             "برای بازگشت به پیش‌فرض، <code>-</code> ارسال کنید.",
