@@ -12,6 +12,7 @@ from ..helpers import (
     esc, fmt_price, fmt_vol, fmt_dur, now_str, display_name, display_username, safe_support_url,
     is_admin, admin_has_perm, back_button,
     state_set, state_clear, state_name, state_data, parse_int, normalize_text_number,
+    move_leading_emoji,
 )
 from ..db import (
     setting_get, setting_set,
@@ -561,7 +562,7 @@ def _show_renewal_gateways(target, uid, purchase_id, package_id, price, package_
         _price_line = f"💰 قیمت: {fmt_price(price)} تومان"
     text = (
         "♻️ <b>تمدید سرویس</b>\n\n"
-        f"🔮 سرویس فعلی: {esc(urllib.parse.unquote(item['service_name'] or ''))}\n"
+        f"🔮 سرویس فعلی: {esc(move_leading_emoji(urllib.parse.unquote(item['service_name'] or '')))}\n"
         + (f"📦 پکیج تمدید: {esc(package_row['name'])}\n" if _pkg_sn_renew else "")
         + f"🔋 حجم: {fmt_vol(package_row['volume_gb'])}\n"
         f"⏰ مدت: {fmt_dur(package_row['duration_days'])}\n"

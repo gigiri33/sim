@@ -119,6 +119,31 @@ def esc(t):
     return html.escape(str(t or ""))
 
 
+# ── Service name display helper ────────────────────────────────────────────────
+_LEADING_EMOJI_RE = re.compile(
+    r'^((?:[\U00002600-\U000027BF'
+    r'\U0001F300-\U0001FAFF'
+    r'\U00002702-\U000027B0'
+    r'\uFE0F\u200D\u20E3\u00A9\u00AE'
+    r']\s*)+)'
+)
+
+def move_leading_emoji(name: str) -> str:
+    """Move leading emojis to the end of a service name string.
+    e.g. '🚀 SPACE VPN-xxx' → 'SPACE VPN-xxx 🚀'
+    """
+    if not name:
+        return name
+    m = _LEADING_EMOJI_RE.match(name)
+    if not m:
+        return name
+    prefix = m.group(1)
+    rest = name[len(prefix):]
+    if not rest.strip():
+        return name
+    return rest.strip() + " " + prefix.strip()
+
+
 # ── State management ───────────────────────────────────────────────────────────
 def state_set(uid, name, **data):
     USER_STATE[uid] = {"state_name": name, "data": data}

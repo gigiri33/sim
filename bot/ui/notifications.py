@@ -20,7 +20,7 @@ from ..db import (
     mark_purchase_reward_given, get_referral_by_referee,
     update_balance,
 )
-from ..helpers import esc, fmt_price, now_str
+from ..helpers import esc, fmt_price, now_str, move_leading_emoji
 from ..bot_instance import bot
 from ..group_manager import send_to_topic
 
@@ -73,7 +73,7 @@ def deliver_purchase_message(chat_id, purchase_id):
         bot.send_message(chat_id, "❌ اطلاعات خرید یافت نشد.")
         return
     cfg          = item["config_text"]
-    service_name = urllib.parse.unquote(item["service_name"] or "")
+    service_name = move_leading_emoji(urllib.parse.unquote(item["service_name"] or ""))
     inquiry_link = item["inquiry_link"] or ""
     show_pkg_name = ("show_name" not in item.keys()) or bool(item["show_name"])
     package_line = f"📦 پکیج: <b>{esc(item['package_name'])}</b>\n" if show_pkg_name and item["package_name"] else ""

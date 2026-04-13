@@ -7,7 +7,7 @@ from telebot import types
 
 from ..config import BRAND_TITLE, DEFAULT_ADMIN_HANDLE
 from ..db import setting_get, get_user, get_user_purchases, get_referral_stats
-from ..helpers import esc, fmt_price, display_username, back_button
+from ..helpers import esc, fmt_price, display_username, back_button, move_leading_emoji
 from ..bot_instance import bot
 from .helpers import send_or_edit
 from .keyboards import kb_main
@@ -84,7 +84,7 @@ def show_my_configs(target, user_id):
     kb = types.InlineKeyboardMarkup()
     for item in items:
         expired_mark = " ❌" if item["is_expired"] else ""
-        svc_name     = urllib.parse.unquote(item["service_name"] or "")
+        svc_name     = move_leading_emoji(urllib.parse.unquote(item["service_name"] or ""))
         title        = f"{svc_name}{expired_mark}"
         kb.add(types.InlineKeyboardButton(title, callback_data=f"mycfg:{item['id']}"))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
