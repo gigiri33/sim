@@ -128,6 +128,16 @@ def create_tronpays_rial_invoice(amount_toman, hash_id, description=""):
 
     # Normalize response — try multiple possible key names
     if isinstance(result, dict):
+        # Check for explicit API-level error first (status != 1)
+        api_status = result.get("status")
+        if api_status is not None and api_status != 1:
+            api_msg = result.get("message") or result.get("error") or result.get("msg") or ""
+            if api_msg:
+                return False, {"error": f"خطای درگاه TronPays:\n{api_msg}"}
+            return False, {
+                "error": f"درگاه TronPays خطا برگرداند (status={api_status}).\nجواب API: {json.dumps(result, ensure_ascii=False)[:500]}"
+            }
+
         invoice_id = (
             result.get("invoice_id")
             or result.get("id")
