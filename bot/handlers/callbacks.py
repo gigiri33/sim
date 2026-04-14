@@ -186,7 +186,16 @@ def _v2_bulk_data_prompt(mode: int) -> str:
             "نام سرویس هر ساب به‌صورت خودکار از انتهای لینک استخراج می‌شود.\n\n"
             "📎 یا می‌توانید محتوا را در یک فایل <b>.txt</b> ارسال کنید."
         )
-    return ""  # mode 2 handled separately (two-step)
+    if mode == 2:  # config+sub separated (many) — step 1: configs
+        return (
+            "📋 <b>ثبت عمده V2Ray — کانفیگ + ساب (مناسب تعداد زیاد) — مرحله اول</b>\n\n"
+            "ابتدا <b>همه کانفیگ‌ها</b> را ارسال کنید (هر خط یک کانفیگ):\n\n"
+            "💡 مثال:\n"
+            "<code>vless://abc...#name1\n"
+            "vless://def...#name2</code>\n\n"
+            "📎 یا می‌توانید محتوا را در یک فایل <b>.txt</b> ارسال کنید."
+        )
+    return ""
 
 
 def _ovpn_caption(pkg_row, username, password, inquiry):
