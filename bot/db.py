@@ -341,6 +341,7 @@ def init_db():
             "referral_purchase_reward_package": "",
             "discount_codes_enabled":             "1",
             "vouchers_enabled":                   "1",
+            "bulk_sale_mode":                     "everyone",
         }
         for coin, _ in CRYPTO_COINS:
             defaults[f"crypto_{coin}"] = ""
@@ -372,6 +373,8 @@ def init_db():
             "CREATE TABLE IF NOT EXISTS voucher_batches (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, gift_type TEXT NOT NULL DEFAULT 'wallet', gift_amount INTEGER, package_id INTEGER, total_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)",
             "CREATE TABLE IF NOT EXISTS voucher_codes (id INTEGER PRIMARY KEY AUTOINCREMENT, batch_id INTEGER NOT NULL REFERENCES voucher_batches(id) ON DELETE CASCADE, code TEXT NOT NULL UNIQUE COLLATE NOCASE, is_used INTEGER NOT NULL DEFAULT 0, used_by INTEGER, used_at TEXT)",
             "ALTER TABLE payments ADD COLUMN final_amount INTEGER",
+            "ALTER TABLE payments ADD COLUMN quantity INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE pending_orders ADD COLUMN quantity INTEGER NOT NULL DEFAULT 1",
         ]
         for sql in migrations:
             try:
@@ -420,6 +423,26 @@ def setting_set(key, value):
             (key, value)
         )
     _invalidate_settings_cache()
+
+
+# ── Bulk Sale ──────────────────────────────────────────────────────────────────
+def should_show_bulk_qty(user_id: int) -> bool:
+    """
+    Return True if the user should be shown the bulk quantity prompt.
+    Modes:
+    - 'everyone'    → all users
+    - 'agents_only' → only users with is_agent=1
+    - 'disabled'    → nobody (qty prompt hidden, behaves like qty=1)
+    """
+    mode = setting_get("bulk_sale_mode", "everyone")
+    if mode == "disabled":
+        return False
+    if mode == "everyone":
+        return True
+    if mode == "agents_only":
+        user = get_user(user_id)
+        return bool(user and user["is_agent"])
+    return False
 
 
 # ── Users ──────────────────────────────────────────────────────────────────────
@@ -1069,13 +1092,13 @@ def get_agencies():
 
 # ── Payments ───────────────────────────────────────────────────────────────────
 def create_payment(kind, user_id, package_id, amount, payment_method,
-                   status="pending", config_id=None, crypto_coin=None, final_amount=None):
+                   status="pending", config_id=None, crypto_coin=None, final_amount=None, quantity=1):
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO payments(kind,user_id,package_id,amount,payment_method,"
-            "status,created_at,config_id,crypto_coin,final_amount) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            "status,created_at,config_id,crypto_coin,final_amount,quantity) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
             (kind, user_id, package_id, amount, payment_method,
-             status, now_str(), config_id, crypto_coin, final_amount)
+             status, now_str(), config_id, crypto_coin, final_amount, max(1, int(quantity or 1)))
         )
         return conn.execute("SELECT last_insert_rowid() AS x").fetchone()["x"]
 
@@ -1313,13 +1336,13 @@ def get_user_xui_jobs(user_id):
 
 
 # ── Pending Orders ─────────────────────────────────────────────────────────────
-def create_pending_order(user_id, package_id, payment_id, amount, payment_method):
+def create_pending_order(user_id, package_id, payment_id, amount, payment_method, quantity=1):
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO pending_orders(user_id,package_id,payment_id,amount,"
-            "payment_method,created_at,status) VALUES(?,?,?,?,?,?,?)",
+            "payment_method,created_at,status,quantity) VALUES(?,?,?,?,?,?,?,?)",
             (user_id, package_id, payment_id, amount,
-             payment_method, now_str(), "waiting")
+             payment_method, now_str(), "waiting", max(1, int(quantity or 1)))
         )
         return conn.execute("SELECT last_insert_rowid() AS x").fetchone()["x"]
 

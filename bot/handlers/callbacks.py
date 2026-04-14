@@ -35,6 +35,7 @@ from ..db import (
     get_all_panels, get_panel, add_panel, delete_panel,
     get_panel_packages, add_panel_package, delete_panel_package, update_panel_field,
     get_conn, create_pending_order, get_pending_order, add_config, search_users,
+    should_show_bulk_qty,
     reset_all_free_tests, user_has_any_test, agent_test_count_in_period,
     get_all_pinned_messages, get_pinned_message, add_pinned_message,
     update_pinned_message, delete_pinned_message,
@@ -500,20 +501,35 @@ def _show_purchase_gateways(target, uid, package_id, price, package_row):
     sd = state_data(uid)
     disc_amount = sd.get("discount_amount", 0)
     orig_amount = sd.get("original_amount", price)
+    quantity    = int(sd.get("quantity", 1) or 1)
+    unit_price  = int(sd.get("unit_price", 0) or 0) or (orig_amount // quantity if quantity > 1 else orig_amount)
+
+    # Build price / quantity lines
+    _qty_line = f"🔢 تعداد: <b>{quantity}</b> عدد\n" if quantity > 1 else ""
+    if quantity > 1:
+        _unit_line = f"💵 قیمت هر عدد: <b>{fmt_price(unit_price)}</b> تومان\n"
+    else:
+        _unit_line = ""
+
     if disc_amount:
         _price_line = (
-            f"💰 قیمت اصلی: {fmt_price(orig_amount)} تومان\n"
+            f"💰 مبلغ اصلی: {fmt_price(orig_amount)} تومان\n"
             f"🎟 تخفیف: {fmt_price(disc_amount)} تومان\n"
-            f"💚 قیمت نهایی: {fmt_price(price)} تومان"
+            f"💚 مبلغ نهایی: {fmt_price(price)} تومان"
         )
     else:
-        _price_line = f"💰 قیمت: {fmt_price(price)} تومان"
+        if quantity > 1:
+            _price_line = f"💰 مبلغ کل: <b>{fmt_price(price)}</b> تومان"
+        else:
+            _price_line = f"💰 قیمت: {fmt_price(price)} تومان"
     text = (
         "💳 <b>انتخاب روش پرداخت</b>\n\n"
         f"🧩 نوع: {esc(package_row['type_name'])}\n"
         + (f"📦 پکیج: {esc(package_row['name'])}\n" if _pkg_sn else "")
         + f"🔋 حجم: {fmt_vol(package_row['volume_gb'])}\n"
         f"⏰ مدت: {fmt_dur(package_row['duration_days'])}\n"
+        f"{_qty_line}"
+        f"{_unit_line}"
         f"{_price_line}\n\n"
         + (_range_guide + "\n\n" if _range_guide else "")
         + "روش پرداخت را انتخاب کنید:"
@@ -617,6 +633,140 @@ def _show_wallet_gateways(target, uid, amount):
         + "روش پرداخت را انتخاب کنید:"
     )
     send_or_edit(target, text, kb)
+
+
+# ── Bulk/Quantity Purchase Helpers ─────────────────────────────────────────────
+
+def _show_qty_prompt(call, package_row, unit_price):
+    """Show the quantity-selection prompt to the user."""
+    from ..db import should_show_bulk_qty
+    uid = call.from_user.id
+    _pkg_sn   = package_row.get("show_name", 1) if not hasattr(package_row, "keys") else (package_row["show_name"] if "show_name" in package_row.keys() else 1)
+    _pkg_name = package_row["name"] if _pkg_sn else ""
+    _name_line = f"📦 پکیج: <b>{esc(_pkg_name)}</b>\n" if _pkg_name else ""
+    state_set(uid, "await_qty",
+              package_id=package_row["id"],
+              unit_price=unit_price,
+              kind="config_purchase")
+    kb = types.InlineKeyboardMarkup()
+    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"buy:t:{package_row['type_id']}"))
+    text = (
+        "🛒 <b>خرید تعدادی</b>\n\n"
+        f"🧩 نوع سرویس: <b>{esc(package_row['type_name'])}</b>\n"
+        f"{_name_line}"
+        f"🔋 حجم: {fmt_vol(package_row['volume_gb'])}  |  ⏰ مدت: {fmt_dur(package_row['duration_days'])}\n"
+        f"💰 قیمت هر عدد: <b>{fmt_price(unit_price)}</b> تومان\n\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "🔢 چه تعداد کانفیگ نیاز دارید؟\n\n"
+        "📝 <i>عدد موردنظر را تایپ کنید (مثلاً ۱، ۲، ۵)</i>"
+    )
+    send_or_edit(call, text, kb)
+
+
+def _qty_order_summary_text(package_row, unit_price, quantity):
+    """Build the order-summary text shown after qty entry."""
+    _pkg_sn   = package_row.get("show_name", 1) if not hasattr(package_row, "keys") else (package_row["show_name"] if "show_name" in package_row.keys() else 1)
+    _pkg_name = package_row["name"] if _pkg_sn else ""
+    _name_line = f"📦 پکیج: <b>{esc(_pkg_name)}</b>\n" if _pkg_name else ""
+    total = unit_price * quantity
+    return (
+        "📋 <b>خلاصه سفارش</b>\n\n"
+        f"🧩 نوع سرویس: <b>{esc(package_row['type_name'])}</b>\n"
+        f"{_name_line}"
+        f"🔋 حجم: {fmt_vol(package_row['volume_gb'])}  |  ⏰ مدت: {fmt_dur(package_row['duration_days'])}\n\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"🔢 تعداد: <b>{quantity}</b> عدد\n"
+        f"💵 قیمت هر عدد: <b>{fmt_price(unit_price)}</b> تومان\n"
+        f"💰 مبلغ کل: <b>{fmt_price(total)}</b> تومان\n"
+        "━━━━━━━━━━━━━━━━━━"
+    )
+
+
+def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method,
+                          quantity, payment_id):
+    """
+    Deliver `quantity` configs to user after successful payment.
+    Returns (delivered_purchase_ids, pending_ids).
+    For configs without stock, creates pending_orders.
+    """
+    from ..ui.notifications import deliver_purchase_message, admin_purchase_notify
+    package_row   = get_package(package_id)
+    unit_price    = max(0, total_amount // quantity) if quantity > 0 else total_amount
+    purchase_ids  = []
+    pending_ids   = []
+
+    for i in range(quantity):
+        # Reserve one config at a time
+        cfg_id = reserve_first_config(package_id)
+        if not cfg_id:
+            # No stock — create a pending order for this slot
+            p_id = create_pending_order(uid, package_id, payment_id, unit_price, payment_method, quantity=1)
+            pending_ids.append(p_id)
+            continue
+        try:
+            purchase_id = assign_config_to_user(
+                cfg_id, uid, package_id, unit_price, payment_method, is_test=0
+            )
+            purchase_ids.append(purchase_id)
+        except Exception:
+            release_reserved_config(cfg_id)
+            p_id = create_pending_order(uid, package_id, payment_id, unit_price, payment_method, quantity=1)
+            pending_ids.append(p_id)
+
+    return purchase_ids, pending_ids
+
+
+def _send_bulk_delivery_result(chat_id, uid, package_row, purchase_ids, pending_ids,
+                               method_label):
+    """
+    Send delivery messages to user after bulk purchase.
+    Delivers all purchased configs, then informs about pending ones.
+    """
+    from ..ui.notifications import deliver_purchase_message, admin_purchase_notify
+
+    total = len(purchase_ids) + len(pending_ids)
+
+    if purchase_ids:
+        if len(purchase_ids) > 1:
+            try:
+                bot.send_message(
+                    chat_id,
+                    f"🎉 <b>خرید شما با موفقیت انجام شد!</b>\n\n"
+                    f"📦 تعداد کانفیگ‌های آماده: <b>{len(purchase_ids)}</b> از <b>{total}</b>\n\n"
+                    "⬇️ کانفیگ‌های شما یکی‌یکی در پیام‌های بعدی ارسال می‌شوند.",
+                    parse_mode="HTML",
+                    reply_markup=back_button("main")
+                )
+            except Exception:
+                pass
+        for pid in purchase_ids:
+            try:
+                deliver_purchase_message(chat_id, pid)
+                admin_purchase_notify(method_label, get_user(uid), package_row, purchase_id=pid)
+            except Exception as e:
+                print(f"[BULK_DELIVERY] Error delivering purchase {pid}: {e}")
+
+    if pending_ids:
+        from ..ui.notifications import notify_pending_order_to_admins
+        count_pending = len(pending_ids)
+        try:
+            bot.send_message(
+                chat_id,
+                f"⚠️ <b>بخشی از سفارش در انتظار تأمین موجودی</b>\n\n"
+                f"✅ {len(purchase_ids)} کانفیگ تحویل داده شد.\n"
+                f"⏳ {count_pending} کانفیگ دیگر در صف انتظار قرار گرفت.\n\n"
+                "به‌محض تأمین موجودی، کانفیگ‌های باقیمانده به‌صورت خودکار ارسال می‌شوند.\n"
+                "🙏 از صبر شما متشکریم.",
+                parse_mode="HTML",
+                reply_markup=back_button("main")
+            )
+        except Exception:
+            pass
+        for p_id in pending_ids:
+            try:
+                notify_pending_order_to_admins(p_id, uid, package_row, package_row["price"], method_label)
+            except Exception:
+                pass
 
 
 # ── Voucher helpers ────────────────────────────────────────────────────────────
@@ -1050,38 +1200,24 @@ def _tetrapay_auto_verify(payment_id, authority, uid, chat_id, message_id, kind,
 
             elif kind == "config_purchase":
                 pkg_row = get_package(package_id)
-                cfg_id = payment["config_id"]
-                if not cfg_id:
-                    cfg_id = reserve_first_config(package_id, payment_id)
-                if not cfg_id:
-                    pending_id = create_pending_order(uid, package_id, payment_id, payment["amount"], "tetrapay")
-                    complete_payment(payment_id)
-                    state_clear(uid)
-                    msg_text = (
-                        "✅ پرداخت شما تأیید شد.\n\n"
-                        "⚠️ <b>موجودی تحویل فوری ربات به اتمام رسید.</b>\n"
-                        "درخواست شما برای ادمین ارسال شد. در کمترین فرصت کانفیگ شما تحویل داده می‌شود.\n"
-                        "🙏 از صبر شما متشکریم."
-                    )
-                    try:
-                        bot.edit_message_text(msg_text, chat_id, message_id, parse_mode="HTML",
-                                              reply_markup=back_button("main"))
-                    except Exception:
-                        bot.send_message(uid, msg_text, parse_mode="HTML", reply_markup=back_button("main"))
-                    notify_pending_order_to_admins(pending_id, uid, pkg_row, payment["amount"], "tetrapay")
-                    return
-                purchase_id_new = assign_config_to_user(cfg_id, uid, package_id, payment["amount"], "tetrapay", is_test=0)
+                _qty_tp_auto = int(payment["quantity"]) if "quantity" in payment.keys() else 1
                 complete_payment(payment_id)
                 state_clear(uid)
                 try:
-                    bot.edit_message_text("✅ پرداخت شما تأیید شد و سرویس آماده است.",
-                                          chat_id, message_id, parse_mode="HTML",
-                                          reply_markup=back_button("main"))
+                    bot.edit_message_text(
+                        "✅ پرداخت شما تأیید شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
+                        chat_id, message_id, parse_mode="HTML",
+                        reply_markup=back_button("main"))
                 except Exception:
-                    bot.send_message(uid, "✅ پرداخت شما تأیید شد و سرویس آماده است.",
-                                     reply_markup=back_button("main"))
-                deliver_purchase_message(chat_id, purchase_id_new)
-                admin_purchase_notify("TetraPay", get_user(uid), pkg_row, purchase_id=purchase_id_new)
+                    bot.send_message(uid,
+                        "✅ پرداخت شما تأیید شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
+                        parse_mode="HTML", reply_markup=back_button("main"))
+                purchase_ids, pending_ids = _deliver_bulk_configs(
+                    chat_id, uid, package_id,
+                    payment["amount"], "tetrapay", _qty_tp_auto, payment_id
+                )
+                _send_bulk_delivery_result(chat_id, uid, pkg_row,
+                                           purchase_ids, pending_ids, "TetraPay")
 
             elif kind == "renewal":
                 pkg_row = get_package(package_id)
@@ -1176,38 +1312,24 @@ def _tronpays_rial_auto_verify(payment_id, invoice_id, uid, chat_id, message_id,
 
             elif kind == "config_purchase":
                 pkg_row = get_package(package_id)
-                cfg_id = payment["config_id"]
-                if not cfg_id:
-                    cfg_id = reserve_first_config(package_id, payment_id)
-                if not cfg_id:
-                    pending_id = create_pending_order(uid, package_id, payment_id, payment["amount"], "tronpays_rial")
-                    complete_payment(payment_id)
-                    state_clear(uid)
-                    msg_text = (
-                        "✅ پرداخت شما تأیید شد.\n\n"
-                        "⚠️ <b>موجودی تحویل فوری ربات به اتمام رسید.</b>\n"
-                        "درخواست شما برای ادمین ارسال شد. در کمترین فرصت کانفیگ شما تحویل داده می‌شود.\n"
-                        "🙏 از صبر شما متشکریم."
-                    )
-                    try:
-                        bot.edit_message_text(msg_text, chat_id, message_id, parse_mode="HTML",
-                                              reply_markup=back_button("main"))
-                    except Exception:
-                        bot.send_message(uid, msg_text, parse_mode="HTML", reply_markup=back_button("main"))
-                    notify_pending_order_to_admins(pending_id, uid, pkg_row, payment["amount"], "tronpays_rial")
-                    return
-                purchase_id_new = assign_config_to_user(cfg_id, uid, package_id, payment["amount"], "tronpays_rial", is_test=0)
+                _qty_trp_auto = int(payment["quantity"]) if "quantity" in payment.keys() else 1
                 complete_payment(payment_id)
                 state_clear(uid)
                 try:
-                    bot.edit_message_text("✅ پرداخت شما تأیید شد و سرویس آماده است.",
-                                          chat_id, message_id, parse_mode="HTML",
-                                          reply_markup=back_button("main"))
+                    bot.edit_message_text(
+                        "✅ پرداخت شما تأیید شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
+                        chat_id, message_id, parse_mode="HTML",
+                        reply_markup=back_button("main"))
                 except Exception:
-                    bot.send_message(uid, "✅ پرداخت شما تأیید شد و سرویس آماده است.",
-                                     reply_markup=back_button("main"))
-                deliver_purchase_message(chat_id, purchase_id_new)
-                admin_purchase_notify("TronPays", get_user(uid), pkg_row, purchase_id=purchase_id_new)
+                    bot.send_message(uid,
+                        "✅ پرداخت شما تأیید شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
+                        parse_mode="HTML", reply_markup=back_button("main"))
+                purchase_ids, pending_ids = _deliver_bulk_configs(
+                    chat_id, uid, package_id,
+                    payment["amount"], "tronpays_rial", _qty_trp_auto, payment_id
+                )
+                _send_bulk_delivery_result(chat_id, uid, pkg_row,
+                                           purchase_ids, pending_ids, "TronPays")
 
             elif kind == "renewal":
                 pkg_row = get_package(package_id)
@@ -2119,8 +2241,11 @@ def _dispatch_callback(call, uid, data):
         price = get_effective_price(uid, package_row)
         state_set(uid, "buy_select_method",
                   package_id=package_id, amount=price, original_amount=price,
-                  kind="config_purchase")
+                  kind="config_purchase", unit_price=price, quantity=1)
         bot.answer_callback_query(call.id)
+        if should_show_bulk_qty(uid):
+            _show_qty_prompt(call, package_row, price)
+            return
         if setting_get("discount_codes_enabled", "0") == "1":
             _show_discount_prompt(call, price)
             return
@@ -2138,44 +2263,34 @@ def _dispatch_callback(call, uid, data):
         if preorder_on and package_row["stock"] <= 0:
             bot.answer_callback_query(call.id, "موجودی این پکیج تمام شده است.", show_alert=True)
             return
-        price = _get_state_price(uid, package_row, "buy_select_method")
+        price    = _get_state_price(uid, package_row, "buy_select_method")
+        quantity = int(state_data(uid).get("quantity", 1) or 1)
         if user["balance"] < price:
             bot.answer_callback_query(call.id, "موجودی کیف پول کافی نیست.", show_alert=True)
             return
-        config_id = reserve_first_config(package_id)
-        if not config_id:
-            if preorder_on:
-                bot.answer_callback_query(call.id, "فعلاً کانفیگی موجود نیست.", show_alert=True)
-                return
-            # preorder_mode OFF — deduct balance, create pending order, notify admin
-            update_balance(uid, -price)
-            payment_id = create_payment("config_purchase", uid, package_id, price, "wallet", status="completed")
-            complete_payment(payment_id)
-            pending_id = create_pending_order(uid, package_id, payment_id, price, "wallet")
-            bot.answer_callback_query(call.id)
-            send_or_edit(call,
-                "✅ پرداخت شما از کیف پول انجام شد.\n\n"
-                "⚠️ <b>موجودی تحویل فوری ربات به اتمام رسید.</b>\n"
-                "درخواست شما برای ادمین ارسال شد. در کمترین فرصت کانفیگ شما تحویل داده می‌شود.\n"
-                "🙏 از صبر شما متشکریم.", back_button("main"))
-            notify_pending_order_to_admins(pending_id, uid, package_row, price, "wallet")
-            state_clear(uid)
-            return
+        # Deduct total and create payment record first
         update_balance(uid, -price)
-        try:
-            purchase_id = assign_config_to_user(config_id, uid, package_id, price, "wallet", is_test=0)
-        except Exception:
-            update_balance(uid, price)
-            release_reserved_config(config_id)
-            bot.answer_callback_query(call.id, "⚠️ خطایی رخ داد، مبلغ به کیف پول بازگردانده شد.", show_alert=True)
-            return
-        payment_id  = create_payment("config_purchase", uid, package_id, price, "wallet",
-                                     status="completed", config_id=config_id)
+        payment_id = create_payment("config_purchase", uid, package_id, price, "wallet",
+                                    status="completed", quantity=quantity)
         complete_payment(payment_id)
         bot.answer_callback_query(call.id, "خرید با موفقیت انجام شد.")
-        send_or_edit(call, "✅ خرید شما انجام شد و سرویس در پیام بعدی ارسال می‌شود.", back_button("main"))
-        deliver_purchase_message(call.message.chat.id, purchase_id)
-        admin_purchase_notify("کیف پول", get_user(uid), package_row, purchase_id=purchase_id)
+        send_or_edit(call, "✅ پرداخت از کیف پول انجام شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
+                     back_button("main"))
+        purchase_ids, pending_ids = _deliver_bulk_configs(
+            call.message.chat.id, uid, package_id, price, "wallet", quantity, payment_id
+        )
+        if not purchase_ids and not pending_ids:
+            # Exceptional: refund and abort
+            update_balance(uid, price)
+            bot.send_message(uid,
+                "⚠️ <b>خطا در تحویل سرویس</b>\n\n"
+                "متأسفانه در تحویل سرویس مشکلی پیش آمد و مبلغ به کیف پول شما بازگردانده شد.\n"
+                "لطفاً با پشتیبانی تماس بگیرید.",
+                parse_mode="HTML", reply_markup=back_button("main"))
+            state_clear(uid)
+            return
+        _send_bulk_delivery_result(call.message.chat.id, uid, package_row,
+                                   purchase_ids, pending_ids, "کیف پول")
         state_clear(uid)
         return
 
@@ -2200,7 +2315,9 @@ def _dispatch_callback(call, uid, data):
                 "لطفاً درگاه دیگری متناسب با این مبلغ انتخاب کنید.",
                 show_alert=True)
             return
-        payment_id = create_payment("config_purchase", uid, package_id, price, "card", status="pending")
+        _qty_card = int(state_data(uid).get("quantity", 1) or 1)
+        payment_id = create_payment("config_purchase", uid, package_id, price, "card",
+                                    status="pending", quantity=_qty_card)
         # Generate random amount if enabled
         final_amount = None
         if setting_get("gw_card_random_amount", "0") == "1":
@@ -2218,7 +2335,8 @@ def _dispatch_callback(call, uid, data):
         if not package_row or (setting_get("preorder_mode", "0") == "1" and package_row["stock"] <= 0):
             bot.answer_callback_query(call.id, "موجودی این پکیج تمام شده است.", show_alert=True)
             return
-        price = _get_state_price(uid, package_row, "buy_select_method")
+        price    = _get_state_price(uid, package_row, "buy_select_method")
+        _qty_cr  = int(state_data(uid).get("quantity", 1) or 1)
         if not is_gateway_in_range("crypto", price):
             _rng = get_gateway_range_text("crypto")
             bot.answer_callback_query(call.id,
@@ -2227,7 +2345,7 @@ def _dispatch_callback(call, uid, data):
                 "لطفاً درگاه دیگری متناسب با این مبلغ انتخاب کنید.",
                 show_alert=True)
             return
-        state_set(uid, "buy_crypto_select_coin", package_id=package_id, amount=price)
+        state_set(uid, "buy_crypto_select_coin", package_id=package_id, amount=price, quantity=_qty_cr)
         bot.answer_callback_query(call.id)
         show_crypto_selection(call, amount=price)
         return
@@ -2240,12 +2358,13 @@ def _dispatch_callback(call, uid, data):
         if sn == "buy_crypto_select_coin":
             package_id  = sd.get("package_id")
             amount      = sd.get("amount")
+            _qty_coin   = int(sd.get("quantity", 1) or 1)
             package_row = get_package(package_id)
             if not package_row or (setting_get("preorder_mode", "0") == "1" and package_row["stock"] <= 0):
                 bot.answer_callback_query(call.id, "موجودی تمام شده است.", show_alert=True)
                 return
             payment_id = create_payment("config_purchase", uid, package_id, amount, "crypto",
-                                        status="pending", crypto_coin=coin_key)
+                                        status="pending", crypto_coin=coin_key, quantity=_qty_coin)
             state_set(uid, "await_purchase_receipt", payment_id=payment_id)
             bot.answer_callback_query(call.id)
             show_crypto_payment_info(call, uid, coin_key, amount)
@@ -2307,29 +2426,20 @@ def _dispatch_callback(call, uid, data):
                 send_or_edit(call, f"✅ پرداخت شما تأیید و کیف پول شارژ شد.\n\n💰 مبلغ: {fmt_price(payment['amount'])} تومان", back_button("main"))
                 state_clear(uid)
             else:
-                config_id = payment["config_id"]
+                config_id  = payment["config_id"]
                 package_id = payment["package_id"]
                 package_row = get_package(package_id)
-                if not config_id:
-                    config_id = reserve_first_config(package_id, payment_id)
-                if not config_id:
-                    pending_id = create_pending_order(uid, package_id, payment_id, payment["amount"], "tetrapay")
-                    complete_payment(payment_id)
-                    bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد!")
-                    send_or_edit(call,
-                        "✅ پرداخت شما تأیید شد.\n\n"
-                        "⚠️ <b>موجودی تحویل فوری ربات به اتمام رسید.</b>\n"
-                        "درخواست شما برای ادمین ارسال شد. در کمترین فرصت کانفیگ شما تحویل داده می‌شود.\n"
-                        "🙏 از صبر شما متشکریم.", back_button("main"))
-                    notify_pending_order_to_admins(pending_id, uid, package_row, payment["amount"], "tetrapay")
-                    state_clear(uid)
-                    return
-                purchase_id = assign_config_to_user(config_id, uid, package_id, payment["amount"], "tetrapay", is_test=0)
+                _qty_tp    = int(payment["quantity"]) if "quantity" in payment.keys() else 1
                 complete_payment(payment_id)
                 bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد!")
-                send_or_edit(call, "✅ پرداخت شما تأیید شد و سرویس آماده است.", back_button("main"))
-                deliver_purchase_message(call.message.chat.id, purchase_id)
-                admin_purchase_notify("TetraPay", get_user(uid), package_row, purchase_id=purchase_id)
+                send_or_edit(call, "✅ پرداخت شما تأیید شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
+                             back_button("main"))
+                purchase_ids, pending_ids = _deliver_bulk_configs(
+                    call.message.chat.id, uid, package_id,
+                    payment["amount"], "tetrapay", _qty_tp, payment_id
+                )
+                _send_bulk_delivery_result(call.message.chat.id, uid, package_row,
+                                           purchase_ids, pending_ids, "TetraPay")
                 state_clear(uid)
         else:
             _st = result.get("status", "") if isinstance(result, dict) else ""
@@ -2344,7 +2454,8 @@ def _dispatch_callback(call, uid, data):
         if not package_row or (setting_get("preorder_mode", "0") == "1" and package_row["stock"] <= 0):
             bot.answer_callback_query(call.id, "موجودی این پکیج تمام شده است.", show_alert=True)
             return
-        price = _get_state_price(uid, package_row, "buy_select_method")
+        price    = _get_state_price(uid, package_row, "buy_select_method")
+        _qty_tetra = int(state_data(uid).get("quantity", 1) or 1)
         if not is_gateway_in_range("tetrapay", price):
             _rng = get_gateway_range_text("tetrapay")
             bot.answer_callback_query(call.id,
@@ -2366,7 +2477,8 @@ def _dispatch_callback(call, uid, data):
         authority = result.get("Authority", "")
         pay_url_bot = result.get("payment_url_bot", "")
         pay_url_web = result.get("payment_url_web", "")
-        payment_id = create_payment("config_purchase", uid, package_id, price, "tetrapay", status="pending")
+        payment_id = create_payment("config_purchase", uid, package_id, price, "tetrapay",
+                                    status="pending", quantity=_qty_tetra)
         with get_conn() as conn:
             conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (authority, payment_id))
         state_set(uid, "await_tetrapay_verify", payment_id=payment_id, authority=authority)
@@ -2420,25 +2532,18 @@ def _dispatch_callback(call, uid, data):
                 config_id  = payment["config_id"]
                 package_id = payment["package_id"]
                 package_row = get_package(package_id)
-                if not config_id:
-                    config_id = reserve_first_config(package_id, payment_id)
-                if not config_id:
-                    pending_id = create_pending_order(uid, package_id, payment_id, payment["amount"], "tronpays_rial")
-                    complete_payment(payment_id)
-                    bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد!")
-                    send_or_edit(call,
-                        "✅ پرداخت شما تأیید شد.\n\n"
-                        "⚠️ <b>موجودی تحویل فوری ربات به اتمام رسید.</b>\n"
-                        "درخواست شما برای ادمین ارسال شد. در کمترین فرصت کانفیگ شما تحویل داده می‌شود.\n"
-                        "🙏 از صبر شما متشکریم.", back_button("main"))
-                    notify_pending_order_to_admins(pending_id, uid, package_row, payment["amount"], "tronpays_rial")
-                    state_clear(uid)
-                    return
-                purchase_id = assign_config_to_user(config_id, uid, package_id, payment["amount"], "tronpays_rial", is_test=0)
+                _qty_tron  = int(payment["quantity"]) if "quantity" in payment.keys() else 1
                 complete_payment(payment_id)
                 bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد!")
-                send_or_edit(call, "✅ پرداخت شما تأیید شد و سرویس آماده است.", back_button("main"))
-                deliver_purchase_message(call.message.chat.id, purchase_id)
+                send_or_edit(call, "✅ پرداخت شما تأیید شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
+                             back_button("main"))
+                purchase_ids, pending_ids = _deliver_bulk_configs(
+                    call.message.chat.id, uid, package_id,
+                    payment["amount"], "tronpays_rial", _qty_tron, payment_id
+                )
+                _send_bulk_delivery_result(call.message.chat.id, uid, package_row,
+                                           purchase_ids, pending_ids, "TronPays")
+                state_clear(uid)
                 admin_purchase_notify("TronPays", get_user(uid), package_row, purchase_id=purchase_id)
                 state_clear(uid)
         else:
@@ -2452,6 +2557,7 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id, "موجودی این پکیج تمام شده است.", show_alert=True)
             return
         price   = _get_state_price(uid, package_row, "buy_select_method")
+        _qty_tp_rial = int(state_data(uid).get("quantity", 1) or 1)
         if not is_gateway_in_range("tronpays_rial", price):
             _rng = get_gateway_range_text("tronpays_rial")
             bot.answer_callback_query(call.id,
@@ -2485,7 +2591,8 @@ def _dispatch_callback(call, uid, data):
                 f"<code>پاسخ API: {esc(str(result)[:400])}</code>",
                 back_button(f"buy:p:{package_id}"))
             return
-        payment_id = create_payment("config_purchase", uid, package_id, price, "tronpays_rial", status="pending")
+        payment_id = create_payment("config_purchase", uid, package_id, price, "tronpays_rial",
+                                    status="pending", quantity=_qty_tp_rial)
         with get_conn() as conn:
             conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id, payment_id))
         state_set(uid, "await_tronpays_rial_verify", payment_id=payment_id, invoice_id=invoice_id)
@@ -2814,26 +2921,17 @@ def _dispatch_callback(call, uid, data):
                 config_id  = payment["config_id"]
                 package_id = payment["package_id"]
                 package_row = get_package(package_id)
-                if not config_id:
-                    config_id = reserve_first_config(package_id, payment_id)
-                if not config_id:
-                    pending_id = create_pending_order(uid, package_id, payment_id, payment["amount"], "swapwallet_crypto")
-                    complete_payment(payment_id)
-                    bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد!")
-                    send_or_edit(call,
-                        "✅ پرداخت شما تأیید شد.\n\n"
-                        "⚠️ <b>موجودی تحویل فوری ربات به اتمام رسید.</b>\n"
-                        "درخواست شما برای ادمین ارسال شد. در کمترین فرصت کانفیگ شما تحویل داده می‌شود.\n"
-                        "🙏 از صبر شما متشکریم.", back_button("main"))
-                    notify_pending_order_to_admins(pending_id, uid, package_row, payment["amount"], "swapwallet_crypto")
-                    state_clear(uid)
-                    return
-                purchase_id = assign_config_to_user(config_id, uid, package_id, payment["amount"], "swapwallet_crypto", is_test=0)
+                _qty_sw = int(payment["quantity"]) if "quantity" in payment.keys() else 1
                 complete_payment(payment_id)
                 bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد!")
-                send_or_edit(call, "✅ پرداخت شما تأیید شد و سرویس آماده است.", back_button("main"))
-                deliver_purchase_message(call.message.chat.id, purchase_id)
-                admin_purchase_notify("SwapWallet Crypto", get_user(uid), package_row, purchase_id=purchase_id)
+                send_or_edit(call, "✅ پرداخت شما تأیید شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
+                             back_button("main"))
+                purchase_ids, pending_ids = _deliver_bulk_configs(
+                    call.message.chat.id, uid, package_id,
+                    payment["amount"], "swapwallet_crypto", _qty_sw, payment_id
+                )
+                _send_bulk_delivery_result(call.message.chat.id, uid, package_row,
+                                           purchase_ids, pending_ids, "SwapWallet Crypto")
                 state_clear(uid)
         else:
             bot.answer_callback_query(call.id, "❌ پرداخت هنوز تأیید نشده. لطفاً ابتدا واریز را انجام دهید.", show_alert=True)
@@ -2846,6 +2944,7 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id, "موجودی این پکیج تمام شده است.", show_alert=True)
             return
         price = _get_state_price(uid, package_row, "buy_select_method")
+        _qty_sw_init = int(state_data(uid).get("quantity", 1) or 1)
         if not is_gateway_in_range("swapwallet_crypto", price):
             _rng = get_gateway_range_text("swapwallet_crypto")
             bot.answer_callback_query(call.id,
@@ -2855,7 +2954,8 @@ def _dispatch_callback(call, uid, data):
                 show_alert=True)
             return
         from ..gateways.swapwallet_crypto import SWAPWALLET_CRYPTO_NETWORKS, NETWORK_LABELS as SW_NET_LABELS
-        state_set(uid, "swcrypto_network_select", kind="config_purchase", package_id=package_id, amount=price)
+        state_set(uid, "swcrypto_network_select", kind="config_purchase", package_id=package_id, amount=price,
+                  quantity=_qty_sw_init)
         kb = types.InlineKeyboardMarkup()
         for net, _ in SWAPWALLET_CRYPTO_NETWORKS:
             kb.add(types.InlineKeyboardButton(SW_NET_LABELS.get(net, net), callback_data=f"swcrypto:net:{net}"))
@@ -2955,7 +3055,9 @@ def _dispatch_callback(call, uid, data):
             verify_cb  = f"pay:swapwallet_crypto:verify:{payment_id}"
         elif kind == "config_purchase":
             package_id = sd.get("package_id")
-            payment_id = create_payment("config_purchase", uid, package_id, amount, "swapwallet_crypto", status="pending")
+            _qty_swc   = int(sd.get("quantity", 1) or 1)
+            payment_id = create_payment("config_purchase", uid, package_id, amount, "swapwallet_crypto",
+                                        status="pending", quantity=_qty_swc)
             verify_cb  = f"pay:swapwallet_crypto:verify:{payment_id}"
         elif kind == "renewal":
             package_id  = sd.get("package_id")
@@ -5726,12 +5828,15 @@ def _dispatch_callback(call, uid, data):
         bot_status      = setting_get("bot_status", "on")
         renewal_enabled = setting_get("manual_renewal_enabled", "1")
         referral_enabled = setting_get("referral_enabled", "1")
+        bulk_mode       = setting_get("bulk_sale_mode", "everyone")
         status_map = {"on": "🟢 روشن", "off": "🔴 خاموش", "update": "🔄 بروزرسانی"}
         renewal_map = {"1": "✅ فعال", "0": "❌ غیرفعال"}
         referral_map = {"1": "✅ فعال", "0": "❌ غیرفعال"}
+        bulk_map = {"everyone": "✅ همه کاربران", "agents_only": "🤝 فقط نمایندگان", "disabled": "❌ غیرفعال"}
         status_label  = status_map.get(bot_status, "🟢 روشن")
         renewal_label = renewal_map.get(renewal_enabled, "✅ فعال")
         referral_label = referral_map.get(referral_enabled, "✅ فعال")
+        bulk_label    = bulk_map.get(bulk_mode, "✅ همه کاربران")
         ops_kb = types.InlineKeyboardMarkup(row_width=2)
         ops_kb.row(
             types.InlineKeyboardButton(status_label,  callback_data="adm:ops:status"),
@@ -5745,6 +5850,10 @@ def _dispatch_callback(call, uid, data):
             types.InlineKeyboardButton(referral_label, callback_data="adm:ops:referral_toggle"),
             types.InlineKeyboardButton("🎁 زیرمجموعه‌گیری", callback_data="adm:ops:noop"),
         )
+        ops_kb.row(
+            types.InlineKeyboardButton(bulk_label, callback_data="adm:ops:bulk_sale"),
+            types.InlineKeyboardButton("📦 فروش عمده", callback_data="adm:ops:noop"),
+        )
         ops_kb.add(types.InlineKeyboardButton("⚙️ تنظیمات زیرمجموعه‌گیری", callback_data="adm:ref:settings"))
         ops_kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:settings"))
         return ops_kb
@@ -5753,14 +5862,17 @@ def _dispatch_callback(call, uid, data):
         bot_status      = setting_get("bot_status", "on")
         renewal_enabled = setting_get("manual_renewal_enabled", "1")
         referral_enabled = setting_get("referral_enabled", "1")
+        bulk_mode       = setting_get("bulk_sale_mode", "everyone")
         status_fa  = {"on": "🟢 روشن", "off": "🔴 خاموش", "update": "🔄 بروزرسانی"}.get(bot_status, "🟢 روشن")
         renewal_fa = "✅ فعال" if renewal_enabled == "1" else "❌ غیرفعال"
         referral_fa = "✅ فعال" if referral_enabled == "1" else "❌ غیرفعال"
+        bulk_fa = {"everyone": "✅ همه کاربران", "agents_only": "🤝 فقط نمایندگان", "disabled": "❌ غیرفعال"}.get(bulk_mode, "✅ همه کاربران")
         return (
             "🤖 <b>مدیریت عملیات ربات</b>\n\n"
             f"🔹 <b>وضعیت ربات:</b> {status_fa}\n"
             f"🔹 <b>تمدید کانفیگ‌های ثبت دستی:</b> {renewal_fa}\n"
-            f"🔹 <b>زیرمجموعه‌گیری:</b> {referral_fa}\n\n"
+            f"🔹 <b>زیرمجموعه‌گیری:</b> {referral_fa}\n"
+            f"🔹 <b>فروش عمده:</b> {bulk_fa}\n\n"
             "برای تغییر هر مورد، دکمه وضعیت فعلی آن را لمس کنید."
         )
 
@@ -5813,6 +5925,20 @@ def _dispatch_callback(call, uid, data):
         log_admin_action(uid, f"زیرمجموعه‌گیری {'فعال' if new_val == '1' else 'غیرفعال'} شد")
         label = "فعال" if new_val == "1" else "غیرفعال"
         bot.answer_callback_query(call.id, f"زیرمجموعه‌گیری: {label}")
+        send_or_edit(call, _ops_menu_text(), _build_ops_kb())
+        return
+
+    if data == "adm:ops:bulk_sale":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        cur = setting_get("bulk_sale_mode", "everyone")
+        cycle = {"everyone": "agents_only", "agents_only": "disabled", "disabled": "everyone"}
+        new_val = cycle.get(cur, "everyone")
+        setting_set("bulk_sale_mode", new_val)
+        labels = {"everyone": "همه کاربران", "agents_only": "فقط نمایندگان", "disabled": "غیرفعال"}
+        log_admin_action(uid, f"فروش عمده: {labels[new_val]}")
+        bot.answer_callback_query(call.id, f"فروش عمده: {labels[new_val]}")
         send_or_edit(call, _ops_menu_text(), _build_ops_kb())
         return
 

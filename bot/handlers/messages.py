@@ -68,6 +68,7 @@ from .callbacks import (
     _ovpn_send_file_group, _ovpn_caption, _fmt_users_label,
     _wg_finish_single, _wg_deliver_bulk_shared, _wg_deliver_bulk_diff,
     _wg_send_file_group, _wg_caption, _wg_service_name_from_filename,
+    _qty_order_summary_text,
 )
 
 
@@ -302,6 +303,37 @@ def universal_handler(message):
                 _show_discount_prompt(message, amount)
                 return
             _show_wallet_gateways(message, uid, amount)
+            return
+
+        # ── Bulk quantity entry ───────────────────────────────────────────────
+        if sn == "await_qty":
+            raw = (message.text or "").strip()
+            normalized = normalize_text_number(raw)
+            qty = parse_int(normalized)
+            if not qty or qty <= 0:
+                bot.send_message(uid,
+                    "⚠️ <b>تعداد نامعتبر است.</b>\n\n"
+                    "لطفاً یک عدد صحیح و مثبت وارد کنید.\n"
+                    "مثال: <code>2</code> یا <code>5</code>",
+                    parse_mode="HTML")
+                return
+            package_id = sd.get("package_id")
+            unit_price = int(sd.get("unit_price", 0) or 0)
+            package_row = get_package(package_id)
+            if not package_row or not unit_price:
+                state_clear(uid)
+                bot.send_message(uid, "⚠️ خطا در اطلاعات سفارش. لطفاً دوباره شروع کنید.", reply_markup=kb_main(uid))
+                return
+            total = unit_price * qty
+            state_set(uid, "buy_select_method",
+                      package_id=package_id, amount=total, original_amount=total,
+                      unit_price=unit_price, quantity=qty, kind="config_purchase")
+            summary = _qty_order_summary_text(package_row, unit_price, qty)
+            bot.send_message(uid, summary, parse_mode="HTML")
+            if setting_get("discount_codes_enabled", "0") == "1":
+                _show_discount_prompt(message, total)
+            else:
+                _show_purchase_gateways(message, uid, package_id, total, package_row)
             return
 
         # ── Discount code entry ───────────────────────────────────────────────
