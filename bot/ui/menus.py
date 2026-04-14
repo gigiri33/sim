@@ -144,10 +144,10 @@ def show_referral_menu(target, user_id):
         "📢 <b>دعوت کن، هدیه بگیر، رشد کن!</b>"
     )
 
-    # Build share text — no appended ref_link (Telegram share URL already embeds it via url= param)
+    # Build share text — link goes at the BOTTOM inside text= only (no url= param)
     custom_banner = setting_get("referral_banner_text", "").strip()
     if custom_banner:
-        share_text = custom_banner
+        share_text = f"{custom_banner}\n\n{ref_link}"
     else:
         share_text = (
             f"🔥 می‌خوای با سرعت بالا و پایداری عالی به اینترنت آزاد وصل بشی؟\n\n"
@@ -155,23 +155,26 @@ def show_referral_menu(target, user_id):
             f"✅ سرعت فوق‌العاده\n"
             f"✅ پایداری بالا\n"
             f"✅ پشتیبانی ۲۴ ساعته\n\n"
-            f"تو هم از لینک من وارد شو و سرویست رو بخر 👇"
+            f"تو هم از لینک من وارد شو و سرویست رو بخر 👇\n{ref_link}"
         )
 
     import urllib.parse as _up
-    share_url = f"https://t.me/share/url?url={_up.quote(ref_link)}&text={_up.quote(share_text)}"
+    # Use text= only so Telegram renders link at bottom (url= puts it at top)
+    share_url = f"https://t.me/share/url?text={_up.quote(share_text)}"
 
     kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton("📤 اشتراک‌گذاری لینک دعوت", url=share_url))
+    banner_photo = setting_get("referral_banner_photo", "").strip()
+    if banner_photo:
+        # With banner: callback so the bot sends the photo to the user for forwarding
+        kb.add(types.InlineKeyboardButton("📤 دریافت پست آماده برای اشتراک‌گذاری", callback_data="referral:get_banner"))
+    kb.add(types.InlineKeyboardButton("🔗 اشتراک‌گذاری لینک دعوت", url=share_url))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
 
-    # Send photo banner if configured, otherwise send plain text
-    banner_photo = setting_get("referral_banner_photo", "").strip()
+    # Send photo banner on the referral menu itself if configured, otherwise plain text
     chat_id = target.message.chat.id if hasattr(target, "message") else target.chat.id
     if banner_photo:
         try:
             if hasattr(target, "message"):
-                # callback query — try to delete previous message and send photo
                 try:
                     bot.delete_message(chat_id, target.message.message_id)
                 except Exception:

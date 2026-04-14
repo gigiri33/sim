@@ -1434,6 +1434,30 @@ def _dispatch_callback(call, uid, data):
         show_referral_menu(call, uid)
         return
 
+    if data == "referral:get_banner":
+        banner_photo = setting_get("referral_banner_photo", "").strip()
+        if not banner_photo:
+            bot.answer_callback_query(call.id, "بنری تنظیم نشده است.", show_alert=True)
+            return
+        bot_info = bot.get_me()
+        ref_link = f"https://t.me/{bot_info.username}?start=ref_{uid}"
+        custom_banner = setting_get("referral_banner_text", "").strip()
+        from ..config import BRAND_TITLE
+        if custom_banner:
+            caption = f"{custom_banner}\n\n{ref_link}"
+        else:
+            caption = (
+                f"🔥 می‌خوای با سرعت بالا و پایداری عالی به اینترنت آزاد وصل بشی؟\n\n"
+                f"من از {BRAND_TITLE} سرویس VPN خریدم و کاملاً راضیم! 😍\n\n"
+                f"✅ سرعت فوق‌العاده\n"
+                f"✅ پایداری بالا\n"
+                f"✅ پشتیبانی ۲۴ ساعته\n\n"
+                f"تو هم از لینک من وارد شو و سرویست رو بخر 👇\n{ref_link}"
+            )
+        bot.answer_callback_query(call.id)
+        bot.send_photo(call.message.chat.id, banner_photo, caption=caption, parse_mode="HTML")
+        return
+
     # ── Discount code flow ───────────────────────────────────────────────────
     if data == "disc:yes":
         sn = state_name(uid)
