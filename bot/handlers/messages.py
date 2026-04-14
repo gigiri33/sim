@@ -258,6 +258,14 @@ def universal_handler(message):
                     parse_mode="HTML",
                 )
             return
+
+        if sn == "admin_broadcast_all" and is_admin(uid):
+            users = get_users()
+            sent  = 0
+            for u in users:
+                try:
+                    _bc_send(u["user_id"])
+                    sent += 1
                 except Exception:
                     pass
             state_clear(uid)
