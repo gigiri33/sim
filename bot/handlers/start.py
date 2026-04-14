@@ -78,4 +78,14 @@ def start_handler(message):
     if not check_channel_membership(uid):
         channel_lock_message(message)
         return
+
+    # User has passed channel check — if they were a referee waiting for channel
+    # confirmation, process their reward now (handles the case where they join
+    # the channel externally and then hit /start again instead of the button).
+    _invalidate_channel_cache(uid)
+    try:
+        from ..ui.notifications import try_give_referral_start_reward_for_channel_join
+        try_give_referral_start_reward_for_channel_join(uid)
+    except Exception:
+        pass
     show_main_menu(message)

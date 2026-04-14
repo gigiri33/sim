@@ -571,30 +571,36 @@ def check_and_give_referral_start_reward(referrer_id):
 
 def try_give_referral_start_reward_for_channel_join(referee_id: int) -> None:
     """
-    Called when a user confirms channel membership (via check_channel callback).
-    If this user came via a referral link AND the reward condition is 'channel',
-    marks them as channel-joined and tries to trigger the start reward for their referrer.
+    Called when a referee confirms channel membership (via check_channel callback
+    OR immediately at /start if they were already a member).
 
-    Idempotent: the atomic set_referral_channel_joined(0→1) ensures this path
-    runs at most once per referee even under race conditions or duplicate events.
+    Flow:
+    1. Look up the referral record — if none, nothing to do.
+    2. Atomically set channel_joined 0→1. If it was already 1, stop (dedup).
+    3. Notify the referee that their join is complete.
+    4. Try to give the start reward to the referrer (atomic claim).
+
+    NOTE: We do NOT check referral_start_reward_enabled here so that
+    channel_joined is always recorded regardless of whether the reward feature
+    is currently on.  That way, turning the feature on later will correctly
+    count already-joined referees.
     """
-    if setting_get("referral_start_reward_enabled", "0") != "1":
-        return
     if not _channel_reward_required():
         return  # condition is start_only — reward already given at /start time
 
-    # Atomic 0→1 transition; returns False if already processed
-    was_new_join = set_referral_channel_joined(referee_id)
-    if not was_new_join:
-        return  # duplicate event or join/leave abuse — silently ignore
-
+    # First look up the referral — bail early if this user wasn't referred
     ref = get_referral_by_referee(referee_id)
     if not ref:
-        return  # not a referred user
+        return
 
     referrer_id = ref["referrer_id"]
 
-    # Notify the referee (friendly UX)
+    # Atomic 0→1 transition; returns False if already set (join/leave dedup)
+    was_new_join = set_referral_channel_joined(referee_id)
+    if not was_new_join:
+        return  # already processed — could be duplicate event or re-join
+
+    # Notify the referee (friendly UX — non-critical)
     try:
         bot.send_message(
             referee_id,
@@ -605,7 +611,7 @@ def try_give_referral_start_reward_for_channel_join(referee_id: int) -> None:
     except Exception:
         pass
 
-    # Now try to give the reward to the referrer
+    # Now try to give the start reward to the referrer
     check_and_give_referral_start_reward(referrer_id)
 
 
