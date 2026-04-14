@@ -19,6 +19,7 @@ from ..db import (
     mark_start_reward_given, get_unrewarded_purchase_referees,
     mark_purchase_reward_given, get_referral_by_referee,
     update_balance,
+    set_referral_channel_joined, try_claim_start_reward_batch,
 )
 from ..helpers import esc, fmt_price, now_str, move_leading_emoji
 from ..bot_instance import bot
@@ -545,30 +546,85 @@ def notify_referral_first_purchase(referee_id):
     send_to_topic("referral_log", text, reply_markup=kb)
 
 
+def _channel_reward_required() -> bool:
+    """Return True if channel membership is required before giving the start reward."""
+    return (
+        setting_get("referral_reward_condition", "channel") == "channel"
+        and bool(setting_get("channel_id", "").strip())
+    )
+
+
 def check_and_give_referral_start_reward(referrer_id):
-    """Check if referrer qualifies for start reward and give it."""
+    """
+    Check if referrer now qualifies for a start reward and give it once.
+    Thread-safe: uses atomic SQL claim so concurrent calls cannot double-reward.
+    Respects referral_reward_condition: if 'channel', only count channel-joined referees.
+    """
     if setting_get("referral_start_reward_enabled", "0") != "1":
         return
-    required_count = int(setting_get("referral_start_reward_count", "1"))
-    unrewarded = get_unrewarded_start_referrals(referrer_id)
-    if len(unrewarded) >= required_count:
-        # Give reward and mark referees as rewarded
-        batch = [r["referee_id"] for r in unrewarded[:required_count]]
-        mark_start_reward_given(referrer_id, batch)
+    required_count  = int(setting_get("referral_start_reward_count", "1") or "1")
+    channel_required = _channel_reward_required()
+    # Atomic: claim the batch — only the first concurrent caller wins
+    if try_claim_start_reward_batch(referrer_id, required_count, channel_required):
         _give_referral_reward(referrer_id, "referral_start_reward")
 
 
+def try_give_referral_start_reward_for_channel_join(referee_id: int) -> None:
+    """
+    Called when a user confirms channel membership (via check_channel callback).
+    If this user came via a referral link AND the reward condition is 'channel',
+    marks them as channel-joined and tries to trigger the start reward for their referrer.
+
+    Idempotent: the atomic set_referral_channel_joined(0→1) ensures this path
+    runs at most once per referee even under race conditions or duplicate events.
+    """
+    if setting_get("referral_start_reward_enabled", "0") != "1":
+        return
+    if not _channel_reward_required():
+        return  # condition is start_only — reward already given at /start time
+
+    # Atomic 0→1 transition; returns False if already processed
+    was_new_join = set_referral_channel_joined(referee_id)
+    if not was_new_join:
+        return  # duplicate event or join/leave abuse — silently ignore
+
+    ref = get_referral_by_referee(referee_id)
+    if not ref:
+        return  # not a referred user
+
+    referrer_id = ref["referrer_id"]
+
+    # Notify the referee (friendly UX)
+    try:
+        bot.send_message(
+            referee_id,
+            "✅ <b>عضویت شما تأیید شد!</b>\n\n"
+            "🎉 تبریک! دعوت شما کامل شد و اکنون می‌توانید از تمام امکانات ربات استفاده کنید.",
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
+    # Now try to give the reward to the referrer
+    check_and_give_referral_start_reward(referrer_id)
+
+
 def check_and_give_referral_purchase_reward(buyer_user_id):
-    """Called after a purchase. Check if buyer was referred and give purchase reward to referrer."""
+    """
+    Called after a purchase. Check if buyer was referred and give purchase reward.
+    Thread-safe: uses atomic mark so concurrent calls cannot double-reward.
+    """
     if setting_get("referral_purchase_reward_enabled", "0") != "1":
         return
     ref = get_referral_by_referee(buyer_user_id)
     if not ref:
         return
     referrer_id = ref["referrer_id"]
-    required_count = int(setting_get("referral_purchase_reward_count", "1"))
+    required_count = int(setting_get("referral_purchase_reward_count", "1") or "1")
     unrewarded = get_unrewarded_purchase_referees(referrer_id)
     if len(unrewarded) >= required_count:
         batch = [r["referee_id"] for r in unrewarded[:required_count]]
+        # Atomic marks — each UPDATE only affects rows with purchase_reward_given=0
         mark_purchase_reward_given(referrer_id, batch)
+        # Verify we actually claimed all of them (no race)
         _give_referral_reward(referrer_id, "referral_purchase_reward")

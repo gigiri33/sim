@@ -4,7 +4,7 @@
 """
 from ..db import ensure_user, notify_first_start_if_needed, get_user, setting_get, add_referral, get_referral_by_referee
 from ..helpers import state_clear, is_admin, parse_int
-from ..ui.helpers import check_channel_membership, channel_lock_message
+from ..ui.helpers import check_channel_membership, channel_lock_message, _invalidate_channel_cache
 from ..ui.menus import show_main_menu
 from ..bot_instance import bot
 
@@ -24,13 +24,29 @@ def start_handler(message):
                 referrer_id = int(parts[1][4:])
                 if referrer_id != uid:
                     add_referral(referrer_id, uid)
-                    # Check & give start reward, then log the join
-                    from ..ui.notifications import check_and_give_referral_start_reward, notify_referral_join
-                    check_and_give_referral_start_reward(referrer_id)
+                    from ..ui.notifications import (
+                        check_and_give_referral_start_reward,
+                        try_give_referral_start_reward_for_channel_join,
+                        notify_referral_join,
+                        _channel_reward_required,
+                    )
                     try:
                         notify_referral_join(referrer_id, uid)
                     except Exception:
                         pass
+
+                    if _channel_reward_required():
+                        # Channel condition is active.
+                        # If the user is ALREADY a channel member right now,
+                        # treat the join as immediate (e.g. they joined before starting).
+                        _invalidate_channel_cache(uid)
+                        if check_channel_membership(uid):
+                            # Mark channel_joined and potentially give reward now
+                            try_give_referral_start_reward_for_channel_join(uid)
+                        # else: reward deferred until user confirms channel membership
+                    else:
+                        # start_only mode — give reward immediately
+                        check_and_give_referral_start_reward(referrer_id)
             except (ValueError, Exception):
                 pass
 

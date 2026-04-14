@@ -1073,6 +1073,12 @@ def on_callback(call):
             _invalidate_channel_cache(uid)   # force re-check after user joined
             if check_channel_membership(uid):
                 bot.answer_callback_query(call.id, "✅ عضویت تأیید شد!")
+                # If this user came via a referral link, trigger their referrer's start reward
+                try:
+                    from ..ui.notifications import try_give_referral_start_reward_for_channel_join
+                    try_give_referral_start_reward_for_channel_join(uid)
+                except Exception:
+                    pass
                 show_main_menu(call)
             else:
                 bot.answer_callback_query(call.id, "❌ هنوز عضو کانال نشده‌اید.", show_alert=True)
@@ -5954,9 +5960,17 @@ def _dispatch_callback(call, uid, data):
         pr_count = setting_get("referral_purchase_reward_count", "1")
         sr_type_label = "💰 کیف پول" if sr_type == "wallet" else "📦 کانفیگ"
         pr_type_label = "💰 کیف پول" if pr_type == "wallet" else "📦 کانفیگ"
+        reward_condition = setting_get("referral_reward_condition", "channel")
+        rc_label = "📢 دعوت + عضویت در کانال" if reward_condition == "channel" else "🚀 فقط دعوت به ربات"
 
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("📸 تنظیم بنر اشتراک‌گذاری", callback_data="adm:ref:banner"))
+        # Reward condition
+        kb.add(types.InlineKeyboardButton("── 🔐 شرط دریافت پاداش ──", callback_data="adm:ops:noop"))
+        kb.row(
+            types.InlineKeyboardButton(rc_label, callback_data="adm:ref:reward_condition"),
+            types.InlineKeyboardButton("شرط ریوارد استارت", callback_data="adm:ops:noop"),
+        )
         # Start reward section
         kb.add(types.InlineKeyboardButton("── 🎁 هدیه استارت ──", callback_data="adm:ops:noop"))
         kb.row(
@@ -6003,8 +6017,11 @@ def _dispatch_callback(call, uid, data):
     def _ref_settings_text():
         sr_enabled = "✅ فعال" if setting_get("referral_start_reward_enabled", "0") == "1" else "❌ غیرفعال"
         pr_enabled = "✅ فعال" if setting_get("referral_purchase_reward_enabled", "0") == "1" else "❌ غیرفعال"
+        reward_condition = setting_get("referral_reward_condition", "channel")
+        rc_fa = "📢 دعوت + عضویت در کانال" if reward_condition == "channel" else "🚀 فقط دعوت به ربات"
         return (
             "⚙️ <b>تنظیمات زیرمجموعه‌گیری</b>\n\n"
+            f"🔐 <b>شرط دریافت پاداش:</b> {rc_fa}\n"
             f"🎁 هدیه استارت: {sr_enabled}\n"
             f"💸 هدیه خرید زیرمجموعه: {pr_enabled}\n\n"
             "هر بخش را با دکمه‌های زیر تنظیم کنید."
@@ -6051,6 +6068,23 @@ def _dispatch_callback(call, uid, data):
         setting_set("referral_banner_photo", "")
         log_admin_action(uid, "بنر اشتراک‌گذاری حذف شد")
         bot.answer_callback_query(call.id, "بنر سفارشی حذف شد.")
+        send_or_edit(call, _ref_settings_text(), _ref_settings_kb())
+        return
+
+    # Reward condition toggle
+    if data == "adm:ref:reward_condition":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        cur = setting_get("referral_reward_condition", "channel")
+        new_val = "start_only" if cur == "channel" else "channel"
+        setting_set("referral_reward_condition", new_val)
+        labels = {
+            "channel":    "دعوت + عضویت در کانال",
+            "start_only": "فقط دعوت به ربات",
+        }
+        log_admin_action(uid, f"شرط پاداش زیرمجموعه به «{labels[new_val]}» تغییر کرد")
+        bot.answer_callback_query(call.id, f"شرط پاداش: {labels[new_val]}")
         send_or_edit(call, _ref_settings_text(), _ref_settings_kb())
         return
 
