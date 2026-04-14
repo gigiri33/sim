@@ -9,13 +9,23 @@ from ..db import setting_get
 from ..helpers import is_admin, admin_has_perm
 
 
+def _user_is_agent(user_id) -> bool:
+    try:
+        from ..db import get_user
+        u = get_user(user_id)
+        return bool(u and u["is_agent"])
+    except Exception:
+        return False
+
+
 def kb_main(user_id):
     kb = types.InlineKeyboardMarkup(row_width=2)
     kb.row(
         types.InlineKeyboardButton("🛒 خرید کانفیگ جدید", callback_data="buy:start"),
         types.InlineKeyboardButton("📦 کانفیگ‌های من",    callback_data="my_configs"),
     )
-    if setting_get("free_test_mode", "everyone") != "disabled":
+    _ft_mode = setting_get("free_test_mode", "everyone")
+    if _ft_mode == "everyone" or (_ft_mode == "agents_only" and _user_is_agent(user_id)):
         kb.add(types.InlineKeyboardButton("🎁 تست رایگان", callback_data="test:start"))
     kb.row(
         types.InlineKeyboardButton("👤 حساب کاربری",    callback_data="profile"),
