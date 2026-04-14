@@ -1108,6 +1108,14 @@ def on_callback(call):
             channel_lock_message(call)
             return
 
+        # Phone gate — enforce for all callbacks except phone-collection itself
+        if not is_admin(uid) and data not in ("check_channel",):
+            from ..handlers.start import _phone_required_for_user, _send_phone_request
+            if _phone_required_for_user(uid):
+                bot.answer_callback_query(call.id)
+                _send_phone_request(call.message.chat.id, uid)
+                return
+
         # Restricted user check (admins bypass)
         if not is_admin(uid):
             _u = get_user(uid)

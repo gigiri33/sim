@@ -143,6 +143,14 @@ def universal_handler(message):
         channel_lock_message(message)
         return
 
+    # Phone gate — enforce for all incoming messages, not just /start
+    sn = state_name(uid)
+    if not is_admin(uid) and sn not in ("waiting_for_phone", "waiting_for_phone_card"):
+        from ..handlers.start import _phone_required_for_user, _send_phone_request
+        if _phone_required_for_user(uid):
+            _send_phone_request(message.chat.id, uid)
+            return
+
     sn = state_name(uid)
     sd = state_data(uid)
 
