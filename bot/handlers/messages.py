@@ -71,7 +71,119 @@ from .callbacks import (
     _wg_finish_single, _wg_deliver_bulk_shared, _wg_deliver_bulk_diff,
     _wg_send_file_group, _wg_caption, _wg_service_name_from_filename,
     _qty_order_summary_text,
+    _v2_name_from_config, _v2_name_from_sub, _v2_bulk_data_prompt,
 )
+
+
+# ── V2Ray bulk helpers ─────────────────────────────────────────────────────────
+
+def _v2_read_raw(message, uid) -> "str | None":
+    """Read raw text from a message or .txt file attachment.
+    Returns None if an error is shown to the admin.
+    """
+    if message.document:
+        doc = message.document
+        fname = (doc.file_name or "").lower()
+        if not fname.endswith(".txt"):
+            bot.send_message(uid,
+                "⚠️ فقط فایل با فرمت <b>.txt</b> پشتیبانی می‌شود.",
+                parse_mode="HTML")
+            return None
+        try:
+            file_info = bot.get_file(doc.file_id)
+            downloaded = bot.download_file(file_info.file_path)
+            return downloaded.decode("utf-8", errors="ignore").strip()
+        except Exception:
+            bot.send_message(uid,
+                "⚠️ خطا در دانلود فایل. لطفاً دوباره ارسال کنید.")
+            return None
+    raw = (message.text or "").strip()
+    if not raw:
+        bot.send_message(uid, "⚠️ متنی ارسال نشده.")
+        return None
+    return raw
+
+
+def _v2_save_bulk(uid, type_id, package_id, pairs, mode, prefix, suffix):
+    """Save a list of (config_text, sub_url) pairs as V2Ray configs.
+
+    mode 1 — config+sub interleaved
+    mode 2 — config+sub index-paired (large)
+    mode 3 — config only
+    mode 4 — sub only
+    """
+    success_count = 0
+    success_names = []
+    errors = []
+
+    for idx, (cfg_text, sub_link) in enumerate(pairs, 1):
+        cfg_text  = (cfg_text  or "").strip()
+        sub_link  = (sub_link  or "").strip()
+
+        # Determine service name
+        if mode == 4:
+            svc_name = _v2_name_from_sub(sub_link) if sub_link else f"sub-{idx}"
+        else:
+            svc_name = _v2_name_from_config(cfg_text, prefix, suffix) if cfg_text else f"config-{idx}"
+
+        if not svc_name:
+            svc_name = f"item-{idx}"
+
+        # Validate required fields
+        if mode in (1, 2) and not cfg_text:
+            errors.append(f"آیتم {idx}: کانفیگ خالی است")
+            continue
+        if mode in (1, 2) and not sub_link:
+            # sub missing — still register with empty sub
+            sub_link = ""
+        if mode == 3 and not cfg_text:
+            errors.append(f"آیتم {idx}: کانفیگ خالی است")
+            continue
+        if mode == 4 and not sub_link:
+            errors.append(f"آیتم {idx}: ساب خالی است")
+            continue
+
+        try:
+            add_config(type_id, package_id, svc_name, cfg_text, sub_link)
+            success_count += 1
+            success_names.append(svc_name)
+        except Exception as e:
+            errors.append(f"آیتم {idx}: {str(e)}")
+
+    # Auto-fulfill pending orders
+    auto_fulfilled = 0
+    auto_fulfill_err = ""
+    if success_count > 0:
+        try:
+            auto_fulfilled = auto_fulfill_pending_orders(package_id)
+        except Exception as e:
+            auto_fulfill_err = str(e)
+
+    state_clear(uid)
+    mode_labels = {1: "کانفیگ + ساب (تعداد کم)", 2: "کانفیگ + ساب (تعداد زیاد)",
+                   3: "کانفیگ تنها", 4: "ساب تنها"}
+    mode_label = mode_labels.get(mode, "")
+
+    if success_count > 0:
+        log_admin_action(uid,
+            f"{success_count} کانفیگ V2Ray دسته‌ای ({mode_label}) برای پکیج #{package_id} ثبت شد")
+
+    result = (
+        f"✅ <b>{success_count}</b> آیتم با موفقیت ثبت شد.\n"
+        f"📌 نوع ثبت: {mode_label}"
+    )
+    if success_names:
+        names_text = "\n".join(f"  • {esc(n)}" for n in success_names[:50])
+        if len(success_names) > 50:
+            names_text += f"\n  … و {len(success_names) - 50} مورد دیگر"
+        result += f"\n\n📝 <b>نام سرویس‌های ثبت‌شده:</b>\n{names_text}"
+    if auto_fulfilled > 0:
+        result += f"\n\n🚀 <b>{auto_fulfilled}</b> سفارش در انتظار به‌صورت خودکار تحویل داده شد."
+    if auto_fulfill_err:
+        result += f"\n\n⚠️ خطا در تحویل سفارش‌های در انتظار:\n<code>{esc(auto_fulfill_err)}</code>"
+    if errors:
+        result += "\n\n❌ <b>خطاها:</b>\n" + "\n".join(errors[:20])
+    bot.send_message(uid, result, parse_mode="HTML", reply_markup=kb_admin_panel())
 
 
 def _send_codes_to_admin(admin_id, header, code_lines, chunk_size=3600):
@@ -1090,7 +1202,7 @@ def universal_handler(message):
                              reply_markup=back_button(f"adm:stk:cfg:{sd['config_id']}"))
             return
 
-        # ── Admin: Config add ──────────────────────────────────────────────────
+        # ── Admin: Config add (legacy single — kept for back-compat) ──────────
         if sn == "admin_add_config_service" and is_admin(uid):
             service_name = (message.text or "").strip()
             if not service_name:
@@ -1124,9 +1236,243 @@ def universal_handler(message):
             return
 
         if sn == "admin_add_config_bulk" and is_admin(uid):
-            # Legacy fallback — should not reach here with new flow
+            # Legacy fallback
             state_clear(uid)
             bot.send_message(uid, "⚠️ لطفاً دوباره از منو اقدام کنید.", reply_markup=kb_admin_panel())
+            return
+
+        # ── V2Ray: Single — Step 1: service name ──────────────────────────────
+        if sn == "v2_single_name" and is_admin(uid):
+            service_name = (message.text or "").strip()
+            if not service_name:
+                bot.send_message(uid, "⚠️ نام سرویس نمی‌تواند خالی باشد.",
+                                 reply_markup=back_button(f"adm:v2:single:{sd['package_id']}"))
+                return
+            mode = sd.get("mode", 1)
+            if mode == 1:
+                state_set(uid, "v2_single_config",
+                          package_id=sd["package_id"], type_id=sd["type_id"],
+                          mode=mode, service_name=service_name)
+                bot.send_message(uid,
+                    "📡 <b>کانفیگ را ارسال کنید:</b>\n\n"
+                    "یک لینک کانفیگ (vless/vmess/trojan/ss) وارد کنید:",
+                    parse_mode="HTML",
+                    reply_markup=back_button(f"adm:v2:single:{sd['package_id']}"))
+            elif mode == 2:
+                state_set(uid, "v2_single_config",
+                          package_id=sd["package_id"], type_id=sd["type_id"],
+                          mode=mode, service_name=service_name)
+                bot.send_message(uid,
+                    "📡 <b>کانفیگ را ارسال کنید:</b>\n\n"
+                    "یک لینک کانفیگ (vless/vmess/trojan/ss) وارد کنید:",
+                    parse_mode="HTML",
+                    reply_markup=back_button(f"adm:v2:single:{sd['package_id']}"))
+            else:  # mode 3: sub only
+                state_set(uid, "v2_single_sub",
+                          package_id=sd["package_id"], type_id=sd["type_id"],
+                          mode=mode, service_name=service_name)
+                bot.send_message(uid,
+                    "🔗 <b>لینک ساب را ارسال کنید:</b>\n\n"
+                    "مثال: <code>http://s1.example.xyz:2096/sub/token123</code>",
+                    parse_mode="HTML",
+                    reply_markup=back_button(f"adm:v2:single:{sd['package_id']}"))
+            return
+
+        # ── V2Ray: Single — Step 2 (mode 1 & 2): config text ─────────────────
+        if sn == "v2_single_config" and is_admin(uid):
+            config_text = (message.text or "").strip()
+            if not config_text:
+                bot.send_message(uid, "⚠️ متن کانفیگ نمی‌تواند خالی باشد.",
+                                 reply_markup=back_button(f"adm:v2:single:{sd['package_id']}"))
+                return
+            mode = sd.get("mode", 1)
+            if mode == 1:
+                # Needs sub next
+                state_set(uid, "v2_single_sub",
+                          package_id=sd["package_id"], type_id=sd["type_id"],
+                          mode=mode, service_name=sd["service_name"],
+                          config_text=config_text)
+                bot.send_message(uid,
+                    "🔗 <b>لینک ساب را ارسال کنید:</b>\n\n"
+                    "مثال: <code>http://s1.example.xyz:2096/sub/token123</code>",
+                    parse_mode="HTML",
+                    reply_markup=back_button(f"adm:v2:single:{sd['package_id']}"))
+            else:  # mode 2: config only — save directly
+                svc = sd["service_name"]
+                add_config(sd["type_id"], sd["package_id"], svc, config_text, "")
+                log_admin_action(uid, f"کانفیگ V2Ray تکی (کانفیگ تنها) '{svc}' ثبت شد")
+                auto_fulfilled = 0
+                try:
+                    auto_fulfilled = auto_fulfill_pending_orders(sd["package_id"])
+                except Exception:
+                    pass
+                state_clear(uid)
+                msg = (
+                    f"✅ <b>کانفیگ با موفقیت ثبت شد.</b>\n\n"
+                    f"🔮 نام سرویس: <b>{esc(svc)}</b>\n"
+                    f"📌 نوع ثبت: کانفیگ تنها"
+                )
+                if auto_fulfilled:
+                    msg += f"\n\n🚀 <b>{auto_fulfilled}</b> سفارش در انتظار تحویل داده شد."
+                bot.send_message(uid, msg, parse_mode="HTML", reply_markup=kb_admin_panel())
+            return
+
+        # ── V2Ray: Single — Step 3: sub link ──────────────────────────────────
+        if sn == "v2_single_sub" and is_admin(uid):
+            sub_link = (message.text or "").strip()
+            if not sub_link:
+                bot.send_message(uid, "⚠️ لینک ساب نمی‌تواند خالی باشد.",
+                                 reply_markup=back_button(f"adm:v2:single:{sd['package_id']}"))
+                return
+            mode = sd.get("mode", 1)
+            svc = sd["service_name"]
+            config_text = sd.get("config_text", "")  # empty for sub-only
+
+            if mode == 3:
+                # Sub only: no config; use sub token as service name display
+                # The stored service_name comes from admin input; sub link goes to inquiry_link
+                add_config(sd["type_id"], sd["package_id"], svc, "", sub_link)
+                log_admin_action(uid, f"کانفیگ V2Ray تکی (ساب تنها) '{svc}' ثبت شد")
+            else:
+                # mode 1: config + sub
+                add_config(sd["type_id"], sd["package_id"], svc, config_text, sub_link)
+                log_admin_action(uid, f"کانفیگ V2Ray تکی (کانفیگ+ساب) '{svc}' ثبت شد")
+
+            auto_fulfilled = 0
+            try:
+                auto_fulfilled = auto_fulfill_pending_orders(sd["package_id"])
+            except Exception:
+                pass
+            state_clear(uid)
+            mode_label = "ساب تنها" if mode == 3 else "کانفیگ + ساب"
+            msg = (
+                f"✅ <b>کانفیگ با موفقیت ثبت شد.</b>\n\n"
+                f"🔮 نام سرویس: <b>{esc(svc)}</b>\n"
+                f"📌 نوع ثبت: {mode_label}"
+            )
+            if auto_fulfilled:
+                msg += f"\n\n🚀 <b>{auto_fulfilled}</b> سفارش در انتظار تحویل داده شد."
+            bot.send_message(uid, msg, parse_mode="HTML", reply_markup=kb_admin_panel())
+            return
+
+        # ── V2Ray: Bulk — prefix input ─────────────────────────────────────────
+        if sn == "v2_bulk_pre" and is_admin(uid):
+            prefix = (message.text or "").strip()
+            pkg_id = sd["package_id"]
+            mode   = sd.get("mode", 1)
+            state_set(uid, "v2_bulk_suf",
+                      package_id=pkg_id, type_id=sd["type_id"],
+                      mode=mode, prefix=prefix)
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("⏭ بدون پسوند", callback_data=f"adm:v2:bulk:suf:skip:{pkg_id}"))
+            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:v2:bulk:{pkg_id}"))
+            bot.send_message(uid,
+                "✂️ <b>پسوند حذفی از نام کانفیگ</b>\n\n"
+                "اگر انتهای نام کانفیگ‌ها متن اضافه‌ای دارد، اینجا وارد کنید.\n\n"
+                "💡 مثال: <code>-main</code>\n\n"
+                "اگر پسوندی ندارید دکمه «بدون پسوند» را بزنید.",
+                parse_mode="HTML", reply_markup=kb)
+            return
+
+        # ── V2Ray: Bulk — suffix input ─────────────────────────────────────────
+        if sn == "v2_bulk_suf" and is_admin(uid):
+            suffix = (message.text or "").strip()
+            pkg_id = sd["package_id"]
+            mode   = sd.get("mode", 1)
+            state_set(uid, "v2_bulk_data",
+                      package_id=pkg_id, type_id=sd["type_id"],
+                      mode=mode, prefix=sd.get("prefix", ""), suffix=suffix)
+            prompt = _v2_bulk_data_prompt(mode)
+            bot.send_message(uid, prompt, parse_mode="HTML",
+                             reply_markup=back_button(f"adm:v2:bulk:{pkg_id}"))
+            return
+
+        # ── V2Ray: Bulk — receive data ─────────────────────────────────────────
+        if sn == "v2_bulk_data" and is_admin(uid):
+            raw = _v2_read_raw(message, uid)
+            if raw is None:
+                return
+            lines = [l.strip() for l in raw.splitlines() if l.strip()]
+            mode       = sd.get("mode", 1)
+            prefix     = sd.get("prefix", "")
+            suffix     = sd.get("suffix", "")
+            type_id    = sd["type_id"]
+            package_id = sd["package_id"]
+
+            if mode == 1:
+                # Interleaved: config, sub, config, sub ...
+                pairs = []
+                i = 0
+                while i < len(lines):
+                    cfg_line = lines[i]
+                    if i + 1 < len(lines) and lines[i + 1].lower().startswith("http"):
+                        sub_line = lines[i + 1]
+                        i += 2
+                    else:
+                        sub_line = ""
+                        i += 1
+                    pairs.append((cfg_line, sub_line))
+                _v2_save_bulk(uid, type_id, package_id, pairs,
+                              mode=1, prefix=prefix, suffix=suffix)
+
+            elif mode == 2:
+                # First all configs, then all subs — collect configs first
+                configs_block = [l for l in lines if not l.lower().startswith("http")]
+                if not configs_block:
+                    bot.send_message(uid,
+                        "⚠️ هیچ کانفیگی در متن ارسال‌شده یافت نشد.\n"
+                        "مطمئن شوید کانفیگ‌ها در ابتدا آمده‌اند.",
+                        parse_mode="HTML",
+                        reply_markup=back_button(f"adm:v2:bulk:{package_id}"))
+                    return
+                state_set(uid, "v2_bulk_configs_large",
+                          package_id=package_id, type_id=type_id,
+                          prefix=prefix, suffix=suffix,
+                          v2_configs=configs_block)
+                kb = types.InlineKeyboardMarkup()
+                kb.add(types.InlineKeyboardButton(
+                    f"✅ {len(configs_block)} کانفیگ دریافت شد — ادامه (ارسال ساب‌ها)",
+                    callback_data=f"adm:v2:bm2subs:{package_id}"
+                ))
+                kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:v2:bulk:{package_id}"))
+                bot.send_message(uid,
+                    f"✅ <b>{len(configs_block)}</b> کانفیگ دریافت شد.\n\n"
+                    "حالا دکمه «ادامه» را بزنید تا ساب‌ها را وارد کنید.",
+                    parse_mode="HTML", reply_markup=kb)
+                return
+
+            elif mode == 3:
+                # Config only — each line is a config
+                pairs = [(l, "") for l in lines]
+                _v2_save_bulk(uid, type_id, package_id, pairs,
+                              mode=3, prefix=prefix, suffix=suffix)
+
+            elif mode == 4:
+                # Sub only — each line is a sub
+                pairs = [("", l) for l in lines]
+                _v2_save_bulk(uid, type_id, package_id, pairs,
+                              mode=4, prefix="", suffix="")
+            return
+
+        # ── V2Ray: Bulk Large — receive subs ──────────────────────────────────
+        if sn == "v2_bulk_subs_large" and is_admin(uid):
+            raw = _v2_read_raw(message, uid)
+            if raw is None:
+                return
+            lines = [l.strip() for l in raw.splitlines() if l.strip()]
+            configs  = sd.get("v2_configs", [])
+            if len(lines) != len(configs):
+                bot.send_message(uid,
+                    f"❌ <b>خطا: تعداد ساب‌ها با کانفیگ‌ها برابر نیست.</b>\n\n"
+                    f"تعداد کانفیگ‌ها: <b>{len(configs)}</b>\n"
+                    f"تعداد ساب‌های دریافت‌شده: <b>{len(lines)}</b>\n\n"
+                    "لطفاً دوباره ارسال کنید. تعداد ساب‌ها باید دقیقاً برابر کانفیگ‌ها باشد.",
+                    parse_mode="HTML",
+                    reply_markup=back_button(f"adm:v2:bulk:{sd['package_id']}"))
+                return
+            pairs = list(zip(configs, lines))
+            _v2_save_bulk(uid, sd["type_id"], sd["package_id"], pairs,
+                          mode=2, prefix=sd.get("prefix", ""), suffix=sd.get("suffix", ""))
             return
 
         if sn == "admin_bulk_prefix" and is_admin(uid):

@@ -139,24 +139,79 @@ def deliver_purchase_message(chat_id, purchase_id):
         _dur_text_v2  = "نامحدود" if not item["duration_days"] else f"{item['duration_days']} روز"
         _max_u_v2     = item["max_users"] if "max_users" in item.keys() else 0
         _users_v2     = "نامحدود" if not _max_u_v2 else f"{_max_u_v2} کاربره"
-        text = (
-            f"✅ <b>{title_line}</b>\n\n"
-            f"🔮 نام سرویس: <b>{esc(service_name)}</b>\n"
-            f"🧩 نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
-            f"{package_line}"
-            f"🔋 حجم: <b>{esc(_vol_text_v2)}</b>\n"
-            f"⏰ مدت: <b>{esc(_dur_text_v2)}</b>\n"
-            f"👥 تعداد کاربر: <b>{esc(_users_v2)}</b>\n\n"
-            f"💝 <b>Config:</b>\n<code>{esc(cfg)}</code>\n\n"
-            f"🔋 Volume web: {esc(inquiry_link or '-')}"
-            f"{expired_note}"
-        )
-        qr_img = qrcode.make(cfg)
-        bio    = io.BytesIO()
-        qr_img.save(bio, format="PNG")
-        bio.seek(0)
-        bio.name = "qrcode.png"
-        bot.send_photo(chat_id, bio, caption=text, parse_mode="HTML", reply_markup=kb)
+
+        # Determine registration mode based on what's available
+        has_config = bool(cfg and cfg.strip())
+        has_sub    = bool(inquiry_link and inquiry_link.strip())
+
+        if has_config and has_sub:
+            # Mode: config + sub
+            text = (
+                f"✅ <b>{title_line}</b>\n\n"
+                f"🔮 نام سرویس: <b>{esc(service_name)}</b>\n"
+                f"🧩 نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
+                f"{package_line}"
+                f"🔋 حجم: <b>{esc(_vol_text_v2)}</b>\n"
+                f"⏰ مدت: <b>{esc(_dur_text_v2)}</b>\n"
+                f"👥 تعداد کاربر: <b>{esc(_users_v2)}</b>\n\n"
+                f"💝 <b>Config:</b>\n<code>{esc(cfg)}</code>\n\n"
+                f"🔗 <b>لینک ساب:</b>\n<code>{esc(inquiry_link)}</code>"
+                f"{expired_note}"
+            )
+            qr_source = cfg
+        elif has_config:
+            # Mode: config only
+            text = (
+                f"✅ <b>{title_line}</b>\n\n"
+                f"🔮 نام سرویس: <b>{esc(service_name)}</b>\n"
+                f"🧩 نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
+                f"{package_line}"
+                f"🔋 حجم: <b>{esc(_vol_text_v2)}</b>\n"
+                f"⏰ مدت: <b>{esc(_dur_text_v2)}</b>\n"
+                f"👥 تعداد کاربر: <b>{esc(_users_v2)}</b>\n\n"
+                f"💝 <b>Config:</b>\n<code>{esc(cfg)}</code>"
+                f"{expired_note}"
+            )
+            qr_source = cfg
+        elif has_sub:
+            # Mode: sub only
+            text = (
+                f"✅ <b>{title_line}</b>\n\n"
+                f"🔮 نام سرویس: <b>{esc(service_name)}</b>\n"
+                f"🧩 نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
+                f"{package_line}"
+                f"🔋 حجم: <b>{esc(_vol_text_v2)}</b>\n"
+                f"⏰ مدت: <b>{esc(_dur_text_v2)}</b>\n"
+                f"👥 تعداد کاربر: <b>{esc(_users_v2)}</b>\n\n"
+                f"🔗 <b>لینک ساب:</b>\n<code>{esc(inquiry_link)}</code>"
+                f"{expired_note}"
+            )
+            qr_source = inquiry_link
+        else:
+            # Fallback: legacy display
+            text = (
+                f"✅ <b>{title_line}</b>\n\n"
+                f"🔮 نام سرویس: <b>{esc(service_name)}</b>\n"
+                f"🧩 نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
+                f"{package_line}"
+                f"🔋 حجم: <b>{esc(_vol_text_v2)}</b>\n"
+                f"⏰ مدت: <b>{esc(_dur_text_v2)}</b>\n"
+                f"👥 تعداد کاربر: <b>{esc(_users_v2)}</b>\n\n"
+                f"💝 <b>Config:</b>\n<code>{esc(cfg or '-')}</code>\n\n"
+                f"🔋 Volume web: {esc(inquiry_link or '-')}"
+                f"{expired_note}"
+            )
+            qr_source = cfg or inquiry_link or ""
+
+        if qr_source:
+            qr_img = qrcode.make(qr_source)
+            bio    = io.BytesIO()
+            qr_img.save(bio, format="PNG")
+            bio.seek(0)
+            bio.name = "qrcode.png"
+            bot.send_photo(chat_id, bio, caption=text, parse_mode="HTML", reply_markup=kb)
+        else:
+            bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
 
     # also mirror to is_test=1 → test_report topic, else → purchase_log topic
     if item["is_test"]:
