@@ -159,8 +159,8 @@ def show_referral_menu(target, user_id):
         )
 
     import urllib.parse as _up
-    # Use text= only so Telegram renders link at bottom (url= puts it at top)
-    share_url = f"https://t.me/share/url?text={_up.quote(share_text)}"
+    # safe='' ensures slashes inside ref_link are encoded and don't break the URL
+    share_url = f"https://t.me/share/url?text={_up.quote(share_text, safe='')}"
 
     kb = types.InlineKeyboardMarkup()
     banner_photo = setting_get("referral_banner_photo", "").strip()
