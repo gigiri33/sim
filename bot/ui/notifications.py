@@ -155,7 +155,7 @@ def deliver_purchase_message(chat_id, purchase_id):
                 f"⏰ مدت: <b>{esc(_dur_text_v2)}</b>\n"
                 f"👥 تعداد کاربر: <b>{esc(_users_v2)}</b>\n\n"
                 f"💝 <b>Config:</b>\n<code>{esc(cfg)}</code>\n\n"
-                f"🔗 <b>لینک ساب:</b>\n<code>{esc(inquiry_link)}</code>"
+                f"🔗 <b>لینک ساب:</b>\n{esc(inquiry_link)}"
                 f"{expired_note}"
             )
             qr_source = cfg
@@ -183,7 +183,7 @@ def deliver_purchase_message(chat_id, purchase_id):
                 f"🔋 حجم: <b>{esc(_vol_text_v2)}</b>\n"
                 f"⏰ مدت: <b>{esc(_dur_text_v2)}</b>\n"
                 f"👥 تعداد کاربر: <b>{esc(_users_v2)}</b>\n\n"
-                f"🔗 <b>لینک ساب:</b>\n<code>{esc(inquiry_link)}</code>"
+                f"🔗 <b>لینک ساب:</b>\n{esc(inquiry_link)}"
                 f"{expired_note}"
             )
             qr_source = inquiry_link
