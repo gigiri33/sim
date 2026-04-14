@@ -48,6 +48,7 @@ from ..db import (
     add_voucher_batch, get_all_voucher_batches, get_voucher_batch,
     get_voucher_codes_for_batch, get_voucher_code_by_code,
     redeem_voucher_code, delete_voucher_batch,
+    get_phone_number,
 )
 from ..gateways.base import is_gateway_available, is_card_info_complete, get_gateway_range_text, is_gateway_in_range, build_gateway_range_guide
 from ..gateways.crypto import fetch_crypto_prices
@@ -2306,6 +2307,19 @@ def _dispatch_callback(call, uid, data):
         if not package_row or (setting_get("preorder_mode", "0") == "1" and package_row["stock"] <= 0):
             bot.answer_callback_query(call.id, "موجودی این پکیج تمام شده است.", show_alert=True)
             return
+        # Phone gate for card_only mode
+        if setting_get("phone_mode", "disabled") == "card_only" and not get_phone_number(uid):
+            from telebot.types import ReplyKeyboardMarkup, KeyboardButton
+            state_set(uid, "waiting_for_phone_card", pending_package_id=package_id)
+            bot.answer_callback_query(call.id)
+            kb_phone = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+            kb_phone.add(KeyboardButton("📱 ارسال شماره تلفن", request_contact=True))
+            bot.send_message(call.message.chat.id,
+                "📱 <b>ثبت شماره تلفن</b>\n\n"
+                "برای پرداخت کارت به کارت، ابتدا باید شماره تلفن خود را ثبت کنید.\n"
+                "با دکمه زیر شماره خود را ارسال کنید:",
+                parse_mode="HTML", reply_markup=kb_phone)
+            return
         card  = setting_get("payment_card", "")
         bank  = setting_get("payment_bank", "")
         owner = setting_get("payment_owner", "")
@@ -2622,11 +2636,15 @@ def _dispatch_callback(call, uid, data):
 
     # ── Free test ─────────────────────────────────────────────────────────────
     if data == "test:start":
-        if setting_get("free_test_enabled", "1") != "1":
-            bot.answer_callback_query(call.id, "تست رایگان غیرفعال است.", show_alert=True)
-            return
+        _ft_mode = setting_get("free_test_mode", "everyone")
         user = get_user(uid)
         is_agent_user = user and user["is_agent"]
+        if _ft_mode == "disabled":
+            bot.answer_callback_query(call.id, "تست رایگان غیرفعال است.", show_alert=True)
+            return
+        if _ft_mode == "agents_only" and not is_agent_user:
+            bot.answer_callback_query(call.id, "تست رایگان فقط برای نمایندگان فعال است.", show_alert=True)
+            return
         if is_agent_user:
             agent_limit = int(setting_get("agent_test_limit", "0") or "0")
             agent_period = setting_get("agent_test_period", "day")
@@ -2659,11 +2677,15 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data.startswith("test:t:"):
-        if setting_get("free_test_enabled", "1") != "1":
-            bot.answer_callback_query(call.id, "تست رایگان غیرفعال است.", show_alert=True)
-            return
+        _ft_mode = setting_get("free_test_mode", "everyone")
         user = get_user(uid)
         is_agent_user = user and user["is_agent"]
+        if _ft_mode == "disabled":
+            bot.answer_callback_query(call.id, "تست رایگان غیرفعال است.", show_alert=True)
+            return
+        if _ft_mode == "agents_only" and not is_agent_user:
+            bot.answer_callback_query(call.id, "تست رایگان فقط برای نمایندگان فعال است.", show_alert=True)
+            return
         if is_agent_user:
             agent_limit = int(setting_get("agent_test_limit", "0") or "0")
             agent_period = setting_get("agent_test_period", "day")
@@ -4972,6 +4994,22 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id)
             return
 
+        if sub == "dm":  # send direct message to user
+            if not is_admin(uid):
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+                return
+            state_set(uid, "admin_dm_user", target_user_id=target_id)
+            bot.answer_callback_query(call.id)
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("🔙 لغو", callback_data=f"adm:usr:v:{target_id}"))
+            send_or_edit(call,
+                f"✉️ <b>پیام خصوصی به کاربر</b>\n\n"
+                f"شناسه کاربر: <code>{target_id}</code>\n\n"
+                "پیام مورد نظر را ارسال کنید.\n"
+                "می‌توانید متن، عکس، ویدیو، فایل یا هر محتوای دیگری بفرستید.",
+                kb)
+            return
+
         if sub == "agp":  # agency prices list
             packs = get_packages()
             if not packs:
@@ -5491,6 +5529,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("🎁 تست رایگان",      callback_data="adm:set:freetest"))
         kb.add(types.InlineKeyboardButton("📜 قوانین خرید",     callback_data="adm:set:rules"))
         kb.add(types.InlineKeyboardButton("🏪 مدیریت فروش",    callback_data="adm:set:shop"))
+        kb.add(types.InlineKeyboardButton("📱 جمع‌آوری شماره تلفن", callback_data="adm:set:phone"))
         kb.add(types.InlineKeyboardButton("🤖 مدیریت عملیات ربات", callback_data="adm:ops"))
         kb.add(types.InlineKeyboardButton("🏢 مدیریت گروه",    callback_data="admin:group"))
         kb.add(types.InlineKeyboardButton("📌 پیام‌های پین شده", callback_data="adm:pin"))
@@ -6804,13 +6843,14 @@ def _dispatch_callback(call, uid, data):
 
     # ── Admin: Free Test Settings ─────────────────────────────────────────────
     if data == "adm:set:freetest":
-        enabled = setting_get("free_test_enabled", "1")
+        ft_mode = setting_get("free_test_mode", "everyone")
         agent_limit = setting_get("agent_test_limit", "0")
         agent_period = setting_get("agent_test_period", "day")
         period_labels = {"day": "روز", "week": "هفته", "month": "ماه"}
+        mode_labels = {"everyone": "🟢 همه کاربران", "agents_only": "🔵 فقط نمایندگان", "disabled": "🔴 غیرفعال"}
+        mode_label = mode_labels.get(ft_mode, ft_mode)
         kb = types.InlineKeyboardMarkup()
-        toggle_label = "🔴 غیرفعال کردن" if enabled == "1" else "🟢 فعال کردن"
-        kb.add(types.InlineKeyboardButton(toggle_label, callback_data="adm:ft:toggle"))
+        kb.add(types.InlineKeyboardButton(f"🔄 وضعیت: {mode_label}", callback_data="adm:ft:toggle"))
         kb.add(types.InlineKeyboardButton("🔄 ریست تست رایگان همه کاربران", callback_data="adm:ft:reset"))
         kb.add(types.InlineKeyboardButton(f"🤝 تعداد تست همکاران: {agent_limit} در {period_labels.get(agent_period, agent_period)}", callback_data="adm:ft:agent"))
         kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:settings"))
@@ -6818,16 +6858,19 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(
             call,
             f"🎁 <b>تنظیمات تست رایگان</b>\n\n"
-            f"وضعیت: {'🟢 فعال' if enabled == '1' else '🔴 غیرفعال'}\n"
+            f"وضعیت: {mode_label}\n"
             f"تست همکاران: <b>{agent_limit}</b> عدد در {period_labels.get(agent_period, agent_period)}",
             kb
         )
         return
 
     if data == "adm:ft:toggle":
-        enabled = setting_get("free_test_enabled", "1")
-        setting_set("free_test_enabled", "0" if enabled == "1" else "1")
-        log_admin_action(uid, f"تست رایگان {'غیرفعال' if enabled == '1' else 'فعال'} شد")
+        ft_mode = setting_get("free_test_mode", "everyone")
+        cycle = {"everyone": "agents_only", "agents_only": "disabled", "disabled": "everyone"}
+        new_mode = cycle.get(ft_mode, "everyone")
+        setting_set("free_test_mode", new_mode)
+        mode_labels_fa = {"everyone": "همه کاربران", "agents_only": "فقط نمایندگان", "disabled": "غیرفعال"}
+        log_admin_action(uid, f"تست رایگان به حالت '{mode_labels_fa.get(new_mode, new_mode)}' تغییر کرد")
         bot.answer_callback_query(call.id, "تغییر یافت.")
         _fake_call(call, "adm:set:freetest")
         return
@@ -6853,6 +6896,78 @@ def _dispatch_callback(call, uid, data):
             "برای غیرفعال کردن محدودیت، <code>0</code> بفرستید.",
             back_button("adm:set:freetest")
         )
+        return
+
+    # ── Admin: Phone Collection Settings ─────────────────────────────────────
+    if data == "adm:set:phone":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        phone_mode = setting_get("phone_mode", "disabled")
+        iran_only  = setting_get("phone_iran_only", "0")
+        mode_labels = {
+            "disabled":     "🔴 غیرفعال",
+            "everyone":     "🟢 همه کاربران",
+            "agents_only":  "🔵 فقط نمایندگان",
+            "trusted_only": "🟡 کاربران مطمئن",
+            "card_only":    "🟠 هنگام پرداخت کارت",
+        }
+        mode_cycle = {
+            "disabled":     "everyone",
+            "everyone":     "agents_only",
+            "agents_only":  "trusted_only",
+            "trusted_only": "card_only",
+            "card_only":    "disabled",
+        }
+        mode_label = mode_labels.get(phone_mode, phone_mode)
+        iran_label = "🟢 فعال (فقط ایرانی)" if iran_only == "1" else "🔴 غیرفعال (هر شماره)"
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton(f"🔄 حالت جمع‌آوری: {mode_label}", callback_data="adm:phone:toggle_mode"))
+        kb.add(types.InlineKeyboardButton(f"🇮🇷 اعتبارسنجی ایرانی: {iran_label}", callback_data="adm:phone:toggle_iran"))
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:settings"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"📱 <b>تنظیمات جمع‌آوری شماره تلفن</b>\n\n"
+            f"حالت: {mode_label}\n"
+            f"اعتبارسنجی ایران: {iran_label}\n\n"
+            "حالت‌های جمع‌آوری:\n"
+            "• <b>غیرفعال</b> — شماره جمع‌آوری نمی‌شود\n"
+            "• <b>همه کاربران</b> — همه باید شماره بدهند\n"
+            "• <b>فقط نمایندگان</b> — فقط نمایندگان شماره می‌دهند\n"
+            "• <b>کاربران مطمئن</b> — فقط کاربران با وضعیت «امن»\n"
+            "• <b>هنگام پرداخت کارت</b> — قبل از پرداخت کارت به کارت",
+            kb)
+        return
+
+    if data == "adm:phone:toggle_mode":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        phone_mode = setting_get("phone_mode", "disabled")
+        mode_cycle = {
+            "disabled":     "everyone",
+            "everyone":     "agents_only",
+            "agents_only":  "trusted_only",
+            "trusted_only": "card_only",
+            "card_only":    "disabled",
+        }
+        new_mode = mode_cycle.get(phone_mode, "disabled")
+        setting_set("phone_mode", new_mode)
+        log_admin_action(uid, f"حالت جمع‌آوری شماره تلفن به '{new_mode}' تغییر کرد")
+        bot.answer_callback_query(call.id, "تغییر یافت.")
+        _fake_call(call, "adm:set:phone")
+        return
+
+    if data == "adm:phone:toggle_iran":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        cur = setting_get("phone_iran_only", "0")
+        new = "0" if cur == "1" else "1"
+        setting_set("phone_iran_only", new)
+        log_admin_action(uid, f"اعتبارسنجی شماره ایرانی {'فعال' if new == '1' else 'غیرفعال'} شد")
+        bot.answer_callback_query(call.id, "تغییر یافت.")
+        _fake_call(call, "adm:set:phone")
         return
 
     # ── Admin: Purchase Rules ─────────────────────────────────────────────────

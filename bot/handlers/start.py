@@ -2,11 +2,46 @@
 """
 /start message handler.
 """
-from ..db import ensure_user, notify_first_start_if_needed, get_user, setting_get, add_referral, get_referral_by_referee
-from ..helpers import state_clear, is_admin, parse_int
+from ..db import ensure_user, notify_first_start_if_needed, get_user, setting_get, add_referral, get_referral_by_referee, get_phone_number
+from ..helpers import state_clear, state_set, is_admin, parse_int, normalize_iranian_phone
 from ..ui.helpers import check_channel_membership, channel_lock_message, _invalidate_channel_cache
 from ..ui.menus import show_main_menu
 from ..bot_instance import bot
+
+
+def _phone_required_for_user(uid: int) -> bool:
+    """Return True if this user still needs to provide a phone number."""
+    phone_mode = setting_get("phone_mode", "disabled")
+    if phone_mode == "disabled":
+        return False
+    if get_phone_number(uid):
+        return False  # already collected
+    if phone_mode == "everyone":
+        return True
+    user = get_user(uid)
+    if not user:
+        return False
+    if phone_mode == "agents_only":
+        return bool(user["is_agent"])
+    if phone_mode == "trusted_only":
+        return user["status"] in ("safe",)
+    # card_only and other modes: not required at start
+    return False
+
+
+def _send_phone_request(chat_id: int, uid: int):
+    """Send the phone-collection message with a contact keyboard."""
+    from telebot import types as _t
+    kb = _t.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    kb.add(_t.KeyboardButton("📱 ارسال شماره تلفن", request_contact=True))
+    bot.send_message(
+        chat_id,
+        "📱 <b>ثبت شماره تلفن</b>\n\n"
+        "برای استفاده از ربات، لطفاً شماره تلفن خود را با دکمه زیر ارسال کنید.",
+        parse_mode="HTML",
+        reply_markup=kb,
+    )
+    state_set(uid, "waiting_for_phone")
 
 
 @bot.message_handler(commands=["start"])
@@ -88,4 +123,10 @@ def start_handler(message):
         try_give_referral_start_reward_for_channel_join(uid)
     except Exception:
         pass
+
+    # Phone gate — must come after channel check
+    if not is_admin(uid) and _phone_required_for_user(uid):
+        _send_phone_request(message.chat.id, uid)
+        return
+
     show_main_menu(message)

@@ -305,9 +305,12 @@ def init_db():
             "backup_enabled":   "0",
             "backup_interval":  "24",
             "backup_target_id": "",
+            "free_test_mode":    "everyone",
             "free_test_enabled": "1",
             "agent_test_limit": "0",
             "agent_test_period": "day",
+            "phone_mode":        "disabled",
+            "phone_iran_only":   "0",
             "purchase_rules_enabled": "0",
             "purchase_rules_text": "♨️ قوانین استفاده از خدمات ما\n\nلطفاً پیش از استفاده از سرویس‌ها، موارد زیر را با دقت مطالعه فرمایید:\n\n1️⃣ اطلاعیه‌های منتشرشده در کانال را حتماً دنبال کنید.\n\n2️⃣ در صورتی که با مشکلی در اتصال مواجه شدید، به پشتیبانی پیام دهید.\n\n3️⃣ از ارسال مشخصات سرویس از طریق پیامک خودداری کنید.\n\n4️⃣ مسئولیت حفظ اطلاعات سرویس بر عهده کاربر می‌باشد.\n\n5️⃣ هرگونه سوءاستفاده ممکن است منجر به مسدود شدن سرویس شود.",
             "worker_api_key":     "",
@@ -378,6 +381,7 @@ def init_db():
             "ALTER TABLE pending_orders ADD COLUMN quantity INTEGER NOT NULL DEFAULT 1",
             "ALTER TABLE referrals ADD COLUMN channel_joined INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE referrals ADD COLUMN rewarded_at TEXT",
+            "ALTER TABLE users ADD COLUMN phone_number TEXT",
         ]
         for sql in migrations:
             try:
@@ -601,6 +605,17 @@ def update_balance(user_id, delta):
 def set_balance(user_id, amount):
     with get_conn() as conn:
         conn.execute("UPDATE users SET balance=? WHERE user_id=?", (amount, user_id))
+
+
+def set_phone_number(user_id: int, phone: str) -> None:
+    with get_conn() as conn:
+        conn.execute("UPDATE users SET phone_number=? WHERE user_id=?", (phone, user_id))
+
+
+def get_phone_number(user_id: int):
+    with get_conn() as conn:
+        row = conn.execute("SELECT phone_number FROM users WHERE user_id=?", (user_id,)).fetchone()
+        return row["phone_number"] if row else None
 
 
 def set_user_status(user_id, status):

@@ -11,6 +11,7 @@ from ..helpers import (
     esc, fmt_price, fmt_vol, fmt_dur, now_str, display_name, display_username,
     is_admin, admin_has_perm, back_button,
     state_set, state_clear, state_name, state_data, parse_int, parse_volume, normalize_text_number,
+    normalize_iranian_phone,
 )
 from ..db import (
     setting_get, setting_set,
@@ -37,6 +38,7 @@ from ..db import (
     get_discount_code, add_discount_code, update_discount_code_field,
     validate_discount_code, record_discount_usage,
     add_voucher_batch, get_voucher_code_by_code, redeem_voucher_code,
+    set_phone_number, get_phone_number,
 )
 from ..gateways.base import is_gateway_available, is_card_info_complete, get_global_amount_range, get_gateway_range_text, is_gateway_in_range, build_gateway_range_guide
 from ..gateways.tetrapay import create_tetrapay_order, verify_tetrapay_order
@@ -104,7 +106,7 @@ def _send_codes_to_admin(admin_id, header, code_lines, chunk_size=3600):
             pass
 
 
-@bot.message_handler(content_types=["text", "photo", "document"])
+@bot.message_handler(content_types=["text", "photo", "document", "contact"])
 def universal_handler(message):
     uid    = message.from_user.id
     ensure_user(message.from_user)
@@ -153,13 +155,109 @@ def universal_handler(message):
             else:
                 bot.copy_message(target_id, message.chat.id, message.message_id)
 
-        if sn == "admin_broadcast_all" and is_admin(uid):
-            users = get_users()
-            sent  = 0
-            for u in users:
-                try:
-                    _bc_send(u["user_id"])
-                    sent += 1
+        if sn == "admin_dm_user" and is_admin(uid):
+            target_uid = sd.get("target_user_id")
+            state_clear(uid)
+            try:
+                bot.copy_message(target_uid, message.chat.id, message.message_id)
+                bot.send_message(uid,
+                    f"✅ پیام با موفقیت به کاربر <code>{target_uid}</code> ارسال شد.",
+                    parse_mode="HTML", reply_markup=kb_admin_panel())
+                log_admin_action(uid, f"پیام خصوصی به کاربر <code>{target_uid}</code> ارسال شد")
+            except Exception as e:
+                bot.send_message(uid,
+                    f"❌ <b>ارسال ناموفق</b>\n\n"
+                    f"کاربر <code>{target_uid}</code> پیام را دریافت نکرد.\n"
+                    f"احتمالاً ربات را بلاک کرده یا چت فعالی ندارد.\n\n"
+                    f"<code>{esc(str(e)[:200])}</code>",
+                    parse_mode="HTML", reply_markup=kb_admin_panel())
+            return
+
+        if sn == "waiting_for_phone":
+            phone_iran_only = setting_get("phone_iran_only", "0") == "1"
+            phone_raw = None
+            # Accept contact message
+            if message.contact and message.contact.user_id == uid:
+                phone_raw = message.contact.phone_number
+            # Accept text message with phone number
+            elif message.text:
+                phone_raw = message.text.strip()
+
+            if phone_raw:
+                normalized = normalize_iranian_phone(phone_raw)
+                if phone_iran_only and not normalized:
+                    bot.send_message(
+                        message.chat.id,
+                        "❌ <b>شماره نامعتبر</b>\n\n"
+                        "لطفاً یک شماره موبایل ایرانی معتبر (شروع با ۰۹) وارد کنید\n"
+                        "یا دکمه «ارسال شماره تلفن» را بزنید.",
+                        parse_mode="HTML",
+                    )
+                    return
+                final_phone = normalized if normalized else phone_raw
+                set_phone_number(uid, final_phone)
+                state_clear(uid)
+                from telebot.types import ReplyKeyboardRemove
+                bot.send_message(
+                    message.chat.id,
+                    f"✅ <b>شماره تلفن ثبت شد</b>\n\n"
+                    f"شماره <code>{final_phone}</code> با موفقیت ذخیره شد.",
+                    parse_mode="HTML",
+                    reply_markup=ReplyKeyboardRemove(),
+                )
+                show_main_menu(message)
+            else:
+                bot.send_message(
+                    message.chat.id,
+                    "⚠️ لطفاً با دکمه زیر شماره تلفن خود را ارسال کنید.",
+                    parse_mode="HTML",
+                )
+            return
+
+        if sn == "waiting_for_phone_card":
+            phone_iran_only = setting_get("phone_iran_only", "0") == "1"
+            phone_raw = None
+            if message.contact and message.contact.user_id == uid:
+                phone_raw = message.contact.phone_number
+            elif message.text:
+                phone_raw = message.text.strip()
+
+            if phone_raw:
+                normalized = normalize_iranian_phone(phone_raw)
+                if phone_iran_only and not normalized:
+                    bot.send_message(
+                        message.chat.id,
+                        "❌ <b>شماره نامعتبر</b>\n\n"
+                        "لطفاً یک شماره موبایل ایرانی معتبر (شروع با ۰۹) وارد کنید\n"
+                        "یا دکمه «ارسال شماره تلفن» را بزنید.",
+                        parse_mode="HTML",
+                    )
+                    return
+                final_phone = normalized if normalized else phone_raw
+                set_phone_number(uid, final_phone)
+                pending_pkg_id = sd.get("pending_package_id")
+                state_clear(uid)
+                from telebot.types import ReplyKeyboardRemove
+                bot.send_message(
+                    message.chat.id,
+                    f"✅ شماره <code>{final_phone}</code> ثبت شد. در حال ادامه خرید...",
+                    parse_mode="HTML",
+                    reply_markup=ReplyKeyboardRemove(),
+                )
+                if pending_pkg_id:
+                    bot.send_message(
+                        message.chat.id,
+                        "🛒 اکنون می‌توانید پرداخت خود را ادامه دهید.",
+                        parse_mode="HTML",
+                    )
+                    show_main_menu(message)
+            else:
+                bot.send_message(
+                    message.chat.id,
+                    "⚠️ لطفاً با دکمه زیر شماره تلفن خود را ارسال کنید.",
+                    parse_mode="HTML",
+                )
+            return
                 except Exception:
                     pass
             state_clear(uid)

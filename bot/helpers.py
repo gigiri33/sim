@@ -100,6 +100,17 @@ def display_name(u):
     return n or "ㅤ"
 
 
+def normalize_iranian_phone(phone: str):
+    """Normalize a phone number to Iranian format (09XXXXXXXXX).
+    Returns normalized string or None if not a valid Iranian mobile number."""
+    phone = re.sub(r"\D", "", str(phone or ""))
+    if phone.startswith("98") and len(phone) == 12:
+        phone = "0" + phone[2:]
+    if len(phone) == 11 and phone.startswith("09"):
+        return phone
+    return None
+
+
 def display_username(u):
     return f"@{u}" if u else "@ ندارد"
 

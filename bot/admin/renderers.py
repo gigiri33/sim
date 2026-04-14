@@ -8,7 +8,7 @@ from telebot import types
 from ..config import ADMIN_PERMS
 from ..db import (
     get_all_types, get_packages, get_registered_packages_stock,
-    get_all_admin_users, get_user, get_user_detail,
+    get_all_admin_users, get_user, get_user_detail, get_phone_number,
     get_panel, get_all_panels, get_panel_packages,
     count_users_stats,
 )
@@ -217,11 +217,14 @@ def _show_admin_user_detail(call, user_id):
         return
     status_label = _user_status_label(row["status"])
     agent_label  = "🤝 نمایندگی فعال" if row["is_agent"] else "❌ نمایندگی غیرفعال"
+    phone = get_phone_number(row["user_id"])
+    phone_line = f"📞 شماره تلفن: <code>{esc(phone)}</code>\n" if phone else "📞 شماره تلفن: ثبت نشده\n"
     text = (
         "👤 <b>اطلاعات کاربر</b>\n\n"
         f"📱 نام: {esc(row['full_name'])}\n"
         f"🆔 نام کاربری: {esc(display_username(row['username']))}\n"
         f"🔢 آیدی: <code>{row['user_id']}</code>\n"
+        f"{phone_line}"
         f"💰 موجودی: <b>{fmt_price(row['balance'])}</b> تومان\n"
         f"🛍 تعداد خرید: <b>{row['purchase_count']}</b>\n"
         f"💵 مجموع خرید: <b>{fmt_price(row['total_spent'])}</b> تومان\n"
@@ -238,6 +241,7 @@ def _show_admin_user_detail(call, user_id):
     kb.add(types.InlineKeyboardButton("💰 موجودی",           callback_data=f"adm:usr:bal:{uid_t}"))
     kb.add(types.InlineKeyboardButton("📦 کانفیگ‌ها",         callback_data=f"adm:usr:cfgs:{uid_t}"))
     kb.add(types.InlineKeyboardButton("💰 قیمت نمایندگی کاربر", callback_data=f"adm:agcfg:{uid_t}"))
+    kb.add(types.InlineKeyboardButton("✉️ پیام خصوصی به کاربر", callback_data=f"adm:usr:dm:{uid_t}"))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:users"))
     send_or_edit(call, text, kb)
 
@@ -250,11 +254,14 @@ def _show_admin_user_detail_msg(chat_id, user_id):
         return
     status_label = _user_status_label(row["status"])
     agent_label  = "🤝 نمایندگی فعال" if row["is_agent"] else "❌ نمایندگی غیرفعال"
+    phone = get_phone_number(row["user_id"])
+    phone_line = f"📞 شماره تلفن: <code>{esc(phone)}</code>\n" if phone else "📞 شماره تلفن: ثبت نشده\n"
     text = (
         "👤 <b>اطلاعات کاربر</b>\n\n"
         f"📱 نام: {esc(row['full_name'])}\n"
         f"🆔 نام کاربری: {esc(display_username(row['username']))}\n"
         f"🔢 آیدی: <code>{row['user_id']}</code>\n"
+        f"{phone_line}"
         f"💰 موجودی: <b>{fmt_price(row['balance'])}</b> تومان\n"
         f"🛍 تعداد خرید: <b>{row['purchase_count']}</b>\n"
         f"💵 مجموع خرید: <b>{fmt_price(row['total_spent'])}</b> تومان\n"
@@ -271,8 +278,9 @@ def _show_admin_user_detail_msg(chat_id, user_id):
     kb.add(types.InlineKeyboardButton("💰 موجودی",           callback_data=f"adm:usr:bal:{uid_t}"))
     kb.add(types.InlineKeyboardButton("📦 کانفیگ‌ها",         callback_data=f"adm:usr:cfgs:{uid_t}"))
     kb.add(types.InlineKeyboardButton("💰 قیمت نمایندگی کاربر", callback_data=f"adm:agcfg:{uid_t}"))
+    kb.add(types.InlineKeyboardButton("✉️ پیام خصوصی به کاربر", callback_data=f"adm:usr:dm:{uid_t}"))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:users"))
-    bot.send_message(chat_id, text, reply_markup=kb)
+    bot.send_message(chat_id, text, reply_markup=kb, parse_mode="HTML")
 
 
 def _show_admin_assign_config_type(call, target_id):

@@ -135,14 +135,18 @@ def deliver_purchase_message(chat_id, purchase_id):
         _send_file_group_delivery(chat_id, file_ids, caption, kb)
     else:
         # V2Ray / text-based delivery
+        _vol_text_v2  = "نامحدود" if not item["volume_gb"] else f"{item['volume_gb']} گیگ"
+        _dur_text_v2  = "نامحدود" if not item["duration_days"] else f"{item['duration_days']} روز"
+        _max_u_v2     = item["max_users"] if "max_users" in item.keys() else 0
+        _users_v2     = "نامحدود" if not _max_u_v2 else f"{_max_u_v2} کاربره"
         text = (
             f"✅ <b>{title_line}</b>\n\n"
             f"🔮 نام سرویس: <b>{esc(service_name)}</b>\n"
             f"🧩 نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
             f"{package_line}"
-            f"🔋 حجم: <b>{'نامحدود' if not item['volume_gb'] else item['volume_gb']}</b> {'گیگ' if item['volume_gb'] else ''}\n"
-            f"⏰ مدت: <b>{'نامحدود' if not item['duration_days'] else str(item['duration_days']) + ' روز'}</b>\n"
-            f"👥 تعداد کاربر: <b>{'نامحدود' if not (item['max_users'] if 'max_users' in item.keys() else 0) else str(item['max_users']) + ' کاربره'}</b>\n\n"
+            f"🔋 حجم: <b>{esc(_vol_text_v2)}</b>\n"
+            f"⏰ مدت: <b>{esc(_dur_text_v2)}</b>\n"
+            f"👥 تعداد کاربر: <b>{esc(_users_v2)}</b>\n\n"
             f"💝 <b>Config:</b>\n<code>{esc(cfg)}</code>\n\n"
             f"🔋 Volume web: {esc(inquiry_link or '-')}"
             f"{expired_note}"

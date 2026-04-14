@@ -144,10 +144,10 @@ def show_referral_menu(target, user_id):
         "📢 <b>دعوت کن، هدیه بگیر، رشد کن!</b>"
     )
 
-    # Build share text
+    # Build share text — no appended ref_link (Telegram share URL already embeds it via url= param)
     custom_banner = setting_get("referral_banner_text", "").strip()
     if custom_banner:
-        share_text = f"{custom_banner}\n\n👇 از لینک زیر وارد شو:\n{ref_link}"
+        share_text = custom_banner
     else:
         share_text = (
             f"🔥 می‌خوای با سرعت بالا و پایداری عالی به اینترنت آزاد وصل بشی؟\n\n"
@@ -155,7 +155,7 @@ def show_referral_menu(target, user_id):
             f"✅ سرعت فوق‌العاده\n"
             f"✅ پایداری بالا\n"
             f"✅ پشتیبانی ۲۴ ساعته\n\n"
-            f"تو هم از لینک من وارد شو و سرویست رو بخر 👇\n{ref_link}"
+            f"تو هم از لینک من وارد شو و سرویست رو بخر 👇"
         )
 
     import urllib.parse as _up
@@ -164,4 +164,21 @@ def show_referral_menu(target, user_id):
     kb = types.InlineKeyboardMarkup()
     kb.add(types.InlineKeyboardButton("📤 اشتراک‌گذاری لینک دعوت", url=share_url))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+
+    # Send photo banner if configured, otherwise send plain text
+    banner_photo = setting_get("referral_banner_photo", "").strip()
+    chat_id = target.message.chat.id if hasattr(target, "message") else target.chat.id
+    if banner_photo:
+        try:
+            if hasattr(target, "message"):
+                # callback query — try to delete previous message and send photo
+                try:
+                    bot.delete_message(chat_id, target.message.message_id)
+                except Exception:
+                    pass
+            bot.send_photo(chat_id, banner_photo, caption=text, reply_markup=kb, parse_mode="HTML")
+            return
+        except Exception:
+            pass  # Fall through to plain text if photo fails
+
     send_or_edit(target, text, kb)
