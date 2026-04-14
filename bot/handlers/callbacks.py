@@ -98,6 +98,97 @@ def _fmt_users_label(max_users):
     return f"{max_users} کاربره"
 
 
+# ── V2Ray helpers ─────────────────────────────────────────────────────────────
+
+def _v2_name_from_sub(sub_url: str) -> str:
+    """Extract service name from the last path segment of a subscription URL.
+
+    Example:
+        http://s1.example.xyz:2096/sub/n1lw9my64qykgz4n → n1lw9my64qykgz4n
+    """
+    if not sub_url:
+        return "sub"
+    try:
+        path = urllib.parse.urlparse(sub_url.strip()).path
+        segments = [s for s in path.split("/") if s]
+        return segments[-1] if segments else "sub"
+    except Exception:
+        return (sub_url.rsplit("/", 1)[-1] or "sub")
+
+
+def _v2_name_from_config(cfg_text: str, prefix: str = "", suffix: str = "") -> str:
+    """Extract and clean service name from a V2Ray config's URL-encoded #tag.
+
+    Preserves the existing extraction logic (url-decode, strip prefix/suffix,
+    strip leading/trailing separators).
+    """
+    if "#" in cfg_text:
+        raw = cfg_text.rsplit("#", 1)[1]
+    else:
+        return "config"
+    try:
+        name = urllib.parse.unquote(raw)
+    except Exception:
+        name = raw
+    # Strip prefix
+    if prefix:
+        if name.startswith(prefix):
+            name = name[len(prefix):]
+        try:
+            dp = urllib.parse.unquote(prefix)
+            if dp != prefix and name.startswith(dp):
+                name = name[len(dp):]
+        except Exception:
+            pass
+    # Strip suffix
+    if suffix:
+        if name.endswith(suffix):
+            name = name[:-len(suffix)]
+        try:
+            ds = urllib.parse.unquote(suffix)
+            if ds != suffix and name.endswith(ds):
+                name = name[:-len(ds)]
+        except Exception:
+            pass
+    return name.strip().strip("-").strip("_").strip() or "config"
+
+
+def _v2_bulk_data_prompt(mode: int) -> str:
+    """Return the instruction message for the admin based on bulk V2Ray mode."""
+    if mode == 1:  # config+sub interleaved (few)
+        return (
+            "📋 <b>ثبت عمده V2Ray — کانفیگ + ساب (مناسب تعداد کم)</b>\n\n"
+            "کانفیگ‌ها و ساب‌ها را به‌صورت <b>یکی در میان</b> وارد کنید:\n\n"
+            "💡 فرمت:\n"
+            "<code>vless://abc...#name1\n"
+            "http://panel.com/sub/token1\n"
+            "vless://def...#name2\n"
+            "http://panel.com/sub/token2</code>\n\n"
+            "یعنی هر کانفیگ بلافاصله با ساب مربوط به خودش بیاید.\n\n"
+            "📎 یا می‌توانید محتوا را در یک فایل <b>.txt</b> ارسال کنید."
+        )
+    if mode == 3:  # config only
+        return (
+            "📋 <b>ثبت عمده V2Ray — کانفیگ تنها</b>\n\n"
+            "همه کانفیگ‌ها را ارسال کنید. هر خط یک کانفیگ:\n\n"
+            "💡 مثال:\n"
+            "<code>vless://abc...#name1\n"
+            "vless://def...#name2</code>\n\n"
+            "📎 یا می‌توانید محتوا را در یک فایل <b>.txt</b> ارسال کنید."
+        )
+    if mode == 4:  # sub only
+        return (
+            "📋 <b>ثبت عمده V2Ray — ساب تنها</b>\n\n"
+            "همه لینک‌های ساب را ارسال کنید. هر خط یک ساب:\n\n"
+            "💡 مثال:\n"
+            "<code>http://s1.example.com:2096/sub/token1\n"
+            "http://s1.example.com:2096/sub/token2</code>\n\n"
+            "نام سرویس هر ساب به‌صورت خودکار از انتهای لینک استخراج می‌شود.\n\n"
+            "📎 یا می‌توانید محتوا را در یک فایل <b>.txt</b> ارسال کنید."
+        )
+    return ""  # mode 2 handled separately (two-step)
+
+
 def _ovpn_caption(pkg_row, username, password, inquiry):
     users_label = _fmt_users_label(pkg_row["max_users"] if "max_users" in pkg_row.keys() else 0)
     vol_text    = "نامحدود" if not pkg_row["volume_gb"] else f"{pkg_row['volume_gb']} گیگ"
@@ -3552,11 +3643,11 @@ def _dispatch_callback(call, uid, data):
         package_id = int(parts[4])
         package_row = get_package(package_id)
 
-        # ── V2Ray: existing flow ──────────────────────────────────────────────
+        # ── V2Ray: new structured flow ────────────────────────────────────────
         if proto == "v2ray":
             kb = types.InlineKeyboardMarkup()
-            kb.add(types.InlineKeyboardButton("📝 ثبت تکی",   callback_data=f"adm:cfg:single:{package_id}"))
-            kb.add(types.InlineKeyboardButton("📋 ثبت دسته‌ای", callback_data=f"adm:cfg:bulk:{package_id}"))
+            kb.add(types.InlineKeyboardButton("📝 ثبت تکی",    callback_data=f"adm:v2:single:{package_id}"))
+            kb.add(types.InlineKeyboardButton("📋 ثبت دسته‌ای", callback_data=f"adm:v2:bulk:{package_id}"))
             kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:cfg:p:{package_id}"))
             bot.answer_callback_query(call.id)
             send_or_edit(call, "📝 روش ثبت کانفیگ V2Ray را انتخاب کنید:", kb)
@@ -4030,12 +4121,185 @@ def _dispatch_callback(call, uid, data):
         bot.send_message(uid, fmt_text, reply_markup=kb)
         return
 
-    if data.startswith("adm:cfg:single:"):
-        package_id  = int(data.split(":")[3])
+    # ── V2Ray: Single ─────────────────────────────────────────────────────────
+    # adm:v2:single:{pkg_id}  → choose single-registration mode
+    if data.startswith("adm:v2:single:"):
+        package_id = int(data.split(":")[3])
         package_row = get_package(package_id)
-        state_set(uid, "admin_add_config_service", package_id=package_id, type_id=package_row["type_id"])
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton(
+            "1️⃣ ثبت کانفیگ + ساب جداگانه",
+            callback_data=f"adm:v2:sm:1:{package_id}"
+        ))
+        kb.add(types.InlineKeyboardButton(
+            "2️⃣ ثبت کانفیگ تنها",
+            callback_data=f"adm:v2:sm:2:{package_id}"
+        ))
+        kb.add(types.InlineKeyboardButton(
+            "3️⃣ ثبت ساب تنها",
+            callback_data=f"adm:v2:sm:3:{package_id}"
+        ))
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:cfg:proto:v2ray:{package_id}"))
         bot.answer_callback_query(call.id)
-        send_or_edit(call, "✏️ نام سرویس را وارد کنید:", back_button("admin:add_config"))
+        send_or_edit(call,
+            "📝 <b>ثبت تکی V2Ray</b>\n\n"
+            "نوع ثبت را انتخاب کنید:\n\n"
+            "1️⃣ <b>کانفیگ + ساب</b> — هم کانفیگ و هم لینک ساب برای کاربر ارسال می‌شود.\n"
+            "2️⃣ <b>کانفیگ تنها</b> — فقط کانفیگ ثبت می‌شود، سابی وجود ندارد.\n"
+            "3️⃣ <b>ساب تنها</b> — فقط لینک ساب ثبت می‌شود، کانفیگی وجود ندارد.", kb)
+        return
+
+    # adm:v2:sm:{mode}:{pkg_id} → start single-mode flow (ask service name)
+    if data.startswith("adm:v2:sm:"):
+        parts = data.split(":")
+        mode       = int(parts[3])
+        package_id = int(parts[4])
+        package_row = get_package(package_id)
+        state_set(uid, "v2_single_name",
+                  package_id=package_id, type_id=package_row["type_id"], mode=mode)
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "✏️ <b>نام سرویس</b> را وارد کنید:\n"
+            "<i>(این نام برای شناسایی سرویس در پنل ادمین و نمایش به کاربر استفاده می‌شود.)</i>",
+            back_button(f"adm:v2:single:{package_id}"))
+        return
+
+    # ── V2Ray: Bulk ───────────────────────────────────────────────────────────
+    # adm:v2:bulk:{pkg_id}  → choose bulk-registration mode
+    if data.startswith("adm:v2:bulk:"):
+        rest = data[len("adm:v2:bulk:"):]
+
+        # adm:v2:bulk:{pkg_id}  → mode selection
+        if rest.isdigit():
+            package_id = int(rest)
+            package_row = get_package(package_id)
+            state_set(uid, "v2_bulk_init",
+                      package_id=package_id, type_id=package_row["type_id"])
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton(
+                "1️⃣ کانفیگ + ساب — مناسب تعداد کم",
+                callback_data=f"adm:v2:bm:1:{package_id}"
+            ))
+            kb.add(types.InlineKeyboardButton(
+                "2️⃣ کانفیگ + ساب — مناسب تعداد زیاد",
+                callback_data=f"adm:v2:bm:2:{package_id}"
+            ))
+            kb.add(types.InlineKeyboardButton(
+                "3️⃣ کانفیگ تنها",
+                callback_data=f"adm:v2:bm:3:{package_id}"
+            ))
+            kb.add(types.InlineKeyboardButton(
+                "4️⃣ ساب تنها",
+                callback_data=f"adm:v2:bm:4:{package_id}"
+            ))
+            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:cfg:proto:v2ray:{package_id}"))
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                "📋 <b>ثبت دسته‌ای V2Ray</b>\n\n"
+                "نوع ثبت را انتخاب کنید:\n\n"
+                "1️⃣ <b>کانفیگ + ساب — تعداد کم</b>\n"
+                "   کانفیگ و ساب را یکی در میان وارد کنید. مناسب برای تعداد کم.\n\n"
+                "2️⃣ <b>کانفیگ + ساب — تعداد زیاد</b>\n"
+                "   ابتدا همه کانفیگ‌ها، سپس همه ساب‌ها را ارسال کنید. مناسب برای تعداد بالا.\n\n"
+                "3️⃣ <b>کانفیگ تنها</b> — بدون ساب.\n\n"
+                "4️⃣ <b>ساب تنها</b> — بدون کانفیگ.", kb)
+            return
+
+        # adm:v2:bulk:pref:skip:{pkg_id}  or  adm:v2:bulk:suf:skip:{pkg_id}
+        # (used only for config-bearing modes that need prefix/suffix stripping)
+        if rest.startswith("pref:skip:"):
+            pkg_id = int(rest.split(":")[2])
+            s = state_data(uid)
+            state_set(uid, "v2_bulk_suf",
+                      package_id=s["package_id"], type_id=s["type_id"],
+                      mode=s["mode"], prefix="")
+            bot.answer_callback_query(call.id)
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("⏭ بدون پسوند", callback_data=f"adm:v2:bulk:suf:skip:{pkg_id}"))
+            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:v2:bulk:{pkg_id}"))
+            send_or_edit(call,
+                "✂️ <b>پسوند حذفی از نام کانفیگ</b>\n\n"
+                "اگر انتهای نام کانفیگ‌ها متن اضافه‌ای دارد که نمی‌خواهید نمایش داده شود، اینجا وارد کنید.\n\n"
+                "💡 مثال: <code>-main</code>\n\n"
+                "اگر پسوندی ندارید دکمه «بدون پسوند» را بزنید.", kb)
+            return
+
+        if rest.startswith("suf:skip:"):
+            pkg_id = int(rest.split(":")[2])
+            s = state_data(uid)
+            mode = s.get("mode", 1)
+            state_set(uid, "v2_bulk_data",
+                      package_id=s["package_id"], type_id=s["type_id"],
+                      mode=mode, prefix=s.get("prefix", ""), suffix="")
+            bot.answer_callback_query(call.id)
+            prompt = _v2_bulk_data_prompt(mode)
+            send_or_edit(call, prompt, back_button(f"adm:v2:bulk:{pkg_id}"))
+            return
+
+        return
+
+    # adm:v2:bm:{mode}:{pkg_id}  → bulk mode selected → ask prefix (for configs) or go straight
+    if data.startswith("adm:v2:bm:"):
+        parts = data.split(":")
+        mode       = int(parts[3])
+        package_id = int(parts[4])
+        s = state_data(uid)
+        bot.answer_callback_query(call.id)
+
+        if mode in (1, 2, 3):
+            # Modes with configs → ask prefix
+            state_set(uid, "v2_bulk_pre",
+                      package_id=package_id, type_id=s.get("type_id", 0), mode=mode)
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("⏭ بدون پیشوند", callback_data=f"adm:v2:bulk:pref:skip:{package_id}"))
+            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:v2:bulk:{package_id}"))
+            send_or_edit(call,
+                "✂️ <b>پیشوند حذفی از نام کانفیگ</b>\n\n"
+                "اگر ابتدای نام کانفیگ‌ها متن اضافه‌ای (مثل ریمارک اینباند) دارد که نمی‌خواهید در نام سرویس باشد، اینجا وارد کنید.\n\n"
+                "💡 مثال: <code>⚕️TUN_-</code>\n\n"
+                "اگر پیشوندی ندارید دکمه «بدون پیشوند» را بزنید.", kb)
+        else:  # mode 4: sub only — no prefix/suffix needed
+            state_set(uid, "v2_bulk_data",
+                      package_id=package_id, type_id=s.get("type_id", 0),
+                      mode=4, prefix="", suffix="")
+            prompt = _v2_bulk_data_prompt(4)
+            send_or_edit(call, prompt, back_button(f"adm:v2:bulk:{package_id}"))
+        return
+
+    # ── V2Ray Mode 2 Bulk: Step 2 — receive subs after configs ───────────────
+    # adm:v2:bm2subs:{pkg_id}  (button sent after config-block received)
+    if data.startswith("adm:v2:bm2subs:"):
+        package_id = int(data.split(":")[3])
+        s = state_data(uid)
+        config_count = len(s.get("v2_configs", []))
+        state_set(uid, "v2_bulk_subs_large",
+                  package_id=package_id, type_id=s.get("type_id", 0),
+                  prefix=s.get("prefix", ""), suffix=s.get("suffix", ""),
+                  v2_configs=s.get("v2_configs", []))
+        bot.answer_callback_query(call.id)
+        bot.send_message(uid,
+            f"✅ <b>{config_count}</b> کانفیگ دریافت شد.\n\n"
+            "📋 <b>حالا همه ساب‌ها را ارسال کنید.</b>\n\n"
+            f"⚠️ باید دقیقاً <b>{config_count}</b> ساب ارسال کنید تا با کانفیگ‌ها جفت شوند.\n"
+            "ترتیب مهم است: ساب اول با کانفیگ اول جفت می‌شود، ساب دوم با کانفیگ دوم و ...\n\n"
+            "📎 می‌توانید یک فایل <b>.txt</b> (هر خط یک ساب) ارسال کنید.",
+            parse_mode="HTML",
+            reply_markup=back_button(f"adm:v2:bulk:{package_id}"))
+        return
+
+    # ── Legacy: adm:cfg:single / adm:cfg:bulk (redirect) ─────────────────────
+    if data.startswith("adm:cfg:single:"):
+        package_id = int(data.split(":")[3])
+        bot.answer_callback_query(call.id)
+        # Redirect to new V2Ray single flow
+        package_row = get_package(package_id)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("1️⃣ ثبت کانفیگ + ساب جداگانه", callback_data=f"adm:v2:sm:1:{package_id}"))
+        kb.add(types.InlineKeyboardButton("2️⃣ ثبت کانفیگ تنها",          callback_data=f"adm:v2:sm:2:{package_id}"))
+        kb.add(types.InlineKeyboardButton("3️⃣ ثبت ساب تنها",             callback_data=f"adm:v2:sm:3:{package_id}"))
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:cfg:proto:v2ray:{package_id}"))
+        send_or_edit(call,
+            "📝 <b>ثبت تکی V2Ray</b>\n\nنوع ثبت را انتخاب کنید:", kb)
         return
 
     if data.startswith("adm:cfg:bulk:"):
@@ -4374,15 +4638,28 @@ def _dispatch_callback(call, uid, data):
         if not row:
             bot.answer_callback_query(call.id, "یافت نشد.", show_alert=True)
             return
+        _has_cfg = bool(row['config_text'] and row['config_text'].strip())
+        _has_sub = bool(row['inquiry_link'] and row['inquiry_link'].strip())
+        if _has_cfg and _has_sub:
+            _reg_mode = "کانفیگ + ساب"
+        elif _has_cfg:
+            _reg_mode = "کانفیگ تنها"
+        elif _has_sub:
+            _reg_mode = "ساب تنها"
+        else:
+            _reg_mode = "—"
         text = (
             f"🔮 نام سرویس: <b>{esc(urllib.parse.unquote(row['service_name'] or ''))}</b>\n"
             f"🧩 نوع سرویس: {esc(row['type_name'])}\n"
+            f"📌 نوع ثبت: {_reg_mode}\n"
             f"🔋 حجم: {fmt_vol(row['volume_gb'])}\n"
             f"⏰ مدت: {fmt_dur(row['duration_days'])}\n\n"
-            f"💝 Config:\n<code>{esc(row['config_text'])}</code>\n\n"
-            f"🔋 Subscription: {esc(row['inquiry_link'] or '-')}\n"
-            f"🗓 ثبت: {esc(row['created_at'])}"
         )
+        if _has_cfg:
+            text += f"💝 Config:\n<code>{esc(row['config_text'])}</code>\n\n"
+        if _has_sub:
+            text += f"🔗 Subscription:\n<code>{esc(row['inquiry_link'])}</code>\n\n"
+        text += f"🗓 ثبت: {esc(row['created_at'])}"
         kb = types.InlineKeyboardMarkup()
         if row["sold_to"]:
             buyer = get_user_detail(row["sold_to"])
