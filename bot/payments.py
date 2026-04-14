@@ -415,25 +415,12 @@ def _finish_card_payment_approval_inner(payment_id, admin_note, approved):
             )
 
         elif payment["kind"] == "config_purchase":
-            # --- Bulk delivery logic ---
-            from .db import state_data
-            bulk_count = 1
-            try:
-                # تلاش برای خواندن bulk_count از state (در صورت وجود)
-                sd = state_data(user_id)
-                if sd and sd.get("bulk_count"):
-                    bulk_count = int(sd["bulk_count"])
-            except Exception:
-                bulk_count = 1
-            config_ids = []
+            config_id   = payment["config_id"]
             package_id  = payment["package_id"]
             package_row = get_package(package_id)
-            for _ in range(bulk_count):
+            if not config_id:
                 config_id = reserve_first_config(package_id, payment_id)
-                if not config_id:
-                    break
-                config_ids.append(config_id)
-            if not config_ids or len(config_ids) < bulk_count:
+            if not config_id:
                 pending_id = create_pending_order(
                     user_id, package_id, payment_id, payment["amount"], payment["payment_method"]
                 )
@@ -454,16 +441,17 @@ def _finish_card_payment_approval_inner(payment_id, admin_note, approved):
                     payment["amount"], payment["payment_method"]
                 )
                 return True
-            # تخصیص bulk کانفیگ
-            purchase_ids = []
+            if payment["config_id"] != config_id:
+                with get_conn() as conn:
+                    conn.execute("UPDATE payments SET config_id=? WHERE id=?", (config_id, payment_id))
             try:
-                for config_id in config_ids:
-                    purchase_id = assign_config_to_user(
-                        config_id, user_id, package_id, payment["amount"] // bulk_count,
-                        payment["payment_method"], is_test=0, bulk_count=bulk_count
-                    )
-                    purchase_ids.append(purchase_id)
+                purchase_id = assign_config_to_user(
+                    config_id, user_id, package_id, payment["amount"],
+                    payment["payment_method"], is_test=0
+                )
             except RuntimeError as e:
+                # Concurrent approval: this config was just sold to someone else.
+                # Re-reserve and try next available config.
                 from .config import ADMIN_IDS as _AIDS
                 for _aid in _AIDS:
                     try:
@@ -499,9 +487,8 @@ def _finish_card_payment_approval_inner(payment_id, admin_note, approved):
                 return True
             complete_payment(payment_id)
             bot.send_message(user_id, f"✅ واریزی شما تأیید شد.\n\n{esc(admin_note)}")
-            for purchase_id in purchase_ids:
-                deliver_purchase_message(user_id, purchase_id)
-                admin_purchase_notify(payment["payment_method"], get_user(user_id), package_row, purchase_id=purchase_id)
+            deliver_purchase_message(user_id, purchase_id)
+            admin_purchase_notify(payment["payment_method"], get_user(user_id), package_row, purchase_id=purchase_id)
 
         elif payment["kind"] == "renewal":
             package_id  = payment["package_id"]

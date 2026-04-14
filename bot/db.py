@@ -127,12 +127,8 @@ def init_db():
                 amount         INTEGER NOT NULL,
                 payment_method TEXT    NOT NULL,
                 created_at     TEXT    NOT NULL,
-                is_test        INTEGER NOT NULL DEFAULT 0,
-                bulk_count     INTEGER NOT NULL DEFAULT 1
+                is_test        INTEGER NOT NULL DEFAULT 0
             );
-            -- Migration: add bulk_count if not exists
-            PRAGMA table_info(purchases);
-            ALTER TABLE purchases ADD COLUMN bulk_count INTEGER NOT NULL DEFAULT 1;
             CREATE TABLE IF NOT EXISTS agency_prices (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id    INTEGER NOT NULL,
@@ -157,9 +153,6 @@ def init_db():
                 key   TEXT PRIMARY KEY,
                 value TEXT
             );
-        ")
-        # مقدار پیش‌فرض bulk_purchase_mode را اگر وجود ندارد درج کن
-        conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", ("bulk_purchase_mode", "all"))
             CREATE TABLE IF NOT EXISTS admin_users (
                 user_id     INTEGER PRIMARY KEY,
                 added_by    INTEGER NOT NULL,
@@ -904,16 +897,12 @@ def update_config_field(config_id, field, value):
         conn.execute(f"UPDATE configs SET {field}=? WHERE id=?", (value, config_id))
 
 
-def assign_config_to_user(config_id, user_id, package_id, amount, payment_method, is_test=0, bulk_count=1):
-    """
-    Assigns a config to a user and logs the purchase, including bulk_count.
-    bulk_count: Number of configs in this purchase (default 1).
-    """
+def assign_config_to_user(config_id, user_id, package_id, amount, payment_method, is_test=0):
     with get_conn() as conn:
         conn.execute(
-            "INSERT INTO purchases(user_id,package_id,config_id,amount,"\
-            "payment_method,created_at,is_test,bulk_count) VALUES(?,?,?,?,?,?,?,?)",
-            (user_id, package_id, config_id, amount, payment_method, now_str(), is_test, bulk_count)
+            "INSERT INTO purchases(user_id,package_id,config_id,amount,"
+            "payment_method,created_at,is_test) VALUES(?,?,?,?,?,?,?)",
+            (user_id, package_id, config_id, amount, payment_method, now_str(), is_test)
         )
         purchase_id = conn.execute(
             "SELECT last_insert_rowid() AS x"
