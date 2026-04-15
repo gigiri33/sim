@@ -382,6 +382,8 @@ def init_db():
             "ALTER TABLE referrals ADD COLUMN channel_joined INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE referrals ADD COLUMN rewarded_at TEXT",
             "ALTER TABLE users ADD COLUMN phone_number TEXT",
+            # audience: 'all' | 'public' | 'agents'  (default 'all' = everyone)
+            "ALTER TABLE discount_codes ADD COLUMN audience TEXT NOT NULL DEFAULT 'all'",
         ]
         for sql in migrations:
             try:
@@ -1400,14 +1402,15 @@ def get_discount_code_by_code(code):
         ).fetchone()
 
 
-def add_discount_code(code, discount_type, discount_value, max_uses_total, max_uses_per_user):
+def add_discount_code(code, discount_type, discount_value, max_uses_total, max_uses_per_user, audience="all"):
+    audience = audience if audience in ("all", "public", "agents") else "all"
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO discount_codes(code, discount_type, discount_value, "
-            "max_uses_total, max_uses_per_user, used_count, is_active, created_at) "
-            "VALUES(?,?,?,?,?,0,1,?)",
+            "max_uses_total, max_uses_per_user, used_count, is_active, created_at, audience) "
+            "VALUES(?,?,?,?,?,0,1,?,?)",
             (code.strip().upper(), discount_type, int(discount_value),
-             int(max_uses_total), int(max_uses_per_user), now_str())
+             int(max_uses_total), int(max_uses_per_user), now_str(), audience)
         )
 
 
@@ -1420,7 +1423,7 @@ def toggle_discount_code(code_id):
 
 
 def update_discount_code_field(code_id, field, value):
-    _allowed = {"code", "discount_type", "discount_value", "max_uses_total", "max_uses_per_user"}
+    _allowed = {"code", "discount_type", "discount_value", "max_uses_total", "max_uses_per_user", "audience"}
     if field not in _allowed:
         return
     with get_conn() as conn:
@@ -1444,7 +1447,7 @@ def get_discount_code_user_uses(code_id, user_id):
         return row["cnt"] if row else 0
 
 
-def validate_discount_code(code, user_id, amount):
+def validate_discount_code(code, user_id, amount, is_agent=False):
     """Returns (ok, row, discount_amount, final_amount, error_msg)."""
     row = get_discount_code_by_code(code)
     if not row:
@@ -1453,6 +1456,12 @@ def validate_discount_code(code, user_id, amount):
         return False, None, 0, amount, "❌ این کد تخفیف غیرفعال است."
     if row["max_uses_total"] > 0 and row["used_count"] >= row["max_uses_total"]:
         return False, None, 0, amount, "❌ ظرفیت این کد تخفیف به پایان رسیده است."
+    # Audience check
+    audience = row["audience"] if "audience" in row.keys() else "all"
+    if audience == "agents" and not is_agent:
+        return False, None, 0, amount, "❌ این کد تخفیف فقط برای نمایندگان قابل استفاده است."
+    if audience == "public" and is_agent:
+        return False, None, 0, amount, "❌ این کد تخفیف فقط برای کاربران عادی قابل استفاده است."
     if row["max_uses_per_user"] > 0:
         user_uses = get_discount_code_user_uses(row["id"], user_id)
         if user_uses >= row["max_uses_per_user"]:
@@ -1476,6 +1485,22 @@ def record_discount_usage(code_id, user_id):
             "UPDATE discount_codes SET used_count = used_count + 1 WHERE id=?",
             (code_id,)
         )
+
+
+def has_eligible_discount_codes(is_agent: bool) -> bool:
+    """Return True if there is at least one active discount code eligible for this user type."""
+    with get_conn() as conn:
+        if is_agent:
+            row = conn.execute(
+                "SELECT 1 FROM discount_codes "
+                "WHERE is_active=1 AND (audience='all' OR audience='agents') LIMIT 1"
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT 1 FROM discount_codes "
+                "WHERE is_active=1 AND (audience='all' OR audience='public') LIMIT 1"
+            ).fetchone()
+        return row is not None
 
 
 def fulfill_pending_order(pending_id):

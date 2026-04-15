@@ -44,7 +44,7 @@ from ..db import (
     save_agency_request_message, get_agency_request_messages, delete_agency_request_messages,
     get_all_discount_codes, get_discount_code, add_discount_code,
     toggle_discount_code, update_discount_code_field, delete_discount_code,
-    validate_discount_code, record_discount_usage,
+    validate_discount_code, record_discount_usage, has_eligible_discount_codes,
     add_voucher_batch, get_all_voucher_batches, get_voucher_batch,
     get_voucher_codes_for_batch, get_voucher_code_by_code,
     redeem_voucher_code, delete_voucher_batch,
@@ -563,12 +563,22 @@ def _get_state_price(uid, package_row, state_key):
 
 
 def _show_discount_prompt(call, amount=None):
+    """Show the discount code prompt. Returns True if shown, False if skipped."""
+    # Check if any eligible discount codes exist for this user
+    from telebot.types import Message
+    uid = call.from_user.id if hasattr(call, "from_user") else call.chat.id
+    user = get_user(uid)
+    is_agent = bool(user and user["is_agent"])
+    if not has_eligible_discount_codes(is_agent):
+        # No eligible codes — skip this step entirely, return False so caller can proceed
+        return False
     kb = types.InlineKeyboardMarkup()
     kb.row(
         types.InlineKeyboardButton("✅ بله، دارم", callback_data="disc:yes"),
         types.InlineKeyboardButton("❌ خیر، ادامه", callback_data="disc:no"),
     )
     send_or_edit(call, _build_discount_prompt_text(amount), kb)
+    return True
 
 
 def _show_purchase_gateways(target, uid, package_id, price, package_row):
@@ -1106,8 +1116,10 @@ def _render_discount_admin_list(call, uid):
     )
     for row in codes:
         status_icon = "✅" if row["is_active"] else "❌"
+        audience = row["audience"] if "audience" in row.keys() else "all"
+        aud_icon = {"all": "👥", "public": "🙋", "agents": "🤝"}.get(audience, "👥")
         kb.row(
-            types.InlineKeyboardButton(f"{status_icon} {row['code']}", callback_data=f"admin:disc:view:{row['id']}"),
+            types.InlineKeyboardButton(f"{status_icon} {aud_icon} {row['code']}", callback_data=f"admin:disc:view:{row['id']}"),
             types.InlineKeyboardButton("⚙️ تنظیمات", callback_data=f"admin:disc:view:{row['id']}"),
         )
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:panel"))
@@ -1119,6 +1131,13 @@ def _render_discount_admin_list(call, uid):
         + ("کدی ثبت نشده است." if not codes else "برای مدیریت هر کد، روی آن کلیک کنید:")
     )
     send_or_edit(call, text, kb)
+
+
+_AUDIENCE_LABELS = {
+    "all":     "👥 همه",
+    "public":  "🙋 فقط عموم",
+    "agents":  "🤝 فقط نمایندگان",
+}
 
 
 def _render_discount_code_detail(call, uid, code_id):
@@ -1134,11 +1153,14 @@ def _render_discount_code_detail(call, uid, code_id):
     actual_uses = row["actual_uses"]
     status_fa = "✅ فعال" if row["is_active"] else "❌ غیرفعال"
     toggle_lbl = "❌ غیرفعال کن" if row["is_active"] else "✅ فعال کن"
+    audience = row["audience"] if "audience" in row.keys() else "all"
+    audience_fa = _AUDIENCE_LABELS.get(audience, "👥 همه")
     text = (
         f"🎟 <b>کد تخفیف: {esc(row['code'])}</b>\n\n"
         f"💰 نوع تخفیف: {disc_type_fa} — {disc_val_fa}\n"
         f"📊 استفاده شده: {actual_uses} / {max_total}\n"
         f"👤 هر کاربر: {max_per} بار\n"
+        f"🎯 دسترسی: {audience_fa}\n"
         f"🔵 وضعیت: {status_fa}\n"
         f"📅 ایجاد: {row['created_at'][:10]}"
     )
@@ -1155,6 +1177,7 @@ def _render_discount_code_detail(call, uid, code_id):
         types.InlineKeyboardButton("✏️ کل استفاده", callback_data=f"admin:disc:edit_total:{code_id}"),
         types.InlineKeyboardButton("✏️ هر کاربر", callback_data=f"admin:disc:edit_per:{code_id}"),
     )
+    kb.add(types.InlineKeyboardButton("🎯 ویرایش دسترسی", callback_data=f"admin:disc:edit_audience:{code_id}"))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:discounts"))
     send_or_edit(call, text, kb)
 
@@ -1870,8 +1893,8 @@ def _dispatch_callback(call, uid, data):
                   kind="renewal", purchase_id=purchase_id)
         bot.answer_callback_query(call.id)
         if setting_get("discount_codes_enabled", "0") == "1":
-            _show_discount_prompt(call, price)
-            return
+            if _show_discount_prompt(call, price):
+                return
         _show_renewal_gateways(call, uid, purchase_id, package_id, price, package_row, item)
         return
 
@@ -2398,8 +2421,8 @@ def _dispatch_callback(call, uid, data):
             _show_qty_prompt(call, package_row, price)
             return
         if setting_get("discount_codes_enabled", "0") == "1":
-            _show_discount_prompt(call, price)
-            return
+            if _show_discount_prompt(call, price):
+                return
         _show_purchase_gateways(call, uid, package_id, price, package_row)
         return
 
@@ -3257,14 +3280,17 @@ def _dispatch_callback(call, uid, data):
 
     if data == "admin:panel":
         bot.answer_callback_query(call.id)
+        footer = ""
+        if uid in ADMIN_IDS:
+            footer = (
+                "\n\n────────────────\n"
+                "💡 <b>Seamless Premium</b>\n"
+                "👨‍💻 Developer: @EmadHabibnia"
+            )
         text = (
             "⚙️ <b>پنل مدیریت</b>\n\n"
-            "بخش مورد نظر را انتخاب کنید:\n\n"
-            "────────────────\n"
-            "💡 <b>ConfigFlow v2.0</b>\n"
-            "👨‍💻 Developer: @Emad_Habibnia\n"
-            "🌐 <a href='https://github.com/Emadhabibnia1385/ConfigFlow'>GitHub ConfigFlow</a>\n"
-            "❤️ <a href='https://t.me/EmadHabibnia/4'>donate</a>"
+            "بخش مورد نظر را انتخاب کنید:"
+            f"{footer}"
         )
         send_or_edit(call, text, kb_admin_panel(uid))
         return
@@ -7679,7 +7705,7 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id)
         send_or_edit(call,
             "🎟 <b>افزودن کد تخفیف</b>\n\n"
-            "مرحله ۱/۴: متن کد تخفیف را وارد کنید:\n"
+            "مرحله ۱/۵: متن کد تخفیف را وارد کنید:\n"
             "(حروف انگلیسی، اعداد، خط تیره — مثال: NEWUSER20)",
             back_button("admin:discounts"))
         return
@@ -7696,13 +7722,38 @@ def _dispatch_callback(call, uid, data):
         if disc_type == "pct":
             send_or_edit(call,
                 "🎟 <b>افزودن کد تخفیف</b>\n\n"
-                "مرحله ۲/۴: مقدار تخفیف را به <b>درصد</b> وارد کنید (۱ تا ۱۰۰):",
+                "مرحله ۲/۵: مقدار تخفیف را به <b>درصد</b> وارد کنید (۱ تا ۱۰۰):",
                 back_button("admin:disc:add"))
         else:
             send_or_edit(call,
                 "🎟 <b>افزودن کد تخفیف</b>\n\n"
-                "مرحله ۲/۴: مقدار تخفیف را به <b>تومان</b> وارد کنید:",
+                "مرحله ۲/۵: مقدار تخفیف را به <b>تومان</b> وارد کنید:",
                 back_button("admin:disc:add"))
+        return
+
+    if data.startswith("admin:disc:add_audience:"):
+        if not is_admin(uid):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        audience = data.split(":")[3] if data.split(":")[3] in ("all", "public", "agents") else "all"
+        sd = state_data(uid)
+        try:
+            add_discount_code(
+                sd.get("code", ""),
+                sd.get("disc_type", "pct"),
+                int(sd.get("discount_value", 0) or 0),
+                int(sd.get("max_uses_total", 0) or 0),
+                int(sd.get("max_uses_per_user", 0) or 0),
+                audience=audience,
+            )
+        except Exception:
+            bot.answer_callback_query(call.id, "⚠️ این کد قبلاً ثبت شده است.", show_alert=True)
+            return
+        state_clear(uid)
+        audience_labels = {"all": "همه", "public": "فقط عموم", "agents": "فقط نمایندگان"}
+        log_admin_action(uid, f"کد تخفیف جدید {sd.get('code', '')} (دسترسی: {audience_labels.get(audience)}) ساخته شد")
+        bot.answer_callback_query(call.id, "✅ کد تخفیف ثبت شد.")
+        _render_discount_admin_list(call, uid)
         return
 
     if data.startswith("admin:disc:view:"):
@@ -7808,6 +7859,42 @@ def _dispatch_callback(call, uid, data):
             "✏️ <b>ویرایش حداکثر استفاده هر کاربر</b>\n\n"
             "تعداد جدید را وارد کنید (۰ = نامحدود):",
             back_button(f"admin:disc:view:{code_id}"))
+        return
+
+    if data.startswith("admin:disc:edit_audience:"):
+        if not is_admin(uid):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        code_id = int(data.split(":")[3])
+        row = get_discount_code(code_id)
+        if not row:
+            bot.answer_callback_query(call.id, "کد پیدا نشد.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        current = row["audience"] if "audience" in row.keys() else "all"
+        kb = types.InlineKeyboardMarkup()
+        for aud_key, aud_label in [("all", "👥 همه"), ("public", "🙋 فقط عموم"), ("agents", "🤝 فقط نمایندگان")]:
+            icon = "✅ " if current == aud_key else ""
+            kb.add(types.InlineKeyboardButton(f"{icon}{aud_label}", callback_data=f"admin:disc:set_audience:{code_id}:{aud_key}"))
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"admin:disc:view:{code_id}"))
+        send_or_edit(call,
+            f"🎯 <b>ویرایش دسترسی کد تخفیف</b>\n\n"
+            f"کد: <code>{esc(row['code'])}</code>\n\n"
+            "این کد تخفیف برای چه کسانی قابل استفاده باشد؟",
+            kb)
+        return
+
+    if data.startswith("admin:disc:set_audience:"):
+        if not is_admin(uid):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        parts = data.split(":")
+        code_id = int(parts[3])
+        audience = parts[4] if parts[4] in ("all", "public", "agents") else "all"
+        update_discount_code_field(code_id, "audience", audience)
+        audience_labels = {"all": "همه", "public": "فقط عموم", "agents": "فقط نمایندگان"}
+        bot.answer_callback_query(call.id, f"✅ دسترسی به «{audience_labels.get(audience)}» تغییر یافت.")
+        _render_discount_code_detail(call, uid, code_id)
         return
 
     # ── Admin: Payment approve/reject ─────────────────────────────────────────

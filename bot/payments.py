@@ -153,7 +153,8 @@ def show_crypto_payment_info(target, uid, coin_key, amount):
     if symbol and symbol in prices and prices[symbol] > 0:
         coin_amount = amount / prices[symbol]
         price_text  = (
-            f"\n\n💱 <b>معادل ارزی:</b> <code>{coin_amount:.6f} {symbol}</code>\n"
+            f"\n\n💱 <b>معادل ارزی:</b> {coin_amount:.6f} {symbol}\n"
+            f"📋 مبلغ قابل کپی: <code>{coin_amount:.6f}</code>\n"
             f"برای پرداخت با این ارز باید معادل <b>{coin_amount:.6f} {symbol}</b> واریز نمایید."
         )
     text = (

@@ -36,7 +36,7 @@ from ..db import (
     save_pinned_send, get_pinned_sends,
     save_agency_request_message,
     get_discount_code, add_discount_code, update_discount_code_field,
-    validate_discount_code, record_discount_usage,
+    validate_discount_code, record_discount_usage, has_eligible_discount_codes,
     add_voucher_batch, get_voucher_code_by_code, redeem_voucher_code,
     set_phone_number, get_phone_number,
 )
@@ -526,8 +526,8 @@ def universal_handler(message):
                 return
             state_set(uid, "wallet_charge_method", amount=amount, original_amount=amount)
             if setting_get("discount_codes_enabled", "0") == "1":
-                _show_discount_prompt(message, amount)
-                return
+                if _show_discount_prompt(message, amount):
+                    return
             _show_wallet_gateways(message, uid, amount)
             return
 
@@ -557,9 +557,9 @@ def universal_handler(message):
             summary = _qty_order_summary_text(package_row, unit_price, qty)
             bot.send_message(uid, summary, parse_mode="HTML")
             if setting_get("discount_codes_enabled", "0") == "1":
-                _show_discount_prompt(message, total)
-            else:
-                _show_purchase_gateways(message, uid, package_id, total, package_row)
+                if _show_discount_prompt(message, total):
+                    return
+            _show_purchase_gateways(message, uid, package_id, total, package_row)
             return
 
         # ── Discount code entry ───────────────────────────────────────────────
@@ -574,7 +574,9 @@ def universal_handler(message):
                 state_clear(uid)
                 bot.send_message(uid, "⚠️ مبلغی برای اعمال تخفیف پیدا نشد.", reply_markup=kb_main(uid))
                 return
-            ok, row, disc_amount, final_amount, err = validate_discount_code(code, uid, original_amount)
+            _user_for_disc = get_user(uid)
+            _is_agent_disc = bool(_user_for_disc and _user_for_disc["is_agent"])
+            ok, row, disc_amount, final_amount, err = validate_discount_code(code, uid, original_amount, is_agent=_is_agent_disc)
             if not ok:
                 kb = types.InlineKeyboardMarkup()
                 kb.add(types.InlineKeyboardButton("🔙 ادامه بدون تخفیف", callback_data="disc:no"))
@@ -692,7 +694,7 @@ def universal_handler(message):
             kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:discounts"))
             bot.send_message(uid,
                 f"🎟 کد: <code>{esc(code)}</code>\n\n"
-                "مرحله ۲/۴: نوع تخفیف را انتخاب کنید:",
+                "مرحله ۲/۵: نوع تخفیف را انتخاب کنید:",
                 reply_markup=kb)
             return
 
@@ -708,7 +710,7 @@ def universal_handler(message):
             state_set(uid, "admin_discount_add_total",
                       code=sd.get("code", ""), disc_type=disc_type, discount_value=val)
             bot.send_message(uid,
-                "مرحله ۳/۴: حداکثر تعداد استفاده کل را وارد کنید:\n"
+                "مرحله ۳/۵: حداکثر تعداد استفاده کل را وارد کنید:\n"
                 "(۰ = نامحدود)",
                 reply_markup=back_button("admin:discounts"))
             return
@@ -722,7 +724,7 @@ def universal_handler(message):
                       code=sd.get("code", ""), disc_type=sd.get("disc_type", "pct"),
                       discount_value=sd.get("discount_value", 0), max_uses_total=total)
             bot.send_message(uid,
-                "مرحله ۴/۴: حداکثر تعداد استفاده هر کاربر را وارد کنید:\n"
+                "مرحله ۴/۵: حداکثر تعداد استفاده هر کاربر را وارد کنید:\n"
                 "(۰ = نامحدود)",
                 reply_markup=back_button("admin:discounts"))
             return
@@ -732,21 +734,25 @@ def universal_handler(message):
             if per_user is None or per_user < 0:
                 bot.send_message(uid, "⚠️ عدد معتبر وارد کنید. ۰ به معنی نامحدود است.")
                 return
-            try:
-                add_discount_code(
-                    sd.get("code", ""),
-                    sd.get("disc_type", "pct"),
-                    int(sd.get("discount_value", 0) or 0),
-                    int(sd.get("max_uses_total", 0) or 0),
-                    per_user,
-                )
-            except sqlite3.IntegrityError:
-                bot.send_message(uid, "⚠️ این کد قبلاً ثبت شده است.", reply_markup=back_button("admin:discounts"))
-                return
-            state_clear(uid)
-            log_admin_action(uid, f"کد تخفیف جدید {sd.get('code', '')} ساخته شد")
-            bot.send_message(uid, "✅ کد تخفیف با موفقیت ثبت شد.")
-            _render_discount_admin_list(message, uid)
+            state_set(uid, "admin_discount_add_audience",
+                      code=sd.get("code", ""),
+                      disc_type=sd.get("disc_type", "pct"),
+                      discount_value=sd.get("discount_value", 0),
+                      max_uses_total=sd.get("max_uses_total", 0),
+                      max_uses_per_user=per_user)
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("👥 همه", callback_data="admin:disc:add_audience:all"))
+            kb.add(types.InlineKeyboardButton("🙋 فقط عموم (کاربران عادی)", callback_data="admin:disc:add_audience:public"))
+            kb.add(types.InlineKeyboardButton("🤝 فقط نمایندگان", callback_data="admin:disc:add_audience:agents"))
+            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:discounts"))
+            bot.send_message(uid,
+                "🎟 <b>افزودن کد تخفیف</b>\n\n"
+                "مرحله ۵/۵: این کد تخفیف برای چه کسانی است؟\n\n"
+                "👥 <b>همه</b> — هم کاربران عادی و هم نمایندگان\n"
+                "🙋 <b>فقط عموم</b> — فقط کاربران عادی\n"
+                "🤝 <b>فقط نمایندگان</b> — فقط نمایندگان",
+                parse_mode="HTML",
+                reply_markup=kb)
             return
 
         if sn == "admin_discount_edit_code" and is_admin(uid):
