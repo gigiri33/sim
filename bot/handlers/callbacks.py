@@ -2605,10 +2605,11 @@ def _dispatch_callback(call, uid, data):
         if not addr:
             bot.answer_callback_query(call.id, "آدرس ولت پیدا نشد.", show_alert=True)
         else:
-            bot.answer_callback_query(
-                call.id,
-                "📋 آدرس ولت روی متن پیام قابل کپی است — روی آدرس ضربه بزنید.",
-                show_alert=False,
+            bot.answer_callback_query(call.id)
+            bot.send_message(
+                call.message.chat.id,
+                f"<code>{esc(addr)}</code>",
+                parse_mode="HTML",
             )
         return
 
@@ -2631,10 +2632,13 @@ def _dispatch_callback(call, uid, data):
                 show_alert=True,
             )
             return
-        bot.answer_callback_query(
-            call.id,
-            "🔢 مبلغ دقیق روی متن پیام قابل کپی است — روی عدد ضربه بزنید.",
-            show_alert=False,
+        coin_amount = amount / prices[symbol]
+        coin_amount_str = f"{coin_amount:.6f}"
+        bot.answer_callback_query(call.id)
+        bot.send_message(
+            call.message.chat.id,
+            f"<code>{coin_amount_str}</code>",
+            parse_mode="HTML",
         )
         return
         show_main_menu(call)
