@@ -1,14 +1,265 @@
-# Seamless Iran Agent
+# Seamless Iran Agent — Offline Install Guide
 
-این ابزار سرویس Iran Agent سیستم Seamless VPN است که روی **سرور ایران** اجرا می‌شود و پنل 3x-ui را به ربات اصلی متصل می‌کند.
+This directory contains everything needed to run the **Iran Agent** on an Iran VPS.
+The agent connects to the bot API on the foreign server, sends heartbeats, and tests
+your 3x-ui panel login.
+
+> **Zero external dependencies.**  The agent uses only Python standard library
+> (`urllib`, `http.cookiejar`, `json`, `logging`, …).  No `pip install`,
+> no `apt install`, no internet access is required on the Iran server.
 
 ---
 
-## معماری
+## Architecture
 
 ```
-┌──────────────────────────┐          ┌──────────────────────────────┐
-│   سرور ایران              │          │   سرور خارج                   │
+┌──────────────────────────┐          ┌───────────────────────────────┐
+│   Iran Server             │          │   Foreign Server (Bot)        │
+│                          │          │                               │
+│  ┌──────────────────┐   │  HTTP(S)  │  ┌─────────────────────────┐ │
+│  │  seamless-iran   │──────────────▶│  │  Bot API  /iran/*       │ │
+│  │  agent           │   │          │  └─────────────────────────┘ │
+│  └──────┬───────────┘   │          └───────────────────────────────┘
+│         │               │
+│  ┌──────▼───────────┐   │
+│  │  3x-ui Panel     │   │
+│  │  (local login)   │   │
+│  └──────────────────┘   │
+│                          │
+│  (optional: Xray proxy)  │
+└──────────────────────────┘
+```
+
+---
+
+## Manual assets required before building iran.zip
+
+> Do this ONCE on a machine that HAS internet access, then include the files in the bundle.
+
+| File | Source | Place at |
+|------|--------|----------|
+| `xray` (Linux x86_64 binary) | [Xray-core releases](https://github.com/XTLS/Xray-core/releases) → `Xray-linux-64.zip` → extract `xray` | `iran/xray/xray` |
+
+All other files are already in the bundle.  No Python wheels or apt packages are needed.
+
+### How to download the Xray binary (on an internet-connected machine)
+
+```bash
+curl -L https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip \
+     -o Xray-linux-64.zip
+unzip -j Xray-linux-64.zip xray -d iran/xray/
+chmod +x iran/xray/xray
+```
+
+> Only needed if you plan to use **xray_vless** outbound mode.
+> For `direct` and `http_proxy` modes, no binary is needed.
+
+---
+
+## Building iran.zip
+
+Run this once on your development machine (after placing any required assets):
+
+```bash
+# From the project root:
+zip -r iran.zip iran/ -x "iran/__pycache__/*" -x "iran/**/*.pyc" -x "iran/.git/*"
+```
+
+Transfer `iran.zip` to the Iran server (e.g. via SCP):
+
+```bash
+scp iran.zip root@YOUR_IRAN_SERVER_IP:/root/
+```
+
+---
+
+## Installation on the Iran server
+
+```bash
+# 1. Transfer and extract
+scp iran.zip root@YOUR_IRAN_SERVER:/root/
+ssh root@YOUR_IRAN_SERVER
+
+# 2. Extract
+unzip iran.zip
+cd iran/
+
+# 3. Run installer
+sudo bash install.sh
+```
+
+The installer asks you a few questions and sets everything up.
+
+---
+
+## Mode 1 — direct
+
+The agent connects directly to the foreign server.
+No proxy, no Xray needed.
+
+```
+Choose mode (1/2/3): 1
+```
+
+Required inputs:
+- Bot API Base URL (e.g. `http://1.2.3.4:8080`)
+- Registration Token (from bot admin panel)
+- 3x-ui panel credentials
+
+---
+
+## Mode 2 — http_proxy
+
+The agent routes all outbound traffic through an existing HTTP proxy.
+
+```
+Choose mode (1/2/3): 2
+Proxy URL: http://PROXY_IP:PORT
+```
+
+The proxy URL is written to `PROXY_URL=` in `config.env`.
+
+---
+
+## Mode 3 — xray_vless
+
+The agent tunnels through a local Xray process running VLESS outbound.
+Xray listens on `127.0.0.1:10809` (HTTP proxy) and the agent uses that.
+
+**Requirements:**
+- `iran/xray/xray` binary must be present in the bundle before building `iran.zip`
+
+```
+Choose mode (1/2/3): 3
+VLESS URI: vless://UUID@host:port?security=reality&pbk=...&sid=...#name
+```
+
+The installer:
+1. Checks `iran/xray/xray` exists — exits with a clear error if missing
+2. Parses the VLESS URI (pure Python stdlib — no external lib)
+3. Builds `/etc/xray/config.json` (HTTP inbound → VLESS outbound)
+4. Installs `/usr/local/bin/xray` from the local binary
+5. Creates and starts the `xray` systemd service
+6. Sets `PROXY_URL=http://127.0.0.1:10809` in `config.env`
+
+---
+
+## What a successful installation looks like
+
+```
+[OK]   Python 3.10 found at /usr/bin/python3
+[OK]   Bundled Xray binary found: /root/iran/xray/xray
+[OK]   VLESS URI parsed and Xray config generated
+[OK]   Binary installed
+[OK]   xray service is running
+[OK]   Files copied to /opt/seamless-iran-agent
+[OK]   config.env written (mode: xray_vless)
+[OK]   Registration successful!
+[OK]   Panel login test passed!
+[OK]   Service seamless-iran-agent is running
+```
+
+---
+
+## Verification commands
+
+```bash
+# Agent status
+systemctl status seamless-iran-agent
+journalctl -u seamless-iran-agent -f
+
+# Xray status (xray_vless mode only)
+systemctl status xray
+journalctl -u xray -f
+
+# Health check
+cd /opt/seamless-iran-agent
+python3 healthcheck.py
+
+# Manual panel test
+python3 test_panel.py --local
+```
+
+---
+
+## Troubleshooting
+
+### Xray binary not found
+
+```
+ERROR: Local Xray binary not found.
+Expected: iran/xray/xray
+```
+
+**Fix:** Download the Linux xray binary on a machine with internet access, place it
+at `iran/xray/xray`, then rebuild `iran.zip`.
+
+### Panel login failed
+
+```
+Panel login test FAILED: Cannot connect to panel at http://127.0.0.1:2053
+```
+
+**Checks:**
+- Is 3x-ui running? `systemctl status x-ui`
+- Correct port? Default is `2053`; check inside the 3x-ui panel settings
+- Correct credentials in `/opt/seamless-iran-agent/config.env`
+
+Re-test: `cd /opt/seamless-iran-agent && python3 test_panel.py --local`
+
+### Registration failed
+
+```
+Registration FAILED.
+```
+
+**Checks:**
+- Is the foreign Bot API reachable? `curl http://BOT_IP:8080/health`
+- If using `xray_vless`: is Xray running? `systemctl status xray`
+- Is the registration token correct and not yet used?
+- Try: `journalctl -u xray -f` to see if VLESS tunnel is working
+
+Re-run registration: `cd /opt/seamless-iran-agent && python3 register.py`
+
+### Agent not sending heartbeats
+
+```bash
+journalctl -u seamless-iran-agent -f
+```
+
+Look for `Heartbeat FAILED` — this usually means the proxy / network is not working.
+
+---
+
+## File structure
+
+```
+iran/
+├── install.sh               ← Offline installer (all 3 modes)
+├── agent.py                 ← Main daemon
+├── register.py              ← One-time registration script
+├── healthcheck.py           ← Health check utility
+├── test_panel.py            ← Panel login test utility
+├── config.env.example       ← Config template
+├── requirements.txt         ← Empty (stdlib only)
+├── README.md                ← This file
+├── lib/
+│   ├── api_client.py        ← HTTP client (urllib, no requests)
+│   ├── panel_client.py      ← 3x-ui login client (urllib, no requests)
+│   ├── config_loader.py     ← Env file parser (no python-dotenv)
+│   └── logger.py            ← Stdlib logging
+├── xray/
+│   ├── xray                 ← Linux binary (place here before building zip)
+│   ├── parse_vless.py       ← VLESS URI parser
+│   ├── build_xray_config.py ← Builds /etc/xray/config.json
+│   ├── install_xray.sh      ← Copies binary + installs service
+│   ├── README.md            ← How to get the xray binary
+│   └── service/
+│       └── xray.service     ← systemd unit for xray
+└── service/
+    └── seamless-iran-agent.service ← systemd unit template
+```
+
 │                          │          │                              │
 │   ┌──────────────────┐   │  HTTPS   │  ┌────────────────────────┐  │
 │   │  seamless-iran   │──────────────▶  │  Seamless Bot API      │  │

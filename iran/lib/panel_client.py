@@ -2,20 +2,16 @@
 """
 3x-ui panel client — handles login and connection tests.
 
-Only HTTP is used (no HTTPS requirement for local LAN connections).
-Secrets are never logged — callers must not pass them to log calls.
+Uses only Python standard library (urllib + http.cookiejar) — zero
+external dependencies.  Secrets are never logged.
 """
 from __future__ import annotations
 
+import http.cookiejar
 import json
-import os
-
-try:
-    import requests as _requests
-    from requests import Session as _Session
-    _REQUESTS_AVAILABLE = True
-except ImportError:
-    _REQUESTS_AVAILABLE = False
+import urllib.error
+import urllib.parse
+import urllib.request
 
 from .logger import get_logger
 
@@ -34,8 +30,6 @@ class XuiPanelClient:
       - Login (obtain session cookie)
       - Verify login success
       - Clean session management (no persistent state between test cycles)
-
-    Does NOT create clients or modify panel data (that is future work).
     """
 
     def __init__(
@@ -48,9 +42,6 @@ class XuiPanelClient:
         timeout: int = 15,
         proxies: dict | None = None,
     ):
-        if not _REQUESTS_AVAILABLE:
-            raise RuntimeError("requests package required. Run: pip install requests")
-
         scheme = "http"
         base   = f"{scheme}://{host}:{port}"
         if panel_path:
@@ -61,11 +52,15 @@ class XuiPanelClient:
         self._timeout  = timeout
         self._proxies  = proxies or {}
 
-    def _login_url(self) -> str:
-        return self._base + "/login"
-
-    def _list_url(self) -> str:
-        return self._base + "/xui/inbound/list"
+    def _build_opener(self) -> urllib.request.OpenerDirector:
+        jar      = http.cookiejar.CookieJar()
+        handlers: list = [urllib.request.HTTPCookieProcessor(jar)]
+        proxy_url = self._proxies.get("https") or self._proxies.get("http")
+        if proxy_url:
+            handlers.append(urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url}))
+        else:
+            handlers.append(urllib.request.ProxyHandler({}))
+        return urllib.request.build_opener(*handlers)
 
     def test_login(self) -> tuple[bool, str]:
         """
@@ -77,38 +72,33 @@ class XuiPanelClient:
         The message is safe to log and return to the admin.
         Password is NEVER included in the return value or logs.
         """
-        session = _requests.Session()
+        opener    = self._build_opener()
+        login_url = self._base + "/login"
+        form_data = urllib.parse.urlencode({
+            "username": self._username,
+            "password": self._password,
+        }).encode("utf-8")
+        req = urllib.request.Request(login_url, data=form_data, method="POST")
+        req.add_header("Content-Type", "application/x-www-form-urlencoded")
+
         try:
-            resp = session.post(
-                self._login_url(),
-                data={
-                    "username": self._username,
-                    "password": self._password,
-                },
-                timeout=self._timeout,
-                proxies=self._proxies,
-                allow_redirects=True,
-            )
-        except _requests.exceptions.ConnectionError:
-            return False, f"Cannot connect to panel at {self._base}"
-        except _requests.exceptions.Timeout:
-            return False, f"Connection timed out ({self._timeout}s)"
+            with opener.open(req, timeout=self._timeout) as resp:
+                body = resp.read().decode("utf-8", errors="replace")
+                try:
+                    data = json.loads(body)
+                    if data.get("success"):
+                        return True, "Login successful"
+                    msg = data.get("msg") or data.get("message") or "Login rejected by panel"
+                    return False, str(msg)[:200]
+                except (json.JSONDecodeError, ValueError):
+                    # Some older panels redirect to dashboard on success
+                    if resp.status == 200:
+                        return True, "Login successful"
+                    return False, f"Unexpected response (HTTP {resp.status})"
+        except urllib.error.HTTPError as exc:
+            return False, f"Panel returned HTTP {exc.code}"
+        except urllib.error.URLError as exc:
+            reason = getattr(exc, "reason", str(exc))
+            return False, f"Cannot connect to panel at {self._base}: {reason}"
         except Exception as exc:
             return False, f"Request error: {type(exc).__name__}"
-
-        # 3x-ui returns JSON {"success": true, ...} on valid login
-        try:
-            data = resp.json()
-            if data.get("success"):
-                return True, "Login successful"
-            # Extract a safe error message from response
-            msg = data.get("msg") or data.get("message") or "Login rejected by panel"
-            # Sanitize: don't echo back any token/cookie
-            return False, str(msg)[:200]
-        except (json.JSONDecodeError, ValueError):
-            # Some panels redirect on success (older versions)
-            if resp.status_code in (200, 302) and len(session.cookies) > 0:
-                return True, "Login successful (cookie obtained)"
-            return False, f"Unexpected response (HTTP {resp.status_code})"
-        finally:
-            session.close()

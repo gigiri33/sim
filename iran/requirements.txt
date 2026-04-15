@@ -1,7 +1,10 @@
-# ── Required ───────────────────────────────────────────────────────────────────
-requests>=2.28.0
-python-dotenv>=1.0.0
-
-# ── Optional (strongly recommended for production) ─────────────────────────────
-# cryptography is needed on the *bot* side for panel-password encryption.
-# The agent itself does not need it since passwords arrive decrypted over HTTPS.
+# Iran Agent — Python dependencies
+#
+# The agent uses ONLY Python standard library modules.
+# No external packages are required.
+# This file is kept for reference; nothing needs to be installed.
+#
+# Standard-library modules used:
+#   urllib.request, urllib.error, urllib.parse
+#   http.cookiejar
+#   json, os, sys, time, signal, logging

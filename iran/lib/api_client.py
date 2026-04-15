@@ -2,21 +2,17 @@
 """
 HTTP client for communicating with the bot's API server (foreign side).
 
+Uses only Python standard library (urllib) — zero external dependencies.
 All requests use the agent's UUID + secret for authentication.
 Secrets are never logged.
 """
 from __future__ import annotations
 
 import json
-import os
-import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from typing import Any
-
-try:
-    import requests as _requests
-    _REQUESTS_AVAILABLE = True
-except ImportError:
-    _REQUESTS_AVAILABLE = False
 
 from .logger import get_logger
 
@@ -29,6 +25,16 @@ class ApiError(Exception):
     def __init__(self, message: str, status_code: int | None = None):
         super().__init__(message)
         self.status_code = status_code
+
+
+def _build_opener(proxies: dict | None) -> urllib.request.OpenerDirector:
+    """Build a urllib opener with optional HTTP proxy support."""
+    proxy_url = (proxies or {}).get("https") or (proxies or {}).get("http")
+    if proxy_url:
+        handler = urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url})
+    else:
+        handler = urllib.request.ProxyHandler({})  # explicitly disable env proxies
+    return urllib.request.build_opener(handler)
 
 
 class BotApiClient:
@@ -46,17 +52,13 @@ class BotApiClient:
         timeout: int = 15,
         proxies: dict | None = None,
     ):
-        if not _REQUESTS_AVAILABLE:
-            raise RuntimeError(
-                "requests package is required. Run: pip install requests"
-            )
-        self._base     = base_url.rstrip("/")
-        self._uuid     = agent_uuid
-        self._secret   = agent_secret  # never logged
-        self._timeout  = timeout
-        self._proxies  = proxies or {}
+        self._base    = base_url.rstrip("/")
+        self._uuid    = agent_uuid
+        self._secret  = agent_secret  # never logged
+        self._timeout = timeout
+        self._opener  = _build_opener(proxies)
 
-    def _headers(self) -> dict:
+    def _headers(self) -> dict[str, str]:
         return {
             "X-Agent-UUID":   self._uuid,
             "X-Agent-Secret": self._secret,
@@ -64,61 +66,45 @@ class BotApiClient:
         }
 
     def _post(self, path: str, payload: dict) -> dict:
-        url = self._base + path
+        url  = self._base + path
+        body = json.dumps(payload).encode("utf-8")
+        req  = urllib.request.Request(url, data=body, method="POST")
+        for k, v in self._headers().items():
+            req.add_header(k, v)
         try:
-            resp = _requests.post(
-                url,
-                json=payload,
-                headers=self._headers(),
-                timeout=self._timeout,
-                proxies=self._proxies,
-            )
-        except _requests.exceptions.ConnectionError as exc:
-            raise ApiError(f"Connection error to {url}: {exc}")
-        except _requests.exceptions.Timeout:
-            raise ApiError(f"Request timed out: {url}")
+            with self._opener.open(req, timeout=self._timeout) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace")
+            try:
+                data = json.loads(raw)
+                raise ApiError(data.get("error", f"HTTP {exc.code}"), status_code=exc.code)
+            except (json.JSONDecodeError, ValueError):
+                raise ApiError(f"HTTP {exc.code}: {raw[:200]}", status_code=exc.code)
+        except urllib.error.URLError as exc:
+            raise ApiError(f"Connection error to {url}: {exc.reason}")
         except Exception as exc:
             raise ApiError(f"Request failed: {exc}")
-
-        try:
-            data = resp.json()
-        except Exception:
-            raise ApiError(f"Non-JSON response ({resp.status_code}): {resp.text[:200]}")
-
-        if not resp.ok:
-            raise ApiError(
-                data.get("error", f"HTTP {resp.status_code}"),
-                status_code=resp.status_code,
-            )
-        return data
 
     def _get(self, path: str) -> dict:
         url = self._base + path
+        req = urllib.request.Request(url, method="GET")
+        for k, v in self._headers().items():
+            req.add_header(k, v)
         try:
-            resp = _requests.get(
-                url,
-                headers=self._headers(),
-                timeout=self._timeout,
-                proxies=self._proxies,
-            )
-        except _requests.exceptions.ConnectionError as exc:
-            raise ApiError(f"Connection error to {url}: {exc}")
-        except _requests.exceptions.Timeout:
-            raise ApiError(f"Request timed out: {url}")
+            with self._opener.open(req, timeout=self._timeout) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace")
+            try:
+                data = json.loads(raw)
+                raise ApiError(data.get("error", f"HTTP {exc.code}"), status_code=exc.code)
+            except (json.JSONDecodeError, ValueError):
+                raise ApiError(f"HTTP {exc.code}: {raw[:200]}", status_code=exc.code)
+        except urllib.error.URLError as exc:
+            raise ApiError(f"Connection error to {url}: {exc.reason}")
         except Exception as exc:
             raise ApiError(f"Request failed: {exc}")
-
-        try:
-            data = resp.json()
-        except Exception:
-            raise ApiError(f"Non-JSON response ({resp.status_code}): {resp.text[:200]}")
-
-        if not resp.ok:
-            raise ApiError(
-                data.get("error", f"HTTP {resp.status_code}"),
-                status_code=resp.status_code,
-            )
-        return data
 
     # ── Public methods ─────────────────────────────────────────────────────────
 
@@ -150,12 +136,11 @@ class BotApiClient:
         return data.get("panels", [])
 
     def health_check(self) -> bool:
-        """Ping the /health endpoint (no auth required)."""
-        url = self._base + "/health"
+        """Check API reachability (no auth required). Returns True on success."""
         try:
-            resp = _requests.get(url, timeout=self._timeout, proxies=self._proxies)
-            return resp.ok
-        except Exception:
+            self._get("/health")
+            return True
+        except ApiError:
             return False
 
 
@@ -173,14 +158,11 @@ def register_agent(
     proxies: dict | None = None,
 ) -> dict:
     """
-    One-shot registration call.
-    Returns dict with agent_uuid, agent_secret, panel_id on success.
+    Register a new agent with the bot API.
+    Returns the response dict containing agent_uuid and agent_secret.
     Raises ApiError on failure.
     """
-    if not _REQUESTS_AVAILABLE:
-        raise RuntimeError("requests package is required. Run: pip install requests")
-
-    url     = base_url.rstrip("/") + "/iran/agents/register"
+    opener  = _build_opener(proxies)
     payload = {
         "registration_token": registration_token,
         "agent_name":         agent_name,
@@ -191,29 +173,21 @@ def register_agent(
         "panel_username":     panel_username,
         "panel_password":     panel_password,
     }
+    url  = base_url.rstrip("/") + "/iran/agents/register"
+    body = json.dumps(payload).encode("utf-8")
+    req  = urllib.request.Request(url, data=body, method="POST")
+    req.add_header("Content-Type", "application/json")
     try:
-        resp = _requests.post(
-            url,
-            json=payload,
-            headers={"Content-Type": "application/json"},
-            timeout=timeout,
-            proxies=proxies or {},
-        )
-    except _requests.exceptions.ConnectionError as exc:
-        raise ApiError(f"Cannot connect to {url}: {exc}")
-    except _requests.exceptions.Timeout:
-        raise ApiError(f"Connection timed out: {url}")
+        with opener.open(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode("utf-8", errors="replace")
+        try:
+            data = json.loads(raw)
+            raise ApiError(data.get("error", f"HTTP {exc.code}"), status_code=exc.code)
+        except (json.JSONDecodeError, ValueError):
+            raise ApiError(f"HTTP {exc.code}: {raw[:200]}", status_code=exc.code)
+    except urllib.error.URLError as exc:
+        raise ApiError(f"Connection error to {base_url}: {exc.reason}")
     except Exception as exc:
-        raise ApiError(f"Request failed: {exc}")
-
-    try:
-        data = resp.json()
-    except Exception:
-        raise ApiError(f"Non-JSON response ({resp.status_code}): {resp.text[:200]}")
-
-    if not resp.ok:
-        raise ApiError(
-            data.get("error", f"HTTP {resp.status_code}"),
-            status_code=resp.status_code,
-        )
-    return data
+        raise ApiError(f"Registration failed: {exc}")

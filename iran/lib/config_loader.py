@@ -2,17 +2,44 @@
 """
 Config loader for the Iran agent.
 
-Reads config.env (or .env) via python-dotenv and validates required fields.
+Uses only Python standard library — zero external dependencies.
+Parses KEY=VALUE files with the same semantics as python-dotenv:
+  - Lines starting with # are comments
+  - Blank lines are ignored
+  - Inline comments after # are stripped (unless value is quoted)
+  - Already-set env vars are NOT overwritten
 """
 import os
 import sys
 
-try:
-    from dotenv import load_dotenv
-    load_dotenv("config.env")
-    load_dotenv()  # fallback to .env
-except ImportError:
-    pass  # accept env-vars from the shell directly
+
+def _load_env_file(path: str) -> None:
+    """Parse a simple KEY=VALUE env file and inject missing keys into os.environ."""
+    if not os.path.exists(path):
+        return
+    with open(path, "r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key   = key.strip()
+            value = value.strip()
+            # Strip inline comment for unquoted values
+            if value and value[0] not in ('"', "'"):
+                value = value.split("#")[0].strip()
+            else:
+                # Remove surrounding quotes
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+                    value = value[1:-1]
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+
+# Load config files (same precedence order as python-dotenv)
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # iran/
+_load_env_file(os.path.join(_BASE_DIR, "config.env"))
+_load_env_file(os.path.join(_BASE_DIR, ".env"))
 
 
 class AgentConfig:
@@ -87,7 +114,7 @@ def load_config(validate: str = "runtime") -> AgentConfig:
     Raises SystemExit on validation failure.
     """
     cfg    = AgentConfig()
-    errors = []
+    errors: list[str] = []
     if validate == "runtime":
         errors = cfg.validate_for_runtime()
     elif validate == "registration":
