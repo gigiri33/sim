@@ -62,6 +62,7 @@ from ..admin.renderers import (
     _show_admin_user_detail_msg, _show_admin_assign_config_type, _fake_call,
     _show_admin_panels, _show_panel_packages, _show_panel_edit,
 )
+from ..admin.iran_panels import show_create_token_result
 from .callbacks import (
     _DISCOUNT_PROMPT_TEXT, _show_discount_prompt,
     _show_purchase_gateways, _show_renewal_gateways, _show_wallet_gateways,
@@ -526,9 +527,6 @@ def universal_handler(message):
                     reply_markup=back_button("main"))
                 return
             state_set(uid, "wallet_charge_method", amount=amount, original_amount=amount)
-            if setting_get("discount_codes_enabled", "0") == "1":
-                if _show_discount_prompt(message, amount):
-                    return
             _show_wallet_gateways(message, uid, amount)
             return
 
@@ -638,9 +636,6 @@ def universal_handler(message):
                 package_row = get_package(package_id) if package_id else None
                 if item and package_row:
                     _show_renewal_gateways(message, uid, purchase_id, package_id, final_amount, package_row, item)
-                return
-            if prev_state == "wallet_charge_method":
-                _show_wallet_gateways(message, uid, final_amount)
                 return
             bot.send_message(uid, "✅ تخفیف ثبت شد.", reply_markup=kb_main(uid))
             return
@@ -2830,6 +2825,21 @@ def universal_handler(message):
                 f"👤 Username: {esc(sd['username'])}\n"
                 f"🆔 Panel ID: #{new_id}",
                 reply_markup=kb_admin_panel(uid))
+            return
+
+        # ── Iran Panel: Token creation (single-step) ───────────────────────────
+        if sn == "ip_mktoken_label" and (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            label = (message.text or "").strip() or "بدون عنوان"
+            state_clear(uid)
+            from ..iran_panel.services import make_registration_token
+            token, _tid = make_registration_token(label=label, created_by=uid, ttl_hours=24)
+            log_admin_action(uid, f"توکن ثبت‌نام ثنایی «{label}» ایجاد شد")
+            # Build the API base URL hint from worker_api_port setting
+            api_port = setting_get("worker_api_port", "8080")
+            api_url  = f"http://<آدرس سرور خارج>:{api_port}"
+            from datetime import datetime, timedelta, timezone as _tz
+            expires = (datetime.now(_tz.utc) + timedelta(hours=24)).strftime("%Y-%m-%d %H:%M UTC")
+            show_create_token_result(message, token, expires, api_url)
             return
 
         # ── Pinned Messages ───────────────────────────────────────────────────

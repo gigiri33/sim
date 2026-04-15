@@ -409,6 +409,13 @@ def init_db():
             except Exception:
                 pass
 
+    # ── Iran Panel tables (separate migration, idempotent) ─────────────────────
+    try:
+        from .iran_panel.db import init_iran_panel_tables
+        init_iran_panel_tables()
+    except Exception:
+        pass
+
 
 # ── Settings ───────────────────────────────────────────────────────────────────
 def setting_get(key, default=""):

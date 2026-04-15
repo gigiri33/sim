@@ -83,6 +83,14 @@ from ..admin.renderers import (
     _show_admin_user_detail_msg, _show_admin_assign_config_type, _fake_call,
     _show_admin_panels, _show_panel_packages, _show_panel_edit,
 )
+from ..admin.iran_panels import (
+    show_iran_panels_list,
+    show_iran_panel_detail,
+    show_iran_agent_detail,
+    show_iran_panel_logs,
+    show_iran_token_list,
+    show_create_token_result,
+)
 from ..admin.backup import _send_backup
 
 
@@ -1605,7 +1613,7 @@ def _dispatch_callback(call, uid, data):
     if data == "disc:yes":
         sn = state_name(uid)
         sd = state_data(uid)
-        if sn not in {"buy_select_method", "renew_select_method", "wallet_charge_method"}:
+        if sn not in {"buy_select_method", "renew_select_method"}:
             bot.answer_callback_query(call.id, "درخواستی برای اعمال تخفیف پیدا نشد.", show_alert=True)
             return
         original_amount = sd.get("original_amount", sd.get("amount", 0))
@@ -1648,10 +1656,6 @@ def _dispatch_callback(call, uid, data):
             if item and package_row:
                 price = sd.get("amount") or get_effective_price(uid, package_row)
                 _show_renewal_gateways(call, uid, purchase_id, package_id, price, package_row, item)
-            return
-        if sn == "wallet_charge_method":
-            amount = int(sd.get("amount", 0) or 0)
-            _show_wallet_gateways(call, uid, amount)
             return
         bot.answer_callback_query(call.id, "درخواستی برای ادامه پیدا نشد.", show_alert=True)
         return
@@ -8431,9 +8435,159 @@ def _dispatch_callback(call, uid, data):
             back_button("admin:panels"))
         return
 
+    # ── Iran Panel management ─────────────────────────────────────────────────
+    if data == "admin:iran_panels":
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        show_iran_panels_list(call)
+        return
+
+    if data == "adm:ip:list_tokens":
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        show_iran_token_list(call)
+        return
+
+    if data == "adm:ip:mktoken":
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        # Ask for a label first
+        state_set(uid, "ip_mktoken_label")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "🔑 <b>ساخت توکن ثبت‌نام</b>\n\n"
+            "یک عنوان برای این توکن وارد کنید (مثلاً: سرور تهران-1):",
+            back_button("admin:iran_panels"))
+        return
+
+    if data.startswith("adm:ip:del_token:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        token_id = int(data.split(":")[3])
+        from ..iran_panel.db import delete_reg_token
+        delete_reg_token(token_id)
+        bot.answer_callback_query(call.id, "✅ توکن حذف شد.")
+        show_iran_token_list(call)
+        return
+
+    if data.startswith("adm:ip:detail:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        panel_id = int(data.split(":")[3])
+        bot.answer_callback_query(call.id)
+        show_iran_panel_detail(call, panel_id)
+        return
+
+    if data.startswith("adm:ip:agent:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        agent_id = int(data.split(":")[3])
+        bot.answer_callback_query(call.id)
+        show_iran_agent_detail(call, agent_id)
+        return
+
+    if data.startswith("adm:ip:logs:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        panel_id = int(data.split(":")[3])
+        bot.answer_callback_query(call.id)
+        show_iran_panel_logs(call, panel_id)
+        return
+
+    if data.startswith("adm:ip:toggle:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        parts     = data.split(":")
+        panel_id  = int(parts[3])
+        is_active = int(parts[4])
+        from ..iran_panel.db import toggle_iran_panel
+        toggle_iran_panel(panel_id, is_active)
+        log_admin_action(uid, f"پنل ثنایی #{panel_id} {'فعال' if is_active else 'غیرفعال'} شد")
+        bot.answer_callback_query(call.id, "✅ وضعیت پنل به‌روز شد.")
+        show_iran_panel_detail(call, panel_id)
+        return
+
+    if data.startswith("adm:ip:req_test:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        panel_id = int(data.split(":")[3])
+        # Mark panel as pending so agent knows to re-test on next heartbeat
+        from ..iran_panel.db import update_iran_panel_status
+        update_iran_panel_status(panel_id, "pending", "درخواست تست مجدد توسط ادمین")
+        bot.answer_callback_query(call.id, "⏳ درخواست تست ارسال شد. Agent در heartbeat بعدی تست می‌کند.")
+        show_iran_panel_detail(call, panel_id)
+        return
+
+    if data.startswith("adm:ip:del_panel:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        panel_id = int(data.split(":")[3])
+        from ..iran_panel.db import get_iran_panel as _gip
+        panel = _gip(panel_id)
+        if not panel:
+            bot.answer_callback_query(call.id, "پنل یافت نشد.", show_alert=True)
+            return
+        kb = types.InlineKeyboardMarkup()
+        kb.row(
+            types.InlineKeyboardButton("✅ بله، حذف شود", callback_data=f"adm:ip:del_panel_ok:{panel_id}"),
+            types.InlineKeyboardButton("❌ انصراف",        callback_data=f"adm:ip:detail:{panel_id}"),
+        )
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"⚠️ آیا مطمئن هستید که پنل <b>{esc(panel['name'])}</b> را حذف کنید؟\n"
+            "تمام لاگ‌های مرتبط نیز حذف می‌شوند.", kb)
+        return
+
+    if data.startswith("adm:ip:del_panel_ok:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        panel_id = int(data.split(":")[4])
+        from ..iran_panel.db import delete_iran_panel
+        delete_iran_panel(panel_id)
+        log_admin_action(uid, f"پنل ثنایی #{panel_id} حذف شد")
+        bot.answer_callback_query(call.id, "✅ پنل حذف شد.")
+        show_iran_panels_list(call)
+        return
+
+    if data.startswith("adm:ip:revoke:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        agent_id = int(data.split(":")[3])
+        from ..iran_panel.db import revoke_iran_agent
+        revoke_iran_agent(agent_id)
+        log_admin_action(uid, f"Agent ثنایی #{agent_id} revoke شد")
+        bot.answer_callback_query(call.id, "🚫 Agent revoke شد. دیگر Heartbeat نمی‌پذیرد.")
+        show_iran_agent_detail(call, agent_id)
+        return
+
+    if data.startswith("adm:ip:del_agent:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        agent_id = int(data.split(":")[3])
+        from ..iran_panel.db import delete_iran_agent
+        delete_iran_agent(agent_id)
+        log_admin_action(uid, f"Agent ثنایی #{agent_id} حذف شد")
+        bot.answer_callback_query(call.id, "✅ Agent و تمام پنل‌های آن حذف شدند.")
+        show_iran_panels_list(call)
+        return
+
     if data == "noop":
         bot.answer_callback_query(call.id)
         return
 
     bot.answer_callback_query(call.id)
-

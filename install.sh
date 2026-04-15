@@ -271,32 +271,6 @@ EOF
   systemctl enable "$SERVICE" >/dev/null 2>&1 || true
 }
 
-create_worker_service() {
-  [[ -f "$DIR/config.env" ]] || return 0
-  info "Creating Iran Worker service for ${SERVICE}-worker..."
-  cat > "/etc/systemd/system/${SERVICE}-worker.service" << EOF
-[Unit]
-Description=Seamless Iran Worker — ${BOT_NAME}
-After=network.target
-StartLimitIntervalSec=0
-
-[Service]
-Type=simple
-WorkingDirectory=${DIR}
-EnvironmentFile=${DIR}/config.env
-ExecStart=${DIR}/venv/bin/python ${DIR}/worker.py
-Restart=always
-RestartSec=10
-StandardOutput=append:${DIR}/worker.log
-StandardError=append:${DIR}/worker.log
-
-[Install]
-WantedBy=multi-user.target
-EOF
-  systemctl daemon-reload
-  systemctl enable "${SERVICE}-worker" >/dev/null 2>&1 || true
-  ok "Worker service created: ${SERVICE}-worker"
-}
 
 start_service() {
   systemctl restart "$SERVICE"
@@ -431,7 +405,7 @@ remove_bot() {
   read -r -p "Are you sure you want to remove ${BOT_NAME}? (yes/no): " confirm
   [[ "$confirm" == "yes" ]] || { info "Cancelled"; return; }
 
-  for svc in "$SERVICE" "${SERVICE}-worker"; do
+  for svc in "$SERVICE"; do
     systemctl stop    "$svc" 2>/dev/null || true
     systemctl disable "$svc" 2>/dev/null || true
     rm -f "/etc/systemd/system/${svc}.service"
@@ -446,79 +420,7 @@ remove_bot() {
   ok "${BOT_NAME} has been completely removed"
 }
 
-install_worker() {
-  echo ""
-  echo -e "${C}┌──────────────────────────────────────┐${N}"
-  echo -e "${C}│${N}    ${B}${W}📦 Worker Installation Source${N}               ${C}│${N}"
-  echo -e "${C}├──────────────────────────────────────┤${N}"
-  echo -e "${C}│${N}  ${B}${G}g)${N} 🌐 Install from GitHub                 ${C}│${N}"
-  echo -e "${C}│${N}  ${B}${M}l)${N} 📁 Install from local files          ${C}│${N}"
 
-
-  echo -e "${C}└──────────────────────────────────────┘${N}"
-  echo ""
-  read -r -p "$(echo -e "${B}Select [g/l]: ${N}")" src_choice
-  case "${src_choice:-}" in
-    g) _install_worker_github ;;
-    l) _install_worker_local  ;;
-    *) echo -e "${R}Invalid option${N}"; return 1 ;;
-  esac
-}
-
-_install_worker_github() {
-  ensure_safe_cwd
-  [[ -d "$DIR/.git" ]] || { install_prereqs; clone_or_update_repo; setup_venv; }
-  [[ -d "$DIR/venv" ]] || setup_venv
-  configure_iran_worker
-  create_worker_service
-  systemctl restart "${SERVICE}-worker"
-  echo ""
-  ok "Iran Worker for ${BOT_NAME} installed and started!"
-
-
-
-  systemctl status "${SERVICE}-worker" --no-pager -l || true
-}
-
-_install_worker_local() {
-  ensure_safe_cwd
-  info "Installing Iran Worker from local files: $SCRIPT_DIR"
-
-
-  local missing=0
-  for f in worker.py requirements.txt; do
-    [[ -f "$SCRIPT_DIR/$f" ]] || { echo -e "${R}✗ Missing file: $SCRIPT_DIR/$f${N}" >&2; missing=1; }
-
-
-
-  done
-  [[ $missing -eq 0 ]] || err "Place the required files next to install.sh"
-
-
-  install_prereqs
-
-
-  mkdir -p "$DIR"
-  for f in worker.py requirements.txt; do
-    cp -v "$SCRIPT_DIR/$f" "$DIR/$f"
-    ok "Copied $f → $DIR/$f"
-  done
-
-  [[ -f "$SCRIPT_DIR/config.env.example" ]] && cp "$SCRIPT_DIR/config.env.example" "$DIR/config.env.example" || true
-
-
-  setup_venv
-
-  configure_iran_worker
-  create_worker_service
-  systemctl restart "${SERVICE}-worker"
-  echo ""
-  ok "Iran Worker for ${BOT_NAME} installed and started!"
-
-
-
-  systemctl status "${SERVICE}-worker" --no-pager -l || true
-}
 
 # ─────────────────────────── BULK OPERATIONS ───────────────────────────
 
@@ -630,11 +532,9 @@ bulk_remove_all() {
     BOT_NAME="$(get_bot_name "$num")"
     echo ""
     echo -e "${C}━━━ Removing ${BOT_NAME} ━━━${N}"
-    for svc in "$SERVICE" "${SERVICE}-worker"; do
-      systemctl stop    "$svc" 2>/dev/null || true
-      systemctl disable "$svc" 2>/dev/null || true
-      rm -f "/etc/systemd/system/${svc}.service"
-    done
+    systemctl stop    "$SERVICE" 2>/dev/null || true
+    systemctl disable "$SERVICE" 2>/dev/null || true
+    rm -f "/etc/systemd/system/${SERVICE}.service"
     systemctl stop    "${SERVICE}-autoupdate.timer"   2>/dev/null || true
     systemctl disable "${SERVICE}-autoupdate.timer"   2>/dev/null || true
     rm -f "/etc/systemd/system/${SERVICE}-autoupdate.timer"
@@ -723,9 +623,6 @@ show_bot_menu() {
   echo -e "${C}│${N}  ${B}${G}9)${N} 🗑️  Remove this bot                          ${C}│${N}"
   echo -e "${C}│${N}  ${B}${C}a)${N} ⚡ Auto-update: $au_label           ${C}│${N}"
   echo -e "${C}│${N}  ${B}${C}u)${N} 📋 Auto-update log                    ${C}│${N}"
-  echo -e "${C}│${N}  ${B}${M}i)${N} 🇮🇷 Install Iran Worker (3x-ui)      ${C}│${N}"
-  echo -e "${C}│${N}  ${B}${M}w)${N} 📋 Worker log                                ${C}│${N}"
-  echo -e "${C}│${N}  ${B}${M}W)${N} 🔁 Restart                  Worker              ${C}│${N}"
   echo -e "${C}│${N}  ${B}${R}b)${N} 🔙 Back to main menu               ${C}│${N}"
   echo -e "${C}└──────────────────────────────────────┘${N}"
   echo ""
@@ -773,7 +670,7 @@ bot_loop() {
     show_bot_header
     show_bot_menu
 
-    read -r -p "$(echo -e "${C}${BOT_NAME}${N} ${B}➜${N} option ${W}[0-9/a/u/i/w/W/b]${N}: ")" choice
+    read -r -p "$(echo -e "${C}${BOT_NAME}${N} ${B}➜${N} option ${W}[0-9/a/u/b]${N}: ")" choice
 
     case "${choice:-}" in
       1) install_bot; read -r -p "Enter...";;
@@ -789,9 +686,6 @@ bot_loop() {
       u) echo -e "${Y}Press Ctrl+C to exit log${N}"; sleep 1
          tail -f "$DIR/autoupdate.log" 2>/dev/null || echo -e "${R}Log file not found.${N}"
          read -r -p "Enter...";;
-      i) install_worker; read -r -p "Enter...";;
-      w) echo -e "${Y}Press Ctrl+C to exit log${N}"; sleep 1; journalctl -u "${SERVICE}-worker" -f;;
-      W) systemctl restart "${SERVICE}-worker" 2>/dev/null && ok "Worker restarted"; read -r -p "Enter...";;
       b) return;;
       *) echo -e "${R}Invalid option${N}"; sleep 1;;
     esac

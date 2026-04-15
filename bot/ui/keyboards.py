@@ -110,6 +110,7 @@ def kb_admin_panel(uid=None):
 
     if is_owner or (uid and admin_has_perm(uid, "manage_panels")):
         kb.add(types.InlineKeyboardButton("🖥 مدیریت پنل‌های 3x-ui", callback_data="admin:panels"))
+        kb.add(types.InlineKeyboardButton("🇮🇷 پنل‌های ثنایی (ایران)", callback_data="admin:iran_panels"))
 
     if is_owner or (uid and admin_has_perm(uid, "settings")):
         kb.add(types.InlineKeyboardButton("⚙️ تنظیمات", callback_data="admin:settings"))

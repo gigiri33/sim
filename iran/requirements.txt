@@ -1,0 +1,7 @@
+# ── Required ───────────────────────────────────────────────────────────────────
+requests>=2.28.0
+python-dotenv>=1.0.0
+
+# ── Optional (strongly recommended for production) ─────────────────────────────
+# cryptography is needed on the *bot* side for panel-password encryption.
+# The agent itself does not need it since passwords arrive decrypted over HTTPS.

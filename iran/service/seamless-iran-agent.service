@@ -1,0 +1,23 @@
+[Unit]
+Description=Seamless Iran Agent — 3x-ui Panel Connector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/seamless-iran-agent
+ExecStart=/opt/seamless-iran-agent/venv/bin/python /opt/seamless-iran-agent/agent.py
+Restart=on-failure
+RestartSec=15s
+
+# Environment file — updated by install.sh and register.py
+EnvironmentFile=/opt/seamless-iran-agent/config.env
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/seamless-iran-agent
+
+[Install]
+WantedBy=multi-user.target
