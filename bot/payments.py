@@ -148,31 +148,39 @@ def show_crypto_payment_info(target, uid, coin_key, amount):
     if not addr:
         send_or_edit(target, "⚠️ آدرس این ارز هنوز توسط ادمین ثبت نشده است.", back_button("main"))
         return
-    price_text = ""
+
+    coin_amount_str = ""
     prices = _get_prices()
     if symbol and symbol in prices and prices[symbol] > 0:
         coin_amount = amount / prices[symbol]
-        price_text  = (
-            f"\n\n💱 <b>معادل ارزی:</b> {coin_amount:.6f} {symbol}\n"
-            f"📋 مبلغ قابل کپی: <code>{coin_amount:.6f}</code>\n"
-            f"برای پرداخت با این ارز باید معادل <b>{coin_amount:.6f} {symbol}</b> واریز نمایید."
-        )
+        coin_amount_str = f"{coin_amount:.6f}"
+
+    equiv_line = (
+        f"\n💱 <b>معادل ارزی:</b> {coin_amount_str} {symbol}\n"
+        if coin_amount_str else ""
+    )
+
     text = (
         f"💎 <b>پرداخت با {label}</b>\n\n"
-        f"مبلغ: <b>{fmt_price(amount)}</b> تومان{price_text}\n\n"
-        f"📋 آدرس ولت:\n<code>{esc(addr)}</code>\n\n"
-        "پس از واریز، تصویر تراکنش یا هش آن را ارسال کنید."
+        f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان"
+        f"{equiv_line}\n"
+        f"📋 <b>آدرس ولت:</b>\n<code>{esc(addr)}</code>\n\n"
+        "⬇️ پس از واریز، تصویر تراکنش یا هش آن را ارسال کنید."
     )
+
     kb = types.InlineKeyboardMarkup()
+    if coin_amount_str:
+        kb.row(
+            types.InlineKeyboardButton("📋 کپی آدرس ولت",    callback_data=f"crypto:copy_addr:{coin_key}"),
+            types.InlineKeyboardButton("🔢 کپی مبلغ دقیق",   callback_data=f"crypto:copy_amount:{coin_key}:{amount}"),
+        )
+    else:
+        kb.add(types.InlineKeyboardButton("📋 کپی آدرس ولت", callback_data=f"crypto:copy_addr:{coin_key}"))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
 
     if hasattr(target, "message"):
         chat_id = target.message.chat.id
         msg_id  = target.message.message_id
-        # Always use explicit parse_mode so HTML tags are parsed correctly.
-        # send_or_edit omits parse_mode which causes Telegram to raise
-        # "can't parse entities" and silently swallow the error, leaving
-        # the coin-selection screen unchanged.
         try:
             bot.edit_message_text(
                 text, chat_id, msg_id,
@@ -183,8 +191,6 @@ def show_crypto_payment_info(target, uid, coin_key, amount):
             return
         except Exception:
             pass
-        # Edit failed: remove buttons so old coins aren't clickable, then
-        # send the payment info as a fresh message.
         try:
             bot.delete_message(chat_id, msg_id)
         except Exception:

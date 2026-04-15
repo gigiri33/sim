@@ -2588,6 +2588,49 @@ def _dispatch_callback(call, uid, data):
 
     if data == "pm:back":
         bot.answer_callback_query(call.id)
+
+    # ── Crypto copy helpers ───────────────────────────────────────────────────
+    if data.startswith("crypto:copy_addr:"):
+        coin_key = data.split(":")[2]
+        from ..db import setting_get as _sg
+        addr = _sg(f"crypto_{coin_key}", "")
+        if not addr:
+            bot.answer_callback_query(call.id, "آدرس ولت پیدا نشد.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        bot.send_message(
+            call.message.chat.id,
+            f"📋 <b>آدرس ولت:</b>\n\n<code>{esc(addr)}</code>\n\n"
+            "روی آدرس بالا ضربه بزنید تا کپی شود.",
+            parse_mode="HTML",
+        )
+        return
+
+    if data.startswith("crypto:copy_amount:"):
+        parts = data.split(":")
+        coin_key = parts[2]
+        try:
+            amount = int(parts[3])
+        except (IndexError, ValueError):
+            bot.answer_callback_query(call.id, "اطلاعات مبلغ پیدا نشد.", show_alert=True)
+            return
+        from ..config import CRYPTO_API_SYMBOLS as _CAS
+        from ..payments import _get_prices as _gp
+        symbol = _CAS.get(coin_key, "")
+        prices = _gp()
+        if not symbol or symbol not in prices or prices[symbol] <= 0:
+            bot.answer_callback_query(call.id, "نرخ ارز در دسترس نیست.", show_alert=True)
+            return
+        coin_amount = amount / prices[symbol]
+        coin_amount_str = f"{coin_amount:.6f}"
+        bot.answer_callback_query(call.id)
+        bot.send_message(
+            call.message.chat.id,
+            f"🔢 <b>مبلغ دقیق:</b>\n\n<code>{coin_amount_str}</code>\n\n"
+            "روی مبلغ بالا ضربه بزنید تا کپی شود.",
+            parse_mode="HTML",
+        )
+        return
         show_main_menu(call)
         return
 
