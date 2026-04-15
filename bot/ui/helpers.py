@@ -15,7 +15,7 @@ from ..bot_instance import bot
 # Caching the result per-user for 60 s cuts the vast majority of these calls.
 _CHANNEL_CACHE: dict[int, tuple[bool, float]] = {}
 _CHANNEL_CACHE_LOCK = threading.Lock()
-_CHANNEL_CACHE_TTL  = 300.0  # seconds (5 min)
+_CHANNEL_CACHE_TTL  = 30.0   # seconds — short TTL so leaving the channel is detected quickly
 
 
 def _invalidate_channel_cache(user_id: int | None = None) -> None:

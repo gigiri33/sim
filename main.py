@@ -50,7 +50,17 @@ def main():
         print(f"⚠️ Could not delete webhook: {e}")
 
     print("✅ Bot is running...")
-    bot.infinity_polling(skip_pending=True, timeout=30, long_polling_timeout=30)
+    bot.infinity_polling(
+        skip_pending=True,
+        timeout=30,
+        long_polling_timeout=30,
+        allowed_updates=[
+            "message",
+            "callback_query",
+            "chat_member",      # needed for channel-leave detection
+            "my_chat_member",   # bot kicked/added to channels/groups
+        ],
+    )
 
 
 if __name__ == "__main__":

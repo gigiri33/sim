@@ -130,3 +130,56 @@ def start_handler(message):
         return
 
     show_main_menu(message)
+
+
+# ── Channel member-status watcher ─────────────────────────────────────────────
+# Fires when any user's membership status changes inside ANY chat the bot can see.
+# We only care about our configured mandatory channel: if a user leaves/gets kicked,
+# we immediately drop their membership cache so the very next callback or message
+# they send will be blocked without waiting for the TTL to expire.
+
+@bot.chat_member_handler(func=lambda u: True)
+def on_chat_member_updated(update):
+    """Immediately invalidate channel-membership cache when a user leaves."""
+    channel_id = setting_get("channel_id", "").strip()
+    if not channel_id:
+        return
+
+    # Match by numeric ID or @username
+    chat = update.chat
+    chat_matches = (
+        str(chat.id) == channel_id
+        or (chat.username and f"@{chat.username}" == channel_id)
+        or str(chat.id) == channel_id.lstrip("-")
+    )
+    if not chat_matches:
+        return
+
+    new_status = update.new_chat_member.status
+    user_id    = update.new_chat_member.user.id
+
+    if new_status in ("left", "kicked", "restricted", "banned"):
+        _invalidate_channel_cache(user_id)
+
+        # Build channel URL for the leave notification
+        if channel_id.startswith("@"):
+            channel_url = f"https://t.me/{channel_id.lstrip('@')}"
+        elif channel_id.startswith("-100"):
+            channel_url = f"https://t.me/c/{channel_id[4:]}"
+        else:
+            channel_url = f"https://t.me/{channel_id}"
+
+        from telebot import types as _t
+        kb = _t.InlineKeyboardMarkup()
+        kb.add(_t.InlineKeyboardButton("📢 عضویت مجدد در کانال", url=channel_url))
+        try:
+            bot.send_message(
+                user_id,
+                "❌ <b>شما از کانال ما خارج شدید</b>\n\n"
+                "از این پس از اخبار، آپدیت‌ها و اطلاعیه‌های مهم با خبر نمی‌شوید.\n\n"
+                "بهتر است مجدداً عضو کانال شوید تا دسترسی به ربات حفظ شود. 🙏",
+                parse_mode="HTML",
+                reply_markup=kb,
+            )
+        except Exception:
+            pass
