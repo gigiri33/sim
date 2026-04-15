@@ -2298,11 +2298,13 @@ def _dispatch_callback(call, uid, data):
             accepted = setting_get(f"rules_accepted_{uid}", "0")
             if accepted != "1":
                 rules_text = setting_get("purchase_rules_text", "")
+                from ..ui.premium_emoji import render_premium_text_html as _rph
+                rendered_rules = _rph(rules_text, escape_plain_parts=True)
                 kb = types.InlineKeyboardMarkup()
                 kb.add(types.InlineKeyboardButton("✅ من قوانین را خواندم و پذیرفتم", callback_data="buy:accept_rules"))
                 kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
                 bot.answer_callback_query(call.id)
-                send_or_edit(call, f"📜 <b>قوانین خرید</b>\n\n{esc(rules_text)}", kb)
+                send_or_edit(call, f"📜 <b>قوانین خرید</b>\n\n{rendered_rules}", kb)
                 return
         # Fall through to actual buy
         data = "buy:start_real"
@@ -5914,11 +5916,60 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("🤖 مدیریت عملیات ربات", callback_data="adm:ops"))
         kb.add(types.InlineKeyboardButton("🏢 مدیریت گروه",    callback_data="admin:group"))
         kb.add(types.InlineKeyboardButton("📌 پیام‌های پین شده", callback_data="adm:pin"))
+        kb.add(types.InlineKeyboardButton("⭐ آیدی ایموجی پرمیوم", callback_data="adm:emoji:menu"))
         kb.add(types.InlineKeyboardButton("� مدیریت اعلان‌ها",  callback_data="adm:notif"))
         kb.add(types.InlineKeyboardButton("�💾 بکاپ",            callback_data="admin:backup"))
         kb.add(types.InlineKeyboardButton("🔙 بازگشت",        callback_data="admin:panel"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "⚙️ <b>تنظیمات</b>", kb)
+        return
+
+    # ── Admin: Premium Emoji Tools ────────────────────────────────────────────
+    if data == "adm:emoji:menu":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("🔍 تبدیل پیام به آیدی ایموجی", callback_data="adm:emoji:extract"))
+        kb.add(types.InlineKeyboardButton("🧪 تست نمایش ایموجی پرمیوم",   callback_data="adm:emoji:test"))
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت",                      callback_data="admin:settings"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(
+            call,
+            "⭐ <b>آیدی ایموجی پرمیوم</b>\n\n"
+            "ابزارهای مدیریت ایموجی‌های سفارشی تلگرام پرمیوم:",
+            kb,
+        )
+        return
+
+    if data == "adm:emoji:extract":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        state_set(uid, "admin_emoji_extract")
+        bot.answer_callback_query(call.id)
+        send_or_edit(
+            call,
+            "🔍 <b>تبدیل پیام به آیدی ایموجی</b>\n\n"
+            "یک پیام حاوی ایموجی پرمیوم (سفارشی) ارسال کنید.\n"
+            "می‌توانید چند ایموجی در یک پیام بفرستید.\n\n"
+            "<i>متن همراه ایموجی نیز شناسایی می‌شود.</i>",
+            back_button("adm:emoji:menu"),
+        )
+        return
+
+    if data == "adm:emoji:test":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        state_set(uid, "admin_emoji_test")
+        bot.answer_callback_query(call.id)
+        send_or_edit(
+            call,
+            "🧪 <b>تست نمایش ایموجی پرمیوم</b>\n\n"
+            "پیامی حاوی ایموجی پرمیوم ارسال کنید تا بازنمایی شود.",
+            back_button("adm:emoji:menu"),
+        )
         return
 
     if data == "adm:set:agency_toggle":

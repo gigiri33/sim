@@ -1034,8 +1034,10 @@ def universal_handler(message):
             return
 
         if sn == "admin_edit_type_desc" and is_admin(uid):
-            desc = (message.text or "").strip()
-            update_type_description(sd["type_id"], desc)
+            from ..ui.premium_emoji import serialize_premium_text as _spt
+            desc     = (message.text or message.caption or "").strip()
+            entities = message.entities or message.caption_entities or []
+            update_type_description(sd["type_id"], _spt(desc, entities))
             state_clear(uid)
             bot.send_message(uid, "✅ توضیحات با موفقیت ویرایش شد.")
             _show_admin_types(message)
@@ -2267,8 +2269,13 @@ def universal_handler(message):
             return
 
         if sn == "admin_set_start_text" and is_admin(uid):
-            val = (message.text or "").strip()
-            setting_set("start_text", "" if val == "-" else val)
+            from ..ui.premium_emoji import serialize_premium_text as _spt
+            raw_text = (message.text or message.caption or "").strip()
+            entities = message.entities or message.caption_entities or []
+            if raw_text == "-":
+                setting_set("start_text", "")
+            else:
+                setting_set("start_text", _spt(raw_text, entities))
             log_admin_action(uid, "متن استارت تغییر کرد")
             state_clear(uid)
             bot.send_message(uid, "✅ متن استارت ذخیره شد.", reply_markup=back_button("admin:settings"))
@@ -2759,14 +2766,45 @@ def universal_handler(message):
 
         # ── Admin: Edit rules text ─────────────────────────────────────────────
         if sn == "admin_edit_rules_text" and is_admin(uid):
-            text_val = (message.text or "").strip()
+            from ..ui.premium_emoji import serialize_premium_text as _spt
+            text_val = (message.text or message.caption or "").strip()
             if not text_val:
                 bot.send_message(uid, "⚠️ متن خالی مجاز نیست.", reply_markup=back_button("adm:set:rules"))
                 return
-            setting_set("purchase_rules_text", text_val)
+            entities = message.entities or message.caption_entities or []
+            setting_set("purchase_rules_text", _spt(text_val, entities))
             log_admin_action(uid, "متن قوانین خرید ویرایش شد")
             state_clear(uid)
             bot.send_message(uid, "✅ متن قوانین خرید ذخیره شد.", reply_markup=back_button("adm:set:rules"))
+            return
+
+        # ── Admin: Premium Emoji — Extract IDs ────────────────────────────────
+        if sn == "admin_emoji_extract" and is_admin(uid):
+            from ..ui.premium_emoji import extract_custom_emojis, format_extracted_emoji_report
+            items  = extract_custom_emojis(message)
+            report = format_extracted_emoji_report(items)
+            state_clear(uid)
+            bot.send_message(uid, report, parse_mode="HTML",
+                             reply_markup=back_button("adm:emoji:menu"))
+            return
+
+        # ── Admin: Premium Emoji — Render Test ────────────────────────────────
+        if sn == "admin_emoji_test" and is_admin(uid):
+            from ..ui.premium_emoji import serialize_premium_text, render_premium_text_entities
+            raw_text  = message.text or message.caption or ""
+            entities  = message.entities or message.caption_entities or []
+            serialized = serialize_premium_text(raw_text, entities)
+            out_text, out_ents = render_premium_text_entities(serialized)
+            state_clear(uid)
+            kb = back_button("adm:emoji:menu")
+            if out_ents:
+                bot.send_message(uid,
+                    "✅ ایموجی‌های پرمیوم شناسایی شدند. بازنمایی:\n\n" + out_text,
+                    entities=out_ents, reply_markup=kb)
+            else:
+                bot.send_message(uid,
+                    f"ℹ️ ایموجی پرمیوم شناسایی نشد.\n\n{esc(out_text)}",
+                    parse_mode="HTML", reply_markup=kb)
             return
 
         # ── Panel: Register Panel Config (multi-step) ──────────────────────────

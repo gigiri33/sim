@@ -11,13 +11,14 @@ from ..helpers import esc, fmt_price, display_username, back_button, move_leadin
 from ..bot_instance import bot
 from .helpers import send_or_edit
 from .keyboards import kb_main
+from .premium_emoji import render_premium_text_html
 
 
 def show_main_menu(target):
     uid         = target.from_user.id if hasattr(target, "from_user") else target.chat.id
-    custom_text = setting_get("start_text", "")
-    if custom_text:
-        text = custom_text
+    custom_raw  = setting_get("start_text", "")
+    if custom_raw:
+        text = render_premium_text_html(custom_raw)  # handles both plain & premium
     else:
         text = (
             f"✨ <b>به فروشگاه {BRAND_TITLE} خوش آمدید!</b>\n\n"
