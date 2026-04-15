@@ -39,6 +39,7 @@ from ..db import (
     validate_discount_code, record_discount_usage, has_eligible_discount_codes,
     add_voucher_batch, get_voucher_code_by_code, redeem_voucher_code,
     set_phone_number, get_phone_number,
+    get_bulk_qty_limits,
 )
 from ..gateways.base import is_gateway_available, is_card_info_complete, get_global_amount_range, get_gateway_range_text, is_gateway_in_range, build_gateway_range_guide
 from ..gateways.tetrapay import create_tetrapay_order, verify_tetrapay_order
@@ -536,13 +537,35 @@ def universal_handler(message):
             raw = (message.text or "").strip()
             normalized = normalize_text_number(raw)
             qty = parse_int(normalized)
+
+            min_qty, max_qty = get_bulk_qty_limits()
+            max_label = "بدون محدودیت" if max_qty == 0 else str(max_qty)
+
             if not qty or qty <= 0:
                 bot.send_message(uid,
-                    "⚠️ <b>تعداد نامعتبر است.</b>\n\n"
-                    "لطفاً یک عدد صحیح و مثبت وارد کنید.\n"
-                    "مثال: <code>2</code> یا <code>5</code>",
+                    "⚠️ <b>تعداد وارد‌شده نامعتبر است.</b>\n\n"
+                    "لطفاً یک عدد صحیح و مثبت وارد کنید.\n\n"
+                    f"📌 بازه مجاز: <b>{min_qty}</b> تا <b>{max_label}</b>\n"
+                    f"مثال: <code>{min_qty}</code>",
                     parse_mode="HTML")
                 return
+
+            if qty < min_qty:
+                bot.send_message(uid,
+                    f"⚠️ <b>تعداد وارد‌شده کمتر از حداقل مجاز است.</b>\n\n"
+                    f"📌 حداقل تعداد مجاز در هر سفارش: <b>{min_qty} عدد</b>\n\n"
+                    "لطفاً مقدار بیشتری وارد کنید.",
+                    parse_mode="HTML")
+                return
+
+            if max_qty > 0 and qty > max_qty:
+                bot.send_message(uid,
+                    f"⚠️ <b>تعداد وارد‌شده بیشتر از حداکثر مجاز است.</b>\n\n"
+                    f"📌 حداکثر تعداد مجاز در هر سفارش: <b>{max_qty} عدد</b>\n\n"
+                    "لطفاً مقدار کمتری وارد کنید.",
+                    parse_mode="HTML")
+                return
+
             package_id = sd.get("package_id")
             unit_price = int(sd.get("unit_price", 0) or 0)
             package_row = get_package(package_id)
@@ -2067,6 +2090,60 @@ def universal_handler(message):
             log_admin_action(uid, f"مبلغ هدیه خرید: {amount} تومان")
             state_clear(uid)
             bot.send_message(uid, f"✅ مبلغ هدیه خرید: {fmt_price(amount)} تومان", reply_markup=back_button("adm:ref:settings"))
+            return
+
+        # ── Bulk sale qty limits ──────────────────────────────────────────────
+        if sn == "admin_bulk_min_qty" and is_admin(uid):
+            val = parse_int(normalize_text_number(message.text or ""))
+            if not val or val <= 0:
+                bot.send_message(uid,
+                    "⚠️ <b>مقدار نامعتبر است.</b>\n\nلطفاً یک عدد صحیح و مثبت وارد کنید (مثلاً ۱).",
+                    parse_mode="HTML",
+                    reply_markup=back_button("adm:ops:bulk_menu"))
+                return
+            _, cur_max = get_bulk_qty_limits()
+            if cur_max > 0 and val > cur_max:
+                bot.send_message(uid,
+                    f"⚠️ <b>حداقل نمی‌تواند بیشتر از حداکثر ({cur_max}) باشد.</b>\n\n"
+                    "لطفاً مقدار کمتری وارد کنید.",
+                    parse_mode="HTML",
+                    reply_markup=back_button("adm:ops:bulk_menu"))
+                return
+            setting_set("bulk_min_qty", str(val))
+            log_admin_action(uid, f"حداقل تعداد فروش عمده: {val}")
+            state_clear(uid)
+            bot.send_message(uid,
+                f"✅ <b>حداقل تعداد خرید به {val} عدد تنظیم شد.</b>",
+                parse_mode="HTML",
+                reply_markup=back_button("adm:ops:bulk_menu"))
+            return
+
+        if sn == "admin_bulk_max_qty" and is_admin(uid):
+            raw_text = normalize_text_number(message.text or "")
+            val = parse_int(raw_text)
+            if val is None or val < 0:
+                bot.send_message(uid,
+                    "⚠️ <b>مقدار نامعتبر است.</b>\n\n"
+                    "یک عدد صحیح مثبت وارد کنید، یا <b>0</b> برای «بدون محدودیت».",
+                    parse_mode="HTML",
+                    reply_markup=back_button("adm:ops:bulk_menu"))
+                return
+            cur_min, _ = get_bulk_qty_limits()
+            if val > 0 and val < cur_min:
+                bot.send_message(uid,
+                    f"⚠️ <b>حداکثر نمی‌تواند کمتر از حداقل ({cur_min}) باشد.</b>\n\n"
+                    "لطفاً مقدار بیشتری وارد کنید یا 0 برای بدون محدودیت.",
+                    parse_mode="HTML",
+                    reply_markup=back_button("adm:ops:bulk_menu"))
+                return
+            setting_set("bulk_max_qty", str(val))
+            log_admin_action(uid, f"حداکثر تعداد فروش عمده: {val if val > 0 else 'نامحدود'}")
+            state_clear(uid)
+            label = "بدون محدودیت" if val == 0 else f"{val} عدد"
+            bot.send_message(uid,
+                f"✅ <b>حداکثر تعداد خرید به {label} تنظیم شد.</b>",
+                parse_mode="HTML",
+                reply_markup=back_button("adm:ops:bulk_menu"))
             return
 
         if sn == "admin_set_card" and is_admin(uid):

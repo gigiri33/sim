@@ -156,7 +156,7 @@ def show_crypto_payment_info(target, uid, coin_key, amount):
         coin_amount_str = f"{coin_amount:.6f}"
 
     equiv_line = (
-        f"\n💱 <b>معادل ارزی:</b> {coin_amount_str} {symbol}\n"
+        f"\n💱 <b>معادل ارزی:</b> <code>{coin_amount_str}</code> {symbol}\n"
         if coin_amount_str else ""
     )
 

@@ -346,6 +346,8 @@ def init_db():
             "discount_codes_enabled":             "1",
             "vouchers_enabled":                   "1",
             "bulk_sale_mode":                     "everyone",
+            "bulk_min_qty":                       "1",
+            "bulk_max_qty":                       "0",
         }
         for coin, _ in CRYPTO_COINS:
             defaults[f"crypto_{coin}"] = ""
@@ -435,6 +437,16 @@ def setting_set(key, value):
 
 
 # ── Bulk Sale ──────────────────────────────────────────────────────────────────
+def get_bulk_qty_limits() -> tuple:
+    """
+    Return (min_qty: int, max_qty: int) for bulk purchases.
+    max_qty == 0 means unlimited.
+    """
+    min_qty = max(1, int(setting_get("bulk_min_qty", "1") or "1"))
+    max_qty = max(0, int(setting_get("bulk_max_qty", "0") or "0"))
+    return min_qty, max_qty
+
+
 def should_show_bulk_qty(user_id: int) -> bool:
     """
     Return True if the user should be shown the bulk quantity prompt.

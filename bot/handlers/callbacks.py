@@ -35,7 +35,7 @@ from ..db import (
     get_all_panels, get_panel, add_panel, delete_panel,
     get_panel_packages, add_panel_package, delete_panel_package, update_panel_field,
     get_conn, create_pending_order, get_pending_order, add_config, search_users,
-    should_show_bulk_qty,
+    should_show_bulk_qty, get_bulk_qty_limits,
     reset_all_free_tests, user_has_any_test, agent_test_count_in_period,
     get_all_pinned_messages, get_pinned_message, add_pinned_message,
     update_pinned_message, delete_pinned_message,
@@ -750,11 +750,18 @@ def _show_wallet_gateways(target, uid, amount):
 
 def _show_qty_prompt(call, package_row, unit_price):
     """Show the quantity-selection prompt to the user."""
-    from ..db import should_show_bulk_qty
+    from ..db import should_show_bulk_qty, get_bulk_qty_limits
     uid = call.from_user.id
     _pkg_sn   = package_row.get("show_name", 1) if not hasattr(package_row, "keys") else (package_row["show_name"] if "show_name" in package_row.keys() else 1)
     _pkg_name = package_row["name"] if _pkg_sn else ""
     _name_line = f"📦 پکیج: <b>{esc(_pkg_name)}</b>\n" if _pkg_name else ""
+
+    min_qty, max_qty = get_bulk_qty_limits()
+    max_label = "بدون محدودیت" if max_qty == 0 else str(max_qty)
+    limit_line = (
+        f"📌 حداقل: <b>{min_qty}</b>  |  حداکثر: <b>{max_label}</b>\n\n"
+    )
+
     state_set(uid, "await_qty",
               package_id=package_row["id"],
               unit_price=unit_price,
@@ -768,7 +775,8 @@ def _show_qty_prompt(call, package_row, unit_price):
         f"🔋 حجم: {fmt_vol(package_row['volume_gb'])}  |  ⏰ مدت: {fmt_dur(package_row['duration_days'])}\n"
         f"💰 قیمت هر عدد: <b>{fmt_price(unit_price)}</b> تومان\n\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        "🔢 چه تعداد کانفیگ نیاز دارید؟\n\n"
+        f"🔢 چه تعداد کانفیگ نیاز دارید؟\n\n"
+        f"{limit_line}"
         "📝 <i>عدد موردنظر را تایپ کنید (مثلاً ۱، ۲، ۵)</i>"
     )
     send_or_edit(call, text, kb)
@@ -2596,14 +2604,12 @@ def _dispatch_callback(call, uid, data):
         addr = _sg(f"crypto_{coin_key}", "")
         if not addr:
             bot.answer_callback_query(call.id, "آدرس ولت پیدا نشد.", show_alert=True)
-            return
-        bot.answer_callback_query(call.id)
-        bot.send_message(
-            call.message.chat.id,
-            f"📋 <b>آدرس ولت:</b>\n\n<code>{esc(addr)}</code>\n\n"
-            "روی آدرس بالا ضربه بزنید تا کپی شود.",
-            parse_mode="HTML",
-        )
+        else:
+            bot.answer_callback_query(
+                call.id,
+                "📋 آدرس ولت روی متن پیام قابل کپی است — روی آدرس ضربه بزنید.",
+                show_alert=False,
+            )
         return
 
     if data.startswith("crypto:copy_amount:"):
@@ -2619,16 +2625,16 @@ def _dispatch_callback(call, uid, data):
         symbol = _CAS.get(coin_key, "")
         prices = _gp()
         if not symbol or symbol not in prices or prices[symbol] <= 0:
-            bot.answer_callback_query(call.id, "نرخ ارز در دسترس نیست.", show_alert=True)
+            bot.answer_callback_query(
+                call.id,
+                "⚠️ نرخ ارز در دسترس نیست. مبلغ را از متن پیام کپی کنید.",
+                show_alert=True,
+            )
             return
-        coin_amount = amount / prices[symbol]
-        coin_amount_str = f"{coin_amount:.6f}"
-        bot.answer_callback_query(call.id)
-        bot.send_message(
-            call.message.chat.id,
-            f"🔢 <b>مبلغ دقیق:</b>\n\n<code>{coin_amount_str}</code>\n\n"
-            "روی مبلغ بالا ضربه بزنید تا کپی شود.",
-            parse_mode="HTML",
+        bot.answer_callback_query(
+            call.id,
+            "🔢 مبلغ دقیق روی متن پیام قابل کپی است — روی عدد ضربه بزنید.",
+            show_alert=False,
         )
         return
         show_main_menu(call)
@@ -6305,7 +6311,7 @@ def _dispatch_callback(call, uid, data):
             types.InlineKeyboardButton("🎁 زیرمجموعه‌گیری", callback_data="adm:ops:noop"),
         )
         ops_kb.row(
-            types.InlineKeyboardButton(bulk_label, callback_data="adm:ops:bulk_sale"),
+            types.InlineKeyboardButton(bulk_label, callback_data="adm:ops:bulk_menu"),
             types.InlineKeyboardButton("📦 فروش عمده", callback_data="adm:ops:noop"),
         )
         ops_kb.add(types.InlineKeyboardButton("⚙️ تنظیمات زیرمجموعه‌گیری", callback_data="adm:ref:settings"))
@@ -6317,6 +6323,8 @@ def _dispatch_callback(call, uid, data):
         renewal_enabled = setting_get("manual_renewal_enabled", "1")
         referral_enabled = setting_get("referral_enabled", "1")
         bulk_mode       = setting_get("bulk_sale_mode", "everyone")
+        min_qty, max_qty = get_bulk_qty_limits()
+        max_label = "بدون محدودیت" if max_qty == 0 else str(max_qty)
         status_fa  = {"on": "🟢 روشن", "off": "🔴 خاموش", "update": "🔄 بروزرسانی"}.get(bot_status, "🟢 روشن")
         renewal_fa = "✅ فعال" if renewal_enabled == "1" else "❌ غیرفعال"
         referral_fa = "✅ فعال" if referral_enabled == "1" else "❌ غیرفعال"
@@ -6326,7 +6334,8 @@ def _dispatch_callback(call, uid, data):
             f"🔹 <b>وضعیت ربات:</b> {status_fa}\n"
             f"🔹 <b>تمدید کانفیگ‌های ثبت دستی:</b> {renewal_fa}\n"
             f"🔹 <b>زیرمجموعه‌گیری:</b> {referral_fa}\n"
-            f"🔹 <b>فروش عمده:</b> {bulk_fa}\n\n"
+            f"🔹 <b>فروش عمده:</b> {bulk_fa}\n"
+            f"   ↳ حداقل تعداد: <b>{min_qty}</b> | حداکثر تعداد: <b>{max_label}</b>\n\n"
             "برای تغییر هر مورد، دکمه وضعیت فعلی آن را لمس کنید."
         )
 
@@ -6383,6 +6392,62 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data == "adm:ops:bulk_sale":
+        # Legacy — redirect to the sub-menu
+        bot.answer_callback_query(call.id)
+        from types import SimpleNamespace as _SN
+        fake = _SN(id=call.id, from_user=call.from_user, message=call.message, data="adm:ops:bulk_menu")
+        _dispatch_callback(fake, uid, "adm:ops:bulk_menu")
+        return
+
+    # ── Bulk Sale Sub-menu ────────────────────────────────────────────────────
+    def _bulk_menu_kb():
+        bulk_mode = setting_get("bulk_sale_mode", "everyone")
+        min_qty, max_qty = get_bulk_qty_limits()
+        max_label = "بدون محدودیت" if max_qty == 0 else str(max_qty)
+        bulk_map  = {
+            "everyone":    "✅ همه کاربران",
+            "agents_only": "🤝 فقط نمایندگان",
+            "disabled":    "❌ غیرفعال",
+        }
+        mode_label = bulk_map.get(bulk_mode, "✅ همه کاربران")
+        kb = types.InlineKeyboardMarkup(row_width=2)
+        kb.row(
+            types.InlineKeyboardButton(mode_label,       callback_data="adm:ops:bulk_mode"),
+            types.InlineKeyboardButton("📦 وضعیت فروش عمده", callback_data="adm:ops:noop"),
+        )
+        kb.row(
+            types.InlineKeyboardButton(f"⬇️ حداقل: {min_qty} عدد",     callback_data="adm:ops:bulk_min"),
+            types.InlineKeyboardButton(f"⬆️ حداکثر: {max_label}",      callback_data="adm:ops:bulk_max"),
+        )
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="adm:ops"))
+        return kb
+
+    def _bulk_menu_text():
+        bulk_mode = setting_get("bulk_sale_mode", "everyone")
+        min_qty, max_qty = get_bulk_qty_limits()
+        max_label = "بدون محدودیت" if max_qty == 0 else f"{max_qty} عدد"
+        bulk_fa   = {
+            "everyone":    "✅ همه کاربران",
+            "agents_only": "🤝 فقط نمایندگان",
+            "disabled":    "❌ غیرفعال",
+        }.get(bulk_mode, "✅ همه کاربران")
+        return (
+            "📦 <b>تنظیمات فروش عمده</b>\n\n"
+            f"🔹 <b>وضعیت:</b> {bulk_fa}\n"
+            f"🔹 <b>حداقل تعداد خرید:</b> {min_qty} عدد\n"
+            f"🔹 <b>حداکثر تعداد خرید:</b> {max_label}\n\n"
+            "برای تغییر هر گزینه، دکمه مربوطه را لمس کنید."
+        )
+
+    if data == "adm:ops:bulk_menu":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, _bulk_menu_text(), _bulk_menu_kb())
+        return
+
+    if data == "adm:ops:bulk_mode":
         if not admin_has_perm(uid, "settings"):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
             return
@@ -6393,7 +6458,38 @@ def _dispatch_callback(call, uid, data):
         labels = {"everyone": "همه کاربران", "agents_only": "فقط نمایندگان", "disabled": "غیرفعال"}
         log_admin_action(uid, f"فروش عمده: {labels[new_val]}")
         bot.answer_callback_query(call.id, f"فروش عمده: {labels[new_val]}")
-        send_or_edit(call, _ops_menu_text(), _build_ops_kb())
+        send_or_edit(call, _bulk_menu_text(), _bulk_menu_kb())
+        return
+
+    if data == "adm:ops:bulk_min":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        state_set(uid, "admin_bulk_min_qty")
+        bot.answer_callback_query(call.id)
+        cur_min = setting_get("bulk_min_qty", "1")
+        send_or_edit(call,
+            "⬇️ <b>تنظیم حداقل تعداد خرید</b>\n\n"
+            "تعداد حداقل کانفیگ در هر سفارش فروش عمده را وارد کنید.\n\n"
+            f"📌 مقدار فعلی: <b>{cur_min}</b>\n\n"
+            "📝 <i>یک عدد صحیح و مثبت وارد کنید (مثلاً ۱، ۲، ۵)</i>",
+            back_button("adm:ops:bulk_menu"))
+        return
+
+    if data == "adm:ops:bulk_max":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        state_set(uid, "admin_bulk_max_qty")
+        bot.answer_callback_query(call.id)
+        cur_max = setting_get("bulk_max_qty", "0")
+        cur_max_label = "بدون محدودیت" if cur_max == "0" else cur_max
+        send_or_edit(call,
+            "⬆️ <b>تنظیم حداکثر تعداد خرید</b>\n\n"
+            "تعداد حداکثر کانفیگ در هر سفارش فروش عمده را وارد کنید.\n\n"
+            f"📌 مقدار فعلی: <b>{cur_max_label}</b>\n\n"
+            "📝 <i>یک عدد صحیح مثبت وارد کنید، یا <b>0</b> برای «بدون محدودیت»</i>",
+            back_button("adm:ops:bulk_menu"))
         return
 
     # ── Referral Settings ─────────────────────────────────────────────────────
