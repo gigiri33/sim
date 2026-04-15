@@ -171,11 +171,11 @@ def show_crypto_payment_info(target, uid, coin_key, amount):
     kb = types.InlineKeyboardMarkup()
     if coin_amount_str:
         kb.row(
-            types.InlineKeyboardButton("📋 کپی آدرس ولت",    callback_data=f"crypto:copy_addr:{coin_key}"),
-            types.InlineKeyboardButton("🔢 کپی مبلغ دقیق",   callback_data=f"crypto:copy_amount:{coin_key}:{amount}"),
+            types.InlineKeyboardButton("📋 کپی آدرس ولت",  copy_text=types.CopyTextButton(text=addr)),
+            types.InlineKeyboardButton("🔢 کپی مبلغ دقیق", copy_text=types.CopyTextButton(text=coin_amount_str)),
         )
     else:
-        kb.add(types.InlineKeyboardButton("📋 کپی آدرس ولت", callback_data=f"crypto:copy_addr:{coin_key}"))
+        kb.add(types.InlineKeyboardButton("📋 کپی آدرس ولت", copy_text=types.CopyTextButton(text=addr)))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
 
     if hasattr(target, "message"):
