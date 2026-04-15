@@ -1180,7 +1180,19 @@ def on_callback(call):
                     try_give_referral_start_reward_for_channel_join(uid)
                 except Exception:
                     pass
-                show_main_menu(call)
+                # Phone gate check
+                from ..handlers.start import _phone_required_for_user, _send_phone_request
+                if not is_admin(uid) and _phone_required_for_user(uid):
+                    _send_phone_request(call.message.chat.id, uid)
+                else:
+                    # Send menu directly to guarantee delivery regardless of edit state
+                    try:
+                        show_main_menu(call)
+                    except Exception:
+                        try:
+                            show_main_menu(call.message)
+                        except Exception:
+                            pass
             else:
                 bot.answer_callback_query(call.id, "❌ هنوز عضو کانال نشده‌اید.", show_alert=True)
         else:

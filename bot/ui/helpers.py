@@ -44,12 +44,14 @@ def send_or_edit(call_or_msg, text, reply_markup=None, disable_preview=True):
                 text,
                 call_or_msg.message.chat.id,
                 call_or_msg.message.message_id,
+                parse_mode="HTML",
                 reply_markup=reply_markup,
                 disable_web_page_preview=disable_preview,
             )
         else:
             bot.send_message(
                 call_or_msg.chat.id, text,
+                parse_mode="HTML",
                 reply_markup=reply_markup,
                 disable_web_page_preview=disable_preview
             )
@@ -61,6 +63,7 @@ def send_or_edit(call_or_msg, text, reply_markup=None, disable_preview=True):
                 else call_or_msg.chat.id
             )
             bot.send_message(chat_id, text,
+                             parse_mode="HTML",
                              reply_markup=reply_markup,
                              disable_web_page_preview=disable_preview)
         except Exception:
