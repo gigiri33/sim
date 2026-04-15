@@ -6312,13 +6312,12 @@ def _dispatch_callback(call, uid, data):
         )
         ops_kb.row(
             types.InlineKeyboardButton(referral_label, callback_data="adm:ops:referral_toggle"),
-            types.InlineKeyboardButton("🎁 زیرمجموعه‌گیری", callback_data="adm:ops:noop"),
+            types.InlineKeyboardButton("🎁 زیرمجموعه‌گیری  ⚙️ تنظیمات", callback_data="adm:ref:settings"),
         )
         ops_kb.row(
             types.InlineKeyboardButton(bulk_label, callback_data="adm:ops:bulk_menu"),
             types.InlineKeyboardButton("📦 فروش عمده", callback_data="adm:ops:noop"),
         )
-        ops_kb.add(types.InlineKeyboardButton("⚙️ تنظیمات زیرمجموعه‌گیری", callback_data="adm:ref:settings"))
         ops_kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:settings"))
         return ops_kb
 
