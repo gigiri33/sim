@@ -11,14 +11,53 @@ from ..helpers import esc, fmt_price, display_username, back_button, move_leadin
 from ..bot_instance import bot
 from .helpers import send_or_edit
 from .keyboards import kb_main
-from .premium_emoji import render_premium_text_html
+from .premium_emoji import render_premium_text_html, render_premium_text_entities, deserialize_premium_text
 
 
 def show_main_menu(target):
     uid         = target.from_user.id if hasattr(target, "from_user") else target.chat.id
     custom_raw  = setting_get("start_text", "")
     if custom_raw:
-        text = render_premium_text_html(custom_raw)  # handles both plain & premium
+        parsed = deserialize_premium_text(custom_raw)
+        if parsed.get("entities"):
+            # Has premium/custom emoji → send via entities (no parse_mode, no HTML issues)
+            text, entities = render_premium_text_entities(custom_raw)
+            chat_id = (
+                target.message.chat.id if hasattr(target, "message") else target.chat.id
+            )
+            kb = kb_main(uid)
+            try:
+                if hasattr(target, "message"):
+                    bot.edit_message_text(
+                        text,
+                        target.message.chat.id,
+                        target.message.message_id,
+                        entities=entities,
+                        reply_markup=kb,
+                        disable_web_page_preview=True,
+                    )
+                else:
+                    bot.send_message(
+                        chat_id, text,
+                        entities=entities,
+                        reply_markup=kb,
+                        disable_web_page_preview=True,
+                    )
+            except Exception:
+                try:
+                    bot.send_message(
+                        chat_id, text,
+                        entities=entities,
+                        reply_markup=kb,
+                        disable_web_page_preview=True,
+                    )
+                except Exception:
+                    # Last resort: send without emoji formatting
+                    bot.send_message(chat_id, text, reply_markup=kb,
+                                     disable_web_page_preview=True)
+            return
+        else:
+            text = render_premium_text_html(custom_raw)
     else:
         text = (
             f"✨ <b>به فروشگاه {BRAND_TITLE} خوش آمدید!</b>\n\n"
