@@ -9,6 +9,10 @@ from __future__ import annotations
 
 import html
 import json
+import re
+
+# Matches Persian/Arabic letters and digits only
+_PERSIAN_WORD_RE = re.compile(r'[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]+')
 
 
 # ── Extraction ─────────────────────────────────────────────────────────────────
@@ -46,20 +50,21 @@ def extract_custom_emojis(message) -> list[dict]:
 
 def extract_context_text(text: str, offset: int, length: int) -> str:
     """
-    Infer nearest context word/phrase for an emoji at (offset, length).
+    Infer nearest Persian word/phrase for an emoji at (offset, length).
+    Only returns Persian/Arabic letters — strips dashes, spaces, symbols.
     Prefers text before the emoji, falls back to text after.
     """
-    before = text[:offset].strip()
-    after  = text[offset + length:].strip()
-    if before:
-        chunk = before[-30:]
-        space = chunk.rfind(" ")
-        return chunk[space + 1:].strip() if space >= 0 else chunk.strip()
-    if after:
-        chunk = after[:30]
-        space = chunk.find(" ")
-        return chunk[:space].strip() if space >= 0 else chunk.strip()
-    return ""
+    def _persian_words(s: str) -> str:
+        words = _PERSIAN_WORD_RE.findall(s)
+        return " ".join(words[-3:]) if words else ""
+
+    before = text[:offset]
+    after  = text[offset + length:]
+
+    ctx = _persian_words(before[-40:])
+    if not ctx:
+        ctx = _persian_words(after[:40])
+    return ctx[:25]
 
 
 # ── Serialization ──────────────────────────────────────────────────────────────
@@ -193,19 +198,18 @@ def render_premium_text_entities(data: str):
 def format_extracted_emoji_report(items: list) -> str:
     """
     Build a human-readable HTML report for the admin emoji-extractor tool.
+    Format per line:  شماره) ایموجی  متن‌فارسی  |  ID
     """
     if not items:
         return "❌ هیچ ایموجی پرمیوم (سفارشی) در این پیام یافت نشد."
 
     def _line(item: dict) -> str:
-        # Clean context: strip newlines/extra spaces, max 20 chars
-        ctx = (item.get("context_text") or "").replace("\n", " ").strip()[:20]
+        ctx = (item.get("context_text") or "").strip()
         eid = item["custom_emoji_id"]
         em  = item["emoji"]
-        if ctx:
-            return f"{em} - {html.escape(ctx)} - <code>{eid}</code>"
-        return f"{em} - <code>{eid}</code>"
+        ctx_part = f" {html.escape(ctx)}" if ctx else ""
+        return f"{em}{ctx_part}  ←  <code>{eid}</code>"
 
-    lines = [f"{i}) {_line(item)}" for i, item in enumerate(items, 1)]
+    lines = [f"{i})  {_line(item)}" for i, item in enumerate(items, 1)]
     header = f"✅ <b>{len(items)} ایموجی پرمیوم یافت شد:</b>\n\n"
     return header + "\n".join(lines)
