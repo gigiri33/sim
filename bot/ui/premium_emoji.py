@@ -198,14 +198,14 @@ def format_extracted_emoji_report(items: list) -> str:
         return "❌ هیچ ایموجی پرمیوم (سفارشی) در این پیام یافت نشد."
 
     def _line(item: dict) -> str:
-        ctx = item["context_text"]
+        # Clean context: strip newlines/extra spaces, max 20 chars
+        ctx = (item.get("context_text") or "").replace("\n", " ").strip()[:20]
         eid = item["custom_emoji_id"]
         em  = item["emoji"]
         if ctx:
-            return f"{html.escape(ctx)} - {em} - <code>{eid}</code>"
+            return f"{em} - {html.escape(ctx)} - <code>{eid}</code>"
         return f"{em} - <code>{eid}</code>"
 
-    if len(items) == 1:
-        return _line(items[0])
-
-    return "\n".join(f"{i}) {_line(item)}" for i, item in enumerate(items, 1))
+    lines = [f"{i}) {_line(item)}" for i, item in enumerate(items, 1)]
+    header = f"✅ <b>{len(items)} ایموجی پرمیوم یافت شد:</b>\n\n"
+    return header + "\n".join(lines)
