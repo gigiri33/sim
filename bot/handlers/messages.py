@@ -2275,10 +2275,20 @@ def universal_handler(message):
             if raw_text == "-":
                 setting_set("start_text", "")
             else:
-                setting_set("start_text", _spt(raw_text, entities))
+                serialized = _spt(raw_text, entities)
+                setting_set("start_text", serialized)
+                # Debug: count how many custom emoji entities were captured
+                custom_count = sum(1 for e in entities if e.type == "custom_emoji")
+                is_json = serialized.strip().startswith("{")
+                bot.send_message(uid,
+                    f"✅ متن استارت ذخیره شد.\n"
+                    f"<code>ایموجی پرمیوم: {custom_count} | فرمت: {'JSON' if is_json else 'plain'}</code>",
+                    parse_mode="HTML",
+                    reply_markup=back_button("admin:settings"))
             log_admin_action(uid, "متن استارت تغییر کرد")
             state_clear(uid)
-            bot.send_message(uid, "✅ متن استارت ذخیره شد.", reply_markup=back_button("admin:settings"))
+            if raw_text == "-":
+                bot.send_message(uid, "✅ متن استارت ذخیره شد.", reply_markup=back_button("admin:settings"))
             return
 
         # ── Admin: Free Test settings ──────────────────────────────────────────
