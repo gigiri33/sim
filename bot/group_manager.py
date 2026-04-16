@@ -11,21 +11,39 @@ from .bot_instance import bot
 # ── Topic registry ─────────────────────────────────────────────────────────────
 # Each entry: (setting_key_suffix, display_name)
 TOPICS = [
-    ("backup",           "💾 بکاپ"),
-    ("new_users",        "👋 کاربران جدید"),
-    ("payment_approval", "💳 تأیید پرداخت"),
-    ("renewal_request",  "♻️ درخواست تمدید"),
-    ("purchase_log",     "📦 لاگ خرید"),
-    ("renewal_log",      "🔄 لاگ تمدید"),
-    ("wallet_log",       "💰 لاگ کیف‌پول"),
-    ("test_report",      "🧪 گزارش تست"),
-    ("broadcast_report", "📢 اطلاع‌رسانی و پین"),
-    ("referral_log",     "🔗 لاگ زیرمجموعه‌گیری"),
-    ("agency_request",   "🤝 درخواست نمایندگی"),
-    ("agency_log",       "🏢 لاگ نمایندگان"),
-    ("admin_ops_log",    "📝 لاگ عملیاتی"),
-    ("error_log",        "❌ گزارش خطا"),
+    ("backup",           "بکاپ"),
+    ("new_users",        "کاربران جدید"),
+    ("payment_approval", "تأیید پرداخت"),
+    ("renewal_request",  "درخواست تمدید"),
+    ("purchase_log",     "لاگ خرید"),
+    ("renewal_log",      "لاگ تمدید"),
+    ("wallet_log",       "لاگ کیف‌پول"),
+    ("test_report",      "گزارش تست"),
+    ("broadcast_report", "اطلاع‌رسانی و پین"),
+    ("referral_log",     "لاگ زیرمجموعه‌گیری"),
+    ("agency_request",   "درخواست نمایندگی"),
+    ("agency_log",       "لاگ نمایندگان"),
+    ("admin_ops_log",    "لاگ عملیاتی"),
+    ("error_log",        "گزارش خطا"),
 ]
+
+# Custom emoji IDs for forum topic icons (used with icon_custom_emoji_id in create_forum_topic)
+TOPIC_EMOJI_IDS = {
+    "backup":           "5373172742071803031",
+    "new_users":        "5372926953978341366",
+    "payment_approval": "5794210855704861919",
+    "renewal_request":  "5803057229909202251",
+    "purchase_log":     "5258134813302332906",
+    "renewal_log":      "5264727218734524899",
+    "wallet_log":       "5318912792428814144",
+    "test_report":      "5411512278740640309",
+    "broadcast_report": "5900108844960322391",
+    "referral_log":     "5463256910851546817",
+    "agency_request":   "5357080225463149588",
+    "agency_log":       "5264895611517300926",
+    "admin_ops_log":    None,  # لاگ عملیاتی — no custom emoji ID provided; fallback
+    "error_log":        "5334882760735598374",
+}
 
 _SETTING_KEY = {key: f"group_topic_{key}" for key, _ in TOPICS}
 
@@ -65,8 +83,10 @@ def ensure_group_topics():
         if _get_topic_id(key):
             already.append(name)
             continue
+        _eid = TOPIC_EMOJI_IDS.get(key)
+        _kw = {"icon_custom_emoji_id": _eid} if _eid else {}
         try:
-            topic = bot.create_forum_topic(group_id, name)
+            topic = bot.create_forum_topic(group_id, name, **_kw)
             setting_set(_SETTING_KEY[key], str(topic.message_thread_id))
             created.append(name)
         except Exception as e:
@@ -79,7 +99,7 @@ def ensure_group_topics():
                 migrated = True
                 # Retry with new ID
                 try:
-                    topic = bot.create_forum_topic(group_id, name)
+                    topic = bot.create_forum_topic(group_id, name, **_kw)
                     setting_set(_SETTING_KEY[key], str(topic.message_thread_id))
                     created.append(name)
                 except Exception as e2:
@@ -87,7 +107,7 @@ def ensure_group_topics():
             elif "upgraded to a supergroup" in err_str and migrated:
                 # Already migrated, just retry
                 try:
-                    topic = bot.create_forum_topic(group_id, name)
+                    topic = bot.create_forum_topic(group_id, name, **_kw)
                     setting_set(_SETTING_KEY[key], str(topic.message_thread_id))
                     created.append(name)
                 except Exception as e2:
@@ -119,7 +139,9 @@ def reset_and_recreate_topics():
                 continue
             # Try a no-op edit to confirm the topic still exists in Telegram
             try:
-                bot.edit_forum_topic(group_id, tid, name=name)
+                _eid = TOPIC_EMOJI_IDS.get(key)
+                _ekw = {"icon_custom_emoji_id": _eid} if _eid else {}
+                bot.edit_forum_topic(group_id, tid, name=name, **_ekw)
             except Exception as e:
                 err = str(e)
                 if any(x in err for x in ("TOPIC_DELETED", "TOPIC_ID_INVALID",

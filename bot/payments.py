@@ -6,7 +6,7 @@ card payment approval and rejection.
 from telebot import types
 import json
 
-from .config import ADMIN_IDS, CRYPTO_COINS, CRYPTO_API_SYMBOLS
+from .config import ADMIN_IDS, CRYPTO_COINS, CRYPTO_API_SYMBOLS, CRYPTO_EMOJI_IDS
 from .db import (
     get_user, get_payment, get_package, get_agency_price,
     get_agency_price_config, get_agency_type_discount,
@@ -128,7 +128,7 @@ def show_payment_method_selection(target, uid, context_data):
 # ── Crypto UI ──────────────────────────────────────────────────────────────────
 def show_crypto_selection(target, amount=None):
     from .db import setting_get
-    kb     = types.InlineKeyboardMarkup()
+    rows   = []
     prices = _get_prices() if amount else {}
     has_any = False
     for coin_key, coin_label in CRYPTO_COINS:
@@ -140,12 +140,13 @@ def show_crypto_selection(target, amount=None):
             if amount and symbol and symbol in prices and prices[symbol] > 0:
                 coin_amount = amount / prices[symbol]
                 price_note  = f" | ≈ {coin_amount:.4f} {symbol}"
-            kb.add(types.InlineKeyboardButton(f"{coin_label}{price_note}", callback_data=f"pm:crypto:{coin_key}"))
+            eid = CRYPTO_EMOJI_IDS.get(coin_key)
+            rows.append([_btn(f"{coin_label}{price_note}", callback_data=f"pm:crypto:{coin_key}", emoji_id=eid)])
     if not has_any:
         send_or_edit(target, "⚠️ هیچ آدرس ارز دیجیتالی توسط ادمین ثبت نشده است.", back_button("main"))
         return
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="pm:back"))
-    send_or_edit(target, "💎 <b>ارز دیجیتال</b>\n\nنوع ارز مورد نظر را انتخاب کنید:", kb)
+    rows.append([_btn("بازگشت", callback_data="pm:back", emoji_id="5352759161945867747")])
+    send_or_edit(target, "💎 <b>ارز دیجیتال</b>\n\nنوع ارز مورد نظر را انتخاب کنید:", _raw_markup(rows))
 
 
 def show_crypto_payment_info(target, uid, coin_key, amount):
@@ -363,7 +364,7 @@ def _clear_payment_admin_buttons(payment_id, status_text, file_id=None):
 def finish_card_payment_approval(payment_id, admin_note, approved):
     result = _finish_card_payment_approval_inner(payment_id, admin_note, approved)
     if result:
-        header = "✅ <b>تراکنش تأیید شد.</b>" if approved else "❌ <b>تراکنش رد شد.</b>"
+        header = f"{ce('✅', '5900157489759916320')} <b>تراکنش تأیید شد.</b>" if approved else f"{ce('❌', '5215539470849288572')} <b>تراکنش رد شد.</b>"
         file_id = None
         try:
             payment = get_payment(payment_id)
@@ -387,10 +388,10 @@ def finish_card_payment_approval(payment_id, admin_note, approved):
                 status_text = (
                     f"{header}\n\n"
                     f"🧾 نوع: {kind_label} | {method_label}\n"
-                    f"👤 کاربر: {esc(user['full_name'])}\n"
+                    f"{ce('👤', '5373012449597335010')} کاربر: {esc(user['full_name'])}\n"
                     f"🆔 نام کاربری: {esc(display_username(user['username']))}\n"
                     f"🔢 آیدی: <code>{user['user_id']}</code>\n"
-                    f"💰 مبلغ: <b>{fmt_price(payment['amount'])}</b> تومان"
+                    f"{ce('💰', '5794002949222964817')} مبلغ: <b>{fmt_price(payment['amount'])}</b> تومان"
                     f"{package_text}\n\n"
                     f"📝 توضیح کاربر:\n{esc(payment['receipt_text'] or '-')}"
                 )
@@ -421,13 +422,13 @@ def _finish_card_payment_approval_inner(payment_id, admin_note, approved):
             if not complete_payment(payment_id):
                 return False  # already processed
             update_balance(user_id, payment["amount"])
-            bot.send_message(user_id, f"✅ واریزی شما تأیید شد.\n\n{esc(admin_note)}")
+            bot.send_message(user_id, f"{ce('✅', '5900157489759916320')} واریزی شما تأیید شد.\n\n{esc(admin_note)}")
             user_row = get_user(user_id)
             send_to_topic("wallet_log",
-                f"💰 <b>شارژ کیف‌پول تأیید شد</b>\n\n"
-                f"👤 {esc(user_row['full_name'] if user_row else str(user_id))}\n"
+                f"{ce('💳', '5796280694934085416')} <b>شارژ کیف‌پول تأیید شد</b>\n\n"
+                f"{ce('👤', '5373012449597335010')} {esc(user_row['full_name'] if user_row else str(user_id))}\n"
                 f"🆔 <code>{user_id}</code>\n"
-                f"💵 مبلغ: {fmt_price(payment['amount'])} تومان"
+                f"{ce('💰', '5794002949222964817')} مبلغ: {fmt_price(payment['amount'])} تومان"
             )
 
         elif payment["kind"] == "config_purchase":
@@ -439,7 +440,7 @@ def _finish_card_payment_approval_inner(payment_id, admin_note, approved):
             if not complete_payment(payment_id):
                 return False  # already processed
             bot.send_message(user_id,
-                f"✅ واریزی شما تأیید شد.\n\n{esc(admin_note)}\n\n"
+                f"{ce('✅', '5900157489759916320')} واریزی شما تأیید شد.\n\n{esc(admin_note)}\n\n"
                 "⏳ کانفیگ‌های شما در حال آماده‌سازی هستند...")
             purchase_ids, pending_ids = _deliver_bulk_configs(
                 user_id, user_id, package_id,
@@ -474,5 +475,5 @@ def _finish_card_payment_approval_inner(payment_id, admin_note, approved):
         reject_payment(payment_id, admin_note)
         if payment["config_id"]:
             release_reserved_config(payment["config_id"])
-        bot.send_message(user_id, f"❌ رسید شما رد شد.\n\n{esc(admin_note)}")
+        bot.send_message(user_id, f"{ce('❌', '5215539470849288572')} رسید شما رد شد.\n\n{esc(admin_note)}")
         return True

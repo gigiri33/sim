@@ -19,24 +19,45 @@ SWAPWALLET_BASE_URL  = "https://swapwallet.app/api"
 
 # ── Admin Permission System ────────────────────────────────────────────────────
 ADMIN_PERMS = [
-    ("full",           "🌟 دسترسی کامل (مانند اونر)"),
-    ("types_packages", "🧩 مدیریت نوع و پکیج‌ها"),
-    ("register_config","📝 ثبت کانفیگ"),
-    ("view_configs",   "👁 دیدن کانفیگ‌های ثبت‌شده"),
-    ("manage_configs", "🗑 حذف و منقضی‌کردن کانفیگ‌ها"),
-    ("broadcast_all",  "📣 فوروارد همگانی"),
-    ("broadcast_cust", "🛍 فوروارد برای مشتریان"),
-    ("view_users",     "👥 مدیریت کاربران (فقط مشاهده)"),
-    ("agency",         "🤝 تایید/رد نمایندگی"),
-    ("assign_config",  "📦 ثبت کانفیگ برای کاربران"),
-    ("manage_balance", "💰 مدیریت موجودی کاربران"),
-    ("user_status",    "🔐 تعیین امن/ناامن کاربران"),
-    ("full_users",       "👑 دسترسی کامل مدیریت کاربران"),
-    ("settings",         "⚙️ دسترسی به تنظیمات ربات"),
-    ("approve_payments", "💳 تایید یا رد پرداخت‌ها"),
-    ("approve_renewal",  "🔄 تایید تمدید کردن"),
-    ("manage_panels",    "🖥 مدیریت پنل‌های 3x-ui"),
+    ("full",           "دسترسی کامل (مانند اونر)"),
+    ("types_packages", "مدیریت نوع و پکیج‌ها"),
+    ("register_config","ثبت کانفیگ"),
+    ("view_configs",   "دیدن کانفیگ‌های ثبت‌شده"),
+    ("manage_configs", "حذف و منقضی‌کردن کانفیگ‌ها"),
+    ("broadcast_all",  "فوروارد همگانی"),
+    ("broadcast_cust", "فوروارد برای مشتریان"),
+    ("view_users",     "مدیریت کاربران (فقط مشاهده)"),
+    ("agency",         "تایید/رد نمایندگی"),
+    ("assign_config",  "ثبت کانفیگ برای کاربران"),
+    ("manage_balance", "مدیریت موجودی کاربران"),
+    ("user_status",    "تعیین امن/ناامن کاربران"),
+    ("full_users",       "دسترسی کامل مدیریت کاربران"),
+    ("settings",         "دسترسی به تنظیمات ربات"),
+    ("approve_payments", "تایید یا رد پرداخت‌ها"),
+    ("approve_renewal",  "تایید تمدید کردن"),
+    ("manage_panels",    "مدیریت پنل‌های 3x-ui"),
 ]
+
+# Custom emoji IDs for admin permission labels (icon_custom_emoji_id on buttons, ce() in HTML)
+PERM_EMOJI_IDS = {
+    "full":             "5210952531676504517",
+    "types_packages":   "5463224921935082813",
+    "register_config":  "5458799228719472718",
+    "view_configs":     "5334882760735598374",
+    "manage_configs":   "5424892643760937442",
+    "broadcast_all":    "5416106115630918483",
+    "broadcast_cust":   "5197304993920616826",
+    "view_users":       "5372926953978341366",
+    "agency":           "5357080225463149588",
+    "assign_config":    "5812073100702914750",
+    "manage_balance":   "5258134813302332906",
+    "user_status":      "5375296873982604963",
+    "full_users":       "5472308992514464048",
+    "settings":         "5463036196777128277",
+    "approve_payments": "5350396951407895212",
+    "approve_renewal":  "6019455416201646359",
+    "manage_panels":    "5215186239853964761",
+}
 PERM_FULL_SET = {
     "types_packages", "register_config", "view_configs", "manage_configs",
     "broadcast_all", "broadcast_cust", "view_users", "agency", "assign_config",
@@ -55,12 +76,21 @@ CRYPTO_API_SYMBOLS = {
 }
 
 CRYPTO_COINS = [
-    ("tron",       "🔵 Tron (TRC20)"),
-    ("ton",        "💎 TON"),
-    ("usdt_bep20", "🟢 USDT (BEP20)"),
-    ("usdc_bep20", "🔵 USDC (BEP20)"),
-    ("ltc",        "🪙 LTC"),
+    ("tron",       "Tron (TRC20)"),
+    ("ton",        "TON"),
+    ("usdt_bep20", "USDT (BEP20)"),
+    ("usdc_bep20", "USDC (BEP20)"),
+    ("ltc",        "LTC (Litecoin)"),
 ]
+
+# Custom emoji IDs for crypto coin labels
+CRYPTO_EMOJI_IDS = {
+    "tron":       "5794054896852409524",
+    "ton":        "5796252975215156083",
+    "usdt_bep20": "5796237685131582541",
+    "usdc_bep20": "5796237685131582541",
+    "ltc":        "5796399747132563586",
+}
 
 # ── Pagination ─────────────────────────────────────────────────────────────────
 CONFIGS_PER_PAGE = 10

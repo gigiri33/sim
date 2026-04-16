@@ -6,7 +6,7 @@ import traceback
 import urllib.parse
 from datetime import datetime
 from telebot import types
-from ..config import ADMIN_IDS, ADMIN_PERMS, PERM_FULL_SET, PERM_USER_FULL, CRYPTO_COINS, CRYPTO_API_SYMBOLS, CONFIGS_PER_PAGE
+from ..config import ADMIN_IDS, ADMIN_PERMS, PERM_FULL_SET, PERM_USER_FULL, PERM_EMOJI_IDS, CRYPTO_COINS, CRYPTO_API_SYMBOLS, CRYPTO_EMOJI_IDS, CONFIGS_PER_PAGE
 from ..bot_instance import bot
 from ..helpers import (
     esc, fmt_price, fmt_vol, fmt_dur, now_str, display_name, display_username, safe_support_url,
@@ -5155,8 +5155,14 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id, "ادمین یافت نشد.", show_alert=True)
             return
         perms = json.loads(row["permissions"] or "{}")
+        from ..ui.premium_emoji import ce as _ce
+        def _perm_line(k, lbl):
+            check = '✅' if perms.get(k) or perms.get('full') else '☐'
+            eid = PERM_EMOJI_IDS.get(k)
+            emoji_tag = _ce('⭐', eid) + ' ' if eid else ''
+            return f"{check} {emoji_tag}{lbl}"
         perm_lines = "\n".join(
-            f"{'✅' if perms.get(k) or perms.get('full') else '☐'} {lbl}"
+            _perm_line(k, lbl)
             for k, lbl in ADMIN_PERMS if k != "full"
         )
         name = user_row["full_name"] if user_row else f"کاربر {target_id}"

@@ -5,7 +5,7 @@ for types, stock, users, admins, panels.
 """
 from telebot import types
 
-from ..config import ADMIN_PERMS
+from ..config import ADMIN_PERMS, PERM_EMOJI_IDS
 from ..db import (
     get_all_types, get_packages, get_registered_packages_stock,
     get_all_admin_users, get_user, get_user_detail, get_phone_number,
@@ -13,6 +13,7 @@ from ..db import (
     count_users_stats,
 )
 from ..helpers import esc, fmt_price, display_username, back_button
+from ..ui.keyboards import _btn, _raw_markup
 from ..bot_instance import bot
 from ..ui.helpers import send_or_edit
 
@@ -106,18 +107,20 @@ def _show_perm_selection(call, uid, target_id, perms, edit_mode=False):
         "سطح دسترسی‌های مورد نظر را انتخاب کنید:\n"
         "(هر گزینه را بزنید تا فعال/غیرفعال شود)"
     )
-    kb = types.InlineKeyboardMarkup()
+    rows = []
     for perm_key, perm_label in ADMIN_PERMS:
         checked = bool(perms.get(perm_key))
         icon    = "✅" if checked else "⬜️"
-        kb.add(types.InlineKeyboardButton(
+        eid     = PERM_EMOJI_IDS.get(perm_key)
+        rows.append([_btn(
             f"{icon} {perm_label}",
-            callback_data=f"adm:mgr:pt:{perm_key}"
-        ))
+            callback_data=f"adm:mgr:pt:{perm_key}",
+            emoji_id=eid,
+        )])
     action_label = "💾 ذخیره تغییرات" if edit_mode else "➕ افزودن ادمین"
-    kb.add(types.InlineKeyboardButton(action_label, callback_data="adm:mgr:confirm"))
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:admins"))
-    send_or_edit(call, text, kb)
+    rows.append([_btn(action_label, callback_data="adm:mgr:confirm")])
+    rows.append([_btn("بازگشت", callback_data="admin:admins", emoji_id="5352759161945867747")])
+    send_or_edit(call, text, _raw_markup(rows))
 
 
 # ── Users list & detail ────────────────────────────────────────────────────────
