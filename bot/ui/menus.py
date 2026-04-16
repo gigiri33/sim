@@ -32,7 +32,7 @@ def show_main_menu(target):
                         text,
                         target.message.chat.id,
                         target.message.message_id,
-                        parse_mode=None,
+                        parse_mode="",
                         entities=entities,
                         reply_markup=kb,
                         disable_web_page_preview=True,
@@ -40,7 +40,7 @@ def show_main_menu(target):
                 else:
                     bot.send_message(
                         chat_id, text,
-                        parse_mode=None,
+                        parse_mode="",
                         entities=entities,
                         reply_markup=kb,
                         disable_web_page_preview=True,
@@ -49,7 +49,7 @@ def show_main_menu(target):
                 try:
                     bot.send_message(
                         chat_id, text,
-                        parse_mode=None,
+                        parse_mode="",
                         entities=entities,
                         reply_markup=kb,
                         disable_web_page_preview=True,
