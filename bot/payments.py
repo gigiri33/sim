@@ -22,6 +22,8 @@ from .gateways.base import is_gateway_available, is_card_info_complete, get_gate
 from .gateways.crypto import fetch_crypto_prices
 from .bot_instance import bot
 from .ui.helpers import send_or_edit
+from .ui.keyboards import _btn, _raw_markup
+from .ui.premium_emoji import ce
 from .group_manager import send_to_topic, send_photo_to_topic
 
 # ── Price cache (60 s TTL) — both selection and payment info share the same data
@@ -80,37 +82,43 @@ def show_payment_method_selection(target, uid, context_data):
     amount = context_data["amount"]
 
     _gw_labels = []
-    kb = types.InlineKeyboardMarkup()
+    rows = []
     from .db import setting_get as _sg
-    if is_gateway_available("card", uid) and is_card_info_complete():
-        _lbl = _sg("gw_card_display_name", "").strip() or "💳 کارت به کارت"
-        kb.add(types.InlineKeyboardButton(_lbl, callback_data="pm:card"))
-        _gw_labels.append(("card", _lbl))
-    if is_gateway_available("crypto", uid):
-        _lbl = _sg("gw_crypto_display_name", "").strip() or "💎 ارز دیجیتال"
-        kb.add(types.InlineKeyboardButton(_lbl, callback_data="pm:crypto"))
-        _gw_labels.append(("crypto", _lbl))
-    if is_gateway_available("tetrapay", uid):
-        _lbl = _sg("gw_tetrapay_display_name", "").strip() or "💳 درگاه کارت به کارت (TetraPay)"
-        kb.add(types.InlineKeyboardButton(_lbl, callback_data="pm:tetrapay"))
-        _gw_labels.append(("tetrapay", _lbl))
-    if is_gateway_available("swapwallet_crypto", uid):
-        _lbl = _sg("gw_swapwallet_crypto_display_name", "").strip() or "💳 درگاه کارت به کارت و ارز دیجیتال (SwapWallet)"
-        kb.add(types.InlineKeyboardButton(_lbl, callback_data="pm:swapwallet_crypto"))
-        _gw_labels.append(("swapwallet_crypto", _lbl))
-    if is_gateway_available("tronpays_rial", uid):
-        _lbl = _sg("gw_tronpays_rial_display_name", "").strip() or "💳 درگاه کارت به کارت (TronPay)"
-        kb.add(types.InlineKeyboardButton(_lbl, callback_data="pm:tronpays_rial"))
-        _gw_labels.append(("tronpays_rial", _lbl))
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+
+    # Gateway emoji mapping: gateway_key -> (default_label, emoji_id)
+    _GW_DEFAULTS = {
+        "card":              ("کارت به کارت",                                "5212962322967966165"),
+        "crypto":            ("ارز دیجیتال",                                 "5231005931550030290"),
+        "tetrapay":          ("درگاه کارت به کارت (TetraPay)",              "5388591696139269118"),
+        "swapwallet_crypto": ("درگاه کارت به کارت و ارز دیجیتال (SwapWallet)", "5794392270828478486"),
+        "tronpays_rial":     ("درگاه کارت به کارت (TronPay)",               "5215437796088499410"),
+    }
+
+    def _add_gw(key, cb, extra_check=True):
+        if not (is_gateway_available(key, uid) and extra_check):
+            return
+        default_lbl, eid = _GW_DEFAULTS[key]
+        custom_lbl = _sg(f"gw_{key}_display_name", "").strip()
+        lbl = custom_lbl or default_lbl
+        rows.append([_btn(lbl, callback_data=cb, emoji_id=eid)])
+        _gw_labels.append((key, lbl))
+
+    _add_gw("card", "pm:card", is_card_info_complete())
+    _add_gw("crypto", "pm:crypto")
+    _add_gw("tetrapay", "pm:tetrapay")
+    _add_gw("swapwallet_crypto", "pm:swapwallet_crypto")
+    _add_gw("tronpays_rial", "pm:tronpays_rial")
+
+    rows.append([_btn("بازگشت", callback_data="nav:main", emoji_id="5352759161945867747")])
+    kb = _raw_markup(rows)
 
     user       = get_user(uid)
-    agent_note = "\n\n🤝 <i>این قیمت‌ها مخصوص همکاری شماست</i>" if user and user["is_agent"] else ""
+    agent_note = f"\n\n{ce('🤝', '5415963453997214172')} <i>این قیمت‌ها مخصوص همکاری شماست</i>" if user and user["is_agent"] else ""
     _range_guide = build_gateway_range_guide(_gw_labels)
     send_or_edit(
         target,
-        f"💳 <b>انتخاب روش پرداخت</b>\n\n"
-        f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان{agent_note}\n\n"
+        f"{ce('💳', '5406865085471663921')} <b>انتخاب روش پرداخت</b>\n\n"
+        f"{ce('💰', '5318912792428814144')} مبلغ: <b>{fmt_price(amount)}</b> تومان{agent_note}\n\n"
         + (_range_guide + "\n\n" if _range_guide else "")
         + "روش پرداخت را انتخاب کنید:",
         kb
@@ -156,27 +164,28 @@ def show_crypto_payment_info(target, uid, coin_key, amount):
         coin_amount_str = f"{coin_amount:.6f}"
 
     equiv_line = (
-        f"\n💱 <b>معادل ارزی:</b> <code>{coin_amount_str}</code> {symbol}\n"
+        f"\n{ce('💱', '5402186569006210455')} <b>معادل ارزی:</b> <code>{coin_amount_str}</code> {symbol}\n"
         if coin_amount_str else ""
     )
 
     text = (
         f"💎 <b>پرداخت با {label}</b>\n\n"
-        f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان"
+        f"{ce('💰', '5318912792428814144')} مبلغ: <b>{fmt_price(amount)}</b> تومان"
         f"{equiv_line}\n"
-        f"📋 <b>آدرس ولت:</b>\n<code>{esc(addr)}</code>\n\n"
-        "⬇️ پس از واریز، تصویر تراکنش یا هش آن را ارسال کنید."
+        f"{ce('👛', '5796280694934085416')} <b>آدرس ولت:</b>\n<code>{esc(addr)}</code>\n\n"
+        f"{ce('⬇️', '5314453632828055816')} پس از واریز، تصویر تراکنش یا هش آن را ارسال کنید."
     )
 
-    kb = types.InlineKeyboardMarkup()
+    rows = []
     if coin_amount_str:
-        kb.row(
-            types.InlineKeyboardButton("📋 کپی آدرس ولت",  copy_text=types.CopyTextButton(text=addr)),
-            types.InlineKeyboardButton("🔢 کپی مبلغ دقیق", copy_text=types.CopyTextButton(text=coin_amount_str)),
-        )
+        rows.append([
+            _btn("کپی آدرس ولت", copy_text=addr, emoji_id="5796280694934085416"),
+            _btn("کپی مبلغ دقیق", copy_text=coin_amount_str, emoji_id="5794002949222964817"),
+        ])
     else:
-        kb.add(types.InlineKeyboardButton("📋 کپی آدرس ولت", copy_text=types.CopyTextButton(text=addr)))
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+        rows.append([_btn("کپی آدرس ولت", copy_text=addr, emoji_id="5796280694934085416")])
+    rows.append([_btn("بازگشت", callback_data="nav:main", emoji_id="5352759161945867747")])
+    kb = _raw_markup(rows)
 
     if hasattr(target, "message"):
         chat_id = target.message.chat.id

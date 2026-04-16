@@ -11,7 +11,7 @@ from ..helpers import esc, fmt_price, display_username, back_button, move_leadin
 from ..bot_instance import bot
 from .helpers import send_or_edit
 from .keyboards import kb_main
-from .premium_emoji import render_premium_text_html, render_premium_text_entities, deserialize_premium_text
+from .premium_emoji import render_premium_text_html, render_premium_text_entities, deserialize_premium_text, ce
 
 
 def show_main_menu(target):
@@ -77,14 +77,14 @@ def show_profile(target, user_id):
     if not user:
         return
     text = (
-        "👤 <b>پروفایل کاربری</b>\n\n"
-        f"📱 نام: {esc(user['full_name'])}\n"
-        f"🆔 نام کاربری: {esc(display_username(user['username']))}\n"
-        f"🔢 آیدی: <code>{user['user_id']}</code>\n\n"
+        f"{ce('👤', '5373012449597335010')} <b>پروفایل کاربری</b>\n\n"
+        f"{ce('📱', '5258011929993026890')} نام: {esc(user['full_name'])}\n"
+        f"{ce('🆔', '6118316934766266392')} نام کاربری: {esc(display_username(user['username']))}\n"
+        f"{ce('🔢', '5875335525136602241')} آیدی: <code>{user['user_id']}</code>\n\n"
         f"💰 موجودی: <b>{fmt_price(user['balance'])}</b> تومان"
     )
     if user["is_agent"]:
-        text += "\n\n🤝 <b>حساب نمایندگی فعال است</b>"
+        text += f"\n\n{ce('🤝', '5287478403530767368')} <b>حساب نمایندگی فعال است</b>"
     kb = types.InlineKeyboardMarkup()
     kb.add(types.InlineKeyboardButton(" بازگشت", callback_data="nav:main"))
     send_or_edit(target, text, kb)
@@ -100,10 +100,12 @@ def show_support(target):
     kb = types.InlineKeyboardMarkup()
     has_any = False
     if support_url:
-        kb.add(types.InlineKeyboardButton("💬 پشتیبانی تلگرام", url=support_url))
+        kb.add(types.InlineKeyboardButton("پشتیبانی تلگرام", url=support_url))
+        # NOTE: icon_custom_emoji_id not supported on url buttons via pyTelegramBotAPI types; fallback text kept
         has_any = True
     if support_link:
-        kb.add(types.InlineKeyboardButton("🌐 پشتیبانی آنلاین", url=support_link))
+        kb.add(types.InlineKeyboardButton("پشتیبانی آنلاین", url=support_link))
+        # NOTE: icon_custom_emoji_id not supported on url buttons via pyTelegramBotAPI types; fallback text kept
         has_any = True
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
 
@@ -111,7 +113,7 @@ def show_support(target):
         send_or_edit(target, "⚠️ پشتیبانی هنوز تنظیم نشده است.", back_button("main"))
         return
 
-    text = "🎧 <b>ارتباط با پشتیبانی</b>\n\n"
+    text = f"{ce('🎧', '5190458330719461749')} <b>ارتباط با پشتیبانی</b>\n\n"
     if support_link_desc:
         text += f"{esc(support_link_desc)}\n\n"
     else:
@@ -122,7 +124,7 @@ def show_support(target):
 def show_my_configs(target, user_id):
     items = get_user_purchases(user_id)
     if not items:
-        send_or_edit(target, "📭 هنوز کانفیگی برای حساب شما ثبت نشده است.", back_button("main"))
+        send_or_edit(target, f"{ce('📭', '5258134813302332906')} هنوز کانفیگی برای حساب شما ثبت نشده است.", back_button("main"))
         return
     kb = types.InlineKeyboardMarkup()
     for item in items:
@@ -131,7 +133,7 @@ def show_my_configs(target, user_id):
         title        = f"{svc_name}{expired_mark}"
         kb.add(types.InlineKeyboardButton(title, callback_data=f"mycfg:{item['id']}"))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
-    send_or_edit(target, "📦 <b>کانفیگ‌های من</b>\n\nیکی از سرویس‌ها را انتخاب کنید:", kb)
+    send_or_edit(target, f"{ce('📦', '5332618260703624145')} <b>کانفیگ‌های من</b>\n\nیکی از سرویس‌ها را انتخاب کنید:", kb)
 
 
 def show_referral_menu(target, user_id):
@@ -158,9 +160,9 @@ def show_referral_menu(target, user_id):
         sr_count = setting_get("referral_start_reward_count", "1")
         if sr_type == "wallet":
             sr_amount = setting_get("referral_start_reward_amount", "0")
-            reward_text += f"🎁 <b>هدیه عضویت:</b> به ازای هر {sr_count} زیرمجموعه، <b>{fmt_price(int(sr_amount))}</b> تومان شارژ کیف پول\n"
+            reward_text += f"{ce('🎁', '5215628200578655810')} <b>هدیه عضویت:</b> به ازای هر {sr_count} زیرمجموعه، <b>{fmt_price(int(sr_amount))}</b> تومان شارژ کیف پول\n"
         else:
-            reward_text += f"🎁 <b>هدیه عضویت:</b> به ازای هر {sr_count} زیرمجموعه، یک کانفیگ رایگان\n"
+            reward_text += f"{ce('🎁', '5215628200578655810')} <b>هدیه عضویت:</b> به ازای هر {sr_count} زیرمجموعه، یک کانفیگ رایگان\n"
 
     if purchase_reward_enabled:
         pr_type = setting_get("referral_purchase_reward_type", "wallet")
@@ -170,21 +172,22 @@ def show_referral_menu(target, user_id):
             reward_text += f"💸 <b>هدیه خرید:</b> به ازای هر {pr_count} خرید زیرمجموعه، <b>{fmt_price(int(pr_amount))}</b> تومان شارژ کیف پول\n"
         else:
             reward_text += f"💸 <b>هدیه خرید:</b> به ازای هر {pr_count} خرید زیرمجموعه، یک کانفیگ رایگان\n"
+    # NOTE: 💸 هدیه خرید uses free emoji as fallback — no custom emoji mapping provided
 
     if not reward_text:
-        reward_text = "🎁 هدیه‌ها هنوز توسط ادمین تنظیم نشده است.\n"
+        reward_text = f"{ce('🎁', '5215628200578655810')} هدیه‌ها هنوز توسط ادمین تنظیم نشده است.\n"
 
     text = (
-        "💼 <b>زیرمجموعه‌گیری و دعوت دوستان</b>\n\n"
+        f"{ce('💼', '5352896944496728039')} <b>زیرمجموعه‌گیری {ce('🎉', '5359785904535774578')} و دعوت دوستان</b>\n\n"
         "با دعوت دوستان از طریق لینک اختصاصی، بدون پرداخت حتی ۱ ریال "
         "کیف پولت شارژ می‌شه و از خدمات ربات استفاده می‌کنی! 🎉\n\n"
         f"{reward_text}\n"
-        "📊 <b>آمار شما:</b>\n"
-        f"  👥 زیرمجموعه‌ها: <b>{stats['total_referrals']}</b> نفر\n"
-        f"  🛒 خریدهای زیرمجموعه: <b>{stats['purchase_count']}</b> عدد\n"
-        f"  💵 مجموع خرید زیرمجموعه: <b>{fmt_price(stats['total_purchase_amount'])}</b> تومان\n\n"
-        f"🔗 <b>لینک دعوت شما:</b>\n<code>{ref_link}</code>\n\n"
-        "📢 <b>دعوت کن، هدیه بگیر، رشد کن!</b>"
+        f"{ce('📊', '5199749070830197566')} <b>آمار شما:</b>\n"
+        f"  {ce('👥', '5472030678633684592')} زیرمجموعه‌ها: <b>{stats['total_referrals']}</b> نفر\n"
+        f"  {ce('🛒', '5431577498364158238')} خریدهای زیرمجموعه: <b>{stats['purchase_count']}</b> عدد\n"
+        f"  {ce('💵', '5431499171045581032')} مجموع خرید زیرمجموعه: <b>{fmt_price(stats['total_purchase_amount'])}</b> تومان\n\n"
+        f"{ce('🔗', '5409048419211682843')} <b>لینک دعوت شما:</b>\n<code>{ref_link}</code>\n\n"
+        f"{ce('📢', '5271604874419647061')} <b>دعوت کن، هدیه بگیر، رشد کن!</b>"
     )
 
     # Build share text — link goes at the BOTTOM inside text= only (no url= param)
@@ -198,6 +201,7 @@ def show_referral_menu(target, user_id):
             f"✅ سرعت فوق‌العاده\n"
             f"✅ پایداری بالا\n"
             f"✅ پشتیبانی ۲۴ ساعته\n\n"
+            # NOTE: share text uses plain emojis (custom emojis can't render outside bot context)
             f"تو هم از لینک من وارد شو و سرویست رو بخر 👇\n{ref_link}"
         )
 
@@ -210,6 +214,7 @@ def show_referral_menu(target, user_id):
     if banner_photo:
         # With banner: callback so the bot sends the photo to the user for forwarding
         kb.add(types.InlineKeyboardButton("📤 دریافت پست آماده برای اشتراک‌گذاری", callback_data="referral:get_banner"))
+    # NOTE: icon_custom_emoji_id for url buttons not supported via types; text fallback kept
     kb.add(types.InlineKeyboardButton("🔗 اشتراک‌گذاری لینک دعوت", url=share_url))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
 

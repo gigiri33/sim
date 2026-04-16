@@ -2,11 +2,31 @@
 """
 Inline keyboard builders for main menu and admin panel.
 """
+import json
 from telebot import types
 
 from ..config import ADMIN_IDS, PERM_USER_FULL
 from ..db import setting_get
 from ..helpers import is_admin, admin_has_perm
+
+
+def _btn(text, callback_data=None, url=None, emoji_id=None, copy_text=None):
+    """Build an InlineKeyboardButton dict with optional icon_custom_emoji_id."""
+    d = {"text": text}
+    if callback_data is not None:
+        d["callback_data"] = callback_data
+    if url is not None:
+        d["url"] = url
+    if emoji_id is not None:
+        d["icon_custom_emoji_id"] = str(emoji_id)
+    if copy_text is not None:
+        d["copy_text"] = {"text": str(copy_text)}
+    return d
+
+
+def _raw_markup(rows):
+    """Serialize an inline_keyboard rows list to a JSON string for reply_markup."""
+    return json.dumps({"inline_keyboard": rows})
 
 
 def _user_is_agent(user_id) -> bool:
@@ -19,48 +39,48 @@ def _user_is_agent(user_id) -> bool:
 
 
 def kb_main(user_id):
-    kb = types.InlineKeyboardMarkup(row_width=2)
-    kb.row(
-        types.InlineKeyboardButton("🛒 خرید کانفیگ جدید", callback_data="buy:start"),
-        types.InlineKeyboardButton("📦 کانفیگ‌های من",    callback_data="my_configs"),
-    )
+    rows = []
+    rows.append([
+        _btn("خرید کانفیگ جدید", callback_data="buy:start",      emoji_id="5226656353744862682"),
+        _btn("کانفیگ‌های من",    callback_data="my_configs",      emoji_id="5332618260703624145"),
+    ])
     _ft_mode = setting_get("free_test_mode", "everyone")
     if _ft_mode == "everyone" or (_ft_mode == "agents_only" and _user_is_agent(user_id)):
-        kb.add(types.InlineKeyboardButton("🎁 تست رایگان", callback_data="test:start"))
-    kb.row(
-        types.InlineKeyboardButton("👤 حساب کاربری",    callback_data="profile"),
-        types.InlineKeyboardButton("💳 شارژ کیف پول",   callback_data="wallet:charge"),
-    )
+        rows.append([_btn("تست رایگان", callback_data="test:start", emoji_id="5199749070830197566")])
+    rows.append([
+        _btn("حساب کاربری",  callback_data="profile",        emoji_id="5373012449597335010"),
+        _btn("شارژ کیف پول", callback_data="wallet:charge",  emoji_id="6021331874528368703"),
+    ])
     ref_on     = setting_get("referral_enabled", "1") == "1"
     voucher_on = setting_get("vouchers_enabled", "1") == "1"
     if ref_on and voucher_on:
-        kb.row(
-            types.InlineKeyboardButton("🎁 دعوت دوستان",    callback_data="referral:menu"),
-            types.InlineKeyboardButton("🎫 ثبت کارت هدیه", callback_data="voucher:redeem"),
-        )
+        rows.append([
+            _btn("دعوت دوستان",    callback_data="referral:menu",   emoji_id="5453957997418004470"),
+            _btn("ثبت کارت هدیه", callback_data="voucher:redeem",  emoji_id="5418010521309815154"),
+        ])
     elif ref_on:
-        kb.add(types.InlineKeyboardButton("🎁 دعوت دوستان",    callback_data="referral:menu"))
+        rows.append([_btn("دعوت دوستان",    callback_data="referral:menu",  emoji_id="5453957997418004470")])
     elif voucher_on:
-        kb.add(types.InlineKeyboardButton("🎫 ثبت کارت هدیه", callback_data="voucher:redeem"))
-    kb.add(types.InlineKeyboardButton("🎧 ارتباط با پشتیبانی", callback_data="support"))
+        rows.append([_btn("ثبت کارت هدیه", callback_data="voucher:redeem", emoji_id="5418010521309815154")])
+    rows.append([_btn("ارتباط با پشتیبانی", callback_data="support", emoji_id="5190458330719461749")])
     if setting_get("agency_request_enabled", "1") == "1":
-        kb.add(types.InlineKeyboardButton("🤝 درخواست نمایندگی", callback_data="agency:request"))
+        rows.append([_btn("درخواست نمایندگی", callback_data="agency:request", emoji_id="5357080225463149588")])
     if is_admin(user_id):
-        kb.add(types.InlineKeyboardButton("⚙️ ورود به پنل مدیریت", callback_data="admin:panel"))
-    return kb
+        rows.append([_btn("ورود به پنل مدیریت", callback_data="admin:panel", emoji_id="5341715473882955310")])
+    return _raw_markup(rows)
 
 
 def kb_admin_panel(uid=None):
-    kb = types.InlineKeyboardMarkup(row_width=2)
+    rows = []
     is_owner = (uid in ADMIN_IDS) if uid else False
 
     if is_owner or (uid and admin_has_perm(uid, "types_packages")):
-        kb.row(types.InlineKeyboardButton("🧩 مدیریت نوع و پکیج‌ها", callback_data="admin:types"))
+        rows.append([_btn("مدیریت نوع و پکیج‌ها", callback_data="admin:types", emoji_id="5463224921935082813")])
 
     if is_owner or (uid and (admin_has_perm(uid, "view_configs") or
                              admin_has_perm(uid, "register_config") or
                              admin_has_perm(uid, "manage_configs"))):
-        kb.row(types.InlineKeyboardButton("📚 کانفیگ‌ها", callback_data="admin:stock"))
+        rows.append([_btn("کانفیگ‌ها", callback_data="admin:stock", emoji_id="6017209397413941115")])
 
     show_users = is_owner or (uid and (admin_has_perm(uid, "view_users") or
                                        admin_has_perm(uid, "full_users") or
@@ -68,52 +88,52 @@ def kb_admin_panel(uid=None):
     show_agents = is_owner or (uid and admin_has_perm(uid, "agency"))
 
     if show_users and is_owner:
-        kb.row(
-            types.InlineKeyboardButton("👥 مدیریت کاربران",  callback_data="admin:users"),
-            types.InlineKeyboardButton("👮 مدیریت ادمین‌ها", callback_data="admin:admins"),
-        )
+        rows.append([
+            _btn("مدیریت کاربران",  callback_data="admin:users",  emoji_id="5258513401784573443"),
+            _btn("مدیریت ادمین‌ها", callback_data="admin:admins", emoji_id="5404568051062425670"),
+        ])
         if show_agents:
-            kb.row(types.InlineKeyboardButton("🤝 مدیریت نمایندگان", callback_data="admin:agents"))
+            rows.append([_btn("مدیریت نمایندگان", callback_data="admin:agents", emoji_id="5908990051349434897")])
     elif show_users:
         if show_agents:
-            kb.row(
-                types.InlineKeyboardButton("👥 مدیریت کاربران", callback_data="admin:users"),
-                types.InlineKeyboardButton("🤝 مدیریت نمایندگان", callback_data="admin:agents"),
-            )
+            rows.append([
+                _btn("مدیریت کاربران",  callback_data="admin:users",  emoji_id="5258513401784573443"),
+                _btn("مدیریت نمایندگان", callback_data="admin:agents", emoji_id="5908990051349434897"),
+            ])
         else:
-            kb.row(types.InlineKeyboardButton("👥 مدیریت کاربران", callback_data="admin:users"))
+            rows.append([_btn("مدیریت کاربران", callback_data="admin:users", emoji_id="5258513401784573443")])
     elif is_owner:
-        kb.row(
-            types.InlineKeyboardButton("👮 مدیریت ادمین‌ها", callback_data="admin:admins"),
-            types.InlineKeyboardButton("🤝 مدیریت نمایندگان", callback_data="admin:agents"),
-        )
+        rows.append([
+            _btn("مدیریت ادمین‌ها",  callback_data="admin:admins", emoji_id="5404568051062425670"),
+            _btn("مدیریت نمایندگان", callback_data="admin:agents", emoji_id="5908990051349434897"),
+        ])
     elif show_agents:
-        kb.row(types.InlineKeyboardButton("🤝 مدیریت نمایندگان", callback_data="admin:agents"))
+        rows.append([_btn("مدیریت نمایندگان", callback_data="admin:agents", emoji_id="5908990051349434897")])
 
     if is_owner:
-        kb.row(
-            types.InlineKeyboardButton("🎟 کد تخفیف",  callback_data="admin:discounts"),
-            types.InlineKeyboardButton("🎁 کارت هدیه", callback_data="admin:vouchers"),
-        )
+        rows.append([
+            _btn("کد تخفیف",  callback_data="admin:discounts", emoji_id="5370935802844946281"),
+            _btn("کارت هدیه", callback_data="admin:vouchers",  emoji_id="5377599075237502153"),
+        ])
 
     show_broadcast = is_owner or (uid and (admin_has_perm(uid, "broadcast_all") or admin_has_perm(uid, "broadcast_cust")))
     show_pr        = is_owner or (uid and admin_has_perm(uid, "approve_payments"))
     if show_broadcast and show_pr:
-        kb.row(
-            types.InlineKeyboardButton("📣 فوروارد همگانی",        callback_data="admin:broadcast"),
-            types.InlineKeyboardButton("📋 رسیدهای بررسی نشده", callback_data="admin:pr"),
-        )
+        rows.append([
+            _btn("فوروارد همگانی",       callback_data="admin:broadcast", emoji_id="5416106115630918483"),
+            _btn("رسیدهای بررسی نشده",  callback_data="admin:pr",        emoji_id="5926764846518376076"),
+        ])
     elif show_broadcast:
-        kb.add(types.InlineKeyboardButton("📣 فوروارد همگانی", callback_data="admin:broadcast"))
+        rows.append([_btn("فوروارد همگانی", callback_data="admin:broadcast", emoji_id="5416106115630918483")])
     elif show_pr:
-        kb.add(types.InlineKeyboardButton("📋 رسیدهای بررسی نشده", callback_data="admin:pr"))
+        rows.append([_btn("رسیدهای بررسی نشده", callback_data="admin:pr", emoji_id="5926764846518376076")])
 
     if is_owner or (uid and admin_has_perm(uid, "manage_panels")):
-        kb.add(types.InlineKeyboardButton("🖥 مدیریت پنل‌های 3x-ui", callback_data="admin:panels"))
-        kb.add(types.InlineKeyboardButton("🇮🇷 پنل‌های ثنایی (ایران)", callback_data="admin:iran_panels"))
+        rows.append([_btn("مدیریت پنل‌های 3x-ui",    callback_data="admin:panels",      emoji_id="5343961484080730197")])
+        rows.append([_btn("پنل‌های ثنایی (ایران)", callback_data="admin:iran_panels", emoji_id="6008006386305211203")])
 
     if is_owner or (uid and admin_has_perm(uid, "settings")):
-        kb.add(types.InlineKeyboardButton("⚙️ تنظیمات", callback_data="admin:settings"))
+        rows.append([_btn("تنظیمات", callback_data="admin:settings", emoji_id="5341715473882955310")])
 
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
-    return kb
+    rows.append([_btn("بازگشت", callback_data="nav:main", emoji_id="5352759161945867747")])
+    return _raw_markup(rows)

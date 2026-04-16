@@ -176,6 +176,9 @@ def state_data(uid):
 
 # ── UI shortcut ────────────────────────────────────────────────────────────────
 def back_button(target="main"):
-    kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"nav:{target}"))
-    return kb
+    import json
+    return json.dumps({"inline_keyboard": [[{
+        "text": "بازگشت",
+        "callback_data": f"nav:{target}",
+        "icon_custom_emoji_id": "5352759161945867747",
+    }]]})

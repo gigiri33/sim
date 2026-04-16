@@ -24,6 +24,7 @@ from ..db import (
 from ..helpers import esc, fmt_price, now_str, move_leading_emoji
 from ..bot_instance import bot
 from ..group_manager import send_to_topic
+from .premium_emoji import ce
 
 
 def _bot_notif_on(key: str) -> bool:
@@ -65,25 +66,25 @@ def _send_file_group_delivery(chat_id, file_ids, caption, kb):
             media = [types.InputMediaDocument(fid) for fid in chunk]
         bot.send_media_group(chat_id, media)
     # keyboard can't attach to media group — send separately
-    bot.send_message(chat_id, "⬆️ فایل‌های کانفیگ شما", reply_markup=kb)
+    bot.send_message(chat_id, f"{ce('⬆️', '5463122435425448565')} فایل‌های کانفیگ شما", reply_markup=kb)
 
 
 def deliver_purchase_message(chat_id, purchase_id):
     item = get_purchase(purchase_id)
     if not item:
-        bot.send_message(chat_id, "❌ اطلاعات خرید یافت نشد.")
+        bot.send_message(chat_id, f"{ce('❌', '5215642288071387368')} اطلاعات خرید یافت نشد.")
         return
     cfg          = item["config_text"]
     service_name = move_leading_emoji(urllib.parse.unquote(item["service_name"] or ""))
     inquiry_link = item["inquiry_link"] or ""
     show_pkg_name = ("show_name" not in item.keys()) or bool(item["show_name"])
-    package_line = f"📦 پکیج: <b>{esc(item['package_name'])}</b>\n" if show_pkg_name and item["package_name"] else ""
-    expired_note = "\n\n⚠️ <b>این سرویس توسط ادمین منقضی شده است.</b>" if item["is_expired"] else ""
+    package_line = f"{ce('📦', '5258134813302332906')} پکیج: <b>{esc(item['package_name'])}</b>\n" if show_pkg_name and item["package_name"] else ""
+    expired_note = f"\n\n{ce('⚠️', '5447644880824181073')} <b>این سرویس توسط ادمین منقضی شده است.</b>" if item["is_expired"] else ""
     title_line   = "تست رایگان" if item["is_test"] else "سرویس شما آماده است"
 
     kb = types.InlineKeyboardMarkup()
     if setting_get("manual_renewal_enabled", "1") == "1":
-        kb.add(types.InlineKeyboardButton("♻️ تمدید", callback_data=f"renew:{purchase_id}"))
+        kb.add(types.InlineKeyboardButton(f"{ce('♻️', '5803057229909202251')} تمدید", callback_data=f"renew:{purchase_id}"))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
 
     # Detect file-based configs (OpenVPN / WireGuard)
@@ -107,14 +108,14 @@ def deliver_purchase_message(chat_id, purchase_id):
             username = cfg_data.get("username", "")
             password = cfg_data.get("password", "")
             caption = (
-                f"✅ <b>{title_line}</b>\n\n"
-                f"🧩 نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
+                f"{ce('✅', '5260463209562776385')} <b>{title_line}</b>\n\n"
+                f"{ce('🧩', '5463224921935082813')} نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
                 f"{package_line}"
-                f"🔋 حجم: <b>{esc(vol_text)}</b>\n"
-                f"⏰ مدت: <b>{esc(dur_text)}</b>\n"
+                f"{ce('🔋', '5924538142198600679')} حجم: <b>{esc(vol_text)}</b>\n"
+                f"{ce('⏰', '5343724178547691280')} مدت: <b>{esc(dur_text)}</b>\n"
                 f"👤 کاربر: <b>{esc(users_label)}</b>\n"
                 f"┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n"
-                f"🔐 اطلاعات اکانت\n"
+                f"{ce('🔐', '5472308992514464048')} اطلاعات اکانت\n"
                 f"username: <code>{esc(username)}</code>\n"
                 f"password: <code>{esc(password)}</code>"
                 f"{inq_line}"
@@ -122,13 +123,13 @@ def deliver_purchase_message(chat_id, purchase_id):
             )
         else:  # wg
             caption = (
-                f"✅ <b>{title_line}</b>\n\n"
-                f"🧩 نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
+                f"{ce('✅', '5260463209562776385')} <b>{title_line}</b>\n\n"
+                f"{ce('🧩', '5463224921935082813')} نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
                 f"{package_line}"
-                f"🔋 حجم: <b>{esc(vol_text)}</b>\n"
-                f"⏰ مدت: <b>{esc(dur_text)}</b>\n"
-                f"👥 نوع کاربری: <b>{esc(users_label)}</b>\n"
-                f"🔮 نام سرویس: <b>{esc(service_name)}</b>"
+                f"{ce('🔋', '5924538142198600679')} حجم: <b>{esc(vol_text)}</b>\n"
+                f"{ce('⏰', '5343724178547691280')} مدت: <b>{esc(dur_text)}</b>\n"
+                f"{ce('👥', '5372926953978341366')} نوع کاربری: <b>{esc(users_label)}</b>\n"
+                f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(service_name)}</b>"
                 f"{inq_line}"
                 f"{expired_note}"
             )
@@ -147,57 +148,57 @@ def deliver_purchase_message(chat_id, purchase_id):
         if has_config and has_sub:
             # Mode: config + sub
             text = (
-                f"✅ <b>{title_line}</b>\n\n"
-                f"🔮 نام سرویس: <b>{esc(service_name)}</b>\n"
-                f"🧩 نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
+                f"{ce('✅', '5260463209562776385')} <b>{title_line}</b>\n\n"
+                f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(service_name)}</b>\n"
+                f"{ce('🧩', '5463224921935082813')} نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
                 f"{package_line}"
-                f"🔋 حجم: <b>{esc(_vol_text_v2)}</b>\n"
-                f"⏰ مدت: <b>{esc(_dur_text_v2)}</b>\n"
-                f"👥 تعداد کاربر: <b>{esc(_users_v2)}</b>\n\n"
-                f"💝 <b>Config:</b>\n<code>{esc(cfg)}</code>\n\n"
-                f"🔗 <b>لینک ساب:</b>\n{esc(inquiry_link)}"
+                f"{ce('🔋', '5924538142198600679')} حجم: <b>{esc(_vol_text_v2)}</b>\n"
+                f"{ce('⏰', '5343724178547691280')} مدت: <b>{esc(_dur_text_v2)}</b>\n"
+                f"{ce('👥', '5372926953978341366')} تعداد کاربر: <b>{esc(_users_v2)}</b>\n\n"
+                f"{ce('💝', '5900197669178970457')} <b>Config:</b>\n<code>{esc(cfg)}</code>\n\n"
+                f"{ce('🔗', '5271604874419647061')} <b>لینک ساب:</b>\n{esc(inquiry_link)}"
                 f"{expired_note}"
             )
             qr_source = cfg
         elif has_config:
             # Mode: config only
             text = (
-                f"✅ <b>{title_line}</b>\n\n"
-                f"🔮 نام سرویس: <b>{esc(service_name)}</b>\n"
-                f"🧩 نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
+                f"{ce('✅', '5260463209562776385')} <b>{title_line}</b>\n\n"
+                f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(service_name)}</b>\n"
+                f"{ce('🧩', '5463224921935082813')} نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
                 f"{package_line}"
-                f"🔋 حجم: <b>{esc(_vol_text_v2)}</b>\n"
-                f"⏰ مدت: <b>{esc(_dur_text_v2)}</b>\n"
-                f"👥 تعداد کاربر: <b>{esc(_users_v2)}</b>\n\n"
-                f"💝 <b>Config:</b>\n<code>{esc(cfg)}</code>"
+                f"{ce('🔋', '5924538142198600679')} حجم: <b>{esc(_vol_text_v2)}</b>\n"
+                f"{ce('⏰', '5343724178547691280')} مدت: <b>{esc(_dur_text_v2)}</b>\n"
+                f"{ce('👥', '5372926953978341366')} تعداد کاربر: <b>{esc(_users_v2)}</b>\n\n"
+                f"{ce('💝', '5900197669178970457')} <b>Config:</b>\n<code>{esc(cfg)}</code>"
                 f"{expired_note}"
             )
             qr_source = cfg
         elif has_sub:
             # Mode: sub only
             text = (
-                f"✅ <b>{title_line}</b>\n\n"
-                f"🔮 نام سرویس: <b>{esc(service_name)}</b>\n"
-                f"🧩 نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
+                f"{ce('✅', '5260463209562776385')} <b>{title_line}</b>\n\n"
+                f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(service_name)}</b>\n"
+                f"{ce('🧩', '5463224921935082813')} نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
                 f"{package_line}"
-                f"🔋 حجم: <b>{esc(_vol_text_v2)}</b>\n"
-                f"⏰ مدت: <b>{esc(_dur_text_v2)}</b>\n"
-                f"👥 تعداد کاربر: <b>{esc(_users_v2)}</b>\n\n"
-                f"🔗 <b>لینک ساب:</b>\n{esc(inquiry_link)}"
+                f"{ce('🔋', '5924538142198600679')} حجم: <b>{esc(_vol_text_v2)}</b>\n"
+                f"{ce('⏰', '5343724178547691280')} مدت: <b>{esc(_dur_text_v2)}</b>\n"
+                f"{ce('👥', '5372926953978341366')} تعداد کاربر: <b>{esc(_users_v2)}</b>\n\n"
+                f"{ce('🔗', '5271604874419647061')} <b>لینک ساب:</b>\n{esc(inquiry_link)}"
                 f"{expired_note}"
             )
             qr_source = inquiry_link
         else:
             # Fallback: legacy display
             text = (
-                f"✅ <b>{title_line}</b>\n\n"
-                f"🔮 نام سرویس: <b>{esc(service_name)}</b>\n"
-                f"🧩 نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
+                f"{ce('✅', '5260463209562776385')} <b>{title_line}</b>\n\n"
+                f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(service_name)}</b>\n"
+                f"{ce('🧩', '5463224921935082813')} نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
                 f"{package_line}"
-                f"🔋 حجم: <b>{esc(_vol_text_v2)}</b>\n"
-                f"⏰ مدت: <b>{esc(_dur_text_v2)}</b>\n"
-                f"👥 تعداد کاربر: <b>{esc(_users_v2)}</b>\n\n"
-                f"💝 <b>Config:</b>\n<code>{esc(cfg or '-')}</code>\n\n"
+                f"{ce('🔋', '5924538142198600679')} حجم: <b>{esc(_vol_text_v2)}</b>\n"
+                f"{ce('⏰', '5343724178547691280')} مدت: <b>{esc(_dur_text_v2)}</b>\n"
+                f"{ce('👥', '5372926953978341366')} تعداد کاربر: <b>{esc(_users_v2)}</b>\n\n"
+                f"{ce('💝', '5900197669178970457')} <b>Config:</b>\n<code>{esc(cfg or '-')}</code>\n\n"
                 f"🔋 Volume web: {esc(inquiry_link or '-')}"
                 f"{expired_note}"
             )

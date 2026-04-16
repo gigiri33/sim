@@ -2,8 +2,7 @@
 """
 Helpers for Telegram Premium / Custom Emoji support.
 
-SCOPE: Only for dynamic texts entered and saved by admin/user.
-       NOT for static/hardcoded bot strings.
+SCOPE: Dynamic texts (admin/user) AND static bot strings (custom emoji HTML tags).
 """
 from __future__ import annotations
 
@@ -13,6 +12,17 @@ import re
 
 # Matches Persian/Arabic letters and digits only
 _PERSIAN_WORD_RE = re.compile(r'[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]+')
+
+
+# ── Custom emoji HTML helper ──────────────────────────────────────────────────
+
+def ce(emoji: str, eid: str | int) -> str:
+    """Return a <tg-emoji> HTML tag for use with parse_mode='HTML'.
+
+    The *emoji* argument is the visible fallback character shown on clients
+    that do not support custom emoji.
+    """
+    return f'<tg-emoji emoji-id="{eid}">{emoji}</tg-emoji>'
 
 
 # ── Extraction ─────────────────────────────────────────────────────────────────
