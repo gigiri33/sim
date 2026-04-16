@@ -5931,7 +5931,6 @@ def _dispatch_callback(call, uid, data):
             return
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("🔍 تبدیل پیام به آیدی ایموجی", callback_data="adm:emoji:extract"))
-        kb.add(types.InlineKeyboardButton("🧪 تست نمایش ایموجی پرمیوم",   callback_data="adm:emoji:test"))
         kb.add(types.InlineKeyboardButton("🔙 بازگشت",                      callback_data="admin:settings"))
         bot.answer_callback_query(call.id)
         send_or_edit(
@@ -5954,20 +5953,6 @@ def _dispatch_callback(call, uid, data):
             "یک پیام حاوی ایموجی پرمیوم (سفارشی) ارسال کنید.\n"
             "می‌توانید چند ایموجی در یک پیام بفرستید.\n\n"
             "<i>متن همراه ایموجی نیز شناسایی می‌شود.</i>",
-            back_button("adm:emoji:menu"),
-        )
-        return
-
-    if data == "adm:emoji:test":
-        if not admin_has_perm(uid, "settings"):
-            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
-            return
-        state_set(uid, "admin_emoji_test")
-        bot.answer_callback_query(call.id)
-        send_or_edit(
-            call,
-            "🧪 <b>تست نمایش ایموجی پرمیوم</b>\n\n"
-            "پیامی حاوی ایموجی پرمیوم ارسال کنید تا بازنمایی شود.",
             back_button("adm:emoji:menu"),
         )
         return

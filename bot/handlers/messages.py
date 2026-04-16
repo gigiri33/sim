@@ -2798,25 +2798,6 @@ def universal_handler(message):
                              reply_markup=back_button("adm:emoji:menu"))
             return
 
-        # ── Admin: Premium Emoji — Render Test ────────────────────────────────
-        if sn == "admin_emoji_test" and is_admin(uid):
-            from ..ui.premium_emoji import serialize_premium_text, render_premium_text_entities
-            raw_text  = message.text or message.caption or ""
-            entities  = message.entities or message.caption_entities or []
-            serialized = serialize_premium_text(raw_text, entities)
-            out_text, out_ents = render_premium_text_entities(serialized)
-            state_clear(uid)
-            kb = back_button("adm:emoji:menu")
-            if out_ents:
-                bot.send_message(uid,
-                    "✅ ایموجی‌های پرمیوم شناسایی شدند. بازنمایی:\n\n" + out_text,
-                    entities=out_ents, reply_markup=kb)
-            else:
-                bot.send_message(uid,
-                    f"ℹ️ ایموجی پرمیوم شناسایی نشد.\n\n{esc(out_text)}",
-                    parse_mode="HTML", reply_markup=kb)
-            return
-
         # ── Panel: Register Panel Config (multi-step) ──────────────────────────
         if sn == "panel_add_name" and is_admin(uid):
             name = (message.text or "").strip()

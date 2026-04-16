@@ -51,7 +51,7 @@ def extract_custom_emojis(message) -> list[dict]:
 def extract_context_text(text: str, offset: int, length: int) -> str:
     """
     Infer nearest Persian word/phrase for an emoji at (offset, length).
-    Only returns Persian/Arabic letters — strips dashes, spaces, symbols.
+    Only looks at the same line as the emoji — ignores neighbouring lines.
     Prefers text before the emoji, falls back to text after.
     """
     def _persian_words(s: str) -> str:
@@ -61,9 +61,17 @@ def extract_context_text(text: str, offset: int, length: int) -> str:
     before = text[:offset]
     after  = text[offset + length:]
 
-    ctx = _persian_words(before[-40:])
+    # Limit to same line: only text after the last newline before the emoji
+    last_nl = before.rfind('\n')
+    same_line_before = before[last_nl + 1:] if last_nl >= 0 else before
+
+    # Limit to same line: only text up to the next newline after the emoji
+    next_nl = after.find('\n')
+    same_line_after = after[:next_nl] if next_nl >= 0 else after
+
+    ctx = _persian_words(same_line_before)
     if not ctx:
-        ctx = _persian_words(after[:40])
+        ctx = _persian_words(same_line_after)
     return ctx[:25]
 
 
