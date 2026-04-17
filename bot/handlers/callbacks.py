@@ -4,7 +4,7 @@ import time
 import threading
 import traceback
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timedelta
 from telebot import types
 from ..config import ADMIN_IDS, ADMIN_PERMS, PERM_FULL_SET, PERM_USER_FULL, PERM_EMOJI_IDS, CRYPTO_COINS, CRYPTO_API_SYMBOLS, CRYPTO_EMOJI_IDS, CONFIGS_PER_PAGE
 from ..bot_instance import bot
@@ -592,9 +592,10 @@ def _invoice_expiry_line() -> str:
     if not _invoice_expiry_enabled():
         return ""
     mins = _invoice_expiry_minutes()
+    expiry_dt = datetime.now() + timedelta(minutes=mins)
+    expiry_str = expiry_dt.strftime("%H:%M")
     return (
-        f"\n\n⏳ این فاکتور به مدت <b>{mins} دقیقه</b> اعتبار دارد "
-        "و پس از آن غیرفعال خواهد شد. در صورت نیاز دوباره اقدام کنید."
+        f"\n\n⏳ اعتبار این فاکتور تا ساعت <b>{expiry_str}</b> است."
     )
 
 
