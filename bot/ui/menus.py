@@ -126,12 +126,16 @@ def show_my_configs(target, user_id):
     if not items:
         send_or_edit(target, f"{ce('📭', '5258134813302332906')} هنوز کانفیگی برای حساب شما ثبت نشده است.", back_button("main"))
         return
+    renewal_enabled = setting_get("manual_renewal_enabled", "1") == "1"
     kb = types.InlineKeyboardMarkup()
     for item in items:
         expired_mark = " ❌" if item["is_expired"] else ""
         svc_name     = move_leading_emoji(urllib.parse.unquote(item["service_name"] or ""))
         title        = f"{svc_name}{expired_mark}"
-        kb.add(types.InlineKeyboardButton(title, callback_data=f"mycfg:{item['id']}"))
+        row = [types.InlineKeyboardButton(title, callback_data=f"mycfg:{item['id']}")]
+        if renewal_enabled and not item["is_test"]:
+            row.append(types.InlineKeyboardButton("♻️ تمدید", callback_data=f"renew:{item['id']}"))
+        kb.add(*row)
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
     send_or_edit(target, f"{ce('📦', '5332618260703624145')} <b>کانفیگ‌های من</b>\n\nیکی از سرویس‌ها را انتخاب کنید:", kb)
 

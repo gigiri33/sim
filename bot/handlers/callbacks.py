@@ -1878,7 +1878,7 @@ def _dispatch_callback(call, uid, data):
             _name_part = f"{p['name']} | " if _sn else ""
             title = f"{_name_part}{fmt_vol(p['volume_gb'])} | {fmt_dur(p['duration_days'])} | {fmt_price(price)} ت"
             kb.add(types.InlineKeyboardButton(title, callback_data=f"renew:p:{purchase_id}:{p['id']}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"mycfg:{purchase_id}"))
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="my_configs"))
         bot.answer_callback_query(call.id)
         agent_note = "\n\n🤝 <i>این قیمت‌ها مخصوص همکاری شماست</i>" if user and user["is_agent"] else ""
         if not packages:
