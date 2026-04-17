@@ -89,7 +89,9 @@ def deliver_purchase_message(chat_id, purchase_id):
     if item["is_test"] and not item["is_expired"]:
         hours_left = item["test_hours_left"] if "test_hours_left" in item.keys() else None
         if hours_left is not None:
-            title_line = f"تست رایگان — ⏰ {int(hours_left)} ساعت باقی‌مانده"
+            h = int(hours_left)
+            time_str = f"{h // 24} روز و {h % 24} ساعت" if h >= 24 else f"{h} ساعت"
+            title_line = f"تست رایگان — ⏰ {time_str} باقی‌مانده"
 
     kb = types.InlineKeyboardMarkup()
     if setting_get("manual_renewal_enabled", "1") == "1" and not item["is_test"]:

@@ -616,14 +616,6 @@ def universal_handler(message):
                 "discount_code": row["code"],
             })
             state_set(uid, prev_state, **new_data)
-            success_text = (
-                "✅ <b>کد تخفیف با موفقیت اعمال شد.</b>\n\n"
-                f"🎟 کد: <code>{esc(row['code'])}</code>\n"
-                f"💰 مبلغ اصلی: {fmt_price(original_amount)} تومان\n"
-                f"🏷 مبلغ تخفیف: {fmt_price(disc_amount)} تومان\n"
-                f"💚 مبلغ نهایی: {fmt_price(final_amount)} تومان"
-            )
-            bot.send_message(uid, success_text, parse_mode="HTML")
             if prev_state == "buy_select_method":
                 package_id = new_data.get("package_id")
                 package_row = get_package(package_id) if package_id else None
@@ -2142,6 +2134,25 @@ def universal_handler(message):
                 f"✅ <b>حداکثر تعداد خرید به {label} تنظیم شد.</b>",
                 parse_mode="HTML",
                 reply_markup=back_button("adm:ops:bulk_menu"))
+            return
+
+        if sn == "admin_set_invoice_expiry_minutes" and is_admin(uid):
+            raw_text = normalize_text_number(message.text or "")
+            val = parse_int(raw_text)
+            if not val or val <= 0:
+                bot.send_message(uid,
+                    "⚠️ <b>مقدار نامعتبر است.</b>\n\n"
+                    "لطفاً یک عدد صحیح مثبت وارد کنید (مثلاً ۳۰).",
+                    parse_mode="HTML",
+                    reply_markup=back_button("adm:ops:invoice_expiry"))
+                return
+            setting_set("invoice_expiry_minutes", str(val))
+            log_admin_action(uid, f"مدت اعتبار فاکتور پرداخت: {val} دقیقه")
+            state_clear(uid)
+            bot.send_message(uid,
+                f"✅ <b>مدت اعتبار فاکتور به {val} دقیقه تنظیم شد.</b>",
+                parse_mode="HTML",
+                reply_markup=back_button("adm:ops:invoice_expiry"))
             return
 
         if sn == "admin_set_card" and is_admin(uid):

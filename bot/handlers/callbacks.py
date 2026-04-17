@@ -572,6 +572,61 @@ def _get_state_price(uid, package_row, state_key):
     return get_effective_price(uid, package_row)
 
 
+# ── Invoice expiry helpers ─────────────────────────────────────────────────────
+
+def _invoice_expiry_minutes() -> int:
+    """Return configured invoice expiry duration in minutes (default 30)."""
+    try:
+        return max(1, int(setting_get("invoice_expiry_minutes", "30") or "30"))
+    except (ValueError, TypeError):
+        return 30
+
+
+def _invoice_expiry_enabled() -> bool:
+    """Return True if invoice expiry feature is enabled."""
+    return setting_get("invoice_expiry_enabled", "1") == "1"
+
+
+def _invoice_expiry_line() -> str:
+    """Return the validity notice line to append inside the invoice text."""
+    if not _invoice_expiry_enabled():
+        return ""
+    mins = _invoice_expiry_minutes()
+    return (
+        f"\n\n⏳ این فاکتور به مدت <b>{mins} دقیقه</b> اعتبار دارد "
+        "و پس از آن غیرفعال خواهد شد. در صورت نیاز دوباره اقدام کنید."
+    )
+
+
+def _stamp_invoice(uid: int) -> None:
+    """Write invoice_created_at timestamp into the user's current state."""
+    sd = state_data(uid)
+    sn = state_name(uid)
+    if not sn:
+        return
+    new_sd = dict(sd)
+    new_sd["invoice_created_at"] = int(time.time())
+    state_set(uid, sn, **new_sd)
+
+
+def _check_invoice_valid(uid: int) -> bool:
+    """Return True if the invoice is still within its validity window."""
+    if not _invoice_expiry_enabled():
+        return True
+    sd = state_data(uid)
+    created_at = sd.get("invoice_created_at")
+    if not created_at:
+        return True  # no timestamp yet — backward-compatible, allow
+    return (time.time() - float(created_at)) <= (_invoice_expiry_minutes() * 60)
+
+
+_INVOICE_EXPIRED_MSG = (
+    "⏰ <b>زمان پرداخت به پایان رسید.</b>\n\n"
+    "اعتبار این فاکتور منقضی شده است. لطفاً دوباره برای "
+    "خرید، تمدید یا شارژ کیف پول اقدام کنید."
+)
+
+
 def _show_discount_prompt(call, amount=None):
     """Show the discount code prompt. Returns True if shown, False if skipped."""
     # Check if any eligible discount codes exist for this user
@@ -643,6 +698,7 @@ def _show_purchase_gateways(target, uid, package_id, price, package_row):
             _price_line = f"💰 مبلغ کل: <b>{fmt_price(price)}</b> تومان"
         else:
             _price_line = f"💰 قیمت: {fmt_price(price)} تومان"
+    _stamp_invoice(uid)
     text = (
         "💳 <b>انتخاب روش پرداخت</b>\n\n"
         f"🧩 نوع: {esc(package_row['type_name'])}\n"
@@ -654,6 +710,7 @@ def _show_purchase_gateways(target, uid, package_id, price, package_row):
         f"{_price_line}\n\n"
         + (_range_guide + "\n\n" if _range_guide else "")
         + "روش پرداخت را انتخاب کنید:"
+        + _invoice_expiry_line()
     )
     send_or_edit(target, text, kb)
 
@@ -697,6 +754,7 @@ def _show_renewal_gateways(target, uid, purchase_id, package_id, price, package_
         )
     else:
         _price_line = f"💰 قیمت: {fmt_price(price)} تومان"
+    _stamp_invoice(uid)
     text = (
         "♻️ <b>تمدید سرویس</b>\n\n"
         f"🔮 سرویس فعلی: {esc(move_leading_emoji(urllib.parse.unquote(item['service_name'] or '')))}\n"
@@ -706,6 +764,7 @@ def _show_renewal_gateways(target, uid, purchase_id, package_id, price, package_
         f"{_price_line}\n\n"
         + (_range_guide + "\n\n" if _range_guide else "")
         + "روش پرداخت را انتخاب کنید:"
+        + _invoice_expiry_line()
     )
     send_or_edit(target, text, kb)
 
@@ -747,11 +806,13 @@ def _show_wallet_gateways(target, uid, amount):
         )
     else:
         _price_line = f"💰 مبلغ: {fmt_price(amount)} تومان"
+    _stamp_invoice(uid)
     text = (
         "💳 <b>شارژ کیف پول</b>\n\n"
         f"{_price_line}\n\n"
         + (_range_guide + "\n\n" if _range_guide else "")
         + "روش پرداخت را انتخاب کنید:"
+        + _invoice_expiry_line()
     )
     send_or_edit(target, text, kb)
 
@@ -2004,6 +2065,9 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data.startswith("rpay:card:"):
+        if not _check_invoice_valid(uid):
+            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            return
         parts = data.split(":")
         purchase_id = int(parts[2])
         package_id  = int(parts[3])
@@ -2044,6 +2108,9 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data.startswith("rpay:crypto:"):
+        if not _check_invoice_valid(uid):
+            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            return
         parts = data.split(":")
         purchase_id = int(parts[2])
         package_id  = int(parts[3])
@@ -2107,6 +2174,9 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data.startswith("rpay:tetrapay:"):
+        if not _check_invoice_valid(uid):
+            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            return
         parts = data.split(":")
         purchase_id = int(parts[2])
         package_id  = int(parts[3])
@@ -2210,6 +2280,9 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data.startswith("rpay:tronpays_rial:"):
+        if not _check_invoice_valid(uid):
+            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            return
         parts = data.split(":")
         purchase_id = int(parts[2])
         package_id  = int(parts[3])
@@ -2500,6 +2573,9 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data.startswith("pay:wallet:"):
+        if not _check_invoice_valid(uid):
+            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            return
         package_id  = int(data.split(":")[2])
         package_row = get_package(package_id)
         user        = get_user(uid)
@@ -2542,6 +2618,9 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data.startswith("pay:card:"):
+        if not _check_invoice_valid(uid):
+            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            return
         package_id  = int(data.split(":")[2])
         package_row = get_package(package_id)
         if not package_row or (setting_get("preorder_mode", "0") == "1" and package_row["stock"] <= 0):
@@ -2590,6 +2669,9 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data.startswith("pay:crypto:"):
+        if not _check_invoice_valid(uid):
+            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            return
         package_id  = int(data.split(":")[2])
         package_row = get_package(package_id)
         if not package_row or (setting_get("preorder_mode", "0") == "1" and package_row["stock"] <= 0):
@@ -2712,6 +2794,9 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data.startswith("pay:tetrapay:"):
+        if not _check_invoice_valid(uid):
+            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            return
         package_id = int(data.split(":")[2])
         package_row = get_package(package_id)
         if not package_row or (setting_get("preorder_mode", "0") == "1" and package_row["stock"] <= 0):
@@ -2814,6 +2899,9 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data.startswith("pay:tronpays_rial:"):
+        if not _check_invoice_valid(uid):
+            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            return
         package_id  = int(data.split(":")[2])
         package_row = get_package(package_id)
         if not package_row or (setting_get("preorder_mode", "0") == "1" and package_row["stock"] <= 0):
@@ -2985,6 +3073,9 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data == "wallet:charge:card":
+        if not _check_invoice_valid(uid):
+            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            return
         sd     = state_data(uid)
         amount = sd.get("amount")
         if not amount:
@@ -3017,6 +3108,9 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data == "wallet:charge:crypto":
+        if not _check_invoice_valid(uid):
+            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            return
         sd     = state_data(uid)
         amount = sd.get("amount")
         if not amount:
@@ -3036,6 +3130,9 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data == "wallet:charge:tetrapay":
+        if not _check_invoice_valid(uid):
+            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            return
         sd     = state_data(uid)
         amount = sd.get("amount")
         if not amount:
@@ -3084,6 +3181,9 @@ def _dispatch_callback(call, uid, data):
 
     # ── SwapWallet Crypto (network selection) ─────────────────────────────────
     if data == "wallet:charge:swapwallet_crypto":
+        if not _check_invoice_valid(uid):
+            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            return
         sd     = state_data(uid)
         amount = sd.get("amount")
         if not amount:
@@ -3108,6 +3208,9 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data == "wallet:charge:tronpays_rial":
+        if not _check_invoice_valid(uid):
+            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            return
         sd     = state_data(uid)
         amount = sd.get("amount")
         if not amount:
@@ -3209,6 +3312,9 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data.startswith("pay:swapwallet_crypto:"):
+        if not _check_invoice_valid(uid):
+            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            return
         package_id  = int(data.split(":")[2])
         package_row = get_package(package_id)
         if not package_row or (setting_get("preorder_mode", "0") == "1" and package_row["stock"] <= 0):
@@ -3272,6 +3378,9 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data.startswith("rpay:swapwallet_crypto:"):
+        if not _check_invoice_valid(uid):
+            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            return
         parts = data.split(":")
         purchase_id = int(parts[2])
         package_id  = int(parts[3])
@@ -6381,6 +6490,16 @@ def _dispatch_callback(call, uid, data):
             types.InlineKeyboardButton(bulk_label, callback_data="adm:ops:bulk_menu"),
             types.InlineKeyboardButton("📦 فروش عمده", callback_data="adm:ops:noop"),
         )
+        _inv_enabled = setting_get("invoice_expiry_enabled", "1")
+        _inv_mins    = setting_get("invoice_expiry_minutes", "30")
+        _inv_label   = (
+            f"✅ فعال — {_inv_mins} دقیقه"
+            if _inv_enabled == "1" else "❌ غیرفعال"
+        )
+        ops_kb.row(
+            types.InlineKeyboardButton(_inv_label, callback_data="adm:ops:invoice_expiry"),
+            types.InlineKeyboardButton("📄 اعتبار فاکتور پرداخت", callback_data="adm:ops:noop"),
+        )
         ops_kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:settings"))
         return ops_kb
 
@@ -6395,13 +6514,21 @@ def _dispatch_callback(call, uid, data):
         renewal_fa = "✅ فعال" if renewal_enabled == "1" else "❌ غیرفعال"
         referral_fa = "✅ فعال" if referral_enabled == "1" else "❌ غیرفعال"
         bulk_fa = {"everyone": "✅ همه کاربران", "agents_only": "🤝 فقط نمایندگان", "disabled": "❌ غیرفعال"}.get(bulk_mode, "✅ همه کاربران")
+        _inv_exp_enabled = setting_get("invoice_expiry_enabled", "1")
+        _inv_exp_mins    = setting_get("invoice_expiry_minutes", "30")
+        _inv_fa = (
+            f"✅ فعال — هر فاکتور تا <b>{_inv_exp_mins} دقیقه</b> معتبر است."
+            if _inv_exp_enabled == "1"
+            else "❌ غیرفعال — فاکتورها محدودیت زمانی ندارند."
+        )
         return (
             "🤖 <b>مدیریت عملیات ربات</b>\n\n"
             f"🔹 <b>وضعیت ربات:</b> {status_fa}\n"
             f"🔹 <b>تمدید کانفیگ‌های ثبت دستی:</b> {renewal_fa}\n"
             f"🔹 <b>زیرمجموعه‌گیری:</b> {referral_fa}\n"
             f"🔹 <b>فروش عمده:</b> {bulk_fa}\n"
-            f"   ↳ حداقل تعداد: <b>{min_qty}</b> | حداکثر تعداد: <b>{max_label}</b>\n\n"
+            f"   ↳ حداقل تعداد: <b>{min_qty}</b> | حداکثر تعداد: <b>{max_label}</b>\n"
+            f"🔹 <b>اعتبار فاکتور پرداخت:</b> {_inv_fa}\n\n"
             "برای تغییر هر مورد، دکمه وضعیت فعلی آن را لمس کنید."
         )
 
@@ -6556,6 +6683,67 @@ def _dispatch_callback(call, uid, data):
             f"📌 مقدار فعلی: <b>{cur_max_label}</b>\n\n"
             "📝 <i>یک عدد صحیح مثبت وارد کنید، یا <b>0</b> برای «بدون محدودیت»</i>",
             back_button("adm:ops:bulk_menu"))
+        return
+
+    # ── Invoice Expiry Sub-menu ───────────────────────────────────────────────
+    def _invoice_expiry_menu_kb():
+        enabled = setting_get("invoice_expiry_enabled", "1")
+        mins    = setting_get("invoice_expiry_minutes", "30")
+        toggle_label = "✅ فعال — کلیک کنید تا غیرفعال شود" if enabled == "1" else "❌ غیرفعال — کلیک کنید تا فعال شود"
+        kb = types.InlineKeyboardMarkup(row_width=1)
+        kb.add(types.InlineKeyboardButton(toggle_label, callback_data="adm:ops:inv_exp:toggle"))
+        if enabled == "1":
+            kb.add(types.InlineKeyboardButton(f"⏱ تنظیم زمان فاکتور: {mins} دقیقه", callback_data="adm:ops:inv_exp:set_mins"))
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="adm:ops"))
+        return kb
+
+    def _invoice_expiry_menu_text():
+        enabled = setting_get("invoice_expiry_enabled", "1")
+        mins    = setting_get("invoice_expiry_minutes", "30")
+        status_fa = f"✅ فعال — هر فاکتور تا <b>{mins} دقیقه</b> معتبر است." if enabled == "1" else "❌ غیرفعال — فاکتورها محدودیت زمانی ندارند."
+        return (
+            "📄 <b>تنظیمات اعتبار فاکتور پرداخت</b>\n\n"
+            f"🔹 <b>وضعیت:</b> {status_fa}\n\n"
+            "وقتی فعال باشد، هر فاکتور پرداخت (خرید، تمدید، شارژ کیف پول) "
+            "فقط تا مدت تعیین‌شده معتبر است. پس از اتمام زمان، کاربر نمی‌تواند "
+            "از آن فاکتور برای پرداخت استفاده کند.\n\n"
+            "مقدار پیش‌فرض: <b>30 دقیقه</b>"
+        )
+
+    if data == "adm:ops:invoice_expiry":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, _invoice_expiry_menu_text(), _invoice_expiry_menu_kb())
+        return
+
+    if data == "adm:ops:inv_exp:toggle":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        cur = setting_get("invoice_expiry_enabled", "1")
+        new_val = "0" if cur == "1" else "1"
+        setting_set("invoice_expiry_enabled", new_val)
+        label = "فعال" if new_val == "1" else "غیرفعال"
+        log_admin_action(uid, f"اعتبار فاکتور پرداخت {label} شد")
+        bot.answer_callback_query(call.id, f"اعتبار فاکتور: {label}")
+        send_or_edit(call, _invoice_expiry_menu_text(), _invoice_expiry_menu_kb())
+        return
+
+    if data == "adm:ops:inv_exp:set_mins":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        cur_mins = setting_get("invoice_expiry_minutes", "30")
+        state_set(uid, "admin_set_invoice_expiry_minutes")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "⏱ <b>تنظیم زمان اعتبار فاکتور</b>\n\n"
+            "مدت زمان اعتبار فاکتور پرداخت را به دقیقه وارد کنید.\n\n"
+            f"📌 مقدار فعلی: <b>{cur_mins} دقیقه</b>\n\n"
+            "📝 <i>یک عدد صحیح مثبت وارد کنید (مثلاً ۱۰، ۳۰، ۶۰)</i>",
+            back_button("adm:ops:invoice_expiry"))
         return
 
     # ── Referral Settings ─────────────────────────────────────────────────────

@@ -996,10 +996,10 @@ def get_purchase(purchase_id):
                    t.name AS type_name, t.description AS type_description,
                    c.service_name, c.config_text, c.inquiry_link,
                    CASE WHEN pr.is_test=1
-                        AND (julianday('now') - julianday(pr.created_at)) * 24 >= 24
+                        AND (julianday('now') - julianday(pr.created_at)) * 24 >= p.duration_days * 24
                         THEN 1 ELSE c.is_expired END AS is_expired,
                    CASE WHEN pr.is_test=1
-                        THEN MAX(0, 24 - CAST((julianday('now') - julianday(pr.created_at)) * 24 AS INTEGER))
+                        THEN MAX(0, p.duration_days * 24 - CAST((julianday('now') - julianday(pr.created_at)) * 24 AS INTEGER))
                         ELSE NULL END AS test_hours_left
             FROM purchases pr
             JOIN packages p ON p.id=pr.package_id
@@ -1019,10 +1019,10 @@ def get_user_purchases(user_id):
                    t.name AS type_name, t.description AS type_description,
                    c.service_name, c.config_text, c.inquiry_link,
                    CASE WHEN pr.is_test=1
-                        AND (julianday('now') - julianday(pr.created_at)) * 24 >= 24
+                        AND (julianday('now') - julianday(pr.created_at)) * 24 >= p.duration_days * 24
                         THEN 1 ELSE c.is_expired END AS is_expired,
                    CASE WHEN pr.is_test=1
-                        THEN MAX(0, 24 - CAST((julianday('now') - julianday(pr.created_at)) * 24 AS INTEGER))
+                        THEN MAX(0, p.duration_days * 24 - CAST((julianday('now') - julianday(pr.created_at)) * 24 AS INTEGER))
                         ELSE NULL END AS test_hours_left
             FROM purchases pr
             JOIN packages p ON p.id=pr.package_id

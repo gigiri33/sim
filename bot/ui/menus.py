@@ -137,7 +137,9 @@ def show_my_configs(target, user_id):
             if item["is_expired"]:
                 test_label = " 🎁❌"
             elif hours_left is not None:
-                test_label = f" 🎁⏰{int(hours_left)}h"
+                h = int(hours_left)
+                time_str = f"{h // 24}d{h % 24}h" if h >= 24 else f"{h}h"
+                test_label = f" 🎁⏰{time_str}"
             else:
                 test_label = " 🎁"
         title = f"{svc_name}{test_label}{expired_mark}"

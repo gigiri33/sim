@@ -424,8 +424,8 @@ def _finish_card_payment_approval_inner(payment_id, admin_note, approved):
             update_balance(user_id, payment["amount"])
             bot.send_message(user_id, f"{ce('✅', '5900157489759916320')} واریزی شما تأیید شد.\n\n{esc(admin_note)}")
             user_row = get_user(user_id)
-            receipt_note = payment.get("receipt_text") or ""
-            pay_method   = payment.get("payment_method") or "—"
+            receipt_note = payment["receipt_text"] if payment["receipt_text"] else ""
+            pay_method   = payment["payment_method"] if payment["payment_method"] else "—"
             pay_id_txt   = f"#{payment_id}"
             send_to_topic("wallet_log",
                 f"{ce('💳', '5931368295545443065')} <b>شارژ کیف‌پول تأیید شد</b>\n\n"
