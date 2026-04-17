@@ -27,23 +27,8 @@ TOPICS = [
     ("error_log",        "گزارش خطا"),
 ]
 
-# Custom emoji IDs for forum topic icons (used with icon_custom_emoji_id in create_forum_topic)
-TOPIC_EMOJI_IDS = {
-    "backup":           "5373172742071803031",
-    "new_users":        "5372926953978341366",
-    "payment_approval": "5794210855704861919",
-    "renewal_request":  "5803057229909202251",
-    "purchase_log":     "5258134813302332906",
-    "renewal_log":      "5264727218734524899",
-    "wallet_log":       "5318912792428814144",
-    "test_report":      "5411512278740640309",
-    "broadcast_report": "5900108844960322391",
-    "referral_log":     "5463256910851546817",
-    "agency_request":   "5357080225463149588",
-    "agency_log":       "5264895611517300926",
-    "admin_ops_log":    None,  # لاگ عملیاتی — no custom emoji ID provided; fallback
-    "error_log":        "5334882760735598374",
-}
+# Custom emoji IDs for forum topic icons — requires Telegram Premium; left empty to avoid PREMIUM_ACCOUNT_REQUIRED errors.
+TOPIC_EMOJI_IDS = {}
 
 _SETTING_KEY = {key: f"group_topic_{key}" for key, _ in TOPICS}
 
