@@ -45,6 +45,8 @@ from ..db import (
     get_all_discount_codes, get_discount_code, add_discount_code,
     toggle_discount_code, update_discount_code_field, delete_discount_code,
     validate_discount_code, record_discount_usage, has_eligible_discount_codes,
+    get_discount_code_targets, set_discount_code_targets,
+    reject_all_pending_payments,
     add_voucher_batch, get_all_voucher_batches, get_voucher_batch,
     get_voucher_codes_for_batch, get_voucher_code_by_code,
     redeem_voucher_code, delete_voucher_batch,
@@ -1116,7 +1118,8 @@ def _render_pending_receipts_page(call, uid, page):
         nav.append(types.InlineKeyboardButton("بعدی ▶️", callback_data=f"admin:pr:list:{page + 1}"))
     if nav:
         kb.row(*nav)
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:panel"))
+    kb.add(types.InlineKeyboardButton("� رد کردن همه", callback_data="admin:pr:reject_all"))
+    kb.add(types.InlineKeyboardButton("�🔙 بازگشت", callback_data="admin:panel"))
     send_or_edit(call, text, kb)
 
 
@@ -1156,6 +1159,42 @@ _AUDIENCE_LABELS = {
 }
 
 
+def _render_discount_scope_selection(call, uid, edit_code_id=None):
+    """Render multi-select UI for discount code scope (types or packages)."""
+    sd = state_data(uid)
+    scope_type = sd.get("scope_type", "all")
+    selected_str = sd.get("scope_selected", "") or ""
+    selected = set(int(x) for x in selected_str.split(",") if x.strip())
+    is_edit = edit_code_id is not None
+    toggle_cb = "admin:disc:stgl_edit" if is_edit else "admin:disc:stgl"
+    confirm_cb = "admin:disc:sconf_edit" if is_edit else "admin:disc:sconf"
+    back_cb = f"admin:disc:edit_scope:{edit_code_id}" if is_edit else "admin:discounts"
+    kb = types.InlineKeyboardMarkup()
+    if scope_type == "types":
+        items = get_all_types()
+        title = "🧩 انتخاب نوع‌های مجاز"
+        for item in items:
+            check = "✅" if item["id"] in selected else "⬜"
+            kb.add(types.InlineKeyboardButton(
+                f"{check} {item['name']}",
+                callback_data=f"{toggle_cb}:{item['id']}"
+            ))
+    else:
+        items = get_packages(include_inactive=True)
+        title = "📦 انتخاب پکیج‌های مجاز"
+        for item in items:
+            check = "✅" if item["id"] in selected else "⬜"
+            kb.add(types.InlineKeyboardButton(
+                f"{check} {item['type_name']} — {item['name']}",
+                callback_data=f"{toggle_cb}:{item['id']}"
+            ))
+    sel_count = len(selected)
+    if sel_count > 0:
+        kb.add(types.InlineKeyboardButton(f"✅ تأیید ({sel_count} مورد انتخابی)", callback_data=confirm_cb))
+    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=back_cb))
+    send_or_edit(call, f"📌 <b>{title}</b>\n\nموارد مورد نظر را انتخاب و سپس تأیید کنید:", kb)
+
+
 def _render_discount_code_detail(call, uid, code_id):
     """Render detail page for a single discount code."""
     row = get_discount_code(code_id)
@@ -1171,12 +1210,31 @@ def _render_discount_code_detail(call, uid, code_id):
     toggle_lbl = "❌ غیرفعال کن" if row["is_active"] else "✅ فعال کن"
     audience = row["audience"] if "audience" in row.keys() else "all"
     audience_fa = _AUDIENCE_LABELS.get(audience, "👥 همه")
+    scope_type = row["scope_type"] if "scope_type" in row.keys() else "all"
+    _SCOPE_LABELS = {"all": "🌐 همه پکیج‌ها", "types": "🧩 نوع‌های خاص", "packages": "📦 پکیج‌های خاص"}
+    scope_fa = _SCOPE_LABELS.get(scope_type, "🌐 همه پکیج‌ها")
+    if scope_type != "all":
+        targets = get_discount_code_targets(code_id)
+        if targets:
+            if scope_type == "types":
+                names = []
+                for t in targets:
+                    tp = get_type(t["target_id"])
+                    names.append(esc(tp["name"]) if tp else str(t["target_id"]))
+                scope_fa += f" ({', '.join(names)})"
+            else:
+                names = []
+                for t in targets:
+                    pkg = get_package(t["target_id"])
+                    names.append(esc(pkg["name"]) if pkg else str(t["target_id"]))
+                scope_fa += f" ({', '.join(names)})"
     text = (
         f"🎟 <b>کد تخفیف: {esc(row['code'])}</b>\n\n"
         f"💰 نوع تخفیف: {disc_type_fa} — {disc_val_fa}\n"
         f"📊 استفاده شده: {actual_uses} / {max_total}\n"
         f"👤 هر کاربر: {max_per} بار\n"
         f"🎯 دسترسی: {audience_fa}\n"
+        f"📌 محدوده: {scope_fa}\n"
         f"🔵 وضعیت: {status_fa}\n"
         f"📅 ایجاد: {row['created_at'][:10]}"
     )
@@ -1194,6 +1252,7 @@ def _render_discount_code_detail(call, uid, code_id):
         types.InlineKeyboardButton("✏️ هر کاربر", callback_data=f"admin:disc:edit_per:{code_id}"),
     )
     kb.add(types.InlineKeyboardButton("🎯 ویرایش دسترسی", callback_data=f"admin:disc:edit_audience:{code_id}"))
+    kb.add(types.InlineKeyboardButton("📌 ویرایش محدوده", callback_data=f"admin:disc:edit_scope:{code_id}"))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:discounts"))
     send_or_edit(call, text, kb)
 
@@ -7883,23 +7942,214 @@ def _dispatch_callback(call, uid, data):
             return
         audience = data.split(":")[3] if data.split(":")[3] in ("all", "public", "agents") else "all"
         sd = state_data(uid)
+        state_set(uid, "admin_discount_add_scope",
+                  code=sd.get("code", ""),
+                  disc_type=sd.get("disc_type", "pct"),
+                  discount_value=sd.get("discount_value", 0),
+                  max_uses_total=sd.get("max_uses_total", 0),
+                  max_uses_per_user=sd.get("max_uses_per_user", 0),
+                  audience=audience)
+        bot.answer_callback_query(call.id)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("🌐 همه پکیج‌ها", callback_data="admin:disc:scope:all"))
+        kb.add(types.InlineKeyboardButton("🧩 فقط نوع‌های خاص", callback_data="admin:disc:scope:types"))
+        kb.add(types.InlineKeyboardButton("📦 فقط پکیج‌های خاص", callback_data="admin:disc:scope:packages"))
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:discounts"))
+        send_or_edit(call,
+            "🎟 <b>افزودن کد تخفیف</b>\n\n"
+            "مرحله ۶/۶: محدوده استفاده از این کد را انتخاب کنید:\n\n"
+            "🌐 <b>همه پکیج‌ها</b> — بدون محدودیت\n"
+            "🧩 <b>نوع‌های خاص</b> — فقط برای نوع‌های انتخابی\n"
+            "📦 <b>پکیج‌های خاص</b> — فقط برای پکیج‌های انتخابی",
+            kb)
+        return
+
+    if data.startswith("admin:disc:scope:"):
+        if not is_admin(uid):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        scope_val = data.split(":")[3] if len(data.split(":")) > 3 else "all"
+        if scope_val not in ("all", "types", "packages"):
+            scope_val = "all"
+        sd = state_data(uid)
+        if scope_val == "all":
+            # Create code immediately with no scope restriction
+            try:
+                new_id = add_discount_code(
+                    sd.get("code", ""),
+                    sd.get("disc_type", "pct"),
+                    int(sd.get("discount_value", 0) or 0),
+                    int(sd.get("max_uses_total", 0) or 0),
+                    int(sd.get("max_uses_per_user", 0) or 0),
+                    audience=sd.get("audience", "all"),
+                    scope_type="all",
+                )
+            except Exception:
+                bot.answer_callback_query(call.id, "⚠️ این کد قبلاً ثبت شده است.", show_alert=True)
+                return
+            state_clear(uid)
+            log_admin_action(uid, f"کد تخفیف جدید {sd.get('code', '')} ثبت شد (محدوده: همه)")
+            bot.answer_callback_query(call.id, "✅ کد تخفیف ثبت شد.")
+            _render_discount_admin_list(call, uid)
+        else:
+            # Show multi-select for types or packages
+            state_set(uid, "admin_discount_scope_sel",
+                      code=sd.get("code", ""),
+                      disc_type=sd.get("disc_type", "pct"),
+                      discount_value=sd.get("discount_value", 0),
+                      max_uses_total=sd.get("max_uses_total", 0),
+                      max_uses_per_user=sd.get("max_uses_per_user", 0),
+                      audience=sd.get("audience", "all"),
+                      scope_type=scope_val,
+                      scope_selected="")
+            bot.answer_callback_query(call.id)
+            _render_discount_scope_selection(call, uid)
+        return
+
+    if data.startswith("admin:disc:stgl:"):
+        if not is_admin(uid):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        parts = data.split(":")
+        item_id = int(parts[3])
+        sd = state_data(uid)
+        selected_str = sd.get("scope_selected", "") or ""
+        selected = set(int(x) for x in selected_str.split(",") if x.strip())
+        if item_id in selected:
+            selected.discard(item_id)
+        else:
+            selected.add(item_id)
+        state_set(uid, "admin_discount_scope_sel",
+                  code=sd.get("code", ""),
+                  disc_type=sd.get("disc_type", "pct"),
+                  discount_value=sd.get("discount_value", 0),
+                  max_uses_total=sd.get("max_uses_total", 0),
+                  max_uses_per_user=sd.get("max_uses_per_user", 0),
+                  audience=sd.get("audience", "all"),
+                  scope_type=sd.get("scope_type", "all"),
+                  scope_selected=",".join(str(x) for x in selected))
+        bot.answer_callback_query(call.id)
+        _render_discount_scope_selection(call, uid)
+        return
+
+    if data == "admin:disc:sconf":
+        if not is_admin(uid):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        sd = state_data(uid)
+        selected_str = sd.get("scope_selected", "") or ""
+        selected_ids = [int(x) for x in selected_str.split(",") if x.strip()]
+        if not selected_ids:
+            bot.answer_callback_query(call.id, "⚠️ حداقل یک مورد را انتخاب کنید.", show_alert=True)
+            return
+        scope_type = sd.get("scope_type", "all")
         try:
-            add_discount_code(
+            new_id = add_discount_code(
                 sd.get("code", ""),
                 sd.get("disc_type", "pct"),
                 int(sd.get("discount_value", 0) or 0),
                 int(sd.get("max_uses_total", 0) or 0),
                 int(sd.get("max_uses_per_user", 0) or 0),
-                audience=audience,
+                audience=sd.get("audience", "all"),
+                scope_type=scope_type,
             )
         except Exception:
             bot.answer_callback_query(call.id, "⚠️ این کد قبلاً ثبت شده است.", show_alert=True)
             return
+        target_type = "type" if scope_type == "types" else "package"
+        set_discount_code_targets(new_id, target_type, selected_ids)
         state_clear(uid)
-        audience_labels = {"all": "همه", "public": "فقط عموم", "agents": "فقط نمایندگان"}
-        log_admin_action(uid, f"کد تخفیف جدید {sd.get('code', '')} (دسترسی: {audience_labels.get(audience)}) ساخته شد")
+        log_admin_action(uid, f"کد تخفیف جدید {sd.get('code', '')} ثبت شد (محدوده: {scope_type})")
         bot.answer_callback_query(call.id, "✅ کد تخفیف ثبت شد.")
         _render_discount_admin_list(call, uid)
+        return
+
+    if data.startswith("admin:disc:edit_scope:"):
+        if not is_admin(uid):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        code_id = int(data.split(":")[3])
+        row = get_discount_code(code_id)
+        if not row:
+            bot.answer_callback_query(call.id, "کد پیدا نشد.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("🌐 همه پکیج‌ها", callback_data=f"admin:disc:set_scope:{code_id}:all"))
+        kb.add(types.InlineKeyboardButton("🧩 فقط نوع‌های خاص", callback_data=f"admin:disc:set_scope:{code_id}:types"))
+        kb.add(types.InlineKeyboardButton("📦 فقط پکیج‌های خاص", callback_data=f"admin:disc:set_scope:{code_id}:packages"))
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"admin:disc:view:{code_id}"))
+        send_or_edit(call, "📌 <b>ویرایش محدوده کد تخفیف</b>\n\nنوع محدوده را انتخاب کنید:", kb)
+        return
+
+    if data.startswith("admin:disc:set_scope:"):
+        if not is_admin(uid):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        parts = data.split(":")
+        code_id   = int(parts[3])
+        scope_val = parts[4] if len(parts) > 4 else "all"
+        if scope_val not in ("all", "types", "packages"):
+            scope_val = "all"
+        if scope_val == "all":
+            update_discount_code_field(code_id, "scope_type", "all")
+            set_discount_code_targets(code_id, "type", [])
+            set_discount_code_targets(code_id, "package", [])
+            log_admin_action(uid, f"محدوده کد تخفیف #{code_id} به همه تغییر یافت")
+            bot.answer_callback_query(call.id, "✅ محدوده به‌روز شد.")
+            _render_discount_code_detail(call, uid, code_id)
+        else:
+            state_set(uid, "admin_discount_scope_edit",
+                      edit_code_id=code_id,
+                      scope_type=scope_val,
+                      scope_selected="")
+            bot.answer_callback_query(call.id)
+            _render_discount_scope_selection(call, uid, edit_code_id=code_id)
+        return
+
+    if data.startswith("admin:disc:stgl_edit:"):
+        if not is_admin(uid):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        parts = data.split(":")
+        item_id = int(parts[3])
+        sd = state_data(uid)
+        selected_str = sd.get("scope_selected", "") or ""
+        selected = set(int(x) for x in selected_str.split(",") if x.strip())
+        if item_id in selected:
+            selected.discard(item_id)
+        else:
+            selected.add(item_id)
+        state_set(uid, "admin_discount_scope_edit",
+                  edit_code_id=sd.get("edit_code_id"),
+                  scope_type=sd.get("scope_type", "all"),
+                  scope_selected=",".join(str(x) for x in selected))
+        bot.answer_callback_query(call.id)
+        _render_discount_scope_selection(call, uid, edit_code_id=sd.get("edit_code_id"))
+        return
+
+    if data == "admin:disc:sconf_edit":
+        if not is_admin(uid):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        sd = state_data(uid)
+        selected_str = sd.get("scope_selected", "") or ""
+        selected_ids = [int(x) for x in selected_str.split(",") if x.strip()]
+        if not selected_ids:
+            bot.answer_callback_query(call.id, "⚠️ حداقل یک مورد را انتخاب کنید.", show_alert=True)
+            return
+        code_id    = sd.get("edit_code_id")
+        scope_type = sd.get("scope_type", "all")
+        update_discount_code_field(code_id, "scope_type", scope_type)
+        target_type = "type" if scope_type == "types" else "package"
+        set_discount_code_targets(code_id, target_type, selected_ids)
+        # Clear the other target type
+        other = "package" if target_type == "type" else "type"
+        set_discount_code_targets(code_id, other, [])
+        state_clear(uid)
+        log_admin_action(uid, f"محدوده کد تخفیف #{code_id} به‌روز شد")
+        bot.answer_callback_query(call.id, "✅ محدوده به‌روز شد.")
+        _render_discount_code_detail(call, uid, code_id)
         return
 
     if data.startswith("admin:disc:view:"):
@@ -8263,6 +8513,40 @@ def _dispatch_callback(call, uid, data):
         finish_card_payment_approval(payment_id, "رسید شما رد شد.", approved=False)
         bot.answer_callback_query(call.id, "❌ رد شد.")
         _render_pending_receipts_page(call, uid, page)
+        return
+
+    if data == "admin:pr:reject_all":
+        if not admin_has_perm(uid, "approve_payments"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        kb = types.InlineKeyboardMarkup()
+        kb.row(
+            types.InlineKeyboardButton("🗑 بله، همه را رد کن", callback_data="admin:pr:reject_all:do"),
+            types.InlineKeyboardButton("❌ لغو", callback_data="admin:pr"),
+        )
+        send_or_edit(call,
+            "⚠️ <b>رد کردن همه رسیدهای در انتظار</b>\n\n"
+            "آیا مطمئن هستید؟ تمام رسیدهای در انتظار بررسی رد خواهند شد و به کاربران اطلاع داده خواهد شد.",
+            kb)
+        return
+
+    if data == "admin:pr:reject_all:do":
+        if not admin_has_perm(uid, "approve_payments"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        from ..db import get_pending_payments_page as _gpp
+        _, pending_rows = _gpp(0, 999)
+        rejected_count = 0
+        for prow in pending_rows:
+            try:
+                finish_card_payment_approval(prow["id"], "رسید شما رد شد.", approved=False)
+                rejected_count += 1
+            except Exception:
+                pass
+        log_admin_action(uid, f"رد همه رسیدها: {rejected_count} رسید رد شد")
+        bot.answer_callback_query(call.id, f"✅ {rejected_count} رسید رد شد.")
+        _render_pending_receipts_page(call, uid, 0)
         return
 
     if data.startswith("adm:pending:addcfg:"):

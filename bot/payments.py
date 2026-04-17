@@ -16,7 +16,7 @@ from .db import (
     get_all_admin_users,
     save_payment_admin_message, get_payment_admin_messages, delete_payment_admin_messages,
 )
-from .helpers import esc, fmt_price, display_username, back_button
+from .helpers import esc, fmt_price, display_username, back_button, now_str
 import time
 from .gateways.base import is_gateway_available, is_card_info_complete, get_gateway_range_text, is_gateway_in_range, build_gateway_range_guide
 from .gateways.crypto import fetch_crypto_prices
@@ -413,7 +413,7 @@ def _finish_card_payment_approval_inner(payment_id, admin_note, approved):
         admin_renewal_notify, notify_pending_order_to_admins,
     )
     payment = get_payment(payment_id)
-    if not payment or payment["status"] not in ("pending", "approved", "rejected"):
+    if not payment or payment["status"] != "pending":
         return False
     user_id = payment["user_id"]
     if approved:
@@ -424,11 +424,18 @@ def _finish_card_payment_approval_inner(payment_id, admin_note, approved):
             update_balance(user_id, payment["amount"])
             bot.send_message(user_id, f"{ce('✅', '5900157489759916320')} واریزی شما تأیید شد.\n\n{esc(admin_note)}")
             user_row = get_user(user_id)
+            receipt_note = payment.get("receipt_text") or ""
+            pay_method   = payment.get("payment_method") or "—"
+            pay_id_txt   = f"#{payment_id}"
             send_to_topic("wallet_log",
-                f"{ce('💳', '5796280694934085416')} <b>شارژ کیف‌پول تأیید شد</b>\n\n"
+                f"{ce('💳', '5931368295545443065')} <b>شارژ کیف‌پول تأیید شد</b>\n\n"
                 f"{ce('👤', '5373012449597335010')} {esc(user_row['full_name'] if user_row else str(user_id))}\n"
                 f"🆔 <code>{user_id}</code>\n"
-                f"{ce('💰', '5794002949222964817')} مبلغ: {fmt_price(payment['amount'])} تومان"
+                f"{ce('💰', '5794002949222964817')} مبلغ: <b>{fmt_price(payment['amount'])}</b> تومان\n"
+                f"💳 روش پرداخت: {esc(pay_method)}\n"
+                f"🧾 شناسه تراکنش: <code>{pay_id_txt}</code>\n"
+                + (f"📝 توضیحات: {esc(receipt_note)}\n" if receipt_note else "")
+                + f"🕐 زمان: {now_str()[:16]}"
             )
 
         elif payment["kind"] == "config_purchase":

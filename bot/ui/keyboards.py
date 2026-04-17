@@ -41,15 +41,15 @@ def _user_is_agent(user_id) -> bool:
 def kb_main(user_id):
     rows = []
     rows.append([
-        _btn("خرید کانفیگ جدید", callback_data="buy:start",      emoji_id="5431499171045581032"),
-        _btn("کانفیگ‌های من",    callback_data="my_configs",      emoji_id="5258134813302332906"),
+        _btn("خرید کانفیگ جدید", callback_data="buy:start",      emoji_id="5312361253610475399"),
+        _btn("کانفیگ‌های من",    callback_data="my_configs",      emoji_id="5447410659077661506"),
     ])
     _ft_mode = setting_get("free_test_mode", "everyone")
     if _ft_mode == "everyone" or (_ft_mode == "agents_only" and _user_is_agent(user_id)):
-        rows.append([_btn("تست رایگان", callback_data="test:start", emoji_id="5199749070830197566")])
+        rows.append([_btn("تست رایگان", callback_data="test:start", emoji_id="6283073379184415506")])
     rows.append([
         _btn("حساب کاربری",  callback_data="profile",        emoji_id="5373012449597335010"),
-        _btn("شارژ کیف پول", callback_data="wallet:charge",  emoji_id="5796280694934085416"),
+        _btn("شارژ کیف پول", callback_data="wallet:charge",  emoji_id="5931368295545443065"),
     ])
     ref_on     = setting_get("referral_enabled", "1") == "1"
     voucher_on = setting_get("vouchers_enabled", "1") == "1"

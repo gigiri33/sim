@@ -386,6 +386,9 @@ def init_db():
             "ALTER TABLE users ADD COLUMN phone_number TEXT",
             # audience: 'all' | 'public' | 'agents'  (default 'all' = everyone)
             "ALTER TABLE discount_codes ADD COLUMN audience TEXT NOT NULL DEFAULT 'all'",
+            # scope_type: 'all' | 'types' | 'packages'
+            "ALTER TABLE discount_codes ADD COLUMN scope_type TEXT NOT NULL DEFAULT 'all'",
+            "CREATE TABLE IF NOT EXISTS discount_code_targets (id INTEGER PRIMARY KEY AUTOINCREMENT, code_id INTEGER NOT NULL REFERENCES discount_codes(id) ON DELETE CASCADE, target_type TEXT NOT NULL, target_id INTEGER NOT NULL, UNIQUE(code_id, target_type, target_id))",
         ]
         for sql in migrations:
             try:
@@ -991,7 +994,13 @@ def get_purchase(purchase_id):
             """
             SELECT pr.*, p.name AS package_name, p.show_name, p.volume_gb, p.duration_days, p.price, p.max_users,
                    t.name AS type_name, t.description AS type_description,
-                   c.service_name, c.config_text, c.inquiry_link, c.is_expired
+                   c.service_name, c.config_text, c.inquiry_link,
+                   CASE WHEN pr.is_test=1
+                        AND (julianday('now') - julianday(pr.created_at)) * 24 >= 24
+                        THEN 1 ELSE c.is_expired END AS is_expired,
+                   CASE WHEN pr.is_test=1
+                        THEN MAX(0, 24 - CAST((julianday('now') - julianday(pr.created_at)) * 24 AS INTEGER))
+                        ELSE NULL END AS test_hours_left
             FROM purchases pr
             JOIN packages p ON p.id=pr.package_id
             JOIN config_types t ON t.id=p.type_id
@@ -1008,7 +1017,13 @@ def get_user_purchases(user_id):
             """
             SELECT pr.*, p.name AS package_name, p.show_name, p.volume_gb, p.duration_days, p.price,
                    t.name AS type_name, t.description AS type_description,
-                   c.service_name, c.config_text, c.inquiry_link, c.is_expired
+                   c.service_name, c.config_text, c.inquiry_link,
+                   CASE WHEN pr.is_test=1
+                        AND (julianday('now') - julianday(pr.created_at)) * 24 >= 24
+                        THEN 1 ELSE c.is_expired END AS is_expired,
+                   CASE WHEN pr.is_test=1
+                        THEN MAX(0, 24 - CAST((julianday('now') - julianday(pr.created_at)) * 24 AS INTEGER))
+                        ELSE NULL END AS test_hours_left
             FROM purchases pr
             JOIN packages p ON p.id=pr.package_id
             JOIN config_types t ON t.id=p.type_id
@@ -1190,7 +1205,7 @@ def update_payment_receipt(payment_id, file_id, text_value):
 def approve_payment(payment_id, admin_note):
     with get_conn() as conn:
         conn.execute(
-            "UPDATE payments SET status='approved', admin_note=?, approved_at=? WHERE id=?",
+            "UPDATE payments SET status='approved', admin_note=?, approved_at=? WHERE id=? AND status='pending'",
             (admin_note, now_str(), payment_id)
         )
 
@@ -1198,7 +1213,7 @@ def approve_payment(payment_id, admin_note):
 def reject_payment(payment_id, admin_note):
     with get_conn() as conn:
         conn.execute(
-            "UPDATE payments SET status='rejected', admin_note=?, approved_at=? WHERE id=?",
+            "UPDATE payments SET status='rejected', admin_note=?, approved_at=? WHERE id=? AND status='pending'",
             (admin_note, now_str(), payment_id)
         )
 
@@ -1421,16 +1436,18 @@ def get_discount_code_by_code(code):
         ).fetchone()
 
 
-def add_discount_code(code, discount_type, discount_value, max_uses_total, max_uses_per_user, audience="all"):
+def add_discount_code(code, discount_type, discount_value, max_uses_total, max_uses_per_user, audience="all", scope_type="all"):
     audience = audience if audience in ("all", "public", "agents") else "all"
+    scope_type = scope_type if scope_type in ("all", "types", "packages") else "all"
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO discount_codes(code, discount_type, discount_value, "
-            "max_uses_total, max_uses_per_user, used_count, is_active, created_at, audience) "
-            "VALUES(?,?,?,?,?,0,1,?,?)",
+            "max_uses_total, max_uses_per_user, used_count, is_active, created_at, audience, scope_type) "
+            "VALUES(?,?,?,?,?,0,1,?,?,?)",
             (code.strip().upper(), discount_type, int(discount_value),
-             int(max_uses_total), int(max_uses_per_user), now_str(), audience)
+             int(max_uses_total), int(max_uses_per_user), now_str(), audience, scope_type)
         )
+        return conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
 
 
 def toggle_discount_code(code_id):
@@ -1442,7 +1459,7 @@ def toggle_discount_code(code_id):
 
 
 def update_discount_code_field(code_id, field, value):
-    _allowed = {"code", "discount_type", "discount_value", "max_uses_total", "max_uses_per_user", "audience"}
+    _allowed = {"code", "discount_type", "discount_value", "max_uses_total", "max_uses_per_user", "audience", "scope_type"}
     if field not in _allowed:
         return
     with get_conn() as conn:
@@ -1466,7 +1483,7 @@ def get_discount_code_user_uses(code_id, user_id):
         return row["cnt"] if row else 0
 
 
-def validate_discount_code(code, user_id, amount, is_agent=False):
+def validate_discount_code(code, user_id, amount, is_agent=False, package_id=None):
     """Returns (ok, row, discount_amount, final_amount, error_msg)."""
     row = get_discount_code_by_code(code)
     if not row:
@@ -1485,6 +1502,19 @@ def validate_discount_code(code, user_id, amount, is_agent=False):
         user_uses = get_discount_code_user_uses(row["id"], user_id)
         if user_uses >= row["max_uses_per_user"]:
             return False, None, 0, amount, "❌ شما قبلاً از این کد تخفیف استفاده کرده‌اید."
+    # Scope check
+    scope_type = row["scope_type"] if "scope_type" in row.keys() else "all"
+    if scope_type != "all" and package_id is not None:
+        targets = get_discount_code_targets(row["id"])
+        target_ids = {t["target_id"] for t in targets}
+        if scope_type == "types":
+            pkg = get_package(package_id)
+            pkg_type_id = pkg["type_id"] if pkg else None
+            if pkg_type_id not in target_ids:
+                return False, None, 0, amount, "❌ این کد تخفیف برای این نوع سرویس قابل استفاده نیست."
+        elif scope_type == "packages":
+            if package_id not in target_ids:
+                return False, None, 0, amount, "❌ این کد تخفیف برای این پکیج قابل استفاده نیست."
     if row["discount_type"] == "pct":
         disc = round(amount * row["discount_value"] / 100)
     else:
@@ -1520,6 +1550,48 @@ def has_eligible_discount_codes(is_agent: bool) -> bool:
                 "WHERE is_active=1 AND (audience='all' OR audience='public') LIMIT 1"
             ).fetchone()
         return row is not None
+
+
+def get_discount_code_targets(code_id):
+    """Return list of target rows for a discount code."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM discount_code_targets WHERE code_id=? ORDER BY id ASC",
+            (code_id,)
+        ).fetchall()
+
+
+def set_discount_code_targets(code_id, target_type, target_ids):
+    """Replace all targets of the given target_type for a discount code."""
+    with get_conn() as conn:
+        conn.execute(
+            "DELETE FROM discount_code_targets WHERE code_id=? AND target_type=?",
+            (code_id, target_type)
+        )
+        for tid in target_ids:
+            try:
+                conn.execute(
+                    "INSERT OR IGNORE INTO discount_code_targets(code_id, target_type, target_id) VALUES(?,?,?)",
+                    (code_id, target_type, int(tid))
+                )
+            except Exception:
+                pass
+
+
+def reject_all_pending_payments():
+    """Reject all pending payments. Returns count of rejected payments."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id FROM payments WHERE status='pending'"
+        ).fetchall()
+        ids = [r["id"] for r in rows]
+        if ids:
+            conn.execute(
+                "UPDATE payments SET status='rejected', admin_note=?, approved_at=? "
+                "WHERE status='pending'",
+                ("رد شد توسط ادمین (رد همه)", now_str())
+            )
+        return len(ids)
 
 
 def fulfill_pending_order(pending_id):

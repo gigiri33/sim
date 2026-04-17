@@ -597,7 +597,8 @@ def universal_handler(message):
                 return
             _user_for_disc = get_user(uid)
             _is_agent_disc = bool(_user_for_disc and _user_for_disc["is_agent"])
-            ok, row, disc_amount, final_amount, err = validate_discount_code(code, uid, original_amount, is_agent=_is_agent_disc)
+            _pkg_id_for_disc = sd.get("package_id")
+            ok, row, disc_amount, final_amount, err = validate_discount_code(code, uid, original_amount, is_agent=_is_agent_disc, package_id=_pkg_id_for_disc)
             if not ok:
                 kb = types.InlineKeyboardMarkup()
                 kb.add(types.InlineKeyboardButton("🔙 ادامه بدون تخفیف", callback_data="disc:no"))

@@ -131,7 +131,16 @@ def show_my_configs(target, user_id):
     for item in items:
         expired_mark = " ❌" if item["is_expired"] else ""
         svc_name     = move_leading_emoji(urllib.parse.unquote(item["service_name"] or ""))
-        title        = f"{svc_name}{expired_mark}"
+        test_label   = ""
+        if item["is_test"]:
+            hours_left = item["test_hours_left"] if "test_hours_left" in item.keys() else None
+            if item["is_expired"]:
+                test_label = " 🎁❌"
+            elif hours_left is not None:
+                test_label = f" 🎁⏰{int(hours_left)}h"
+            else:
+                test_label = " 🎁"
+        title = f"{svc_name}{test_label}{expired_mark}"
         row = [types.InlineKeyboardButton(title, callback_data=f"mycfg:{item['id']}")]
         if renewal_enabled and not item["is_test"]:
             row.append(types.InlineKeyboardButton("♻️ تمدید", callback_data=f"renew:{item['id']}"))

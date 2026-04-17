@@ -79,11 +79,20 @@ def deliver_purchase_message(chat_id, purchase_id):
     inquiry_link = item["inquiry_link"] or ""
     show_pkg_name = ("show_name" not in item.keys()) or bool(item["show_name"])
     package_line = f"{ce('📦', '5258134813302332906')} پکیج: <b>{esc(item['package_name'])}</b>\n" if show_pkg_name and item["package_name"] else ""
-    expired_note = f"\n\n{ce('⚠️', '5447644880824181073')} <b>این سرویس توسط ادمین منقضی شده است.</b>" if item["is_expired"] else ""
-    title_line   = "تست رایگان" if item["is_test"] else "سرویس شما آماده است"
+    expired_note = ""
+    if item["is_expired"]:
+        if item["is_test"]:
+            expired_note = f"\n\n{ce('⚠️', '5447644880824181073')} <b>مدت تست رایگان شما به پایان رسیده است.</b>"
+        else:
+            expired_note = f"\n\n{ce('⚠️', '5447644880824181073')} <b>این سرویس توسط ادمین منقضی شده است.</b>"
+    title_line = "تست رایگان" if item["is_test"] else "سرویس شما آماده است"
+    if item["is_test"] and not item["is_expired"]:
+        hours_left = item["test_hours_left"] if "test_hours_left" in item.keys() else None
+        if hours_left is not None:
+            title_line = f"تست رایگان — ⏰ {int(hours_left)} ساعت باقی‌مانده"
 
     kb = types.InlineKeyboardMarkup()
-    if setting_get("manual_renewal_enabled", "1") == "1":
+    if setting_get("manual_renewal_enabled", "1") == "1" and not item["is_test"]:
         kb.add(types.InlineKeyboardButton("♻️ تمدید", callback_data=f"renew:{purchase_id}"))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
 
