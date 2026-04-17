@@ -1001,10 +1001,12 @@ def universal_handler(message):
             return
 
         if sn == "admin_add_type_desc" and is_admin(uid):
-            desc = (message.text or "").strip()
+            from ..ui.premium_emoji import serialize_premium_text as _spt
+            desc = (message.text or message.caption or "").strip()
+            entities = message.entities or message.caption_entities or []
             name = sd["type_name"]
             try:
-                add_type(name, desc)
+                add_type(name, _spt(desc, entities))
                 log_admin_action(uid, f"نوع جدید '{name}' ثبت شد")
                 state_clear(uid)
                 bot.send_message(uid, "✅ نوع جدید ثبت شد.")

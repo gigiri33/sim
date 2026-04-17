@@ -236,7 +236,9 @@ def deliver_purchase_message(chat_id, purchase_id):
         )
     type_desc = item["type_description"] if item["type_description"] else ""
     if type_desc:
-        bot.send_message(chat_id, f"📌 <b>توضیحات سرویس:</b>\n\n{esc(type_desc)}", parse_mode="HTML")
+        from .premium_emoji import render_premium_text_html as _rph_desc
+        rendered_desc = _rph_desc(type_desc, escape_plain_parts=True)
+        bot.send_message(chat_id, f"📌 <b>توضیحات سرویس:</b>\n\n{rendered_desc}", parse_mode="HTML")
 
     # Check referral purchase reward (only for non-test purchases)
     if not item["is_test"]:

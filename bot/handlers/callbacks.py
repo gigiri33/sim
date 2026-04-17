@@ -7771,8 +7771,38 @@ def _dispatch_callback(call, uid, data):
                 (f"rules_accepted_{uid}", "1")
             )
         bot.answer_callback_query(call.id)
-        # Proceed to buy flow
-        _fake_call(call, "buy:start_real")
+        # Delete the rules message and send buy menu as a fresh message
+        # (editing a tg-emoji message into a different message can silently fail)
+        try:
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+        except Exception:
+            pass
+        # Now dispatch buy:start_real via a fresh message-based call
+        if setting_get("shop_open", "1") != "1":
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+            bot.send_message(uid, "🔴 <b>فروشگاه موقتاً تعطیل است.</b>\n\nلطفاً بعداً مراجعه کنید.",
+                             parse_mode="HTML", reply_markup=kb)
+            return
+        stock_only = setting_get("preorder_mode", "0") == "1"
+        items = get_active_types()
+        kb = types.InlineKeyboardMarkup()
+        has_any = False
+        for item in items:
+            if stock_only:
+                packs = [p for p in get_packages(type_id=item['id']) if p['price'] > 0 and p['stock'] > 0]
+            else:
+                packs = [p for p in get_packages(type_id=item['id']) if p['price'] > 0]
+            if packs:
+                kb.add(types.InlineKeyboardButton(f"🧩 {item['name']}", callback_data=f"buy:t:{item['id']}"))
+                has_any = True
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+        if not has_any:
+            bot.send_message(uid, "📭 در حال حاضر بسته‌ای برای فروش موجود نیست.",
+                             parse_mode="HTML", reply_markup=kb)
+        else:
+            bot.send_message(uid, "🛒 <b>خرید کانفیگ جدید</b>\n\nنوع مورد نظر را انتخاب کنید:",
+                             parse_mode="HTML", reply_markup=kb)
         return
 
     # ── Admin: Pinned Messages ─────────────────────────────────────────────────
