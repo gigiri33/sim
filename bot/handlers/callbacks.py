@@ -12,7 +12,7 @@ from ..helpers import (
     esc, fmt_price, fmt_vol, fmt_dur, now_str, display_name, display_username, safe_support_url,
     is_admin, admin_has_perm, back_button,
     state_set, state_clear, state_name, state_data, parse_int, normalize_text_number,
-    move_leading_emoji,
+    move_leading_emoji, _TZ_TEHRAN,
 )
 from ..db import (
     setting_get, setting_set,
@@ -592,7 +592,7 @@ def _invoice_expiry_line() -> str:
     if not _invoice_expiry_enabled():
         return ""
     mins = _invoice_expiry_minutes()
-    expiry_dt = datetime.now() + timedelta(minutes=mins)
+    expiry_dt = datetime.now(_TZ_TEHRAN) + timedelta(minutes=mins)
     expiry_str = expiry_dt.strftime("%H:%M")
     return (
         f"\n\n⏳ اعتبار این فاکتور تا ساعت <b>{expiry_str}</b> است."

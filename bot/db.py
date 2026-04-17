@@ -1061,15 +1061,20 @@ def reset_all_free_tests():
 
 
 def agent_test_count_in_period(user_id, period):
-    now = datetime.now()
+    import jdatetime as _jdt
+    from .helpers import _TZ_TEHRAN
+    now_j = _jdt.datetime.fromgregorian(datetime=__import__("datetime").datetime.now(_TZ_TEHRAN))
+    zero = now_j.replace(hour=0, minute=0, second=0, microsecond=0)
     if period == "day":
-        start = now.strftime("%Y-%m-%d 00:00:00")
+        start_j = zero
     elif period == "week":
-        start = (now - timedelta(days=now.weekday())).strftime("%Y-%m-%d 00:00:00")
+        # Iranian week starts on Saturday; jdatetime weekday(): 0=Saturday
+        start_j = zero - __import__("datetime").timedelta(days=now_j.weekday())
     elif period == "month":
-        start = now.strftime("%Y-%m-01 00:00:00")
+        start_j = zero.replace(day=1)
     else:
-        start = now.strftime("%Y-%m-%d 00:00:00")
+        start_j = zero
+    start = start_j.strftime("%Y-%m-%d %H:%M:%S")
     with get_conn() as conn:
         row = conn.execute(
             "SELECT COUNT(*) as cnt FROM purchases WHERE user_id=? AND is_test=1 AND created_at>=?",

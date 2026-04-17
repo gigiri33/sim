@@ -14,6 +14,8 @@ import sqlite3
 import functools
 from datetime import datetime, timezone, timedelta
 
+import jdatetime
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -41,7 +43,8 @@ def _conn():
     return c
 
 def _now():
-    return datetime.now(_TZ_TEHRAN).strftime("%Y-%m-%d %H:%M:%S")
+    dt = datetime.now(_TZ_TEHRAN)
+    return jdatetime.datetime.fromgregorian(datetime=dt).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _get_api_key():

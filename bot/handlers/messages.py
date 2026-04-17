@@ -2880,8 +2880,12 @@ def universal_handler(message):
             # Build the API base URL hint from worker_api_port setting
             api_port = setting_get("worker_api_port", "8080")
             api_url  = f"http://<آدرس سرور خارج>:{api_port}"
-            from datetime import datetime, timedelta, timezone as _tz
-            expires = (datetime.now(_tz.utc) + timedelta(hours=24)).strftime("%Y-%m-%d %H:%M UTC")
+            from datetime import datetime, timedelta
+            from ..helpers import _TZ_TEHRAN
+            import jdatetime as _jdt
+            expiry_dt  = datetime.now(_TZ_TEHRAN) + timedelta(hours=24)
+            expiry_jdt = _jdt.datetime.fromgregorian(datetime=expiry_dt)
+            expires    = expiry_jdt.strftime("%Y-%m-%d %H:%M")
             show_create_token_result(message, token, expires, api_url)
             return
 

@@ -11,6 +11,8 @@ from __future__ import annotations
 import os
 from datetime import datetime, timedelta, timezone
 
+import jdatetime
+
 from .crypto_utils import (
     generate_reg_token,
     generate_agent_secret,
@@ -45,7 +47,7 @@ from .db import (
     get_reg_tokens,
 )
 
-_TZ_UTC = timezone.utc
+_TZ_TEHRAN = timezone(timedelta(hours=3, minutes=30))
 
 # ── Token management ───────────────────────────────────────────────────────────
 
@@ -66,9 +68,8 @@ def make_registration_token(
         (token_plaintext, token_id)
     """
     token      = generate_reg_token()
-    expires_at = (
-        datetime.now(_TZ_UTC) + timedelta(hours=ttl_hours)
-    ).strftime("%Y-%m-%d %H:%M:%S")
+    expiry_dt  = datetime.now(_TZ_TEHRAN) + timedelta(hours=ttl_hours)
+    expires_at = jdatetime.datetime.fromgregorian(datetime=expiry_dt).strftime("%Y-%m-%d %H:%M:%S")
     token_id   = create_reg_token(token, label, expires_at, created_by)
     return token, token_id
 

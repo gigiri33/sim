@@ -4,6 +4,7 @@ import json
 import re
 from datetime import datetime, timezone, timedelta
 
+import jdatetime
 from telebot import types
 
 _TZ_TEHRAN = timezone(timedelta(hours=3, minutes=30))
@@ -14,7 +15,10 @@ from .bot_instance import bot, USER_STATE, PERSIAN_DIGITS
 
 # ── Time ───────────────────────────────────────────────────────────────────────
 def now_str():
-    return datetime.now(_TZ_TEHRAN).strftime("%Y-%m-%d %H:%M:%S")
+    """Return current Tehran time as a Jalali date-time string: ۱۴۰۴-۰۱-۲۸ ۱۰:۳۰:۰۰"""
+    dt = datetime.now(_TZ_TEHRAN)
+    jdt = jdatetime.datetime.fromgregorian(datetime=dt)
+    return jdt.strftime("%Y-%m-%d %H:%M:%S")
 
 
 # ── Admin auth ─────────────────────────────────────────────────────────────────
