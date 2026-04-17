@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 Admin panel renderer helpers — reusable screen-building functions
 for types, stock, users, admins, panels.
@@ -47,7 +47,7 @@ def _show_admin_types(call):
                 types.InlineKeyboardButton("✏️", callback_data=f"admin:pkg:edit:{p['id']}"),
                 types.InlineKeyboardButton("🗑",  callback_data=f"admin:pkg:del:{p['id']}"),
             )
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:panel"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
     send_or_edit(call, "🧩 <b>مدیریت نوع و پکیج‌ها</b>", kb)
 
 
@@ -72,7 +72,7 @@ def _show_admin_stock(call):
             f"📦 {row['type_name']} - {row['name']} | 🟢{row['stock']} 🔴{row['sold_count']} ❌{row['expired_count']}{pending_label}",
             callback_data=f"adm:stk:pk:{row['id']}"
         ))
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:panel"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
     send_or_edit(call, "📁 <b>کانفیگ‌ها</b>", kb)
 
 
@@ -88,7 +88,7 @@ def _show_admin_admins_panel(call):
             f"👮 {name} | {row['user_id']}",
             callback_data=f"adm:mgr:v:{row['user_id']}"
         ))
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:panel"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
     count = len(admins)
     text = (
         f"👮 <b>مدیریت ادمین‌ها</b>\n\n"
@@ -191,7 +191,7 @@ def _show_admin_users_list(call, page=0, filter_mode="all"):
         nav.append(types.InlineKeyboardButton("➡️ بعدی", callback_data=f"adm:usr:fl:{filter_mode}:{page + 1}"))
     if nav:
         kb.row(*nav)
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:panel"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
 
     text = (
         f"👥 <b>مدیریت کاربران</b>\n\n"
@@ -245,7 +245,7 @@ def _show_admin_user_detail(call, user_id):
     kb.add(types.InlineKeyboardButton("📦 کانفیگ‌ها",         callback_data=f"adm:usr:cfgs:{uid_t}"))
     kb.add(types.InlineKeyboardButton("💰 قیمت نمایندگی کاربر", callback_data=f"adm:agcfg:{uid_t}"))
     kb.add(types.InlineKeyboardButton("✉️ پیام خصوصی به کاربر", callback_data=f"adm:usr:dm:{uid_t}"))
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:users"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:users", icon_custom_emoji_id="5253997076169115797"))
     send_or_edit(call, text, kb)
 
 
@@ -282,7 +282,7 @@ def _show_admin_user_detail_msg(chat_id, user_id):
     kb.add(types.InlineKeyboardButton("📦 کانفیگ‌ها",         callback_data=f"adm:usr:cfgs:{uid_t}"))
     kb.add(types.InlineKeyboardButton("💰 قیمت نمایندگی کاربر", callback_data=f"adm:agcfg:{uid_t}"))
     kb.add(types.InlineKeyboardButton("✉️ پیام خصوصی به کاربر", callback_data=f"adm:usr:dm:{uid_t}"))
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:users"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:users", icon_custom_emoji_id="5253997076169115797"))
     bot.send_message(chat_id, text, reply_markup=kb, parse_mode="HTML")
 
 
@@ -294,7 +294,7 @@ def _show_admin_assign_config_type(call, target_id):
             f"🧩 {item['name']}",
             callback_data=f"adm:acfg:t:{target_id}:{item['id']}"
         ))
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:usr:v:{target_id}"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:usr:v:{target_id}", icon_custom_emoji_id="5253997076169115797"))
     send_or_edit(call, "📝 نوع کانفیگ را انتخاب کنید:", kb)
 
 
@@ -329,7 +329,7 @@ def _show_admin_panels(call):
             types.InlineKeyboardButton("📦 Packages", callback_data=f"adm:panel:pkgs:{p['id']}"),
         )
     kb.add(types.InlineKeyboardButton("⚙️ Worker API Settings", callback_data="adm:panel:api_settings"))
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:panel"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
     send_or_edit(call, "🖥 <b>مدیریت پنل‌های 3x-ui</b>\n\nپنل‌های ثبت‌شده:", kb)
 
 

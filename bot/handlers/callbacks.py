@@ -522,7 +522,7 @@ def _render_bulk_page(call, uid):
         else:
             kb.add(types.InlineKeyboardButton(f"🗑 حذف ({sel_count})", callback_data="adm:stk:bdel"))
 
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="adm:stk:bcanc"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:stk:bcanc", icon_custom_emoji_id="5253997076169115797"))
 
     kind_labels = {"av": "🟢 موجود", "sl": "🔴 فروخته", "ex": "❌ منقضی"}
     heading = (
@@ -701,7 +701,7 @@ def _show_purchase_gateways(target, uid, package_id, price, package_row):
         _lbl = setting_get("gw_tronpays_rial_display_name", "").strip() or "💳 درگاه کارت به کارت (TronPay)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:tronpays_rial:{package_id}"))
         _gw_labels.append(("tronpays_rial", _lbl))
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"buy:t:{package_row['type_id']}"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"buy:t:{package_row['type_id']}", icon_custom_emoji_id="5253997076169115797"))
     _range_guide = build_gateway_range_guide(_gw_labels)
     _pkg_sn = package_row['show_name'] if 'show_name' in package_row.keys() else 1
     sd = state_data(uid)
@@ -770,7 +770,7 @@ def _show_renewal_gateways(target, uid, purchase_id, package_id, price, package_
         _lbl = setting_get("gw_tronpays_rial_display_name", "").strip() or "💳 درگاه کارت به کارت (TronPay)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:tronpays_rial:{purchase_id}:{package_id}"))
         _gw_labels.append(("tronpays_rial", _lbl))
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"renew:{purchase_id}"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"renew:{purchase_id}", icon_custom_emoji_id="5253997076169115797"))
     _range_guide = build_gateway_range_guide(_gw_labels)
     _pkg_sn_renew = package_row['show_name'] if 'show_name' in package_row.keys() else 1
     sd = state_data(uid)
@@ -823,7 +823,7 @@ def _show_wallet_gateways(target, uid, amount):
         _lbl = setting_get("gw_tronpays_rial_display_name", "").strip() or "💳 درگاه کارت به کارت (TronPay)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:tronpays_rial"))
         _gw_labels.append(("tronpays_rial", _lbl))
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
     _range_guide = build_gateway_range_guide(_gw_labels)
     sd = state_data(uid)
     disc_amount = sd.get("discount_amount", 0)
@@ -868,7 +868,7 @@ def _show_qty_prompt(call, package_row, unit_price):
               unit_price=unit_price,
               kind="config_purchase")
     kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"buy:t:{package_row['type_id']}"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"buy:t:{package_row['type_id']}", icon_custom_emoji_id="5253997076169115797"))
     text = (
         "🛒 <b>خرید تعدادی</b>\n\n"
         f"🧩 نوع سرویس: <b>{esc(package_row['type_name'])}</b>\n"
@@ -1049,7 +1049,7 @@ def _build_card_payment_page(card, bank, owner, price, final_amount):
         )
         kb.add(types.InlineKeyboardButton("💳 کپی شماره کارت",
                                           copy_text=types.CopyTextButton(text=card_clean)))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
     else:
         text = (
             "💳 <b>کارت به کارت</b>\n\n"
@@ -1058,7 +1058,7 @@ def _build_card_payment_page(card, bank, owner, price, final_amount):
             "📸 پس از واریز، تصویر رسید یا شماره پیگیری را ارسال کنید."
         )
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
 
     return text, kb
 import string
@@ -1113,7 +1113,7 @@ def _render_voucher_batch_detail(call, uid, batch_id):
     kb.row(
         types.InlineKeyboardButton("🗑 حذف این دسته", callback_data=f"admin:vch:del:{batch_id}"),
     )
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:vouchers"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:vouchers", icon_custom_emoji_id="5253997076169115797"))
     if len(combined) <= MAX_MSG:
         send_or_edit(call, combined, kb)
     else:
@@ -1156,7 +1156,7 @@ def _render_voucher_admin_list(call, uid):
             types.InlineKeyboardButton(f"🎫 {b['name']} ({remain}/{total})", callback_data=f"admin:vch:view:{b['id']}"),
             types.InlineKeyboardButton("📋 اطلاعات", callback_data=f"admin:vch:view:{b['id']}"),
         )
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:panel"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
     text = (
         "🎫 <b>مدیریت کارت‌های هدیه</b>\n\n"
         f"وضعیت سیستم: {'✅ فعال' if enabled else '❌ غیرفعال'}\n"
@@ -1176,7 +1176,7 @@ def _render_pending_receipts_page(call, uid, page):
         total, rows = get_pending_payments_page(page, PAGE_SIZE)
     if not rows:
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:panel"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call, "✅ رسید بررسی نشده‌ای وجود ندارد.", kb)
         return
     total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
@@ -1232,7 +1232,7 @@ def _render_discount_admin_list(call, uid):
             types.InlineKeyboardButton(f"{status_icon} {aud_icon} {row['code']}", callback_data=f"admin:disc:view:{row['id']}"),
             types.InlineKeyboardButton("⚙️ تنظیمات", callback_data=f"admin:disc:view:{row['id']}"),
         )
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:panel"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
     total = len(codes)
     text = (
         "🎟 <b>مدیریت کدهای تخفیف</b>\n\n"
@@ -1282,7 +1282,7 @@ def _render_discount_scope_selection(call, uid, edit_code_id=None):
     sel_count = len(selected)
     if sel_count > 0:
         kb.add(types.InlineKeyboardButton(f"✅ تأیید ({sel_count} مورد انتخابی)", callback_data=confirm_cb))
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=back_cb))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data=back_cb, icon_custom_emoji_id="5253997076169115797"))
     send_or_edit(call, f"📌 <b>{title}</b>\n\nموارد مورد نظر را انتخاب و سپس تأیید کنید:", kb)
 
 
@@ -1344,7 +1344,7 @@ def _render_discount_code_detail(call, uid, code_id):
     )
     kb.add(types.InlineKeyboardButton("🎯 ویرایش دسترسی", callback_data=f"admin:disc:edit_audience:{code_id}"))
     kb.add(types.InlineKeyboardButton("📌 ویرایش محدوده", callback_data=f"admin:disc:edit_scope:{code_id}"))
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:discounts"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:discounts", icon_custom_emoji_id="5253997076169115797"))
     send_or_edit(call, text, kb)
 
 
@@ -1463,7 +1463,7 @@ def _swapwallet_error_inline(call, err_msg):
     else:
         msg = f"❌ <b>خطا در اتصال به SwapWallet</b>\n\n<code>{err_msg[:300]}</code>"
     kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
     try:
         bot.answer_callback_query(call.id)
     except Exception:
@@ -1818,7 +1818,7 @@ def _dispatch_callback(call, uid, data):
             return
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("📤 ارسال درخواست (بدون متن)", callback_data="agency:send_empty"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
         state_set(uid, "agency_request_text")
         bot.answer_callback_query(call.id)
         send_or_edit(call,
@@ -2028,7 +2028,7 @@ def _dispatch_callback(call, uid, data):
             _name_part = f"{p['name']} | " if _sn else ""
             title = f"{_name_part}{fmt_vol(p['volume_gb'])} | {fmt_dur(p['duration_days'])} | {fmt_price(price)} ت"
             kb.add(types.InlineKeyboardButton(title, callback_data=f"renew:p:{purchase_id}:{p['id']}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="my_configs"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="my_configs", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         agent_note = "\n\n🤝 <i>این قیمت‌ها مخصوص همکاری شماست</i>" if user and user["is_agent"] else ""
         if not packages:
@@ -2464,7 +2464,7 @@ def _dispatch_callback(call, uid, data):
                 rendered_rules = _rph(rules_text, escape_plain_parts=True)
                 kb = types.InlineKeyboardMarkup()
                 kb.add(types.InlineKeyboardButton("✅ من قوانین را خواندم و پذیرفتم", callback_data="buy:accept_rules"))
-                kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+                kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
                 bot.answer_callback_query(call.id)
                 send_or_edit(call, f"📜 <b>قوانین خرید</b>\n\n{rendered_rules}", kb)
                 return
@@ -2475,7 +2475,7 @@ def _dispatch_callback(call, uid, data):
         # Check if shop is open
         if setting_get("shop_open", "1") != "1":
             kb = types.InlineKeyboardMarkup()
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call, "🔴 <b>فروشگاه موقتاً تعطیل است.</b>\n\nلطفاً بعداً مراجعه کنید.", kb)
             return
@@ -2491,7 +2491,7 @@ def _dispatch_callback(call, uid, data):
             if packs:
                 kb.add(types.InlineKeyboardButton(f"🧩 {item['name']}", callback_data=f"buy:t:{item['id']}"))
                 has_any = True
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         if not has_any:
             send_or_edit(call, "📭 در حال حاضر بسته‌ای برای فروش موجود نیست.", kb)
@@ -2502,7 +2502,7 @@ def _dispatch_callback(call, uid, data):
     if data.startswith("buy:t:"):
         if setting_get("shop_open", "1") != "1":
             kb = types.InlineKeyboardMarkup()
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call, "🔴 <b>فروشگاه موقتاً تعطیل است.</b>\n\nلطفاً بعداً مراجعه کنید.", kb)
             return
@@ -2520,7 +2520,7 @@ def _dispatch_callback(call, uid, data):
             for u in user_limits:
                 label = "👥 نامحدود" if u == 0 else f"👥 {u} کاربره"
                 kb.add(types.InlineKeyboardButton(label, callback_data=f"buy:mu:{u}:{type_id}"))
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="buy:start"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data="buy:start", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call, "👥 تعداد کاربر مورد نظر را انتخاب کنید:", kb)
             return
@@ -2533,7 +2533,7 @@ def _dispatch_callback(call, uid, data):
             _name_part = f"{p['name']}{stock_tag} | " if _sn else (f"{stock_tag} | " if stock_tag else "")
             title = f"{_name_part}{fmt_vol(p['volume_gb'])} | {fmt_dur(p['duration_days'])} | {fmt_price(price)} ت"
             kb.add(types.InlineKeyboardButton(title, callback_data=f"buy:p:{p['id']}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="buy:start"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="buy:start", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         agent_note = "\n\n🤝 <i>این قیمت‌ها مخصوص همکاری شماست</i>" if user and user["is_agent"] else ""
         if not packages:
@@ -2545,7 +2545,7 @@ def _dispatch_callback(call, uid, data):
     if data.startswith("buy:mu:"):
         if setting_get("shop_open", "1") != "1":
             kb = types.InlineKeyboardMarkup()
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call, "🔴 <b>فروشگاه موقتاً تعطیل است.</b>\n\nلطفاً بعداً مراجعه کنید.", kb)
             return
@@ -2567,7 +2567,7 @@ def _dispatch_callback(call, uid, data):
             _name_part = f"{p['name']}{stock_tag} | " if _sn else (f"{stock_tag} | " if stock_tag else "")
             title = f"{_name_part}{fmt_vol(p['volume_gb'])} | {fmt_dur(p['duration_days'])} | {fmt_price(price)} ت"
             kb.add(types.InlineKeyboardButton(title, callback_data=f"buy:p:{p['id']}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"buy:t:{type_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"buy:t:{type_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         agent_note = "\n\n🤝 <i>این قیمت‌ها مخصوص همکاری شماست</i>" if user and user["is_agent"] else ""
         if not packages:
@@ -2579,12 +2579,32 @@ def _dispatch_callback(call, uid, data):
     if data.startswith("buy:p:"):
         if setting_get("shop_open", "1") != "1":
             kb = types.InlineKeyboardMarkup()
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call, "🔴 <b>فروشگاه موقتاً تعطیل است.</b>\n\nلطفاً بعداً مراجعه کنید.", kb)
             return
         package_id  = int(data.split(":")[2])
         package_row = get_package(package_id)
+        if not package_row:
+            bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
+            return
+        # ── Buyer role enforcement ────────────────────────────────────────────
+        buyer_role = package_row["buyer_role"] if "buyer_role" in package_row.keys() else "all"
+        if buyer_role != "all":
+            _user = get_user(uid)
+            _is_agent = bool(_user and _user["is_agent"])
+            if buyer_role == "agents" and not _is_agent:
+                bot.answer_callback_query(call.id,
+                    "🔒 این پکیج فقط برای نمایندگان فعال است.\n\n"
+                    "برای تهیه این پکیج باید نماینده باشید.",
+                    show_alert=True)
+                return
+            if buyer_role == "public" and _is_agent:
+                bot.answer_callback_query(call.id,
+                    "🔒 این پکیج فقط برای کاربران عادی قابل خرید است.\n\n"
+                    "نمایندگان مجاز به خرید این پکیج نیستند.",
+                    show_alert=True)
+                return
         if not package_row:
             bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
             return
@@ -3036,7 +3056,7 @@ def _dispatch_callback(call, uid, data):
             if packs:
                 kb.add(types.InlineKeyboardButton(f"🎁 {item['name']}", callback_data=f"test:t:{item['id']}"))
                 has_any = True
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         if not has_any:
             send_or_edit(call, "📭 در حال حاضر تست رایگانی موجود نیست.", kb)
@@ -3098,13 +3118,13 @@ def _dispatch_callback(call, uid, data):
     if data == "wallet:charge":
         if setting_get("shop_open", "1") != "1":
             kb = types.InlineKeyboardMarkup()
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call, "🔴 <b>فروشگاه موقتاً تعطیل است.</b>\n\nشارژ کیف پول در حال حاضر امکان‌پذیر نیست.", kb)
             return
         state_set(uid, "await_wallet_amount")
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "💳 <b>شارژ کیف پول</b>\n\nمبلغ مورد نظر را به تومان وارد کنید:", kb)
         return
@@ -3239,7 +3259,7 @@ def _dispatch_callback(call, uid, data):
         kb = types.InlineKeyboardMarkup()
         for net, _ in SWAPWALLET_CRYPTO_NETWORKS:
             kb.add(types.InlineKeyboardButton(SW_NET_LABELS.get(net, net), callback_data=f"swcrypto:net:{net}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "💎 <b>پرداخت کریپتو (SwapWallet)</b>\n\nشبکه مورد نظر را انتخاب کنید:", kb)
         return
@@ -3373,7 +3393,7 @@ def _dispatch_callback(call, uid, data):
         kb = types.InlineKeyboardMarkup()
         for net, _ in SWAPWALLET_CRYPTO_NETWORKS:
             kb.add(types.InlineKeyboardButton(SW_NET_LABELS.get(net, net), callback_data=f"swcrypto:net:{net}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"buy:p:{package_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"buy:p:{package_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "💎 <b>پرداخت کریپتو (SwapWallet)</b>\n\nشبکه مورد نظر را انتخاب کنید:", kb)
         return
@@ -3445,7 +3465,7 @@ def _dispatch_callback(call, uid, data):
         kb = types.InlineKeyboardMarkup()
         for net, _ in SWAPWALLET_CRYPTO_NETWORKS:
             kb.add(types.InlineKeyboardButton(SW_NET_LABELS.get(net, net), callback_data=f"swcrypto:net:{net}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"renew:{purchase_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"renew:{purchase_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "💎 <b>پرداخت کریپتو (SwapWallet)</b>\n\nشبکه مورد نظر را انتخاب کنید:", kb)
         return
@@ -3546,7 +3566,7 @@ def _dispatch_callback(call, uid, data):
         is_active = row["is_active"] if "is_active" in row.keys() else 1
         status_label = "✅ فعال — کلیک برای غیرفعال" if is_active else "❌ غیرفعال — کلیک برای فعال"
         kb.add(types.InlineKeyboardButton(status_label, callback_data=f"admin:type:toggleactive:{type_id}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:types"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:types", icon_custom_emoji_id="5253997076169115797"))
         desc_preview = f"\n📝 توضیحات: {esc(row['description'][:80])}..." if row["description"] and len(row["description"]) > 80 else (f"\n📝 توضیحات: {esc(row['description'])}" if row["description"] else "\n📝 توضیحات: ندارد")
         status_line  = "\n🔘 وضعیت: <b>فعال</b>" if is_active else "\n🔘 وضعیت: <b>غیرفعال</b>"
         bot.answer_callback_query(call.id)
@@ -3575,7 +3595,7 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id)
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("⏭ توضیحاتی نمی‌خواهم وارد کنم", callback_data=f"admin:type:deldesc:{type_id}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"admin:type:edit:{type_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"admin:type:edit:{type_id}", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call,
             f"📝 توضیحات جدید برای نوع <b>{esc(row['name'])}</b> را ارسال کنید:\n\n"
             "این توضیحات پس از ارسال کانفیگ به کاربر نمایش داده می‌شود.", kb)
@@ -3694,6 +3714,46 @@ def _dispatch_callback(call, uid, data):
         _show_admin_types(call)
         return
 
+    # ── Helper: build package edit panel text + keyboard ─────────────────────
+    def _pkg_edit_text_kb(package_row):
+        _BR_LABELS = {"all": "همه", "agents": "فقط نمایندگان", "public": "فقط کاربران عادی"}
+        package_id    = package_row["id"]
+        show_name_val = package_row["show_name"] if "show_name" in package_row.keys() else 1
+        show_name_lbl = "👁 نمایش نام به کاربر: ✅ بله" if show_name_val else "👁 نمایش نام به کاربر: ❌ خیر"
+        pkg_active    = package_row["active"] if "active" in package_row.keys() else 1
+        pkg_status_label = "✅ فعال — کلیک برای غیرفعال" if pkg_active else "❌ غیرفعال — کلیک برای فعال"
+        buyer_role    = package_row["buyer_role"] if "buyer_role" in package_row.keys() else "all"
+        br_label      = _BR_LABELS.get(buyer_role, "همه")
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("✏️ ویرایش نام",   callback_data=f"admin:pkg:ef:name:{package_id}"))
+        kb.add(types.InlineKeyboardButton("💰 ویرایش قیمت",  callback_data=f"admin:pkg:ef:price:{package_id}"))
+        kb.add(types.InlineKeyboardButton("🔋 ویرایش حجم",   callback_data=f"admin:pkg:ef:volume:{package_id}"))
+        kb.add(types.InlineKeyboardButton("⏰ ویرایش مدت",   callback_data=f"admin:pkg:ef:dur:{package_id}"))
+        kb.add(types.InlineKeyboardButton("📌 جایگاه نمایش",  callback_data=f"admin:pkg:ef:position:{package_id}"))
+        kb.add(types.InlineKeyboardButton("👥 محدودیت کاربر", callback_data=f"admin:pkg:ef:maxusers:{package_id}"))
+        kb.add(types.InlineKeyboardButton(show_name_lbl,      callback_data=f"admin:pkg:toggle_sn:{package_id}"))
+        kb.add(types.InlineKeyboardButton(f"🔑 خریداران: {br_label} — تغییر", callback_data=f"admin:pkg:set_br:{package_id}"))
+        kb.add(types.InlineKeyboardButton(pkg_status_label, callback_data=f"admin:pkg:toggleactive:{package_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:types", icon_custom_emoji_id="5253997076169115797"))
+        cur_pos      = package_row["position"] if "position" in package_row.keys() else 0
+        pkg_status_line = "✅ فعال" if pkg_active else "❌ غیرفعال"
+        sn_line      = "✅ بله" if show_name_val else "❌ خیر"
+        mu_val       = package_row["max_users"] if "max_users" in package_row.keys() else 0
+        mu_line      = "نامحدود" if not mu_val else f"{mu_val} کاربره"
+        text = (
+            f"📦 <b>ویرایش پکیج</b>\n\n"
+            f"نام: {esc(package_row['name'])}\n"
+            f"قیمت: {fmt_price(package_row['price'])} تومان\n"
+            f"حجم: {fmt_vol(package_row['volume_gb'])}\n"
+            f"مدت: {fmt_dur(package_row['duration_days'])}\n"
+            f"جایگاه: {cur_pos}\n"
+            f"محدودیت کاربر: {mu_line}\n"
+            f"نمایش نام به کاربر: {sn_line}\n"
+            f"خریداران مجاز: {br_label}\n"
+            f"وضعیت: {pkg_status_line}"
+        )
+        return text, kb
+
     if data.startswith("admin:pkg:add:t:"):
         type_id  = int(data.split(":")[4])
         type_row = get_type(type_id)
@@ -3721,6 +3781,41 @@ def _dispatch_callback(call, uid, data):
             back_button("admin:types"))
         return
 
+    if data.startswith("admin:pkg:add:br:"):
+        # step: admin selects buyer_role during package creation
+        if state_name(uid) != "admin_add_package_buyer_role" or not is_admin(uid):
+            bot.answer_callback_query(call.id)
+            return
+        buyer_role = data.split(":")[4]  # 'all' | 'agents' | 'public'
+        if buyer_role not in ("all", "agents", "public"):
+            bot.answer_callback_query(call.id)
+            return
+        sd = state_data(uid)
+        show_name_val = sd.get("show_name", 1)
+        max_users     = int(sd.get("max_users", 0) or 0)
+        add_package(sd["type_id"], sd["package_name"], sd["volume"], sd["duration"], sd["price"],
+                    show_name=show_name_val, max_users=max_users, buyer_role=buyer_role)
+        log_admin_action(uid, f"پکیج '{sd['package_name']}' با buyer_role={buyer_role} ثبت شد")
+        state_clear(uid)
+        _br_labels = {"all": "همه", "agents": "فقط نمایندگان", "public": "فقط کاربران عادی"}
+        vol_label = "حجم نامحدود" if sd["volume"] == 0 else fmt_vol(sd["volume"])
+        dur_label = "زمان نامحدود" if sd["duration"] == 0 else f"{sd['duration']} روز"
+        pri_label = "رایگان" if sd["price"] == 0 else f"{fmt_price(sd['price'])} تومان"
+        sn_label  = "بله" if show_name_val else "خیر"
+        mu_label  = "نامحدود" if max_users == 0 else f"{max_users} کاربره"
+        bot.answer_callback_query(call.id, "✅ پکیج ثبت شد.")
+        send_or_edit(call,
+            f"✅ پکیج با موفقیت ثبت شد.\n\n"
+            f"📦 <b>{esc(sd['package_name'])}</b>\n"
+            f"🔋 حجم: {vol_label}\n"
+            f"⏰ مدت: {dur_label}\n"
+            f"💰 قیمت: {pri_label}\n"
+            f"👥 تعداد کاربر: {mu_label}\n"
+            f"👁 نمایش نام: {sn_label}\n"
+            f"🔑 خریداران مجاز: {_br_labels[buyer_role]}",
+            back_button("admin:types"))
+        return
+
     if data.startswith("admin:pkg:edit:"):
         package_id  = int(data.split(":")[3])
         package_row = get_package(package_id)
@@ -3728,36 +3823,8 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
             return
         show_name_val = package_row['show_name'] if 'show_name' in package_row.keys() else 1
-        show_name_lbl = "👁 نمایش نام به کاربر: ✅ بله" if show_name_val else "👁 نمایش نام به کاربر: ❌ خیر"
-        kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("✏️ ویرایش نام",   callback_data=f"admin:pkg:ef:name:{package_id}"))
-        kb.add(types.InlineKeyboardButton("💰 ویرایش قیمت",  callback_data=f"admin:pkg:ef:price:{package_id}"))
-        kb.add(types.InlineKeyboardButton("🔋 ویرایش حجم",   callback_data=f"admin:pkg:ef:volume:{package_id}"))
-        kb.add(types.InlineKeyboardButton("⏰ ویرایش مدت",   callback_data=f"admin:pkg:ef:dur:{package_id}"))
-        kb.add(types.InlineKeyboardButton("📌 جایگاه نمایش",  callback_data=f"admin:pkg:ef:position:{package_id}"))
-        kb.add(types.InlineKeyboardButton("👥 محدودیت کاربر", callback_data=f"admin:pkg:ef:maxusers:{package_id}"))
-        kb.add(types.InlineKeyboardButton(show_name_lbl,      callback_data=f"admin:pkg:toggle_sn:{package_id}"))
-        pkg_active = package_row['active'] if 'active' in package_row.keys() else 1
-        pkg_status_label = "✅ فعال — کلیک برای غیرفعال" if pkg_active else "❌ غیرفعال — کلیک برای فعال"
-        kb.add(types.InlineKeyboardButton(pkg_status_label, callback_data=f"admin:pkg:toggleactive:{package_id}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت",       callback_data="admin:types"))
         bot.answer_callback_query(call.id)
-        cur_pos = package_row['position'] if 'position' in package_row.keys() else 0
-        pkg_status_line = "✅ فعال" if pkg_active else "❌ غیرفعال"
-        sn_line = "✅ بله" if show_name_val else "❌ خیر"
-        mu_val  = package_row['max_users'] if 'max_users' in package_row.keys() else 0
-        mu_line = "نامحدود" if not mu_val else f"{mu_val} کاربره"
-        text = (
-            f"📦 <b>ویرایش پکیج</b>\n\n"
-            f"نام: {esc(package_row['name'])}\n"
-            f"قیمت: {fmt_price(package_row['price'])} تومان\n"
-            f"حجم: {fmt_vol(package_row['volume_gb'])}\n"
-            f"مدت: {fmt_dur(package_row['duration_days'])}\n"
-            f"جایگاه: {cur_pos}\n"
-            f"محدودیت کاربر: {mu_line}\n"
-            f"نمایش نام به کاربر: {sn_line}\n"
-            f"وضعیت: {pkg_status_line}"
-        )
+        text, kb = _pkg_edit_text_kb(package_row)
         send_or_edit(call, text, kb)
         return
 
@@ -3772,38 +3839,55 @@ def _dispatch_callback(call, uid, data):
         update_package_field(package_id, "show_name", new_sn)
         log_admin_action(uid, f"نمایش نام پکیج #{package_id} {'فعال' if new_sn else 'غیرفعال'} شد")
         bot.answer_callback_query(call.id, "✅ تنظیم نمایش نام بروزرسانی شد.")
-        # Refresh edit panel
         package_row = get_package(package_id)
-        show_name_val = package_row['show_name'] if 'show_name' in package_row.keys() else 1
-        show_name_lbl = "👁 نمایش نام به کاربر: ✅ بله" if show_name_val else "👁 نمایش نام به کاربر: ❌ خیر"
+        text, kb = _pkg_edit_text_kb(package_row)
+        send_or_edit(call, text, kb)
+        return
+
+    if data.startswith("admin:pkg:set_br:"):
+        # Show buyer_role selection for a package
+        package_id  = int(data.split(":")[3])
+        package_row = get_package(package_id)
+        if not package_row:
+            bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
+            return
+        buyer_role = package_row["buyer_role"] if "buyer_role" in package_row.keys() else "all"
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("✏️ ویرایش نام",   callback_data=f"admin:pkg:ef:name:{package_id}"))
-        kb.add(types.InlineKeyboardButton("💰 ویرایش قیمت",  callback_data=f"admin:pkg:ef:price:{package_id}"))
-        kb.add(types.InlineKeyboardButton("🔋 ویرایش حجم",   callback_data=f"admin:pkg:ef:volume:{package_id}"))
-        kb.add(types.InlineKeyboardButton("⏰ ویرایش مدت",   callback_data=f"admin:pkg:ef:dur:{package_id}"))
-        kb.add(types.InlineKeyboardButton("📌 جایگاه نمایش",  callback_data=f"admin:pkg:ef:position:{package_id}"))
-        kb.add(types.InlineKeyboardButton("👥 محدودیت کاربر", callback_data=f"admin:pkg:ef:maxusers:{package_id}"))
-        kb.add(types.InlineKeyboardButton(show_name_lbl,      callback_data=f"admin:pkg:toggle_sn:{package_id}"))
-        pkg_active = package_row['active'] if 'active' in package_row.keys() else 1
-        pkg_status_label = "✅ فعال — کلیک برای غیرفعال" if pkg_active else "❌ غیرفعال — کلیک برای فعال"
-        kb.add(types.InlineKeyboardButton(pkg_status_label, callback_data=f"admin:pkg:toggleactive:{package_id}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت",       callback_data="admin:types"))
-        cur_pos = package_row['position'] if 'position' in package_row.keys() else 0
-        pkg_status_line = "✅ فعال" if pkg_active else "❌ غیرفعال"
-        sn_line = "✅ بله" if show_name_val else "❌ خیر"
-        mu_val  = package_row['max_users'] if 'max_users' in package_row.keys() else 0
-        mu_line = "نامحدود" if not mu_val else f"{mu_val} کاربره"
-        text = (
-            f"📦 <b>ویرایش پکیج</b>\n\n"
-            f"نام: {esc(package_row['name'])}\n"
-            f"قیمت: {fmt_price(package_row['price'])} تومان\n"
-            f"حجم: {fmt_vol(package_row['volume_gb'])}\n"
-            f"مدت: {fmt_dur(package_row['duration_days'])}\n"
-            f"جایگاه: {cur_pos}\n"
-            f"محدودیت کاربر: {mu_line}\n"
-            f"نمایش نام به کاربر: {sn_line}\n"
-            f"وضعیت: {pkg_status_line}"
+        kb.row(
+            types.InlineKeyboardButton("✅ همه"               if buyer_role == "all"     else "همه",
+                                       callback_data=f"admin:pkg:br:all:{package_id}"),
+            types.InlineKeyboardButton("✅ فقط نمایندگان"     if buyer_role == "agents"  else "فقط نمایندگان",
+                                       callback_data=f"admin:pkg:br:agents:{package_id}"),
+            types.InlineKeyboardButton("✅ فقط کاربران عادی"  if buyer_role == "public"  else "فقط کاربران عادی",
+                                       callback_data=f"admin:pkg:br:public:{package_id}"),
         )
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"admin:pkg:edit:{package_id}", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"📦 <b>{esc(package_row['name'])}</b>\n\n"
+            "👥 چه کسانی بتوانند این پکیج را بخرند؟\n\n"
+            "• <b>همه</b> — هم کاربران عادی، هم نمایندگان\n"
+            "• <b>فقط نمایندگان</b> — فقط کاربران نماینده\n"
+            "• <b>فقط کاربران عادی</b> — فقط کاربران غیرنماینده", kb)
+        return
+
+    if data.startswith("admin:pkg:br:"):
+        # Admin selects buyer_role for existing package
+        parts      = data.split(":")
+        role       = parts[3]   # 'all' | 'agents' | 'public'
+        package_id = int(parts[4])
+        if role not in ("all", "agents", "public"):
+            bot.answer_callback_query(call.id)
+            return
+        package_row = get_package(package_id)
+        if not package_row:
+            bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
+            return
+        update_package_field(package_id, "buyer_role", role)
+        log_admin_action(uid, f"buyer_role پکیج #{package_id} به {role} تغییر کرد")
+        bot.answer_callback_query(call.id, "✅ محدودیت خریدار بروزرسانی شد.")
+        package_row = get_package(package_id)
+        text, kb = _pkg_edit_text_kb(package_row)
         send_or_edit(call, text, kb)
         return
 
@@ -3873,7 +3957,7 @@ def _dispatch_callback(call, uid, data):
         kb = types.InlineKeyboardMarkup()
         for item in types_list:
             kb.add(types.InlineKeyboardButton(f"🧩 {item['name']}", callback_data=f"adm:cfg:t:{item['id']}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:panel"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "📝 <b>ثبت کانفیگ</b>\n\nنوع کانفیگ را انتخاب کنید:", kb)
         return
@@ -3887,7 +3971,7 @@ def _dispatch_callback(call, uid, data):
                 f"{p['name']} | {fmt_vol(p['volume_gb'])} | {fmt_dur(p['duration_days'])}",
                 callback_data=f"adm:cfg:p:{p['id']}"
             ))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:add_config"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:add_config", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "📦 پکیج مربوطه را انتخاب کنید:", kb)
         return
@@ -3900,7 +3984,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("🌐 V2Ray",    callback_data=f"adm:cfg:proto:v2ray:{package_id}"))
         kb.add(types.InlineKeyboardButton("🔒 OpenVPN",  callback_data=f"adm:cfg:proto:ovpn:{package_id}"))
         kb.add(types.InlineKeyboardButton("🛡 WireGuard", callback_data=f"adm:cfg:proto:wg:{package_id}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:cfg:t:{package_row['type_id']}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:cfg:t:{package_row['type_id']}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "🔌 پروتکل کانفیگ را انتخاب کنید:", kb)
         return
@@ -3917,7 +4001,7 @@ def _dispatch_callback(call, uid, data):
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("📝 ثبت تکی",    callback_data=f"adm:v2:single:{package_id}"))
             kb.add(types.InlineKeyboardButton("📋 ثبت دسته‌ای", callback_data=f"adm:v2:bulk:{package_id}"))
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:cfg:p:{package_id}"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:cfg:p:{package_id}", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call, "📝 روش ثبت کانفیگ V2Ray را انتخاب کنید:", kb)
             return
@@ -3927,7 +4011,7 @@ def _dispatch_callback(call, uid, data):
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("📝 ثبت تکی",   callback_data=f"adm:ovpn:single:{package_id}"))
             kb.add(types.InlineKeyboardButton("📋 ثبت دسته‌ای", callback_data=f"adm:ovpn:bulk:{package_id}"))
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:cfg:p:{package_id}"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:cfg:p:{package_id}", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call, "📝 روش ثبت کانفیگ OpenVPN را انتخاب کنید:", kb)
             return
@@ -3937,7 +4021,7 @@ def _dispatch_callback(call, uid, data):
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("📝 ثبت تکی",    callback_data=f"adm:wg:single:{package_id}"))
             kb.add(types.InlineKeyboardButton("📋 ثبت دسته‌ای", callback_data=f"adm:wg:bulk:{package_id}"))
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:cfg:p:{package_id}"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:cfg:p:{package_id}", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call, "📝 روش ثبت کانفیگ WireGuard را انتخاب کنید:", kb)
             return
@@ -3951,7 +4035,7 @@ def _dispatch_callback(call, uid, data):
         state_set(uid, "ovpn_single_file", package_id=package_id)
         bot.answer_callback_query(call.id)
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:cfg:proto:ovpn:{package_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:cfg:proto:ovpn:{package_id}", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call,
             "📎 <b>ثبت تکی OpenVPN</b>\n\n"
             "فایل یا فایل‌های <code>.ovpn</code> را ارسال کنید.\n"
@@ -3972,7 +4056,7 @@ def _dispatch_callback(call, uid, data):
                 types.InlineKeyboardButton("✅ بله", callback_data=f"adm:ovpn:bulk:shared:{package_id}"),
                 types.InlineKeyboardButton("❌ خیر", callback_data=f"adm:ovpn:bulk:diff:{package_id}"),
             )
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:cfg:proto:ovpn:{package_id}"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:cfg:proto:ovpn:{package_id}", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call, "📂 آیا فایل کانفیگ <b>همه اکانت‌ها یکی</b> است؟", kb)
             return
@@ -3982,7 +4066,7 @@ def _dispatch_callback(call, uid, data):
             package_id = int(rest.split(":")[1])
             state_set(uid, "ovpn_bulk_shared_file", package_id=package_id, shared_files=[])
             kb = types.InlineKeyboardMarkup()
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:ovpn:bulk:{package_id}"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:ovpn:bulk:{package_id}", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call,
                 "📎 <b>ثبت دسته‌ای OpenVPN — فایل مشترک</b>\n\n"
@@ -4001,7 +4085,7 @@ def _dispatch_callback(call, uid, data):
             package_id = int(rest.split(":")[1])
             state_set(uid, "ovpn_bulk_diff_count", package_id=package_id)
             kb = types.InlineKeyboardMarkup()
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:ovpn:bulk:{package_id}"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:ovpn:bulk:{package_id}", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call,
                 "🔢 <b>ثبت دسته‌ای OpenVPN — فایل متفاوت</b>\n\n"
@@ -4062,7 +4146,7 @@ def _dispatch_callback(call, uid, data):
                 "<code>user1\npass1\nuser2\npass2</code>"
             )
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:ovpn:bulk:{package_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:ovpn:bulk:{package_id}", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call, fmt_text, kb)
         return
 
@@ -4139,7 +4223,7 @@ def _dispatch_callback(call, uid, data):
                 "<code>user1\npass1\nuser2\npass2</code>"
             )
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:ovpn:bulk:{package_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:ovpn:bulk:{package_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.send_message(uid, fmt_text, reply_markup=kb)
         return
 
@@ -4170,7 +4254,7 @@ def _dispatch_callback(call, uid, data):
         state_set(uid, "wg_single_file", package_id=package_id, wg_files=[], wg_names=[])
         bot.answer_callback_query(call.id)
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:cfg:proto:wg:{package_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:cfg:proto:wg:{package_id}", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call,
             "📎 <b>ثبت تکی WireGuard</b>\n\n"
             "فایل یا فایل‌های کانفیگ WireGuard را ارسال کنید.\n"
@@ -4219,7 +4303,7 @@ def _dispatch_callback(call, uid, data):
                 types.InlineKeyboardButton("✅ بله", callback_data=f"adm:wg:bulk:shared:{package_id}"),
                 types.InlineKeyboardButton("❌ خیر", callback_data=f"adm:wg:bulk:diff:{package_id}"),
             )
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:cfg:proto:wg:{package_id}"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:cfg:proto:wg:{package_id}", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call, "📂 آیا فایل‌های <b>همه کانفیگ‌ها یکی</b> هستند؟", kb)
             return
@@ -4229,7 +4313,7 @@ def _dispatch_callback(call, uid, data):
             package_id = int(rest.split(":")[1])
             state_set(uid, "wg_bulk_shared_file", package_id=package_id, shared_files=[], shared_names=[])
             kb = types.InlineKeyboardMarkup()
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:wg:bulk:{package_id}"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:wg:bulk:{package_id}", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call,
                 "📎 <b>ثبت دسته‌ای WireGuard — فایل مشترک</b>\n\n"
@@ -4245,7 +4329,7 @@ def _dispatch_callback(call, uid, data):
             package_id = int(rest.split(":")[1])
             state_set(uid, "wg_bulk_diff_count", package_id=package_id)
             kb = types.InlineKeyboardMarkup()
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:wg:bulk:{package_id}"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:wg:bulk:{package_id}", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call,
                 "🔢 <b>ثبت دسته‌ای WireGuard — فایل متفاوت</b>\n\n"
@@ -4305,7 +4389,7 @@ def _dispatch_callback(call, uid, data):
                 "عدد را وارد کنید:"
             )
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:wg:bulk:{package_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:wg:bulk:{package_id}", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call, fmt_text, kb)
         return
 
@@ -4386,7 +4470,7 @@ def _dispatch_callback(call, uid, data):
             send_or_edit(call, fmt_text, types.InlineKeyboardMarkup())
             return
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:wg:bulk:{package_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:wg:bulk:{package_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.send_message(uid, fmt_text, reply_markup=kb)
         return
 
@@ -4408,7 +4492,7 @@ def _dispatch_callback(call, uid, data):
             "3️⃣ ثبت ساب تنها",
             callback_data=f"adm:v2:sm:3:{package_id}"
         ))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:cfg:proto:v2ray:{package_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:cfg:proto:v2ray:{package_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call,
             "📝 <b>ثبت تکی V2Ray</b>\n\n"
@@ -4467,7 +4551,7 @@ def _dispatch_callback(call, uid, data):
                 "4️⃣ ساب تنها",
                 callback_data=f"adm:v2:bm:4:{package_id}"
             ))
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:cfg:proto:v2ray:{package_id}"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:cfg:proto:v2ray:{package_id}", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call,
                 "📋 <b>ثبت دسته‌ای V2Ray</b>\n\n"
@@ -4495,7 +4579,7 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id)
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("⏭ بدون پسوند", callback_data=f"adm:v2:bulk:suf:skip:{pkg_id}"))
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:v2:bulk:{pkg_id}"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:v2:bulk:{pkg_id}", icon_custom_emoji_id="5253997076169115797"))
             send_or_edit(call,
                 "✂️ <b>پسوند حذفی از نام کانفیگ</b>\n\n"
                 "اگر انتهای نام کانفیگ‌ها متن اضافه‌ای دارد که نمی‌خواهید نمایش داده شود، اینجا وارد کنید.\n\n"
@@ -4531,7 +4615,7 @@ def _dispatch_callback(call, uid, data):
                       package_id=package_id, type_id=s.get("type_id", 0), mode=mode)
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("⏭ بدون پیشوند", callback_data=f"adm:v2:bulk:pref:skip:{package_id}"))
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:v2:bulk:{package_id}"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:v2:bulk:{package_id}", icon_custom_emoji_id="5253997076169115797"))
             send_or_edit(call,
                 "✂️ <b>پیشوند حذفی از نام کانفیگ</b>\n\n"
                 "اگر ابتدای نام کانفیگ‌ها متن اضافه‌ای (مثل ریمارک اینباند) دارد که نمی‌خواهید در نام سرویس باشد، اینجا وارد کنید.\n\n"
@@ -4576,7 +4660,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("1️⃣ ثبت کانفیگ + ساب جداگانه", callback_data=f"adm:v2:sm:1:{package_id}"))
         kb.add(types.InlineKeyboardButton("2️⃣ ثبت کانفیگ تنها",          callback_data=f"adm:v2:sm:2:{package_id}"))
         kb.add(types.InlineKeyboardButton("3️⃣ ثبت ساب تنها",             callback_data=f"adm:v2:sm:3:{package_id}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:cfg:proto:v2ray:{package_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:cfg:proto:v2ray:{package_id}", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call,
             "📝 <b>ثبت تکی V2Ray</b>\n\nنوع ثبت را انتخاب کنید:", kb)
         return
@@ -4601,7 +4685,7 @@ def _dispatch_callback(call, uid, data):
                 back_button("admin:add_config"))
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("⏭ بعدی (بدون پسوند)", callback_data=f"adm:cfg:bulk:skipsuf:{pkg_id}"))
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:add_config"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:add_config", icon_custom_emoji_id="5253997076169115797"))
             send_or_edit(call,
                 "✂️ <b>پسوند حذفی از نام کانفیگ</b>\n\n"
                 "وقتی چندتا اکسترنال پروکسی ست می‌کنید، انتهای نام کانفیگ متن‌های اضافه اکسترنال‌ها اضافه می‌شود.\n"
@@ -4665,7 +4749,7 @@ def _dispatch_callback(call, uid, data):
                       has_inquiry=has_inq)
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("⏭ بعدی (بدون پیشوند)", callback_data=f"adm:cfg:bulk:skippre:{pkg_id}"))
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:add_config"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:add_config", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call,
                 "✂️ <b>پیشوند حذفی از نام کانفیگ</b>\n\n"
@@ -4685,7 +4769,7 @@ def _dispatch_callback(call, uid, data):
             types.InlineKeyboardButton("✅ بله", callback_data=f"adm:cfg:bulk:inq:y:{package_id}"),
             types.InlineKeyboardButton("❌ خیر", callback_data=f"adm:cfg:bulk:inq:n:{package_id}"),
         )
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:cfg:p:{package_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:cfg:p:{package_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "🔗 آیا کانفیگ‌ها <b>لینک استعلام</b> هم دارند؟", kb)
         return
@@ -4750,7 +4834,7 @@ def _dispatch_callback(call, uid, data):
             )
         else:
             kb.add(types.InlineKeyboardButton("🗑 حذف همگانی", callback_data=f"adm:stk:blkA:{kind_str}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:stock"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:stock", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         if kind_str == "sl":
             label_kind = "🔴 کل فروخته شده"
@@ -4786,7 +4870,7 @@ def _dispatch_callback(call, uid, data):
                 f"⏳ تحویل {pending_c} سفارش در انتظار",
                 callback_data=f"adm:stk:fulfill:{package_id}"
             ))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:stock"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:stock", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         pending_line = f"\n⏳ سفارش در انتظار: {pending_c}" if pending_c > 0 else ""
         text = (
@@ -4892,7 +4976,7 @@ def _dispatch_callback(call, uid, data):
             )
         else:
             kb.add(types.InlineKeyboardButton("🗑 حذف همگانی", callback_data=f"adm:stk:blk:{kind_str}:{package_id}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:stk:pk:{package_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:stk:pk:{package_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         if kind_str == "sl":
             label_kind = "🔴 فروخته شده"
@@ -4958,7 +5042,7 @@ def _dispatch_callback(call, uid, data):
             types.InlineKeyboardButton("✏️ ویرایش", callback_data=f"adm:stk:edt:{config_id}"),
             types.InlineKeyboardButton("🗑 حذف کانفیگ", callback_data=f"adm:stk:del:{config_id}:{row['package_id']}"),
         )
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:stk:pk:{row['package_id']}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:stk:pk:{row['package_id']}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         # Send with QR code
         try:
@@ -4998,7 +5082,7 @@ def _dispatch_callback(call, uid, data):
                     esc(t["name"]),
                     callback_data=f"adm:stk:edt:pkgt:{config_id}:{t['id']}"
                 ))
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:stk:edt:{config_id}"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:stk:edt:{config_id}", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call, "🧩 نوع سرویس را انتخاب کنید:", kb)
             return
@@ -5014,7 +5098,7 @@ def _dispatch_callback(call, uid, data):
                     label,
                     callback_data=f"adm:stk:edt:pkgp:{config_id}:{p['id']}"
                 ))
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:stk:edt:pkg:{config_id}"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:stk:edt:pkg:{config_id}", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call, "📦 پکیج را انتخاب کنید:", kb)
             return
@@ -5062,7 +5146,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("🔮 ویرایش نام سرویس",    callback_data=f"adm:stk:edt:svc:{config_id}"))
         kb.add(types.InlineKeyboardButton("💝 ویرایش متن کانفیگ",   callback_data=f"adm:stk:edt:cfg:{config_id}"))
         kb.add(types.InlineKeyboardButton("🔗 ویرایش لینک استعلام", callback_data=f"adm:stk:edt:inq:{config_id}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت",               callback_data=f"adm:stk:cfg:{config_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:stk:cfg:{config_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "✏️ <b>ویرایش کانفیگ</b>\n\nچه چیزی را ویرایش می‌کنید؟", kb)
         return
@@ -5244,7 +5328,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("🔗 لینک استعلام", callback_data="adm:stk:srch:link"))
         kb.add(types.InlineKeyboardButton("💝 متن کانفیگ", callback_data="adm:stk:srch:cfg"))
         kb.add(types.InlineKeyboardButton("🔮 نام سرویس", callback_data="adm:stk:srch:name"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:stock"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:stock", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call, "🔍 جستجو بر اساس:", kb)
         bot.answer_callback_query(call.id)
         return
@@ -5381,7 +5465,7 @@ def _dispatch_callback(call, uid, data):
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("🗑 حذف ادمین", callback_data=f"adm:mgr:del:{target_id}"))
         kb.add(types.InlineKeyboardButton("✏️ ویرایش دسترسی‌ها", callback_data=f"adm:mgr:edit:{target_id}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:admins"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:admins", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
         return
@@ -5544,7 +5628,7 @@ def _dispatch_callback(call, uid, data):
                 types.InlineKeyboardButton("➕ افزایش", callback_data=f"adm:usr:bal+:{target_id}"),
                 types.InlineKeyboardButton("➖ کاهش",  callback_data=f"adm:usr:bal-:{target_id}"),
             )
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:usr:v:{target_id}"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:usr:v:{target_id}", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call,
                 f"💰 <b>موجودی کاربر</b>\n\n"
@@ -5578,7 +5662,7 @@ def _dispatch_callback(call, uid, data):
                         f"{svc}{expired_mark}",
                         callback_data=f"adm:usrcfg:{target_id}:{p['config_id']}"
                     ))
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:usr:v:{target_id}"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:usr:v:{target_id}", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call, f"📦 کانفیگ‌های کاربر:", kb)
             return
@@ -5615,7 +5699,7 @@ def _dispatch_callback(call, uid, data):
                 price = fmt_price(ap) if ap is not None else fmt_price(p["price"])
                 label = f"{p['name']} | {price} ت"
                 kb.add(types.InlineKeyboardButton(label, callback_data=f"adm:usr:agpe:{target_id}:{p['id']}"))
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:usr:v:{target_id}"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:usr:v:{target_id}", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call, "🏷 <b>قیمت‌های اختصاصی نمایندگی</b>\n\nبرای ویرایش روی پکیج بزنید:", kb)
             return
@@ -5664,7 +5748,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("🔄 حذف از کاربر (برگشت به مانده‌ها)", callback_data=f"adm:usrcfg:unassign:{target_id}:{config_id}"))
         if not row["is_expired"]:
             kb.add(types.InlineKeyboardButton("🔴 منقضی کردن", callback_data=f"adm:stk:exp:{config_id}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:usr:cfgs:{target_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:usr:cfgs:{target_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
         return
@@ -5682,7 +5766,7 @@ def _dispatch_callback(call, uid, data):
                     f"{p['name']} | موجود: {avail}",
                     callback_data=f"adm:acfg:p:{target_id}:{p['id']}"
                 ))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:usr:v:{target_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:usr:v:{target_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "📦 پکیج مورد نظر را انتخاب کنید:", kb)
         return
@@ -5697,7 +5781,7 @@ def _dispatch_callback(call, uid, data):
             svc = urllib.parse.unquote(c["service_name"] or "")
             kb.add(types.InlineKeyboardButton(svc,
                                               callback_data=f"adm:acfg:do:{target_id}:{c['id']}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:usr:v:{target_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:usr:v:{target_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "🔧 کانفیگ مورد نظر را انتخاب کنید:", kb)
         return
@@ -5746,7 +5830,7 @@ def _dispatch_callback(call, uid, data):
                     "🗑 حذف",
                     callback_data=f"adm:agt:rm:{ag['user_id']}")
             )
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:panel"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call,
             f"🤝 <b>مدیریت نمایندگان</b>\n\n"
             f"👥 تعداد نمایندگان فعلی: <b>{len(agents)}</b>\n"
@@ -5800,7 +5884,7 @@ def _dispatch_callback(call, uid, data):
                     "🗑 حذف",
                     callback_data=f"adm:agt:rm:{ag['user_id']}")
             )
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:panel"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call,
             f"🤝 <b>مدیریت نمایندگان</b>\n\n"
             f"👥 تعداد نمایندگان فعلی: <b>{len(agents)}</b>\n"
@@ -5835,7 +5919,7 @@ def _dispatch_callback(call, uid, data):
                     "🗑 حذف",
                     callback_data=f"adm:agt:rm:{ag['user_id']}")
             )
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:panel"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call,
             f"🤝 <b>مدیریت نمایندگان</b>\n\n"
             f"👥 تعداد نمایندگان فعلی: <b>{len(agents)}</b>\n"
@@ -5866,7 +5950,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton(
             f"{tick['package']}📦 قیمت جداگانه هر پکیج",
             callback_data=f"adm:agcfg:pkg:{target_id}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:usr:v:{target_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:usr:v:{target_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         target_user = get_user(target_id)
         uname = esc(target_user["full_name"]) if target_user else str(target_id)
@@ -5890,7 +5974,7 @@ def _dispatch_callback(call, uid, data):
             types.InlineKeyboardButton("📊 درصد", callback_data=f"adm:agcfg:glb:pct:{target_id}"),
             types.InlineKeyboardButton("💵 تومان", callback_data=f"adm:agcfg:glb:tmn:{target_id}"),
         )
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:agcfg:{target_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:agcfg:{target_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call,
             f"🌍 <b>تخفیف کل محصولات</b>\n\n"
@@ -5936,7 +6020,7 @@ def _dispatch_callback(call, uid, data):
                 f"{dot} {t['name']} | {val_lbl}",
                 callback_data=f"adm:agcfg:td:{target_id}:{t['id']}"
             ))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:agcfg:{target_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:agcfg:{target_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "🧩 <b>تخفیف هر دسته</b>\n\nدسته مورد نظر را انتخاب کنید:", kb)
         return
@@ -5954,7 +6038,7 @@ def _dispatch_callback(call, uid, data):
             types.InlineKeyboardButton("📊 درصد", callback_data=f"adm:agcfg:tdt:{target_id}:{type_id}:pct"),
             types.InlineKeyboardButton("💵 تومان", callback_data=f"adm:agcfg:tdt:{target_id}:{type_id}:tmn"),
         )
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:agcfg:type:{target_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:agcfg:type:{target_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call,
             f"🧩 <b>دسته #{type_id}</b>\n\n"
@@ -5994,7 +6078,7 @@ def _dispatch_callback(call, uid, data):
             price = fmt_price(ap) if ap is not None else fmt_price(p["price"])
             label = f"{p['name']} | {price} ت"
             kb.add(types.InlineKeyboardButton(label, callback_data=f"adm:usr:agpe:{target_id}:{p['id']}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:agcfg:{target_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:agcfg:{target_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "📦 <b>قیمت هر پکیج</b>\n\nبرای ویرایش روی پکیج بزنید:", kb)
         return
@@ -6007,7 +6091,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("👤 فقط مشتریان عادی",        callback_data="adm:bc:normal"))
         kb.add(types.InlineKeyboardButton("🤝 فقط نمایندگان",           callback_data="adm:bc:agents"))
         kb.add(types.InlineKeyboardButton("👑 فقط ادمین‌ها",            callback_data="adm:bc:admins"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت",                  callback_data="admin:panel"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "📣 <b>فوروارد همگانی</b>\n\nگیرنده‌ها را انتخاب کنید:", kb)
         return
@@ -6070,7 +6154,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("🔢 ثبت آیدی گروه",      callback_data="adm:grp:setid"))
         kb.add(types.InlineKeyboardButton("🛠 ساخت تاپیک‌های جدید",  callback_data="adm:grp:create"))
         kb.add(types.InlineKeyboardButton("♻️ بازسازی همه تاپیک‌ها", callback_data="adm:grp:reset"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:settings"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
         return
@@ -6130,7 +6214,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("⭐ آیدی ایموجی پرمیوم", callback_data="adm:emoji:menu"))
         kb.add(types.InlineKeyboardButton("� مدیریت اعلان‌ها",  callback_data="adm:notif"))
         kb.add(types.InlineKeyboardButton("�💾 بکاپ",            callback_data="admin:backup"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت",        callback_data="admin:panel"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "⚙️ <b>تنظیمات</b>", kb)
         return
@@ -6142,7 +6226,7 @@ def _dispatch_callback(call, uid, data):
             return
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("🔍 تبدیل پیام به آیدی ایموجی", callback_data="adm:emoji:extract"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت",                      callback_data="admin:settings"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(
             call,
@@ -6204,7 +6288,7 @@ def _dispatch_callback(call, uid, data):
             kb.add(types.InlineKeyboardButton("📊 تخفیف پیش‌فرض نمایندگی", callback_data="adm:set:agency_defpct"))
             kb.add(types.InlineKeyboardButton("� مدیریت اعلان‌ها",  callback_data="adm:notif"))
             kb.add(types.InlineKeyboardButton("�💾 بکاپ",            callback_data="admin:backup"))
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت",        callback_data="admin:panel"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
             send_or_edit(call, "⚙️ <b>تنظیمات</b>", kb)
         except Exception:
             pass
@@ -6252,7 +6336,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("👑 اعلان های ربات اونر",   callback_data="adm:notif:own"))
         kb.add(types.InlineKeyboardButton("🤖 اعلان های ربات ادمین",   callback_data="adm:notif:bot"))
         kb.add(types.InlineKeyboardButton("📢 گروه",  callback_data="adm:notif:grp"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:settings"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call,
             "🔔 <b>مدیریت اعلان‌ها</b>\n\n"
             "👑 <b>اعلان های ربات اونر</b>: اعلان برای اونر در ربات\n"
@@ -6273,7 +6357,7 @@ def _dispatch_callback(call, uid, data):
             kb.add(types.InlineKeyboardButton(
                 f"{icon} {label}",
                 callback_data=f"adm:notif:otg:{key}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="adm:notif"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:notif", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call,
             "👑 <b>اعلان های ربات اونر</b>\n\n"
             "اعلان‌هایی که مستقیماً برای <b>ADMIN_IDS</b> (اید ثابت تو config.py) ارسال می‌شن:"
@@ -6301,7 +6385,7 @@ def _dispatch_callback(call, uid, data):
             kb.add(types.InlineKeyboardButton(
                 f"{icon} {l}",
                 callback_data=f"adm:notif:otg:{k}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="adm:notif"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:notif", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call,
             "👑 <b>اعلان های ربات اونر</b>\n\n"
             "اعلان‌هایی که مستقیماً برای <b>ADMIN_IDS</b> ارسال می‌شن:"
@@ -6321,7 +6405,7 @@ def _dispatch_callback(call, uid, data):
             kb.add(types.InlineKeyboardButton(
                 f"{icon} {label}",
                 callback_data=f"adm:notif:gtg:{key}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="adm:notif"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:notif", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call,
             "📢 <b>گروه</b>\n\n"
             "انتخاب کنید کدام اعلان‌ها در تاپیک‌های گروه ارسال شوند:\n"
@@ -6341,7 +6425,7 @@ def _dispatch_callback(call, uid, data):
             kb.add(types.InlineKeyboardButton(
                 f"{icon} {label}",
                 callback_data=f"adm:notif:btg:{key}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="adm:notif"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:notif", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call,
             "🤖 <b>اعلان های ربات ادمین</b>\n\n"
             "انتخاب کنید کدام اعلان‌ها به صورت مستقیم برای ادمین‌ها ارسال شوند:\n"
@@ -6370,7 +6454,7 @@ def _dispatch_callback(call, uid, data):
             kb.add(types.InlineKeyboardButton(
                 f"{icon} {l}",
                 callback_data=f"adm:notif:gtg:{k}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="adm:notif"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:notif", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call,
             "📢 <b>گروه</b>\n\n"
             "انتخاب کنید کدام اعلان‌ها در تاپیک‌های گروه ارسال شوند:\n"
@@ -6399,7 +6483,7 @@ def _dispatch_callback(call, uid, data):
             kb.add(types.InlineKeyboardButton(
                 f"{icon} {l}",
                 callback_data=f"adm:notif:btg:{k}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="adm:notif"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:notif", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call,
             "🤖 <b>اعلان های ربات ادمین</b>\n\n"
             "انتخاب کنید کدام اعلان‌ها به صورت مستقیم برای ادمین‌ها ارسال شوند:\n"
@@ -6418,7 +6502,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton(f"{tg_status} پشتیبانی تلگرام", callback_data="adm:set:support_tg"))
         kb.add(types.InlineKeyboardButton(f"{link_status} پشتیبانی آنلاین (لینک)", callback_data="adm:set:support_link"))
         kb.add(types.InlineKeyboardButton("✏️ توضیحات پشتیبانی", callback_data="adm:set:support_desc"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:settings"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
         text = (
             "🎧 <b>تنظیمات پشتیبانی</b>\n\n"
             f"📱 تلگرام: <code>{esc(support_raw or 'ثبت نشده')}</code>\n"
@@ -6463,7 +6547,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton(
             f"{stock_icon} فروش بر اساس موجودی: {'فعال' if preorder_mode == '1' else 'غیرفعال'}",
             callback_data="adm:shop:toggle_stock"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:settings"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
         text = (
             "🏪 <b>مدیریت فروش</b>\n\n"
             f"🔹 <b>وضعیت فروش:</b> {'🟢 باز' if shop_open == '1' else '🔴 بسته'}\n"
@@ -6537,7 +6621,7 @@ def _dispatch_callback(call, uid, data):
             types.InlineKeyboardButton(_inv_label, callback_data="adm:ops:invoice_expiry"),
             types.InlineKeyboardButton("📄 اعتبار فاکتور پرداخت", callback_data="adm:ops:noop"),
         )
-        ops_kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:settings"))
+        ops_kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
         return ops_kb
 
     def _ops_menu_text():
@@ -6649,7 +6733,7 @@ def _dispatch_callback(call, uid, data):
             types.InlineKeyboardButton(f"⬇️ حداقل: {min_qty} عدد",     callback_data="adm:ops:bulk_min"),
             types.InlineKeyboardButton(f"⬆️ حداکثر: {max_label}",      callback_data="adm:ops:bulk_max"),
         )
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="adm:ops"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:ops", icon_custom_emoji_id="5253997076169115797"))
         return kb
 
     def _bulk_menu_text():
@@ -6731,7 +6815,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton(toggle_label, callback_data="adm:ops:inv_exp:toggle"))
         if enabled == "1":
             kb.add(types.InlineKeyboardButton(f"⏱ تنظیم زمان فاکتور: {mins} دقیقه", callback_data="adm:ops:inv_exp:set_mins"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="adm:ops"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:ops", icon_custom_emoji_id="5253997076169115797"))
         return kb
 
     def _invoice_expiry_menu_text():
@@ -6846,7 +6930,7 @@ def _dispatch_callback(call, uid, data):
                     pkg_name = _p["name"]
             kb.add(types.InlineKeyboardButton(f"📦 پکیج: {pkg_name}", callback_data="adm:ref:pr:pkg"))
 
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="adm:ops"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:ops", icon_custom_emoji_id="5253997076169115797"))
         return kb
 
     def _ref_settings_text():
@@ -6886,7 +6970,7 @@ def _dispatch_callback(call, uid, data):
         kb = types.InlineKeyboardMarkup()
         if cur_text or cur_photo:
             kb.add(types.InlineKeyboardButton("🗑 حذف بنر سفارشی", callback_data="adm:ref:banner:del"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="adm:ref:settings"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:ref:settings", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call,
             "📸 <b>تنظیم بنر اشتراک‌گذاری</b>\n\n"
             "متن یا عکس+کپشن مورد نظر برای اشتراک‌گذاری لینک دعوت ارسال کنید.\n"
@@ -6987,7 +7071,7 @@ def _dispatch_callback(call, uid, data):
                     f"{t['name']} - {p['name']}",
                     callback_data=f"adm:ref:sr:pkgsel:{p['id']}"
                 ))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="adm:ref:settings"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:ref:settings", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "📦 <b>انتخاب پکیج هدیه استارت</b>\n\nپکیجی که می‌خواهید به عنوان هدیه داده شود انتخاب کنید:", kb)
         return
@@ -7064,7 +7148,7 @@ def _dispatch_callback(call, uid, data):
                     f"{t['name']} - {p['name']}",
                     callback_data=f"adm:ref:pr:pkgsel:{p['id']}"
                 ))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="adm:ref:settings"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:ref:settings", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "📦 <b>انتخاب پکیج هدیه خرید</b>\n\nپکیجی که می‌خواهید به عنوان هدیه داده شود انتخاب کنید:", kb)
         return
@@ -7091,7 +7175,7 @@ def _dispatch_callback(call, uid, data):
             status_icon = "🟢" if enabled == "1" else "🔴"
             gw_label = setting_get(f"gw_{gw_key}_display_name", "").strip() or gw_default
             kb.add(types.InlineKeyboardButton(f"{status_icon} {gw_label}", callback_data=f"adm:set:gw:{gw_key}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:settings"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "💳 <b>درگاه‌های پرداخت</b>\n\nدرگاه مورد نظر را انتخاب کنید:", kb)
         return
@@ -7121,7 +7205,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("💳 شماره کارت", callback_data="adm:set:card"))
         kb.add(types.InlineKeyboardButton("🏦 نام بانک", callback_data="adm:set:bank"))
         kb.add(types.InlineKeyboardButton("👤 نام صاحب کارت", callback_data="adm:set:owner"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="adm:set:gateways"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gateways", icon_custom_emoji_id="5253997076169115797"))
         name_display = display_name or "<i>پیش‌فرض: کارت به کارت</i>"
         text = (
             "💳 <b>درگاه کارت به کارت</b>\n\n"
@@ -7194,7 +7278,7 @@ def _dispatch_callback(call, uid, data):
             addr = setting_get(f"crypto_{coin_key}", "")
             status_icon = "✅" if addr else "❌"
             kb.add(types.InlineKeyboardButton(f"{status_icon} {coin_label}", callback_data=f"adm:set:cw:{coin_key}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="adm:set:gateways"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gateways", icon_custom_emoji_id="5253997076169115797"))
         display_name_crypto = setting_get("gw_crypto_display_name", "")
         name_display_crypto = display_name_crypto or "<i>پیش‌فرض: ارز دیجیتال</i>"
         text = (
@@ -7262,7 +7346,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("🔑 تنظیم کلید API", callback_data="adm:set:tetrapay_key"))
         if not api_key:
             kb.add(types.InlineKeyboardButton("🌐 دریافت کلید API از سایت TetraPay", url="https://tetra98.com"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="adm:set:gateways"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gateways", icon_custom_emoji_id="5253997076169115797"))
         if api_key:
             key_display = f"<code>{esc(api_key[:8])}...{esc(api_key[-4:])}</code>"
         else:
@@ -7353,7 +7437,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("🏷 نام نمایشی درگاه", callback_data="adm:gw:swapwallet_crypto:set_name"))
         if not api_key:
             kb.add(types.InlineKeyboardButton("🌐 دریافت کلید API از سواپ ولت", url="https://swapwallet.app"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="adm:set:gateways"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gateways", icon_custom_emoji_id="5253997076169115797"))
         key_display = f"<code>{esc(api_key[:8])}...{esc(api_key[-4:])}</code>" if api_key else "❌ <b>ثبت نشده — الزامی</b>"
         user_status = "✅ ثبت شده" if username else "❌ ثبت نشده"
         display_name_sw = setting_get("gw_swapwallet_crypto_display_name", "")
@@ -7448,7 +7532,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("🏷 نام نمایشی درگاه", callback_data="adm:gw:tronpays_rial:set_name"))
         if not api_key:
             kb.add(types.InlineKeyboardButton("🤖 دریافت API Key از @TronPaysBot", url="https://t.me/TronPaysBot"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="adm:set:gateways"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gateways", icon_custom_emoji_id="5253997076169115797"))
         key_display = (f"<code>{esc(api_key[:8])}...{esc(api_key[-4:])}</code>"
                        if api_key else "❌ <b>ثبت نشده</b> — ابتدا از ربات @TronPaysBot کلید API دریافت کنید")
         cb_url = setting_get("tronpays_rial_callback_url", "").strip() or "https://example.com/"
@@ -7528,7 +7612,7 @@ def _dispatch_callback(call, uid, data):
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton(f"وضعیت بازه: {enabled_label}", callback_data=f"adm:gw:{gw_name}:range:toggle"))
         kb.add(types.InlineKeyboardButton("✏️ تنظیم بازه", callback_data=f"adm:gw:{gw_name}:range:set"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:set:gw:{gw_name}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:set:gw:{gw_name}", icon_custom_emoji_id="5253997076169115797"))
         text = (
             f"📊 <b>بازه پرداختی — {gw_label}</b>\n\n"
             f"وضعیت: {enabled_label}\n"
@@ -7649,7 +7733,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton(f"🔄 وضعیت: {mode_label}", callback_data="adm:ft:toggle"))
         kb.add(types.InlineKeyboardButton("🔄 ریست تست رایگان همه کاربران", callback_data="adm:ft:reset"))
         kb.add(types.InlineKeyboardButton(f"🤝 تعداد تست همکاران: {agent_limit} در {period_labels.get(agent_period, agent_period)}", callback_data="adm:ft:agent"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:settings"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(
             call,
@@ -7720,7 +7804,7 @@ def _dispatch_callback(call, uid, data):
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton(f"🔄 حالت جمع‌آوری: {mode_label}", callback_data="adm:phone:toggle_mode"))
         kb.add(types.InlineKeyboardButton(f"🇮🇷 اعتبارسنجی ایرانی: {iran_label}", callback_data="adm:phone:toggle_iran"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:settings"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call,
             f"📱 <b>تنظیمات جمع‌آوری شماره تلفن</b>\n\n"
@@ -7773,7 +7857,7 @@ def _dispatch_callback(call, uid, data):
         toggle_label = "🔴 غیرفعال کردن" if enabled == "1" else "🟢 فعال کردن"
         kb.add(types.InlineKeyboardButton(toggle_label, callback_data="adm:rules:toggle"))
         kb.add(types.InlineKeyboardButton("✏️ ویرایش متن قوانین", callback_data="adm:rules:edit"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:settings"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call,
             f"📜 <b>قوانین خرید</b>\n\n"
@@ -7817,7 +7901,7 @@ def _dispatch_callback(call, uid, data):
         # Now dispatch buy:start_real via a fresh message-based call
         if setting_get("shop_open", "1") != "1":
             kb = types.InlineKeyboardMarkup()
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
             bot.send_message(uid, "🔴 <b>فروشگاه موقتاً تعطیل است.</b>\n\nلطفاً بعداً مراجعه کنید.",
                              parse_mode="HTML", reply_markup=kb)
             return
@@ -7833,7 +7917,7 @@ def _dispatch_callback(call, uid, data):
             if packs:
                 kb.add(types.InlineKeyboardButton(f"🧩 {item['name']}", callback_data=f"buy:t:{item['id']}"))
                 has_any = True
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
         if not has_any:
             bot.send_message(uid, "📭 در حال حاضر بسته‌ای برای فروش موجود نیست.",
                              parse_mode="HTML", reply_markup=kb)
@@ -7858,7 +7942,7 @@ def _dispatch_callback(call, uid, data):
                 types.InlineKeyboardButton("✏️", callback_data=f"adm:pin:edit:{p['id']}"),
                 types.InlineKeyboardButton("🗑", callback_data=f"adm:pin:del:{p['id']}"),
             )
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:settings"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
         count_text = f"{len(pins)} پیام" if pins else "هیچ پیامی ثبت نشده"
         send_or_edit(call, f"📌 <b>پیام‌های پین شده</b>\n\n{count_text}", kb)
         return
@@ -7935,7 +8019,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton(toggle_label, callback_data="adm:bkp:toggle"))
         kb.add(types.InlineKeyboardButton(f"⏰ زمان‌بندی: هر {interval} ساعت", callback_data="adm:bkp:interval"))
         kb.add(types.InlineKeyboardButton("📤 تنظیم مقصد", callback_data="adm:bkp:target"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:settings"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(
             call,
@@ -8049,7 +8133,7 @@ def _dispatch_callback(call, uid, data):
         kb = types.InlineKeyboardMarkup()
         for t in types_list:
             kb.add(types.InlineKeyboardButton(t["name"], callback_data=f"admin:vch:pick_type:{t['id']}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:vch:add"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:vch:add", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call,
             "🎫 <b>افزودن کارت هدیه – انتخاب نوع</b>\n\n"
             "نوع کانفیگ را انتخاب کنید:", kb)
@@ -8069,7 +8153,7 @@ def _dispatch_callback(call, uid, data):
             _sn = p['show_name'] if 'show_name' in p.keys() else 1
             label = (f"{p['name']} | " if _sn else "") + f"{fmt_vol(p['volume_gb'])} | {fmt_dur(p['duration_days'])}"
             kb.add(types.InlineKeyboardButton(label, callback_data=f"admin:vch:pick_pkg:{p['id']}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:vch:gift_type:config"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:vch:gift_type:config", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call, "🎫 <b>افزودن کارت هدیه – انتخاب پکیج</b>\n\nپکیج مورد نظر را انتخاب کنید:", kb)
         return
 
@@ -8138,7 +8222,7 @@ def _dispatch_callback(call, uid, data):
         state_set(uid, "await_voucher_code")
         bot.answer_callback_query(call.id)
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call,
             "🎫✨ <b>ثبت کارت هدیه</b> ✨🎫\n\n"
             "🌟 از اینکه کارت هدیه‌ای دریافت کرده‌اید خوشحالیم!\n\n"
@@ -8209,7 +8293,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("🌐 همه پکیج‌ها", callback_data="admin:disc:scope:all"))
         kb.add(types.InlineKeyboardButton("🧩 فقط نوع‌های خاص", callback_data="admin:disc:scope:types"))
         kb.add(types.InlineKeyboardButton("📦 فقط پکیج‌های خاص", callback_data="admin:disc:scope:packages"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:discounts"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:discounts", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call,
             "🎟 <b>افزودن کد تخفیف</b>\n\n"
             "مرحله ۶/۶: محدوده استفاده از این کد را انتخاب کنید:\n\n"
@@ -8333,7 +8417,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("🌐 همه پکیج‌ها", callback_data=f"admin:disc:set_scope:{code_id}:all"))
         kb.add(types.InlineKeyboardButton("🧩 فقط نوع‌های خاص", callback_data=f"admin:disc:set_scope:{code_id}:types"))
         kb.add(types.InlineKeyboardButton("📦 فقط پکیج‌های خاص", callback_data=f"admin:disc:set_scope:{code_id}:packages"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"admin:disc:view:{code_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"admin:disc:view:{code_id}", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call, "📌 <b>ویرایش محدوده کد تخفیف</b>\n\nنوع محدوده را انتخاب کنید:", kb)
         return
 
@@ -8527,7 +8611,7 @@ def _dispatch_callback(call, uid, data):
         for aud_key, aud_label in [("all", "👥 همه"), ("public", "🙋 فقط عموم"), ("agents", "🤝 فقط نمایندگان")]:
             icon = "✅ " if current == aud_key else ""
             kb.add(types.InlineKeyboardButton(f"{icon}{aud_label}", callback_data=f"admin:disc:set_audience:{code_id}:{aud_key}"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"admin:disc:view:{code_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"admin:disc:view:{code_id}", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call,
             f"🎯 <b>ویرایش دسترسی کد تخفیف</b>\n\n"
             f"کد: <code>{esc(row['code'])}</code>\n\n"

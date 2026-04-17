@@ -41,8 +41,8 @@ def _user_is_agent(user_id) -> bool:
 def kb_main(user_id):
     rows = []
     rows.append([
-        _btn("خرید کانفیگ جدید", callback_data="buy:start",      emoji_id="5312361253610475399"),
-        _btn("کانفیگ‌های من",    callback_data="my_configs",      emoji_id="5447410659077661506"),
+        _btn("خرید سرویس جدید", callback_data="buy:start",      emoji_id="5312361253610475399"),
+        _btn("سرویس‌های من",     callback_data="my_configs",      emoji_id="5361741454685256344"),
     ])
     _ft_mode = setting_get("free_test_mode", "everyone")
     if _ft_mode == "everyone" or (_ft_mode == "agents_only" and _user_is_agent(user_id)):
@@ -62,7 +62,7 @@ def kb_main(user_id):
         rows.append([_btn("دعوت دوستان",    callback_data="referral:menu",  emoji_id="5453957997418004470")])
     elif voucher_on:
         rows.append([_btn("ثبت کارت هدیه", callback_data="voucher:redeem", emoji_id="5418010521309815154")])
-    rows.append([_btn("ارتباط با پشتیبانی", callback_data="support", emoji_id="5307746710682869587")])
+    rows.append([_btn("ارتباط با پشتیبانی", callback_data="support", emoji_id="5467539229468793355")])
     if setting_get("agency_request_enabled", "1") == "1":
         rows.append([_btn("درخواست نمایندگی", callback_data="agency:request", emoji_id="5372957680174384345")])
     if is_admin(user_id):
@@ -135,5 +135,5 @@ def kb_admin_panel(uid=None):
     if is_owner or (uid and admin_has_perm(uid, "settings")):
         rows.append([_btn("تنظیمات", callback_data="admin:settings", emoji_id="5370935802844946281")])
 
-    rows.append([_btn("بازگشت", callback_data="nav:main", emoji_id="5352759161945867747")])
+    rows.append([_btn("بازگشت", callback_data="nav:main", emoji_id="5253997076169115797")])
     return _raw_markup(rows)

@@ -184,5 +184,5 @@ def back_button(target="main"):
     return json.dumps({"inline_keyboard": [[{
         "text": "بازگشت",
         "callback_data": f"nav:{target}",
-        "icon_custom_emoji_id": "5352759161945867747",
+        "icon_custom_emoji_id": "5253997076169115797",
     }]]})

@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 import os
 import traceback
 import sqlite3
@@ -702,7 +702,7 @@ def universal_handler(message):
                 types.InlineKeyboardButton("٪ درصدی", callback_data="admin:disc:add_type:pct"),
                 types.InlineKeyboardButton("💰 مبلغ ثابت", callback_data="admin:disc:add_type:amount"),
             )
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:discounts"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:discounts", icon_custom_emoji_id="5253997076169115797"))
             bot.send_message(uid,
                 f"🎟 کد: <code>{esc(code)}</code>\n\n"
                 "مرحله ۲/۵: نوع تخفیف را انتخاب کنید:",
@@ -755,7 +755,7 @@ def universal_handler(message):
             kb.add(types.InlineKeyboardButton("👥 همه", callback_data="admin:disc:add_audience:all"))
             kb.add(types.InlineKeyboardButton("🙋 فقط عموم (کاربران عادی)", callback_data="admin:disc:add_audience:public"))
             kb.add(types.InlineKeyboardButton("🤝 فقط نمایندگان", callback_data="admin:disc:add_audience:agents"))
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:discounts"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:discounts", icon_custom_emoji_id="5253997076169115797"))
             bot.send_message(uid,
                 "🎟 <b>افزودن کد تخفیف</b>\n\n"
                 "مرحله ۵/۵: این کد تخفیف برای چه کسانی است؟\n\n"
@@ -911,7 +911,7 @@ def universal_handler(message):
                 types.InlineKeyboardButton("💰 هدیه موجودی کیف پول", callback_data="admin:vch:gift_type:wallet"),
                 types.InlineKeyboardButton("📦 هدیه کانفیگ",          callback_data="admin:vch:gift_type:config"),
             )
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:vouchers"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:vouchers", icon_custom_emoji_id="5253997076169115797"))
             bot.send_message(uid,
                 f"🎫 نام: <b>{esc(name)}</b>\n\n"
                 "مرحله ۲: نوع هدیه را انتخاب کنید:", reply_markup=kb)
@@ -993,7 +993,7 @@ def universal_handler(message):
             state_set(uid, "admin_add_type_desc", type_name=name)
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("⏭ توضیحاتی نمی‌خواهم وارد کنم", callback_data="admin:type:skipdesc"))
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:types"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:types", icon_custom_emoji_id="5253997076169115797"))
             bot.send_message(uid,
                 f"📝 توضیحات نوع <b>{esc(name)}</b> را وارد کنید:\n\n"
                 "این توضیحات پس از ارسال کانفیگ به کاربر نمایش داده می‌شود.\n"
@@ -1109,25 +1109,20 @@ def universal_handler(message):
             if max_users is None or max_users < 0:
                 bot.send_message(uid, "⚠️ عدد معتبر (صفر یا بیشتر) وارد کنید.", reply_markup=back_button("admin:types"))
                 return
-            show_name_val = sd.get("show_name", 1)
-            add_package(sd["type_id"], sd["package_name"], sd["volume"], sd["duration"], sd["price"],
-                        show_name=show_name_val, max_users=max_users)
-            log_admin_action(uid, f"پکیج '{sd['package_name']}' ثبت شد")
-            state_clear(uid)
-            vol_label = "حجم نامحدود" if sd["volume"] == 0 else fmt_vol(sd["volume"])
-            dur_label = "زمان نامحدود" if sd["duration"] == 0 else f"{sd['duration']} روز"
-            pri_label = "رایگان" if sd["price"] == 0 else f"{fmt_price(sd['price'])} تومان"
-            sn_label  = "بله" if show_name_val else "خیر"
-            mu_label  = "نامحدود" if max_users == 0 else f"{max_users} کاربره"
+            mu_label = "نامحدود" if max_users == 0 else f"{max_users} کاربره"
+            state_set(uid, "admin_add_package_buyer_role",
+                      type_id=sd["type_id"], package_name=sd["package_name"],
+                      volume=sd["volume"], duration=sd["duration"],
+                      price=sd["price"], show_name=sd.get("show_name", 1),
+                      max_users=max_users)
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("همه", callback_data="admin:pkg:add:br:all"))
+            kb.add(types.InlineKeyboardButton("فقط نمایندگان", callback_data="admin:pkg:add:br:agents"))
+            kb.add(types.InlineKeyboardButton("فقط کاربران عادی", callback_data="admin:pkg:add:br:public"))
             bot.send_message(uid,
-                f"✅ پکیج با موفقیت ثبت شد.\n\n"
-                f"📦 <b>{esc(sd['package_name'])}</b>\n"
-                f"🔋 حجم: {vol_label}\n"
-                f"⏰ مدت: {dur_label}\n"
-                f"💰 قیمت: {pri_label}\n"
-                f"👥 تعداد کاربر: {mu_label}\n"
-                f"👁 نمایش نام به کاربر: {sn_label}")
-            _show_admin_types(message)
+                f"✅ محدودیت کاربر: <b>{mu_label}</b>\n\n"
+                "👥 چه کسانی بتوانند این پکیج را بخرند?",
+                reply_markup=kb)
             return
 
         # ── Admin: Package edit field ──────────────────────────────────────────
@@ -1158,31 +1153,9 @@ def universal_handler(message):
             state_clear(uid)
             package_row = get_package(package_id)
             if package_row:
-                show_name_val = package_row["show_name"] if "show_name" in package_row.keys() else 1
-                show_name_lbl = "👁 نمایش نام به کاربر: ✅ بله" if show_name_val else "👁 نمایش نام به کاربر: ❌ خیر"
-                kb = types.InlineKeyboardMarkup()
-                kb.add(types.InlineKeyboardButton("✏️ ویرایش نام",   callback_data=f"admin:pkg:ef:name:{package_id}"))
-                kb.add(types.InlineKeyboardButton("💰 ویرایش قیمت",  callback_data=f"admin:pkg:ef:price:{package_id}"))
-                kb.add(types.InlineKeyboardButton("🔋 ویرایش حجم",   callback_data=f"admin:pkg:ef:volume:{package_id}"))
-                kb.add(types.InlineKeyboardButton("⏰ ویرایش مدت",   callback_data=f"admin:pkg:ef:dur:{package_id}"))
-                kb.add(types.InlineKeyboardButton("🔢 جایگاه نمایش", callback_data=f"admin:pkg:ef:position:{package_id}"))
-                kb.add(types.InlineKeyboardButton("👥 محدودیت کاربر", callback_data=f"admin:pkg:ef:maxusers:{package_id}"))
-                kb.add(types.InlineKeyboardButton(show_name_lbl,     callback_data=f"admin:pkg:toggle_sn:{package_id}"))
-                kb.add(types.InlineKeyboardButton("🔙 بازگشت",       callback_data="admin:types"))
-                cur_pos = package_row["position"] if "position" in package_row.keys() else 0
-                sn_line = "✅ بله" if show_name_val else "❌ خیر"
-                mu_val  = package_row["max_users"] if "max_users" in package_row.keys() else 0
-                mu_line = "نامحدود" if not mu_val else f"{mu_val} کاربره"
-                text = (
-                    f"✅ ویرایش انجام شد\n\n"
-                    f"📦 <b>{esc(package_row['name'])}</b>\n"
-                    f"قیمت: {fmt_price(package_row['price'])} تومان\n"
-                    f"حجم: {fmt_vol(package_row['volume_gb'])}\n"
-                    f"مدت: {fmt_dur(package_row['duration_days'])}\n"
-                    f"جایگاه: {cur_pos}\n"
-                    f"محدودیت کاربر: {mu_line}\n"
-                    f"نمایش نام به کاربر: {sn_line}"
-                )
+                from .callbacks import _pkg_edit_text_kb as _peth
+                text, kb = _peth(package_row)
+                text = "✅ ویرایش انجام شد\n\n" + text.replace("📦 <b>ویرایش پکیج</b>\n\n", "")
                 send_or_edit(message, text, kb)
             else:
                 bot.send_message(uid, "✅ پکیج با موفقیت ویرایش شد.")
@@ -1386,7 +1359,7 @@ def universal_handler(message):
                       mode=mode, prefix=prefix)
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("⏭ بدون پسوند", callback_data=f"adm:v2:bulk:suf:skip:{pkg_id}"))
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:v2:bulk:{pkg_id}"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:v2:bulk:{pkg_id}", icon_custom_emoji_id="5253997076169115797"))
             bot.send_message(uid,
                 "✂️ <b>پسوند حذفی از نام کانفیگ</b>\n\n"
                 "اگر انتهای نام کانفیگ‌ها متن اضافه‌ای دارد، اینجا وارد کنید.\n\n"
@@ -1455,7 +1428,7 @@ def universal_handler(message):
                     f"✅ {len(configs_block)} کانفیگ دریافت شد — ادامه (ارسال ساب‌ها)",
                     callback_data=f"adm:v2:bm2subs:{package_id}"
                 ))
-                kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"adm:v2:bulk:{package_id}"))
+                kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:v2:bulk:{package_id}", icon_custom_emoji_id="5253997076169115797"))
                 bot.send_message(uid,
                     f"✅ <b>{len(configs_block)}</b> کانفیگ دریافت شد.\n\n"
                     "حالا دکمه «ادامه» را بزنید تا ساب‌ها را وارد کنید.",
@@ -1504,7 +1477,7 @@ def universal_handler(message):
                       has_inquiry=sd["has_inquiry"], prefix=prefix)
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("⏭ بعدی (بدون پسوند)", callback_data=f"adm:cfg:bulk:skipsuf:{pkg_id}"))
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:add_config"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:add_config", icon_custom_emoji_id="5253997076169115797"))
             bot.send_message(uid,
                 "✂️ <b>پسوند حذفی از نام کانفیگ</b>\n\n"
                 "وقتی چندتا <b>اکسترنال پروکسی</b> ست می‌کنید، انتهای نام کانفیگ متن‌های اضافه اکسترنال‌ها اضافه می‌شود.\n"
@@ -2446,7 +2419,7 @@ def universal_handler(message):
                 else:
                     label = "📦 " + label
                 kb.add(types.InlineKeyboardButton(label, callback_data=f"adm:stk:cfg:{r['id']}"))
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="adm:stk:search"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:stk:search", icon_custom_emoji_id="5253997076169115797"))
             bot.send_message(uid, f"🔍 نتایج جستجو ({len(rows)}):", reply_markup=kb)
             return
 
@@ -2578,7 +2551,7 @@ def universal_handler(message):
                 "💰 قیمت نمایندگی",
                 callback_data=f"adm:agcfg:{target_user['user_id']}"
             ))
-            kb_r.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:agents"))
+            kb_r.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:agents", icon_custom_emoji_id="5253997076169115797"))
             bot.send_message(uid,
                 f"✅ کاربر <b>{esc(target_user['full_name'])}</b> (کد <code>{target_user['user_id']}</code>) به نماینده تبدیل شد.\n\n"
                 f"📊 تخفیف پیش‌فرض {default_pct}% اعمال شد.",
@@ -2761,7 +2734,7 @@ def universal_handler(message):
             kb_conf.add(types.InlineKeyboardButton(
                 "💰 قیمت نمایندگی کاربر", callback_data=f"adm:agcfg:{target_uid}"))
             kb_conf.add(types.InlineKeyboardButton(
-                "🔙 بازگشت", callback_data="admin:users"))
+                "بازگشت", callback_data="admin:users"))
             bot.send_message(uid,
                 f"✅ نمایندگی تأیید شد.\n📊 تخفیف پیش‌فرض {default_pct}% اعمال شد.",
                 reply_markup=kb_conf)
@@ -2929,7 +2902,7 @@ def universal_handler(message):
                     _types.InlineKeyboardButton("✏️", callback_data=f"adm:pin:edit:{p['id']}"),
                     _types.InlineKeyboardButton("🗑", callback_data=f"adm:pin:del:{p['id']}"),
                 )
-            kb.add(_types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:settings"))
+            kb.add(_types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
             count_text = f"{len(pins)} پیام" if pins else "هیچ پیامی ثبت نشده"
             bot.send_message(uid,
                 f"✅ پیام پین ارسال شد.\n📤 فرستاده شده: {sent} کاربر\n📌 پین شده: {pinned} کاربر\n\n"
@@ -2975,7 +2948,7 @@ def universal_handler(message):
                     _types.InlineKeyboardButton("✏️", callback_data=f"adm:pin:edit:{p['id']}"),
                     _types.InlineKeyboardButton("🗑", callback_data=f"adm:pin:del:{p['id']}"),
                 )
-            kb.add(_types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:settings"))
+            kb.add(_types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
             count_text = f"{len(pins)} پیام" if pins else "هیچ پیامی ثبت نشده"
             edited_count = edited if pin_id else 0
             bot.send_message(uid,
