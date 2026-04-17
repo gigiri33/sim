@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 import json
 import time
 import threading
@@ -622,10 +622,39 @@ def _check_invoice_valid(uid: int) -> bool:
 
 
 _INVOICE_EXPIRED_MSG = (
-    "⏰ <b>زمان پرداخت به پایان رسید.</b>\n\n"
-    "اعتبار این فاکتور منقضی شده است. لطفاً دوباره برای "
-    "خرید، تمدید یا شارژ کیف پول اقدام کنید."
+    "⏰ زمان پرداخت شما با این فاکتور به پایان رسیده است.\n"
+    "لطفا دوباره اقدام کنید."
 )
+
+
+def _show_invoice_expired(call) -> None:
+    """Edit the invoice message in-place to show expiry notice with a restart button."""
+    uid = call.from_user.id
+    state_clear(uid)
+    kb = types.InlineKeyboardMarkup()
+    kb.add(types.InlineKeyboardButton("🔄 شروع مجدد", callback_data="invoice:restart"))
+    try:
+        bot.answer_callback_query(call.id)
+    except Exception:
+        pass
+    try:
+        bot.edit_message_text(
+            _INVOICE_EXPIRED_MSG,
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            parse_mode="HTML",
+            reply_markup=kb,
+        )
+    except Exception:
+        try:
+            bot.send_message(
+                call.message.chat.id,
+                _INVOICE_EXPIRED_MSG,
+                parse_mode="HTML",
+                reply_markup=kb,
+            )
+        except Exception:
+            pass
 
 
 def _show_discount_prompt(call, amount=None):
@@ -2067,7 +2096,7 @@ def _dispatch_callback(call, uid, data):
 
     if data.startswith("rpay:card:"):
         if not _check_invoice_valid(uid):
-            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            _show_invoice_expired(call)
             return
         parts = data.split(":")
         purchase_id = int(parts[2])
@@ -2110,7 +2139,7 @@ def _dispatch_callback(call, uid, data):
 
     if data.startswith("rpay:crypto:"):
         if not _check_invoice_valid(uid):
-            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            _show_invoice_expired(call)
             return
         parts = data.split(":")
         purchase_id = int(parts[2])
@@ -2176,7 +2205,7 @@ def _dispatch_callback(call, uid, data):
 
     if data.startswith("rpay:tetrapay:"):
         if not _check_invoice_valid(uid):
-            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            _show_invoice_expired(call)
             return
         parts = data.split(":")
         purchase_id = int(parts[2])
@@ -2282,7 +2311,7 @@ def _dispatch_callback(call, uid, data):
 
     if data.startswith("rpay:tronpays_rial:"):
         if not _check_invoice_valid(uid):
-            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            _show_invoice_expired(call)
             return
         parts = data.split(":")
         purchase_id = int(parts[2])
@@ -2575,7 +2604,7 @@ def _dispatch_callback(call, uid, data):
 
     if data.startswith("pay:wallet:"):
         if not _check_invoice_valid(uid):
-            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            _show_invoice_expired(call)
             return
         package_id  = int(data.split(":")[2])
         package_row = get_package(package_id)
@@ -2620,7 +2649,7 @@ def _dispatch_callback(call, uid, data):
 
     if data.startswith("pay:card:"):
         if not _check_invoice_valid(uid):
-            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            _show_invoice_expired(call)
             return
         package_id  = int(data.split(":")[2])
         package_row = get_package(package_id)
@@ -2671,7 +2700,7 @@ def _dispatch_callback(call, uid, data):
 
     if data.startswith("pay:crypto:"):
         if not _check_invoice_valid(uid):
-            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            _show_invoice_expired(call)
             return
         package_id  = int(data.split(":")[2])
         package_row = get_package(package_id)
@@ -2750,6 +2779,13 @@ def _dispatch_callback(call, uid, data):
         show_main_menu(call)
         return
 
+    # ── Invoice expired restart ───────────────────────────────────────────────
+    if data == "invoice:restart":
+        bot.answer_callback_query(call.id)
+        state_clear(uid)
+        show_main_menu(call)
+        return
+
     # ── TetraPay ──────────────────────────────────────────────────────────────
     if data.startswith("pay:tetrapay:verify:"):
         payment_id = int(data.split(":")[3])
@@ -2796,7 +2832,7 @@ def _dispatch_callback(call, uid, data):
 
     if data.startswith("pay:tetrapay:"):
         if not _check_invoice_valid(uid):
-            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            _show_invoice_expired(call)
             return
         package_id = int(data.split(":")[2])
         package_row = get_package(package_id)
@@ -2901,7 +2937,7 @@ def _dispatch_callback(call, uid, data):
 
     if data.startswith("pay:tronpays_rial:"):
         if not _check_invoice_valid(uid):
-            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            _show_invoice_expired(call)
             return
         package_id  = int(data.split(":")[2])
         package_row = get_package(package_id)
@@ -3075,7 +3111,7 @@ def _dispatch_callback(call, uid, data):
 
     if data == "wallet:charge:card":
         if not _check_invoice_valid(uid):
-            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            _show_invoice_expired(call)
             return
         sd     = state_data(uid)
         amount = sd.get("amount")
@@ -3110,7 +3146,7 @@ def _dispatch_callback(call, uid, data):
 
     if data == "wallet:charge:crypto":
         if not _check_invoice_valid(uid):
-            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            _show_invoice_expired(call)
             return
         sd     = state_data(uid)
         amount = sd.get("amount")
@@ -3132,7 +3168,7 @@ def _dispatch_callback(call, uid, data):
 
     if data == "wallet:charge:tetrapay":
         if not _check_invoice_valid(uid):
-            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            _show_invoice_expired(call)
             return
         sd     = state_data(uid)
         amount = sd.get("amount")
@@ -3183,7 +3219,7 @@ def _dispatch_callback(call, uid, data):
     # ── SwapWallet Crypto (network selection) ─────────────────────────────────
     if data == "wallet:charge:swapwallet_crypto":
         if not _check_invoice_valid(uid):
-            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            _show_invoice_expired(call)
             return
         sd     = state_data(uid)
         amount = sd.get("amount")
@@ -3210,7 +3246,7 @@ def _dispatch_callback(call, uid, data):
 
     if data == "wallet:charge:tronpays_rial":
         if not _check_invoice_valid(uid):
-            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            _show_invoice_expired(call)
             return
         sd     = state_data(uid)
         amount = sd.get("amount")
@@ -3314,7 +3350,7 @@ def _dispatch_callback(call, uid, data):
 
     if data.startswith("pay:swapwallet_crypto:"):
         if not _check_invoice_valid(uid):
-            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            _show_invoice_expired(call)
             return
         package_id  = int(data.split(":")[2])
         package_row = get_package(package_id)
@@ -3380,7 +3416,7 @@ def _dispatch_callback(call, uid, data):
 
     if data.startswith("rpay:swapwallet_crypto:"):
         if not _check_invoice_valid(uid):
-            bot.answer_callback_query(call.id, _INVOICE_EXPIRED_MSG, show_alert=True)
+            _show_invoice_expired(call)
             return
         parts = data.split(":")
         purchase_id = int(parts[2])
