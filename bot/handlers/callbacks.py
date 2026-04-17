@@ -657,6 +657,16 @@ def _show_invoice_expired(call) -> None:
             pass
 
 
+def _br_ok(p, is_agent: bool) -> bool:
+    """Return True if the package is visible/purchasable for this user type."""
+    br = p["buyer_role"] if "buyer_role" in p.keys() else "all"
+    if br == "agents" and not is_agent:
+        return False
+    if br == "public" and is_agent:
+        return False
+    return True
+
+
 def _show_discount_prompt(call, amount=None):
     """Show the discount code prompt. Returns True if shown, False if skipped."""
     # Check if any eligible discount codes exist for this user
@@ -2508,12 +2518,14 @@ def _dispatch_callback(call, uid, data):
             return
         type_id   = int(data.split(":")[2])
         stock_only = setting_get("preorder_mode", "0") == "1"
+        user = get_user(uid)
+        _is_agent = bool(user and user["is_agent"])
         if stock_only:
-            packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and p["stock"] > 0]
+            packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and p["stock"] > 0 and _br_ok(p, _is_agent)]
         else:
-            packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0]
+            packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and _br_ok(p, _is_agent)]
         # For user-count selector, check ALL packages regardless of stock
-        all_type_packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0]
+        all_type_packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and _br_ok(p, _is_agent)]
         user_limits = sorted(set(p["max_users"] if "max_users" in p.keys() else 0 for p in all_type_packages))
         if any(u != 0 for u in user_limits):
             kb = types.InlineKeyboardMarkup()
@@ -2525,7 +2537,6 @@ def _dispatch_callback(call, uid, data):
             send_or_edit(call, "👥 تعداد کاربر مورد نظر را انتخاب کنید:", kb)
             return
         kb   = types.InlineKeyboardMarkup()
-        user = get_user(uid)
         for p in packages:
             price = get_effective_price(uid, p)
             stock_tag = "" if p["stock"] > 0 else " ⏳"
@@ -2553,13 +2564,14 @@ def _dispatch_callback(call, uid, data):
         selected_mu  = int(parts_mu[2])
         type_id      = int(parts_mu[3])
         stock_only   = setting_get("preorder_mode", "0") == "1"
+        user = get_user(uid)
+        _is_agent = bool(user and user["is_agent"])
         if stock_only:
-            all_pkgs = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and p["stock"] > 0]
+            all_pkgs = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and p["stock"] > 0 and _br_ok(p, _is_agent)]
         else:
-            all_pkgs = [p for p in get_packages(type_id=type_id) if p["price"] > 0]
+            all_pkgs = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and _br_ok(p, _is_agent)]
         packages = [p for p in all_pkgs if (p["max_users"] if "max_users" in p.keys() else 0) == selected_mu]
         kb   = types.InlineKeyboardMarkup()
-        user = get_user(uid)
         for p in packages:
             price     = get_effective_price(uid, p)
             stock_tag = "" if p["stock"] > 0 else " ⏳"
