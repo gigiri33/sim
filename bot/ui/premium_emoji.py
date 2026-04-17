@@ -16,13 +16,69 @@ _PERSIAN_WORD_RE = re.compile(r'[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\
 
 # ── Custom emoji HTML helper ──────────────────────────────────────────────────
 
+# ── Centralized premium emoji map ────────────────────────────────────────────
+# Format: key → (fallback_char, emoji_id)
+EMOJI: dict[str, tuple[str, str]] = {
+    # Crypto
+    "tron":          ("🔵", "5794054896852409524"),
+    "ton":           ("💎", "5796252975215156083"),
+    "usdt":          ("🟢", "5796237685131582541"),
+    "usdc":          ("🔵", "5796237685131582541"),
+    "ltc":           ("🌊", "5796399747132563586"),
+    "bnb":           ("🟡", "4956574641075258382"),
+    # Main menu buttons
+    "buy_config":    ("🛒", "5431499171045581032"),
+    "my_configs":    ("📦", "5258134813302332906"),
+    "wallet_charge": ("💳", "5796280694934085416"),
+    "support":       ("🎧", "5307746710682869587"),
+    "agency_req":    ("🤝", "5372957680174384345"),
+    "admin_panel":   ("⚙️", "5370935802844946281"),
+    "back":          ("🔙", "5352759161945867747"),
+    # Payment
+    "card_payment":  ("💳", "5796315849241403403"),
+    "crypto_pay":    ("💎", "5794002949222964817"),
+    "amount":        ("💰", "5224257782013769471"),
+    "wallet_addr":   ("👛", "5796280694934085416"),
+    # Service delivery
+    "check":         ("✅", "5427009714745517609"),
+    "service_name":  ("🔮", "5361837567463399422"),
+    "volume":        ("🔋", "5924538142198600679"),
+    "duration":      ("⏰", "5413704112220949842"),
+    "config_text":   ("💝", "5465263910414195580"),
+    "sub_link":      ("🔗", "5375129357373165375"),
+    # Profile
+    "balance":       ("💰", "5375296873982604963"),
+    "agency_acc":    ("🤝", "5908990051349434897"),
+    # Start text
+    "welcome":       ("✨", "5325547803936572038"),
+    "vpn":           ("🛡",  "5017108172138087141"),
+    "support_24":    ("📞", "5467539229468793355"),
+}
+
+# Old emoji IDs → new premium IDs (applied transparently inside ce())
+_ID_REMAP: dict[str, str] = {
+    "5260463209562776385": "5427009714745517609",  # ✅ check (service ready)
+    "5343724178547691280": "5413704112220949842",  # ⏰ duration
+    "5900197669178970457": "5465263910414195580",  # 💝 config text
+    "5271604874419647061": "5375129357373165375",  # 🔗 sub link
+    "5287478403530767368": "5908990051349434897",  # 🤝 agency account
+    "5190458330719461749": "5307746710682869587",  # 🎧 support
+    "5406865085471663921": "5796315849241403403",  # 💳 payment header
+    "5318912792428814144": "5224257782013769471",  # 💰 amount (mablag)
+    "5415963453997214172": "5908990051349434897",  # 🤝 agency payment note
+    "5332618260703624145": "5258134813302332906",  # 📦 my configs header
+}
+
+
 def ce(emoji: str, eid: str | int) -> str:
     """Return a <tg-emoji> HTML tag for use with parse_mode='HTML'.
 
     The *emoji* argument is the visible fallback character shown on clients
-    that do not support custom emoji.
+    that do not support custom emoji.  Known old IDs are transparently
+    remapped to their premium replacements via _ID_REMAP.
     """
-    return f'<tg-emoji emoji-id="{eid}">{emoji}</tg-emoji>'
+    eid_str = _ID_REMAP.get(str(eid), str(eid))
+    return f'<tg-emoji emoji-id="{eid_str}">{emoji}</tg-emoji>'
 
 
 # ── Extraction ─────────────────────────────────────────────────────────────────

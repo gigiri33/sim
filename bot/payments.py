@@ -87,11 +87,11 @@ def show_payment_method_selection(target, uid, context_data):
 
     # Gateway emoji mapping: gateway_key -> (default_label, emoji_id)
     _GW_DEFAULTS = {
-        "card":              ("کارت به کارت",                                "5212962322967966165"),
-        "crypto":            ("ارز دیجیتال",                                 "5231005931550030290"),
-        "tetrapay":          ("درگاه کارت به کارت (TetraPay)",              "5388591696139269118"),
-        "swapwallet_crypto": ("درگاه کارت به کارت و ارز دیجیتال (SwapWallet)", "5794392270828478486"),
-        "tronpays_rial":     ("درگاه کارت به کارت (TronPay)",               "5215437796088499410"),
+        "card":              ("کارت به کارت",                                "5796315849241403403"),
+        "crypto":            ("ارز دیجیتال",                                 "5794002949222964817"),
+        "tetrapay":          ("درگاه کارت به کارت (TetraPay)",              "5796315849241403403"),
+        "swapwallet_crypto": ("درگاه کارت به کارت و ارز دیجیتال (SwapWallet)", "5796315849241403403"),
+        "tronpays_rial":     ("درگاه کارت به کارت (TronPay)",               "5796315849241403403"),
     }
 
     def _add_gw(key, cb, extra_check=True):
@@ -146,7 +146,7 @@ def show_crypto_selection(target, amount=None):
         send_or_edit(target, "⚠️ هیچ آدرس ارز دیجیتالی توسط ادمین ثبت نشده است.", back_button("main"))
         return
     rows.append([_btn("بازگشت", callback_data="pm:back", emoji_id="5352759161945867747")])
-    send_or_edit(target, "💎 <b>ارز دیجیتال</b>\n\nنوع ارز مورد نظر را انتخاب کنید:", _raw_markup(rows))
+    send_or_edit(target, f"{ce('💎', '5794002949222964817')} <b>ارز دیجیتال</b>\n\nنوع ارز مورد نظر را انتخاب کنید:", _raw_markup(rows))
 
 
 def show_crypto_payment_info(target, uid, coin_key, amount):
@@ -170,7 +170,7 @@ def show_crypto_payment_info(target, uid, coin_key, amount):
     )
 
     text = (
-        f"💎 <b>پرداخت با {label}</b>\n\n"
+        f"{ce('💎', '5794002949222964817')} <b>پرداخت با {label}</b>\n\n"
         f"{ce('💰', '5318912792428814144')} مبلغ: <b>{fmt_price(amount)}</b> تومان"
         f"{equiv_line}\n"
         f"{ce('👛', '5796280694934085416')} <b>آدرس ولت:</b>\n<code>{esc(addr)}</code>\n\n"

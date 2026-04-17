@@ -41,15 +41,15 @@ def _user_is_agent(user_id) -> bool:
 def kb_main(user_id):
     rows = []
     rows.append([
-        _btn("خرید کانفیگ جدید", callback_data="buy:start",      emoji_id="5226656353744862682"),
-        _btn("کانفیگ‌های من",    callback_data="my_configs",      emoji_id="5332618260703624145"),
+        _btn("خرید کانفیگ جدید", callback_data="buy:start",      emoji_id="5431499171045581032"),
+        _btn("کانفیگ‌های من",    callback_data="my_configs",      emoji_id="5258134813302332906"),
     ])
     _ft_mode = setting_get("free_test_mode", "everyone")
     if _ft_mode == "everyone" or (_ft_mode == "agents_only" and _user_is_agent(user_id)):
         rows.append([_btn("تست رایگان", callback_data="test:start", emoji_id="5199749070830197566")])
     rows.append([
         _btn("حساب کاربری",  callback_data="profile",        emoji_id="5373012449597335010"),
-        _btn("شارژ کیف پول", callback_data="wallet:charge",  emoji_id="6021331874528368703"),
+        _btn("شارژ کیف پول", callback_data="wallet:charge",  emoji_id="5796280694934085416"),
     ])
     ref_on     = setting_get("referral_enabled", "1") == "1"
     voucher_on = setting_get("vouchers_enabled", "1") == "1"
@@ -62,11 +62,11 @@ def kb_main(user_id):
         rows.append([_btn("دعوت دوستان",    callback_data="referral:menu",  emoji_id="5453957997418004470")])
     elif voucher_on:
         rows.append([_btn("ثبت کارت هدیه", callback_data="voucher:redeem", emoji_id="5418010521309815154")])
-    rows.append([_btn("ارتباط با پشتیبانی", callback_data="support", emoji_id="5190458330719461749")])
+    rows.append([_btn("ارتباط با پشتیبانی", callback_data="support", emoji_id="5307746710682869587")])
     if setting_get("agency_request_enabled", "1") == "1":
-        rows.append([_btn("درخواست نمایندگی", callback_data="agency:request", emoji_id="5357080225463149588")])
+        rows.append([_btn("درخواست نمایندگی", callback_data="agency:request", emoji_id="5372957680174384345")])
     if is_admin(user_id):
-        rows.append([_btn("ورود به پنل مدیریت", callback_data="admin:panel", emoji_id="5341715473882955310")])
+        rows.append([_btn("ورود به پنل مدیریت", callback_data="admin:panel", emoji_id="5370935802844946281")])
     return _raw_markup(rows)
 
 
@@ -133,7 +133,7 @@ def kb_admin_panel(uid=None):
         rows.append([_btn("پنل‌های ثنایی (ایران)", callback_data="admin:iran_panels", emoji_id="6008006386305211203")])
 
     if is_owner or (uid and admin_has_perm(uid, "settings")):
-        rows.append([_btn("تنظیمات", callback_data="admin:settings", emoji_id="5341715473882955310")])
+        rows.append([_btn("تنظیمات", callback_data="admin:settings", emoji_id="5370935802844946281")])
 
     rows.append([_btn("بازگشت", callback_data="nav:main", emoji_id="5352759161945867747")])
     return _raw_markup(rows)
