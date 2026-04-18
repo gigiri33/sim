@@ -6583,8 +6583,7 @@ def _dispatch_callback(call, uid, data):
             types.InlineKeyboardButton("🎧 پشتیبانی",           callback_data="adm:set:support"),
             types.InlineKeyboardButton("💳 درگاه‌های پرداخت",   callback_data="adm:set:gateways"),
         )
-        kb.add(types.InlineKeyboardButton("📢 کانال قفل",        callback_data="adm:set:channel"))
-        kb.add(types.InlineKeyboardButton("📢 مدیریت کانال‌های قفل", callback_data="adm:locked_channels"))
+        kb.add(types.InlineKeyboardButton("📢 کانال قفل",           callback_data="adm:locked_channels"))
         kb.add(types.InlineKeyboardButton("🎁 تست رایگان",      callback_data="adm:set:freetest"))
         kb.add(types.InlineKeyboardButton("📜 قوانین خرید",     callback_data="adm:set:rules"))
         kb.add(types.InlineKeyboardButton("🏪 مدیریت فروش",    callback_data="adm:set:shop"))
@@ -6658,8 +6657,7 @@ def _dispatch_callback(call, uid, data):
                 types.InlineKeyboardButton("🎧 پشتیبانی",           callback_data="adm:set:support"),
                 types.InlineKeyboardButton("💳 درگاه‌های پرداخت",   callback_data="adm:set:gateways"),
             )
-            kb.add(types.InlineKeyboardButton("📢 کانال قفل",        callback_data="adm:set:channel"))
-            kb.add(types.InlineKeyboardButton("📢 مدیریت کانال‌های قفل", callback_data="adm:locked_channels"))
+            kb.add(types.InlineKeyboardButton("📢 کانال قفل",           callback_data="adm:locked_channels"))
             kb.add(types.InlineKeyboardButton("✏️ ویرایش متن استارت", callback_data="adm:set:start_text"))
             kb.add(types.InlineKeyboardButton("📜 قوانین خرید",     callback_data="adm:set:rules"))
             kb.add(types.InlineKeyboardButton("🏷 تنظیمات فروش",    callback_data="adm:set:shop"))
