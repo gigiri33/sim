@@ -2950,120 +2950,176 @@ def universal_handler(message):
 
 
 
-    # ── Panel add / edit states ───────────────────────────────────────────────
+        # ── Panel add / edit states ───────────────────────────────────────────────
 
-    if sn == "pnl_add_name":
-        name = (message.text or "").strip()
-        if not name:
-            bot.send_message(uid, "⚠️ نام نمی‌تواند خالی باشد. دوباره ارسال کنید.")
+        if sn == "pnl_add_name":
+            name = (message.text or "").strip()
+            if not name:
+                bot.send_message(uid, "⚠️ نام نمی‌تواند خالی باشد. دوباره ارسال کنید.")
+                return
+            state_set(uid, "pnl_add_proto", name=name)
+            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+            kb_proto = InlineKeyboardMarkup()
+            kb_proto.row(
+                InlineKeyboardButton("http",  callback_data="adm:pnl:add_proto:http"),
+                InlineKeyboardButton("https", callback_data="adm:pnl:add_proto:https"),
+            )
+            bot.send_message(uid,
+                "مرحله ۲/۷ — <b>پروتکل</b>\n\nپروتکل اتصال به پنل را انتخاب کنید:",
+                parse_mode="HTML", reply_markup=kb_proto)
             return
-        state_set(uid, "pnl_add_proto", name=name)
-        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-        kb_proto = InlineKeyboardMarkup()
-        kb_proto.row(
-            InlineKeyboardButton("http",  callback_data="adm:pnl:add_proto:http"),
-            InlineKeyboardButton("https", callback_data="adm:pnl:add_proto:https"),
-        )
-        bot.send_message(uid,
-            "مرحله ۲/۷ — <b>پروتکل</b>\n\nپروتکل اتصال به پنل را انتخاب کنید:",
-            parse_mode="HTML", reply_markup=kb_proto)
-        return
 
-    if sn == "pnl_add_host":
-        host = (message.text or "").strip()
-        if not host:
-            bot.send_message(uid, "⚠️ آدرس نمی‌تواند خالی باشد.")
+        if sn == "pnl_add_host":
+            host = (message.text or "").strip()
+            if not host:
+                bot.send_message(uid, "⚠️ آدرس نمی‌تواند خالی باشد.")
+                return
+            sd = state_data(uid)
+            state_set(uid, "pnl_add_port", name=sd.get("name"), protocol=sd.get("protocol"), host=host)
+            bot.send_message(uid,
+                "مرحله ۴/۷ — <b>پورت</b>\n\nشماره پورت پنل را ارسال کنید (مثال: 2053):",
+                parse_mode="HTML", reply_markup=back_button("admin:panels"))
             return
-        sd = state_data(uid)
-        state_set(uid, "pnl_add_port", name=sd.get("name"), protocol=sd.get("protocol"), host=host)
-        bot.send_message(uid,
-            "مرحله ۴/۷ — <b>پورت</b>\n\nشماره پورت پنل را ارسال کنید (مثال: 2053):",
-            parse_mode="HTML", reply_markup=back_button("admin:panels"))
-        return
 
-    if sn == "pnl_add_port":
-        port_raw = (message.text or "").strip()
-        port = parse_int(port_raw)
-        if not port or port <= 0 or port > 65535:
-            bot.send_message(uid, "⚠️ پورت باید یک عدد بین ۱ تا ۶۵۵۳۵ باشد.")
+        if sn == "pnl_add_port":
+            port_raw = (message.text or "").strip()
+            port = parse_int(port_raw)
+            if not port or port <= 0 or port > 65535:
+                bot.send_message(uid, "⚠️ پورت باید یک عدد بین ۱ تا ۶۵۵۳۵ باشد.")
+                return
+            sd = state_data(uid)
+            state_set(uid, "pnl_add_path",
+                      name=sd.get("name"), protocol=sd.get("protocol"),
+                      host=sd.get("host"), port=port)
+            bot.send_message(uid,
+                "مرحله ۵/۷ — <b>مسیر (path)</b>\n\n"
+                "مسیر مخفی پنل را ارسال کنید.\n"
+                "اگر پنل مسیر مخفی ندارد، <b>/</b> ارسال کنید.",
+                parse_mode="HTML", reply_markup=back_button("admin:panels"))
             return
-        sd = state_data(uid)
-        state_set(uid, "pnl_add_path",
-                  name=sd.get("name"), protocol=sd.get("protocol"),
-                  host=sd.get("host"), port=port)
-        bot.send_message(uid,
-            "مرحله ۵/۷ — <b>مسیر (path)</b>\n\n"
-            "مسیر مخفی پنل را ارسال کنید.\n"
-            "اگر پنل مسیر مخفی ندارد، <b>/</b> ارسال کنید.",
-            parse_mode="HTML", reply_markup=back_button("admin:panels"))
-        return
 
-    if sn == "pnl_add_path":
-        raw_path = (message.text or "").strip()
-        # Normalise: "/" or empty → empty string; otherwise ensure leading /
-        if raw_path in ("", "/"):
-            path = ""
-        else:
-            path = raw_path if raw_path.startswith("/") else "/" + raw_path
-        sd = state_data(uid)
-        state_set(uid, "pnl_add_user",
-                  name=sd.get("name"), protocol=sd.get("protocol"),
-                  host=sd.get("host"), port=sd.get("port"), path=path)
-        bot.send_message(uid,
-            "مرحله ۶/۷ — <b>نام کاربری</b>\n\nنام کاربری پنل را ارسال کنید:",
-            parse_mode="HTML", reply_markup=back_button("admin:panels"))
-        return
-
-    if sn == "pnl_add_user":
-        username = (message.text or "").strip()
-        if not username:
-            bot.send_message(uid, "⚠️ نام کاربری نمی‌تواند خالی باشد.")
+        if sn == "pnl_add_path":
+            raw_path = (message.text or "").strip()
+            if raw_path in ("", "/"):
+                path = ""
+            else:
+                path = raw_path if raw_path.startswith("/") else "/" + raw_path
+            sd = state_data(uid)
+            state_set(uid, "pnl_add_user",
+                      name=sd.get("name"), protocol=sd.get("protocol"),
+                      host=sd.get("host"), port=sd.get("port"), path=path)
+            bot.send_message(uid,
+                "مرحله ۶/۷ — <b>نام کاربری</b>\n\nنام کاربری پنل را ارسال کنید:",
+                parse_mode="HTML", reply_markup=back_button("admin:panels"))
             return
-        sd = state_data(uid)
-        state_set(uid, "pnl_add_pass",
-                  name=sd.get("name"), protocol=sd.get("protocol"),
-                  host=sd.get("host"), port=sd.get("port"),
-                  path=sd.get("path", ""), username=username)
-        bot.send_message(uid,
-            "مرحله ۷/۷ — <b>رمز عبور</b>\n\nرمز عبور پنل را ارسال کنید:",
-            parse_mode="HTML", reply_markup=back_button("admin:panels"))
-        return
 
-    if sn == "pnl_add_pass":
-        password = (message.text or "").strip()
-        if not password:
-            bot.send_message(uid, "⚠️ رمز عبور نمی‌تواند خالی باشد.")
+        if sn == "pnl_add_user":
+            username = (message.text or "").strip()
+            if not username:
+                bot.send_message(uid, "⚠️ نام کاربری نمی‌تواند خالی باشد.")
+                return
+            sd = state_data(uid)
+            state_set(uid, "pnl_add_pass",
+                      name=sd.get("name"), protocol=sd.get("protocol"),
+                      host=sd.get("host"), port=sd.get("port"),
+                      path=sd.get("path", ""), username=username)
+            bot.send_message(uid,
+                "مرحله ۷/۷ — <b>رمز عبور</b>\n\nرمز عبور پنل را ارسال کنید:",
+                parse_mode="HTML", reply_markup=back_button("admin:panels"))
             return
-        sd = state_data(uid)
-        name     = sd.get("name", "")
-        protocol = sd.get("protocol", "http")
-        host     = sd.get("host", "")
-        port     = sd.get("port", 2053)
-        path     = sd.get("path", "")
-        username = sd.get("username", "")
 
-        bot.send_message(uid, "⏳ در حال بررسی اتصال به پنل…")
+        if sn == "pnl_add_pass":
+            password = (message.text or "").strip()
+            if not password:
+                bot.send_message(uid, "⚠️ رمز عبور نمی‌تواند خالی باشد.")
+                return
+            sd = state_data(uid)
+            name     = sd.get("name", "")
+            protocol = sd.get("protocol", "http")
+            host     = sd.get("host", "")
+            port     = sd.get("port", 2053)
+            path     = sd.get("path", "")
+            username = sd.get("username", "")
 
-        try:
-            from ..panels.client import PanelClient
-            client = PanelClient(protocol=protocol, host=host, port=int(port),
-                                 path=path, username=username, password=password)
-            ok, err = client.health_check()
-        except Exception as exc:
-            ok, err = False, str(exc)
+            bot.send_message(uid, "⏳ در حال بررسی اتصال به پنل…")
 
-        if ok:
+            try:
+                from ..panels.client import PanelClient
+                client = PanelClient(protocol=protocol, host=host, port=int(port),
+                                     path=path, username=username, password=password)
+                ok, err = client.health_check()
+            except Exception as exc:
+                ok, err = False, str(exc)
+
+            if ok:
+                state_clear(uid)
+                from ..db import add_panel as _add_panel
+                panel_id = _add_panel(name=name, protocol=protocol, host=host,
+                                      port=int(port), path=path, username=username,
+                                      password=password)
+                from ..db import update_panel_status
+                update_panel_status(panel_id, "connected", "")
+                from ..admin.renderers import _show_panel_detail
+
+                class _FakeCall:
+                    def __init__(self, msg, cb_data):
+                        class _FU:
+                            id = uid
+                        self.from_user = _FU()
+                        self.message   = msg
+                        self.data      = cb_data
+                        self.id        = 0
+
+                bot.send_message(uid, "✅ اتصال موفق! پنل ذخیره شد.")
+                _show_panel_detail(_FakeCall(message, f"adm:pnl:detail:{panel_id}"), panel_id)
+            else:
+                state_set(uid, "pnl_add_save_fail",
+                          name=name, protocol=protocol, host=host, port=int(port),
+                          path=path, username=username, password=password, error=err or "")
+                from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+                kb_fail = InlineKeyboardMarkup()
+                kb_fail.row(
+                    InlineKeyboardButton("💾 ذخیره به‌عنوان غیرفعال",
+                                         callback_data="adm:pnl:save_as_inactive"),
+                    InlineKeyboardButton("❌ لغو", callback_data="adm:pnl:add_cancel"),
+                )
+                bot.send_message(uid,
+                    f"❌ <b>اتصال ناموفق</b>\n\n"
+                    f"خطا: <code>{esc(err or 'نامشخص')}</code>\n\n"
+                    "می‌توانید پنل را به‌صورت غیرفعال ذخیره کنید تا بعداً ویرایش شود.",
+                    parse_mode="HTML", reply_markup=kb_fail)
+            return
+
+        if sn == "pnl_edit_field":
+            sd       = state_data(uid)
+            field    = sd.get("field")
+            panel_id = sd.get("panel_id")
+            new_val  = (message.text or "").strip()
+
+            if not new_val:
+                bot.send_message(uid, "⚠️ مقدار نمی‌تواند خالی باشد. دوباره ارسال کنید.")
+                return
+
+            if field == "port":
+                port_v = parse_int(new_val)
+                if not port_v or port_v <= 0 or port_v > 65535:
+                    bot.send_message(uid, "⚠️ پورت باید عدد ۱–۶۵۵۳۵ باشد.")
+                    return
+                new_val = port_v
+
+            if field == "path":
+                if new_val in ("", "/"):
+                    new_val = ""
+                elif not new_val.startswith("/"):
+                    new_val = "/" + new_val
+
+            from ..db import update_panel_field as _upf
+            _upf(panel_id, field, new_val)
             state_clear(uid)
-            from ..db import add_panel as _add_panel
-            panel_id = _add_panel(name=name, protocol=protocol, host=host,
-                                  port=int(port), path=path, username=username,
-                                  password=password)
-            from ..db import update_panel_status
-            update_panel_status(panel_id, "connected", "")
-            from ..admin.renderers import _show_panel_detail
-            from ..ui.helpers import send_or_edit
 
-            class _FakeCall:
+            from ..admin.renderers import _show_panel_detail
+
+            class _FakeCall2:
                 def __init__(self, msg, cb_data):
                     class _FU:
                         id = uid
@@ -3072,69 +3128,9 @@ def universal_handler(message):
                     self.data      = cb_data
                     self.id        = 0
 
-            bot.send_message(uid, "✅ اتصال موفق! پنل ذخیره شد.")
-            _show_panel_detail(_FakeCall(message, f"adm:pnl:detail:{panel_id}"), panel_id)
-        else:
-            # Keep state so user can choose to save as inactive or cancel
-            state_set(uid, "pnl_add_save_fail",
-                      name=name, protocol=protocol, host=host, port=int(port),
-                      path=path, username=username, password=password, error=err or "")
-            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-            kb_fail = InlineKeyboardMarkup()
-            kb_fail.row(
-                InlineKeyboardButton("💾 ذخیره به‌عنوان غیرفعال",
-                                     callback_data="adm:pnl:save_as_inactive"),
-                InlineKeyboardButton("❌ لغو", callback_data="adm:pnl:add_cancel"),
-            )
-            bot.send_message(uid,
-                f"❌ <b>اتصال ناموفق</b>\n\n"
-                f"خطا: <code>{esc(err or 'نامشخص')}</code>\n\n"
-                "می‌توانید پنل را به‌صورت غیرفعال ذخیره کنید تا بعداً ویرایش شود.",
-                parse_mode="HTML", reply_markup=kb_fail)
-        return
-
-    if sn == "pnl_edit_field":
-        sd       = state_data(uid)
-        field    = sd.get("field")
-        panel_id = sd.get("panel_id")
-        new_val  = (message.text or "").strip()
-
-        if not new_val:
-            bot.send_message(uid, "⚠️ مقدار نمی‌تواند خالی باشد. دوباره ارسال کنید.")
+            bot.send_message(uid, "✅ ویرایش ذخیره شد.")
+            _show_panel_detail(_FakeCall2(message, f"adm:pnl:detail:{panel_id}"), panel_id)
             return
-
-        if field == "port":
-            port_v = parse_int(new_val)
-            if not port_v or port_v <= 0 or port_v > 65535:
-                bot.send_message(uid, "⚠️ پورت باید عدد ۱–۶۵۵۳۵ باشد.")
-                return
-            new_val = port_v
-
-        if field == "path":
-            if new_val in ("", "/"):
-                new_val = ""
-            elif not new_val.startswith("/"):
-                new_val = "/" + new_val
-
-        from ..db import update_panel_field as _upf, get_panel as _gp
-        _upf(panel_id, field, new_val)
-        state_clear(uid)
-
-        from ..admin.renderers import _show_panel_detail
-        from ..ui.helpers import send_or_edit
-
-        class _FakeCall2:
-            def __init__(self, msg, cb_data):
-                class _FU:
-                    id = uid
-                self.from_user = _FU()
-                self.message   = msg
-                self.data      = cb_data
-                self.id        = 0
-
-        bot.send_message(uid, "✅ ویرایش ذخیره شد.")
-        _show_panel_detail(_FakeCall2(message, f"adm:pnl:detail:{panel_id}"), panel_id)
-        return
 
     except Exception as e:
         print("TEXT_HANDLER_ERROR:", e)
