@@ -2957,7 +2957,7 @@ def universal_handler(message):
             if not name:
                 bot.send_message(uid, "⚠️ نام نمی‌تواند خالی باشد. دوباره ارسال کنید.")
                 return
-            state_set(uid, "pnl_add_proto", name=name)
+            state_set(uid, "pnl_add_proto", pnl_name=name)
             from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
             kb_proto = InlineKeyboardMarkup()
             kb_proto.row(
@@ -2975,7 +2975,7 @@ def universal_handler(message):
                 bot.send_message(uid, "⚠️ آدرس نمی‌تواند خالی باشد.")
                 return
             sd = state_data(uid)
-            state_set(uid, "pnl_add_port", name=sd.get("name"), protocol=sd.get("protocol"), host=host)
+            state_set(uid, "pnl_add_port", pnl_name=sd.get("pnl_name"), protocol=sd.get("protocol"), host=host)
             bot.send_message(uid,
                 "مرحله ۴/۷ — <b>پورت</b>\n\nشماره پورت پنل را ارسال کنید (مثال: 2053):",
                 parse_mode="HTML", reply_markup=back_button("admin:panels"))
@@ -2989,7 +2989,7 @@ def universal_handler(message):
                 return
             sd = state_data(uid)
             state_set(uid, "pnl_add_path",
-                      name=sd.get("name"), protocol=sd.get("protocol"),
+                      pnl_name=sd.get("pnl_name"), protocol=sd.get("protocol"),
                       host=sd.get("host"), port=port)
             bot.send_message(uid,
                 "مرحله ۵/۷ — <b>مسیر (path)</b>\n\n"
@@ -3006,7 +3006,7 @@ def universal_handler(message):
                 path = raw_path if raw_path.startswith("/") else "/" + raw_path
             sd = state_data(uid)
             state_set(uid, "pnl_add_user",
-                      name=sd.get("name"), protocol=sd.get("protocol"),
+                      pnl_name=sd.get("pnl_name"), protocol=sd.get("protocol"),
                       host=sd.get("host"), port=sd.get("port"), path=path)
             bot.send_message(uid,
                 "مرحله ۶/۷ — <b>نام کاربری</b>\n\nنام کاربری پنل را ارسال کنید:",
@@ -3020,7 +3020,7 @@ def universal_handler(message):
                 return
             sd = state_data(uid)
             state_set(uid, "pnl_add_pass",
-                      name=sd.get("name"), protocol=sd.get("protocol"),
+                      pnl_name=sd.get("pnl_name"), protocol=sd.get("protocol"),
                       host=sd.get("host"), port=sd.get("port"),
                       path=sd.get("path", ""), username=username)
             bot.send_message(uid,
@@ -3034,7 +3034,7 @@ def universal_handler(message):
                 bot.send_message(uid, "⚠️ رمز عبور نمی‌تواند خالی باشد.")
                 return
             sd = state_data(uid)
-            name     = sd.get("name", "")
+            pnl_name = sd.get("pnl_name", "")
             protocol = sd.get("protocol", "http")
             host     = sd.get("host", "")
             port     = sd.get("port", 2053)
@@ -3054,7 +3054,7 @@ def universal_handler(message):
             if ok:
                 state_clear(uid)
                 from ..db import add_panel as _add_panel
-                panel_id = _add_panel(name=name, protocol=protocol, host=host,
+                panel_id = _add_panel(name=pnl_name, protocol=protocol, host=host,
                                       port=int(port), path=path, username=username,
                                       password=password)
                 from ..db import update_panel_status
@@ -3074,7 +3074,7 @@ def universal_handler(message):
                 _show_panel_detail(_FakeCall(message, f"adm:pnl:detail:{panel_id}"), panel_id)
             else:
                 state_set(uid, "pnl_add_save_fail",
-                          name=name, protocol=protocol, host=host, port=int(port),
+                          pnl_name=pnl_name, protocol=protocol, host=host, port=int(port),
                           path=path, username=username, password=password, error=err or "")
                 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
                 kb_fail = InlineKeyboardMarkup()
