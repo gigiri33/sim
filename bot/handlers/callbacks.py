@@ -1204,6 +1204,32 @@ def _render_voucher_admin_list(call, uid):
     send_or_edit(call, text, kb)
 
 
+def _build_locked_channels_menu():
+    """Build the locked-channels admin panel text+keyboard. Returns (text, kb)."""
+    rows = get_locked_channels()
+    kb = types.InlineKeyboardMarkup()
+    # Add button at the top
+    kb.add(types.InlineKeyboardButton("➕ افزودن کانال/گروه جدید", callback_data="adm:lch:add"))
+    # Two-column rows: channel name (right) | delete (left)
+    for row in rows:
+        ch = row["channel_id"]
+        label = ch if ch.startswith("@") else f"🔢 {ch}"
+        kb.row(
+            types.InlineKeyboardButton(f"📢 {label}", callback_data="noop"),
+            types.InlineKeyboardButton("🗑 حذف", callback_data=f"adm:lch:del:{row['id']}"),
+        )
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings",
+                                      icon_custom_emoji_id="5253997076169115797"))
+    legacy = setting_get("channel_id", "").strip()
+    legacy_note = f"\n⚠️ کانال قدیمی (تنظیمات): <code>{esc(legacy)}</code>" if legacy else ""
+    text = (
+        "📢 <b>مدیریت کانال‌های اجباری / قفل</b>\n\n"
+        "ربات تنها زمانی اجازه ورود می‌دهد که کاربر در <b>همه</b> کانال‌های زیر عضو باشد.\n\n"
+        f"تعداد کانال‌های فعال: <b>{len(rows)}</b>{legacy_note}"
+    )
+    return text, kb
+
+
 def _render_pending_receipts_page(call, uid, page):
     """Render paginated pending receipts list for admin."""
     PAGE_SIZE = 10
@@ -5162,7 +5188,7 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, text, kb)
         return
 
-    if data.startswith("adm:stk:fulfill:"):
+    if data.startswith("adm:stk:fulfill:") and data.split(":")[3].isdigit():
         package_id  = int(data.split(":")[3])
         package_row = get_package(package_id)
         if not package_row:
@@ -8082,22 +8108,8 @@ def _dispatch_callback(call, uid, data):
         if not admin_has_perm(uid, "settings"):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
             return
-        rows = get_locked_channels()
-        kb = types.InlineKeyboardMarkup()
-        for row in rows:
-            ch = row["channel_id"]
-            kb.add(types.InlineKeyboardButton(
-                f"🗑 حذف {ch}", callback_data=f"adm:lch:del:{row['id']}"
-            ))
-        kb.add(types.InlineKeyboardButton("➕ افزودن کانال/گروه", callback_data="adm:lch:add"))
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
-        legacy = setting_get("channel_id", "").strip()
-        legacy_note = f"\n⚠️ کانال قدیمی (تنظیمات): <code>{esc(legacy)}</code>" if legacy else ""
-        send_or_edit(call,
-            "📢 <b>مدیریت کانال‌های قفل</b>\n\n"
-            "ربات تنها زمانی اجازه ورود می‌دهد که کاربر در <b>همه</b> کانال‌های زیر عضو باشد.\n\n"
-            f"کانال‌های فعال: <b>{len(rows)}</b>{legacy_note}", kb)
+        send_or_edit(call, *_build_locked_channels_menu())
         return
 
     if data == "adm:lch:add":
@@ -8122,20 +8134,7 @@ def _dispatch_callback(call, uid, data):
         remove_locked_channel_by_id(row_id)
         _invalidate_channel_cache()
         bot.answer_callback_query(call.id, "✅ کانال حذف شد.")
-        # Reload same menu
-        rows = get_locked_channels()
-        kb = types.InlineKeyboardMarkup()
-        for row in rows:
-            ch = row["channel_id"]
-            kb.add(types.InlineKeyboardButton(f"🗑 حذف {ch}", callback_data=f"adm:lch:del:{row['id']}"))
-        kb.add(types.InlineKeyboardButton("➕ افزودن کانال/گروه", callback_data="adm:lch:add"))
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
-        legacy = setting_get("channel_id", "").strip()
-        legacy_note = f"\n⚠️ کانال قدیمی (تنظیمات): <code>{esc(legacy)}</code>" if legacy else ""
-        send_or_edit(call,
-            "📢 <b>مدیریت کانال‌های قفل</b>\n\n"
-            "ربات تنها زمانی اجازه ورود می‌دهد که کاربر در <b>همه</b> کانال‌های زیر عضو باشد.\n\n"
-            f"کانال‌های فعال: <b>{len(rows)}</b>{legacy_note}", kb)
+        send_or_edit(call, *_build_locked_channels_menu())
         return
 
     # ── Admin: SwapWallet active currencies ───────────────────────────────────
@@ -9477,7 +9476,7 @@ def _dispatch_callback(call, uid, data):
     # adm:pnd:ovpn:single:{pending_id}  →  OpenVPN single for pending order
     if data.startswith("adm:pnd:ovpn:single:"):
         if not is_admin(uid): return
-        pending_id = int(data.split(":")[5])
+        pending_id = int(data.split(":")[4])
         p_row = get_pending_order(pending_id)
         if not p_row or p_row["status"] == "fulfilled":
             bot.answer_callback_query(call.id, "سفارش یافت/تکمیل نشد.", show_alert=True); return
@@ -9548,7 +9547,7 @@ def _dispatch_callback(call, uid, data):
     # adm:pnd:wg:single:{pending_id}  →  WireGuard single for pending order
     if data.startswith("adm:pnd:wg:single:"):
         if not is_admin(uid): return
-        pending_id = int(data.split(":")[5])
+        pending_id = int(data.split(":")[4])
         p_row = get_pending_order(pending_id)
         if not p_row or p_row["status"] == "fulfilled":
             bot.answer_callback_query(call.id, "سفارش یافت/تکمیل نشد.", show_alert=True); return
@@ -9812,7 +9811,7 @@ def _dispatch_callback(call, uid, data):
     # adm:pnd:ovpn:single:{pending_id}  →  OpenVPN single for pending order
     if data.startswith("adm:pnd:ovpn:single:"):
         if not is_admin(uid): return
-        pending_id = int(data.split(":")[5])
+        pending_id = int(data.split(":")[4])
         p_row = get_pending_order(pending_id)
         if not p_row or p_row["status"] == "fulfilled":
             bot.answer_callback_query(call.id, "سفارش یافت/تکمیل نشد.", show_alert=True); return
@@ -9883,7 +9882,7 @@ def _dispatch_callback(call, uid, data):
     # adm:pnd:wg:single:{pending_id}  →  WireGuard single for pending order
     if data.startswith("adm:pnd:wg:single:"):
         if not is_admin(uid): return
-        pending_id = int(data.split(":")[5])
+        pending_id = int(data.split(":")[4])
         p_row = get_pending_order(pending_id)
         if not p_row or p_row["status"] == "fulfilled":
             bot.answer_callback_query(call.id, "سفارش یافت/تکمیل نشد.", show_alert=True); return
