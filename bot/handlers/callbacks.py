@@ -3506,13 +3506,10 @@ def _dispatch_callback(call, uid, data):
         if len(_active_nets) == 1:
             # Skip selection — go directly with the only available network
             net = _active_nets[0][0]
-            state_set(uid, "swcrypto_network_select", kind="wallet_charge", amount=amount, _auto_net=net)
-            # Fake a network selection by routing through same handler data
-            bot.answer_callback_query(call.id)
+            state_set(uid, "swcrypto_network_select", kind="wallet_charge", amount=amount)
             # Emit synthetic callback — handled by swcrypto:net: branch below (force inline)
             _swc_sd = state_data(uid)
             _swc_sd["_auto_net"] = net
-            from ..gateways.swapwallet_crypto import create_swapwallet_crypto_invoice
             order_id = f"swc-{uid}-{int(datetime.now().timestamp())}"
             success, result = create_swapwallet_crypto_invoice(amount, order_id, net, "شارژ کیف پول")
             if not success:
@@ -3666,11 +3663,31 @@ def _dispatch_callback(call, uid, data):
         state_set(uid, "swcrypto_network_select", kind="config_purchase", package_id=package_id, amount=price,
                   quantity=_qty_sw_init)
         kb = types.InlineKeyboardMarkup()
-        for net, _ in _active_nets2:
-            kb.add(types.InlineKeyboardButton(SW_NET_LABELS.get(net, net), callback_data=f"swcrypto:net:{net}"))
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"buy:p:{package_id}", icon_custom_emoji_id="5253997076169115797"))
-        bot.answer_callback_query(call.id)
-        send_or_edit(call, "💎 <b>پرداخت کریپتو (SwapWallet)</b>\n\nشبکه مورد نظر را انتخاب کنید:", kb)
+        if len(_active_nets2) == 1:
+            # Only one network — auto-select and go directly to payment
+            net = _active_nets2[0][0]
+            order_id = f"swc-{uid}-{int(datetime.now().timestamp())}"
+            success, result = create_swapwallet_crypto_invoice(price, order_id, net, "پرداخت کریپتو")
+            if not success:
+                err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
+                _swapwallet_error_inline(call, err_msg)
+                return
+            invoice_id = result.get("id", "")
+            payment_id = create_payment("config_purchase", uid, package_id, price, "swapwallet_crypto",
+                                        status="pending", quantity=_qty_sw_init)
+            with get_conn() as conn:
+                conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id, payment_id))
+            state_set(uid, "await_swapwallet_crypto_verify", payment_id=payment_id, invoice_id=invoice_id)
+            verify_cb = f"pay:swapwallet_crypto:verify:{payment_id}"
+            bot.answer_callback_query(call.id)
+            show_swapwallet_crypto_page(call, amount_toman=price, invoice_id=invoice_id,
+                                        result=result, payment_id=payment_id, verify_cb=verify_cb)
+        else:
+            for net, _ in _active_nets2:
+                kb.add(types.InlineKeyboardButton(SW_NET_LABELS.get(net, net), callback_data=f"swcrypto:net:{net}"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"buy:p:{package_id}", icon_custom_emoji_id="5253997076169115797"))
+            bot.answer_callback_query(call.id)
+            send_or_edit(call, "💎 <b>پرداخت کریپتو (SwapWallet)</b>\n\nشبکه مورد نظر را انتخاب کنید:", kb)
         return
 
     if data.startswith("rpay:swapwallet_crypto:verify:"):
@@ -3742,11 +3759,31 @@ def _dispatch_callback(call, uid, data):
                   purchase_id=purchase_id, package_id=package_id,
                   amount=price, config_id=item["config_id"])
         kb = types.InlineKeyboardMarkup()
-        for net, _ in _active_nets3:
-            kb.add(types.InlineKeyboardButton(SW_NET_LABELS.get(net, net), callback_data=f"swcrypto:net:{net}"))
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"renew:{purchase_id}", icon_custom_emoji_id="5253997076169115797"))
-        bot.answer_callback_query(call.id)
-        send_or_edit(call, "💎 <b>پرداخت کریپتو (SwapWallet)</b>\n\nشبکه مورد نظر را انتخاب کنید:", kb)
+        if len(_active_nets3) == 1:
+            # Only one network — auto-select and go directly to payment
+            net = _active_nets3[0][0]
+            order_id = f"swc-{uid}-{int(datetime.now().timestamp())}"
+            success, result = create_swapwallet_crypto_invoice(price, order_id, net, "پرداخت کریپتو")
+            if not success:
+                err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
+                _swapwallet_error_inline(call, err_msg)
+                return
+            invoice_id = result.get("id", "")
+            payment_id = create_payment("renewal", uid, package_id, price, "swapwallet_crypto",
+                                        status="pending", config_id=item["config_id"])
+            with get_conn() as conn:
+                conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id, payment_id))
+            state_set(uid, "await_swapwallet_crypto_verify", payment_id=payment_id, invoice_id=invoice_id)
+            verify_cb = f"rpay:swapwallet_crypto:verify:{payment_id}"
+            bot.answer_callback_query(call.id)
+            show_swapwallet_crypto_page(call, amount_toman=price, invoice_id=invoice_id,
+                                        result=result, payment_id=payment_id, verify_cb=verify_cb)
+        else:
+            for net, _ in _active_nets3:
+                kb.add(types.InlineKeyboardButton(SW_NET_LABELS.get(net, net), callback_data=f"swcrypto:net:{net}"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"renew:{purchase_id}", icon_custom_emoji_id="5253997076169115797"))
+            bot.answer_callback_query(call.id)
+            send_or_edit(call, "💎 <b>پرداخت کریپتو (SwapWallet)</b>\n\nشبکه مورد نظر را انتخاب کنید:", kb)
         return
 
     # ── SwapWallet Crypto: network selected → create invoice ─────────────────
