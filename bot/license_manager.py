@@ -27,6 +27,7 @@ LICENSE_GRACE_MINUTES     = int(os.getenv("LICENSE_GRACE_MINUTES", "60"))
 
 _SETTINGS_KEY_STATE          = "license_state"           # active | expired | inactive
 _SETTINGS_KEY_API_KEY        = "license_api_key"
+_SETTINGS_KEY_API_URL        = "license_api_url_base"     # stored API URL (overrides env var)
 _SETTINGS_KEY_EXPIRES_AT     = "license_expires_at"
 _SETTINGS_KEY_MACHINE_ID     = "license_machine_id"
 _SETTINGS_KEY_LAST_CHECK     = "license_last_check"
@@ -123,11 +124,23 @@ def _invalidate_cache() -> None:
 
 # ── API call ──────────────────────────────────────────────────────────────────
 
+def _get_api_base_url() -> str:
+    """Return the active license API base URL: settings > env var."""
+    stored = _setting_get(_SETTINGS_KEY_API_URL)
+    if stored:
+        return stored.rstrip("/")
+    if LICENSE_API_URL:
+        return LICENSE_API_URL.rstrip("/")
+    raise RuntimeError(
+        "آدرس سرور لایسنس (LICENSE_API_URL) تنظیم نشده است.\n"
+        "هنگام فعال‌سازی، API URL را وارد کنید."
+    )
+
+
 def _call_license_api(endpoint: str, payload: dict) -> dict:
     """POST to the license server. Returns parsed JSON or raises."""
-    if not LICENSE_API_URL:
-        raise RuntimeError("متغیر LICENSE_API_URL در فایل .env تنظیم نشده است.")
-    url = f"{LICENSE_API_URL.rstrip('/')}/{endpoint.lstrip('/')}"
+    base = _get_api_base_url()
+    url = f"{base}/{endpoint.lstrip('/')}"
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url, data=data,
@@ -170,18 +183,23 @@ def get_or_create_machine_id() -> str:
 
 def activate_license(
     api_key: str,
+    api_url: str = "",
     bot_username: str = "",
     owner_telegram_id: int = 0,
     owner_username: str = "",
 ) -> dict:
     """
-    Attempt to activate the license with the provided api_key.
+    Attempt to activate the license with the provided api_key and api_url.
     Returns {"ok": True, "expires_at": "...", "message": "..."} or
             {"ok": False, "message": "..."}
     """
     api_key = api_key.strip()
     if not api_key:
         return {"ok": False, "message": "کلید API نمی‌تواند خالی باشد."}
+
+    # Save API URL first so _call_license_api can use it
+    if api_url:
+        _setting_set(_SETTINGS_KEY_API_URL, api_url.strip().rstrip("/"))
 
     machine_id = get_or_create_machine_id()
 
@@ -197,7 +215,6 @@ def activate_license(
         result = _call_license_api("/activate", payload)
     except RuntimeError as e:
         log.warning("License activation failed: %s", e)
-        # If the server cannot be reached, treat as network error (not invalid key)
         return {"ok": False, "message": f"خطا در اتصال به سرور لایسنس:\n{e}"}
 
     if result.get("ok") or result.get("status") == "active":
@@ -277,8 +294,11 @@ def _check_license_internal(force: bool = False) -> bool:
         machine_id = get_or_create_machine_id()
         try:
             result = _call_license_api("/check", {
-                "api_key":    api_key,
-                "machine_id": machine_id,
+                "api_key":           api_key,
+                "machine_id":        machine_id,
+                "bot_username":      _setting_get(_SETTINGS_KEY_BOT_USERNAME),
+                "owner_telegram_id": int(_setting_get(_SETTINGS_KEY_OWNER_TG_ID) or 0),
+                "owner_username":    _setting_get(_SETTINGS_KEY_OWNER_USERNAME),
             })
             _setting_set(_SETTINGS_KEY_LAST_CHECK, _now_iso())
             remote_state = result.get("status", "inactive")
@@ -524,8 +544,16 @@ ACTIVATION_FAIL_TEXT = (
 )
 
 API_KEY_PROMPT_TEXT = (
-    "🔐 <b>فعال‌سازی لایسنس</b>\n\n"
+    "🔐 <b>فعال‌سازی لایسنس — مرحله ۱ از ۲</b>\n\n"
     "لطفاً <b>API Key</b> لایسنس خود را وارد کنید.\n"
     "این کلید را از @Emad_Habibnia دریافت می‌کنید.\n\n"
+    "⬅️ برای لغو /cancel بزنید."
+)
+
+API_URL_PROMPT_TEXT = (
+    "🌐 <b>فعال‌سازی لایسنس — مرحله ۲ از ۲</b>\n\n"
+    "لطفاً <b>API URL</b> سرور لایسنس را وارد کنید.\n"
+    "<i>مثال: http://209.50.228.1:5000/api/license</i>\n\n"
+    "این آدرس را از @Emad_Habibnia دریافت می‌کنید.\n\n"
     "⬅️ برای لغو /cancel بزنید."
 )

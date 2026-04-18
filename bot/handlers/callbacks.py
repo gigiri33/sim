@@ -1739,7 +1739,7 @@ def _dispatch_callback(call, uid, data):
         from ..license_manager import (
             is_limited_mode, get_license_status_text, check_license, _invalidate_cache,
             activate_license, get_or_create_machine_id,
-            API_KEY_PROMPT_TEXT, ACTIVATION_SUCCESS_TEXT, ACTIVATION_FAIL_TEXT,
+            API_KEY_PROMPT_TEXT, API_URL_PROMPT_TEXT, ACTIVATION_SUCCESS_TEXT, ACTIVATION_FAIL_TEXT,
         )
         from ..config import ADMIN_IDS as _AIDS
 

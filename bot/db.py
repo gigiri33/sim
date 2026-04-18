@@ -394,6 +394,7 @@ def init_db():
             # ── License system settings migration ──────────────────────────────
             "INSERT OR IGNORE INTO settings(key,value) VALUES('license_state','inactive')",
             "INSERT OR IGNORE INTO settings(key,value) VALUES('license_api_key','')",
+            "INSERT OR IGNORE INTO settings(key,value) VALUES('license_api_url_base','')",
             "INSERT OR IGNORE INTO settings(key,value) VALUES('license_expires_at','')",
             "INSERT OR IGNORE INTO settings(key,value) VALUES('license_machine_id','')",
             "INSERT OR IGNORE INTO settings(key,value) VALUES('license_last_check','')",

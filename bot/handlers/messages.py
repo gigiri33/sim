@@ -281,7 +281,7 @@ def universal_handler(message):
     sd = state_data(uid)
 
     try:
-        # ── License activation state ──────────────────────────────────────────
+        # ── License activation state — step 1: API Key ───────────────────────
         if sn == "license:waiting_api_key" and is_admin(uid):
             text = (message.text or "").strip()
             if text in ("/cancel", "لغو"):
@@ -289,6 +289,21 @@ def universal_handler(message):
                 bot.send_message(message.chat.id, "❌ فعال‌سازی لغو شد.")
                 return
             api_key = text
+            # Move to step 2: ask for API URL
+            from ..license_manager import API_URL_PROMPT_TEXT
+            state_set(uid, "license:waiting_api_url", pending_api_key=api_key)
+            bot.send_message(message.chat.id, API_URL_PROMPT_TEXT, parse_mode="HTML")
+            return
+
+        # ── License activation state — step 2: API URL ───────────────────────
+        if sn == "license:waiting_api_url" and is_admin(uid):
+            text = (message.text or "").strip()
+            if text in ("/cancel", "لغو"):
+                state_clear(uid)
+                bot.send_message(message.chat.id, "❌ فعال‌سازی لغو شد.")
+                return
+            api_url = text
+            api_key = state_data(uid).get("pending_api_key", "")
             state_clear(uid)
             from ..license_manager import (
                 activate_license, get_or_create_machine_id,
@@ -304,6 +319,7 @@ def universal_handler(message):
             bot.send_message(message.chat.id, "⏳ در حال فعال‌سازی لایسنس...", parse_mode="HTML")
             result = activate_license(
                 api_key=api_key,
+                api_url=api_url,
                 bot_username=bot_username,
                 owner_telegram_id=uid,
                 owner_username=message.from_user.username or "",
