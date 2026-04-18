@@ -238,8 +238,6 @@ def universal_handler(message):
                 parse_mode="HTML",
             )
             return
-
-    # Restricted user check
     _u = get_user(uid)
     if _u and _u["status"] == "restricted" and not is_admin(uid):
         bot.send_message(
@@ -283,6 +281,47 @@ def universal_handler(message):
     sd = state_data(uid)
 
     try:
+        # ── License activation state ──────────────────────────────────────────
+        if sn == "license:waiting_api_key" and is_admin(uid):
+            text = (message.text or "").strip()
+            if text in ("/cancel", "لغو"):
+                state_clear(uid)
+                bot.send_message(message.chat.id, "❌ فعال‌سازی لغو شد.")
+                return
+            api_key = text
+            state_clear(uid)
+            from ..license_manager import (
+                activate_license, get_or_create_machine_id,
+                ACTIVATION_SUCCESS_TEXT, ACTIVATION_FAIL_TEXT,
+            )
+            get_or_create_machine_id()
+            bot_username = ""
+            try:
+                me = bot.get_me()
+                bot_username = me.username or ""
+            except Exception:
+                pass
+            bot.send_message(message.chat.id, "⏳ در حال فعال‌سازی لایسنس...", parse_mode="HTML")
+            result = activate_license(
+                api_key=api_key,
+                bot_username=bot_username,
+                owner_telegram_id=uid,
+                owner_username=message.from_user.username or "",
+            )
+            if result.get("ok"):
+                expires = result.get("expires_at", "نامشخص")
+                success_text = ACTIVATION_SUCCESS_TEXT.format(expires_at=expires)
+                kb = types.InlineKeyboardMarkup()
+                kb.add(types.InlineKeyboardButton("📊 وضعیت لایسنس", callback_data="license:status"))
+                bot.send_message(message.chat.id, success_text, parse_mode="HTML", reply_markup=kb)
+            else:
+                error_msg = result.get("message", "خطای نامشخص")
+                fail_text = ACTIVATION_FAIL_TEXT.format(message=error_msg)
+                kb = types.InlineKeyboardMarkup()
+                kb.add(types.InlineKeyboardButton("🔄 تلاش مجدد", callback_data="license:activate"))
+                bot.send_message(message.chat.id, fail_text, parse_mode="HTML", reply_markup=kb)
+            return
+
         # ── Broadcast ─────────────────────────────────────────────────────────
         def _bc_send(target_id):
             """Forward if admin forwarded something, copy if admin wrote directly."""

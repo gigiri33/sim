@@ -1734,6 +1734,63 @@ def _start_tronpays_rial_auto_verify(payment_id, invoice_id, uid, chat_id, messa
 
 
 def _dispatch_callback(call, uid, data):
+    # ── License callbacks ────────────────────────────────────────────────────
+    if data.startswith("license:"):
+        from ..license_manager import (
+            is_limited_mode, get_license_status_text, check_license, _invalidate_cache,
+            activate_license, get_or_create_machine_id,
+            API_KEY_PROMPT_TEXT, ACTIVATION_SUCCESS_TEXT, ACTIVATION_FAIL_TEXT,
+        )
+        from ..config import ADMIN_IDS as _AIDS
+
+        if data == "license:activate":
+            if uid not in _AIDS and not is_admin(uid):
+                bot.answer_callback_query(call.id, "⛔ دسترسی فقط برای مالک/ادمین.", show_alert=True)
+                return
+            bot.answer_callback_query(call.id)
+            state_set(uid, "license:waiting_api_key")
+            bot.send_message(call.message.chat.id, API_KEY_PROMPT_TEXT, parse_mode="HTML")
+            return
+
+        if data in ("license:status", "license:recheck"):
+            if uid not in _AIDS and not is_admin(uid):
+                bot.answer_callback_query(call.id, "⛔ دسترسی فقط برای مالک/ادمین.", show_alert=True)
+                return
+            if data == "license:recheck":
+                bot.answer_callback_query(call.id, "⏳ در حال بررسی...")
+                _invalidate_cache()
+                check_license(force=True)
+            else:
+                bot.answer_callback_query(call.id)
+            text = get_license_status_text()
+            kb = types.InlineKeyboardMarkup()
+            if is_limited_mode():
+                kb.add(types.InlineKeyboardButton("🔐 فعال‌سازی لایسنس", callback_data="license:activate"))
+            kb.add(types.InlineKeyboardButton("🔄 بررسی مجدد", callback_data="license:recheck"))
+            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:panel"))
+            try:
+                bot.edit_message_text(
+                    text, call.message.chat.id, call.message.message_id,
+                    parse_mode="HTML", reply_markup=kb,
+                )
+            except Exception:
+                bot.send_message(call.message.chat.id, text, parse_mode="HTML", reply_markup=kb)
+            return
+
+        if data == "license:limited_info":
+            bot.answer_callback_query(call.id)
+            bot.send_message(
+                call.message.chat.id,
+                "🔒 <b>ربات در حالت محدود اجرا می‌شود.</b>\n\n"
+                "برای فعال‌سازی کامل ربات، با مالک تماس بگیرید.\n"
+                "یا برای خرید اشتراک به @Emad_Habibnia پیام دهید.",
+                parse_mode="HTML",
+            )
+            return
+
+        bot.answer_callback_query(call.id)
+        return
+
     # Navigation
     if data.startswith("nav:"):
         target = data[4:]
