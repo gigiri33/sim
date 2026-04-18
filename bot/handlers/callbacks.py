@@ -49,7 +49,7 @@ from ..db import (
     get_voucher_codes_for_batch, get_voucher_code_by_code,
     redeem_voucher_code, delete_voucher_batch,
     get_phone_number,
-    has_pending_rewards, get_unclaimed_rewards, mark_rewards_claimed,
+    has_pending_rewards, get_unclaimed_rewards, mark_rewards_claimed, mark_reward_claimed_by_id,
     get_locked_channels, add_locked_channel, remove_locked_channel_by_id,
 )
 from ..gateways.base import is_gateway_available, is_card_info_complete, get_gateway_range_text, is_gateway_in_range, build_gateway_range_guide
@@ -1960,39 +1960,64 @@ def _dispatch_callback(call, uid, data):
             return
         delivered_wallet = 0
         delivered_config = 0
-        failed_config = 0
+        failed_config    = 0
         for row in rewards:
             if row["reward_type"] == "wallet":
-                update_balance(uid, int(row["amount"] or 0))
-                delivered_wallet += int(row["amount"] or 0)
+                amt = int(row["amount"] or 0)
+                if amt > 0:
+                    update_balance(uid, amt)
+                    delivered_wallet += amt
+                mark_reward_claimed_by_id(row["id"])
             else:
                 pkg_id = row["package_id"]
                 if not pkg_id:
                     failed_config += 1
-                    continue
+                    continue  # leave unclaimed — admin must fix package config
                 available = get_available_configs_for_package(int(pkg_id))
                 if not available:
                     failed_config += 1
-                    continue
+                    continue  # leave unclaimed — no stock; user can retry later
                 cfg = available[0]
                 try:
                     purchase_id = assign_config_to_user(
                         cfg["id"], uid, int(pkg_id), 0, "referral_gift", is_test=0
                     )
+                    mark_reward_claimed_by_id(row["id"])
                     delivered_config += 1
-                    deliver_purchase_message(uid, purchase_id)
+                    try:
+                        deliver_purchase_message(uid, purchase_id)
+                    except Exception:
+                        pass
                 except Exception:
                     failed_config += 1
-        mark_rewards_claimed(uid)
+        # Build result message
         parts_msg = []
         if delivered_wallet:
-            parts_msg.append(f"💰 {fmt_price(delivered_wallet)} تومان به کیف پول شما اضافه شد")
+            parts_msg.append(
+                f"💰 مبلغ <b>{fmt_price(delivered_wallet)}</b> تومان با موفقیت به کیف‌پول شما اضافه شد."
+            )
         if delivered_config:
-            parts_msg.append(f"🎁 {delivered_config} کانفیگ رایگان تحویل داده شد")
+            parts_msg.append(
+                f"🎁 <b>{delivered_config}</b> کانفیگ رایگان با موفقیت به سرویس‌های شما اضافه شد."
+            )
         if failed_config:
-            parts_msg.append(f"⚠️ {failed_config} پاداش کانفیگ به دلیل عدم موجودی تحویل نشد — با پشتیبانی تماس بگیرید")
-        result_text = "\n".join(parts_msg) if parts_msg else "پاداشی برای دریافت وجود نداشت."
-        bot.answer_callback_query(call.id, "✅ پاداش دریافت شد!", show_alert=True)
+            parts_msg.append(
+                f"⚠️ <b>{failed_config}</b> پاداش کانفیگ به دلیل عدم موجودی تحویل داده نشد.\n"
+                "لطفاً بعداً دوباره تلاش کنید یا با پشتیبانی تماس بگیرید."
+            )
+        if parts_msg:
+            bot.answer_callback_query(call.id, "✅ پاداش دریافت شد!", show_alert=False)
+            summary = "\n\n".join(parts_msg)
+            try:
+                bot.send_message(
+                    uid,
+                    f"🎁 <b>پاداش زیرمجموعه‌گیری</b>\n\n{summary}",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+        else:
+            bot.answer_callback_query(call.id, "پاداشی برای دریافت وجود نداشت.", show_alert=True)
         show_referral_menu(call, uid)
         return
 

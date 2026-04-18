@@ -131,8 +131,16 @@ def channel_lock_message(target):
     if channels:
         for channel_id in channels:
             url = _channel_url(channel_id)
-            label = channel_id if channel_id.startswith("@") else "کانال"
-            kb.add(types.InlineKeyboardButton("📢 {}".format(label.lstrip("@")), url=url))
+            if channel_id.startswith("@"):
+                label = channel_id  # e.g. @MyChannel
+            else:
+                # Numeric ID — try to resolve username from Telegram
+                try:
+                    chat = bot.get_chat(channel_id)
+                    label = f"@{chat.username}" if chat.username else channel_id
+                except Exception:
+                    label = channel_id
+            kb.add(types.InlineKeyboardButton("📢 {}".format(label), url=url))
     else:
         kb.add(types.InlineKeyboardButton("📢 عضویت در کانال", url="https://t.me/"))
     kb.add(types.InlineKeyboardButton("✅ عضو شدم", callback_data="check_channel"))

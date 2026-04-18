@@ -20,6 +20,7 @@ from ..db import (
     mark_purchase_reward_given, get_referral_by_referee,
     update_balance,
     set_referral_channel_joined, try_claim_start_reward_batch,
+    try_claim_purchase_reward_batch,
     add_pending_reward,
 )
 from ..helpers import esc, fmt_price, now_str, move_leading_emoji
@@ -617,16 +618,19 @@ def _channel_reward_required() -> bool:
 
 def check_and_give_referral_start_reward(referrer_id):
     """
-    Check if referrer now qualifies for a start reward and give it once.
-    Thread-safe: uses atomic SQL claim so concurrent calls cannot double-reward.
-    Respects referral_reward_condition: if 'channel', only count channel-joined referees.
+    Check if referrer qualifies for start reward(s) and give one per complete batch.
+    Thread-safe: atomic SQL claim prevents double-rewarding across concurrent calls.
+    Loops so that if user passed multiple thresholds (e.g. 10 invites, threshold=5)
+    they get the correct number of rewards.
     """
     if setting_get("referral_start_reward_enabled", "0") != "1":
         return
-    required_count  = int(setting_get("referral_start_reward_count", "1") or "1")
+    required_count = int(setting_get("referral_start_reward_count", "1") or "1")
+    if required_count <= 0:
+        return
     channel_required = _channel_reward_required()
-    # Atomic: claim the batch — only the first concurrent caller wins
-    if try_claim_start_reward_batch(referrer_id, required_count, channel_required):
+    # Loop: give one reward per complete batch claimed atomically
+    while try_claim_start_reward_batch(referrer_id, required_count, channel_required):
         _give_referral_reward(referrer_id, "referral_start_reward")
 
 
@@ -678,8 +682,9 @@ def try_give_referral_start_reward_for_channel_join(referee_id: int) -> None:
 
 def check_and_give_referral_purchase_reward(buyer_user_id):
     """
-    Called after a purchase. Check if buyer was referred and give purchase reward.
-    Thread-safe: uses atomic mark so concurrent calls cannot double-reward.
+    Called after a purchase. Check if buyer was referred and give purchase reward(s).
+    Uses atomic SQL claim (try_claim_purchase_reward_batch) to prevent double-rewarding.
+    Loops so multiple thresholds crossed in one purchase are all rewarded correctly.
     """
     if setting_get("referral_purchase_reward_enabled", "0") != "1":
         return
@@ -688,10 +693,8 @@ def check_and_give_referral_purchase_reward(buyer_user_id):
         return
     referrer_id = ref["referrer_id"]
     required_count = int(setting_get("referral_purchase_reward_count", "1") or "1")
-    unrewarded = get_unrewarded_purchase_referees(referrer_id)
-    if len(unrewarded) >= required_count:
-        batch = [r["referee_id"] for r in unrewarded[:required_count]]
-        # Atomic marks — each UPDATE only affects rows with purchase_reward_given=0
-        mark_purchase_reward_given(referrer_id, batch)
-        # Verify we actually claimed all of them (no race)
+    if required_count <= 0:
+        return
+    # Loop: give one reward per complete batch claimed atomically
+    while try_claim_purchase_reward_batch(referrer_id, required_count):
         _give_referral_reward(referrer_id, "referral_purchase_reward")

@@ -2,7 +2,7 @@
 """
 /start message handler.
 """
-from ..db import ensure_user, notify_first_start_if_needed, get_user, setting_get, add_referral, get_referral_by_referee, get_phone_number
+from ..db import ensure_user, notify_first_start_if_needed, get_user, setting_get, add_referral, get_referral_by_referee, get_phone_number, get_locked_channels
 from ..helpers import state_clear, state_set, is_admin, parse_int, normalize_iranian_phone
 from ..ui.helpers import check_channel_membership, channel_lock_message, _invalidate_channel_cache
 from ..ui.menus import show_main_menu
@@ -144,19 +144,37 @@ def start_handler(message):
 
 @bot.chat_member_handler(func=lambda u: True)
 def on_chat_member_updated(update):
-    """Immediately invalidate channel-membership cache when a user leaves."""
-    channel_id = setting_get("channel_id", "").strip()
-    if not channel_id:
+    """Invalidate channel-membership cache when a user leaves any locked channel."""
+    # Build full list of locked channels (DB table + legacy setting)
+    all_channels = []
+    try:
+        for row in get_locked_channels():
+            ch = str(row["channel_id"]).strip()
+            if ch and ch not in all_channels:
+                all_channels.append(ch)
+    except Exception:
+        pass
+    legacy = setting_get("channel_id", "").strip()
+    if legacy and legacy not in all_channels:
+        all_channels.append(legacy)
+
+    if not all_channels:
         return
 
-    # Match by numeric ID or @username
+    # Check whether the update's chat matches any of our locked channels
     chat = update.chat
-    chat_matches = (
-        str(chat.id) == channel_id
-        or (chat.username and f"@{chat.username}" == channel_id)
-        or str(chat.id) == channel_id.lstrip("-")
-    )
-    if not chat_matches:
+    matched_channel = None
+    for channel_id in all_channels:
+        chat_matches = (
+            str(chat.id) == channel_id
+            or (chat.username and f"@{chat.username}" == channel_id)
+            or str(chat.id) == channel_id.lstrip("-")
+        )
+        if chat_matches:
+            matched_channel = channel_id
+            break
+
+    if matched_channel is None:
         return
 
     new_status = update.new_chat_member.status
@@ -165,21 +183,25 @@ def on_chat_member_updated(update):
     if new_status in ("left", "kicked", "restricted", "banned"):
         _invalidate_channel_cache(user_id)
 
-        # Build channel URL for the leave notification
-        if channel_id.startswith("@"):
-            channel_url = f"https://t.me/{channel_id.lstrip('@')}"
-        elif channel_id.startswith("-100"):
-            channel_url = f"https://t.me/c/{channel_id[4:]}"
+        # Determine a human-readable channel label
+        if matched_channel.startswith("@"):
+            channel_url   = f"https://t.me/{matched_channel.lstrip('@')}"
+            channel_label = matched_channel
+        elif matched_channel.startswith("-100"):
+            channel_url   = f"https://t.me/c/{matched_channel[4:]}"
+            # Try to get username from the chat object
+            channel_label = f"@{chat.username}" if chat.username else matched_channel
         else:
-            channel_url = f"https://t.me/{channel_id}"
+            channel_url   = f"https://t.me/{matched_channel}"
+            channel_label = f"@{chat.username}" if chat.username else matched_channel
 
         from telebot import types as _t
         kb = _t.InlineKeyboardMarkup()
-        kb.add(_t.InlineKeyboardButton("📢 عضویت مجدد در کانال", url=channel_url))
+        kb.add(_t.InlineKeyboardButton(f"📢 عضویت مجدد در کانال", url=channel_url))
         try:
             bot.send_message(
                 user_id,
-                "❌ <b>شما از کانال ما خارج شدید</b>\n\n"
+                f"❌ <b>شما از کانال {channel_label} خارج شدید</b>\n\n"
                 "از این پس از اخبار، آپدیت‌ها و اطلاعیه‌های مهم با خبر نمی‌شوید.\n\n"
                 "بهتر است مجدداً عضو کانال شوید تا دسترسی به ربات حفظ شود. 🙏",
                 parse_mode="HTML",

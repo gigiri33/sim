@@ -1941,6 +1941,56 @@ def mark_rewards_claimed(user_id: int) -> int:
         return cur.rowcount
 
 
+def mark_reward_claimed_by_id(reward_id: int) -> None:
+    """Mark a single pending_reward row as claimed (only after successful delivery)."""
+    ts = now_str()
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE pending_rewards SET claimed=1, claimed_at=? WHERE id=? AND claimed=0",
+            (ts, reward_id)
+        )
+
+
+def get_pending_rewards_summary(user_id: int) -> dict:
+    """Return totals of unclaimed rewards: wallet_total (int toman) and config_count (int)."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT reward_type, amount FROM pending_rewards WHERE user_id=? AND claimed=0",
+            (user_id,)
+        ).fetchall()
+    wallet_total = 0
+    config_count = 0
+    for row in rows:
+        if row["reward_type"] == "wallet":
+            wallet_total += int(row["amount"] or 0)
+        else:
+            config_count += 1
+    return {"wallet_total": wallet_total, "config_count": config_count}
+
+
+def try_claim_purchase_reward_batch(referrer_id: int, required_count: int) -> bool:
+    """
+    Atomically claim `required_count` eligible unrewarded purchase-referrals.
+    Uses a single UPDATE+subquery so only one concurrent caller can win.
+    Returns True if the batch was fully claimed (caller should now give the reward).
+    Thread-safe against race conditions.
+    """
+    with get_conn() as conn:
+        cur = conn.execute(
+            """UPDATE referrals
+                   SET purchase_reward_given=1
+                 WHERE referrer_id=? AND purchase_reward_given=0
+                   AND referee_id IN (
+                         SELECT r.referee_id FROM referrals r
+                          JOIN purchases p ON p.user_id = r.referee_id AND p.is_test = 0
+                          WHERE r.referrer_id=? AND r.purchase_reward_given=0
+                          LIMIT ?
+                       )""",
+            (referrer_id, referrer_id, required_count)
+        )
+        return cur.rowcount >= required_count
+
+
 # ── Locked Channels (multi-channel join enforcement) ──────────────────────────
 def get_locked_channels():
     """Return all locked channel rows."""

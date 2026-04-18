@@ -6,7 +6,7 @@ import urllib.parse
 from telebot import types
 
 from ..config import BRAND_TITLE, DEFAULT_ADMIN_HANDLE
-from ..db import setting_get, get_user, get_user_purchases, get_referral_stats, has_pending_rewards
+from ..db import setting_get, get_user, get_user_purchases, get_referral_stats, has_pending_rewards, get_pending_rewards_summary
 from ..helpers import esc, fmt_price, display_username, back_button, move_leading_emoji
 from ..bot_instance import bot
 from .helpers import send_or_edit
@@ -192,6 +192,23 @@ def show_referral_menu(target, user_id):
     if not reward_text:
         reward_text = f"{ce('🎁', '5215628200578655810')} هدیه‌ها هنوز توسط ادمین تنظیم نشده است.\n"
 
+    # ── Pending reward summary ─────────────────────────────────────────────────
+    pending_summary = get_pending_rewards_summary(user_id)
+    pending_wallet  = pending_summary["wallet_total"]
+    pending_configs = pending_summary["config_count"]
+    pending_text = ""
+    if pending_wallet > 0 or pending_configs > 0:
+        pending_lines = []
+        if pending_wallet > 0:
+            pending_lines.append(f"💰 <b>{fmt_price(pending_wallet)}</b> تومان کیف‌پول")
+        if pending_configs > 0:
+            pending_lines.append(f"🎁 <b>{pending_configs}</b> کانفیگ رایگان")
+        pending_text = (
+            f"\n\n{ce('🎁', '5215628200578655810')} <b>پاداش‌های آماده دریافت:</b>\n"
+            + "\n".join(f"  • {ln}" for ln in pending_lines)
+            + "\n\n⬇️ برای دریافت جایزه، روی دکمه «🎁 دریافت پاداش» کلیک کنید."
+        )
+
     text = (
         f"{ce('💼', '5352896944496728039')} <b>زیرمجموعه‌گیری {ce('🎉', '5359785904535774578')} و دعوت دوستان</b>\n\n"
         "با دعوت دوستان از طریق لینک اختصاصی، بدون پرداخت حتی ۱ ریال "
@@ -203,6 +220,7 @@ def show_referral_menu(target, user_id):
         f"  {ce('💵', '5431499171045581032')} مجموع خرید زیرمجموعه: <b>{fmt_price(stats['total_purchase_amount'])}</b> تومان\n\n"
         f"{ce('🔗', '5409048419211682843')} <b>لینک دعوت شما:</b>\n<code>{ref_link}</code>\n\n"
         f"{ce('📢', '5271604874419647061')} <b>دعوت کن، هدیه بگیر، رشد کن!</b>"
+        f"{pending_text}"
     )
 
     # Build share text — link goes at the BOTTOM inside text= only (no url= param)
@@ -225,17 +243,21 @@ def show_referral_menu(target, user_id):
     share_url = f"https://t.me/share/url?text={_up.quote(share_text, safe='')}"
 
     kb = types.InlineKeyboardMarkup()
-    banner_photo = setting_get("referral_banner_photo", "").strip()
-    if banner_photo:
-        # With banner: callback so the bot sends the photo to the user for forwarding
-        kb.add(types.InlineKeyboardButton("📤 دریافت پست آماده برای اشتراک‌گذاری", callback_data="referral:get_banner"))
-    # NOTE: icon_custom_emoji_id for url buttons not supported via types; text fallback kept
 
-    # ── Pending reward claim button ────────────────────────────────────────────
-    if has_pending_rewards(user_id):
+    # ── Pending reward claim button (top, most prominent) ──────────────────────
+    if pending_wallet > 0 or pending_configs > 0:
         kb.add(types.InlineKeyboardButton("🎁 دریافت پاداش", callback_data="referral:claim_reward"))
 
-    kb.add(types.InlineKeyboardButton("🔗 اشتراک‌گذاری لینک دعوت", url=share_url))
+    # ── Share buttons — side by side ───────────────────────────────────────────
+    banner_photo = setting_get("referral_banner_photo", "").strip()
+    if banner_photo:
+        kb.row(
+            types.InlineKeyboardButton("📤 دریافت پست آماده", callback_data="referral:get_banner"),
+            types.InlineKeyboardButton("🔗 اشتراک‌گذاری لینک", url=share_url),
+        )
+    else:
+        kb.add(types.InlineKeyboardButton("🔗 اشتراک‌گذاری لینک دعوت", url=share_url))
+
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
 
     # Send photo banner on the referral menu itself if configured, otherwise plain text
