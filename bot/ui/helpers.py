@@ -118,7 +118,10 @@ def check_channel_membership(user_id):
                 is_member = False
                 break
         except Exception:
-            pass  # fail-open
+            # Fail-closed: if bot can't check a channel (not admin there, etc.)
+            # treat user as NOT a member to enforce the lock.
+            is_member = False
+            break
 
     with _CHANNEL_CACHE_LOCK:
         _CHANNEL_CACHE[user_id] = (is_member, now)
