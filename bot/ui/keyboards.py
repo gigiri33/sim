@@ -67,10 +67,6 @@ def kb_main(user_id):
         rows.append([_btn("درخواست نمایندگی", callback_data="agency:request", emoji_id="5372957680174384345")])
     if is_admin(user_id):
         rows.append([_btn("ورود به پنل مدیریت", callback_data="admin:panel", emoji_id="5370935802844946281")])
-    # Show limited-mode notice to regular users when license is inactive
-    from ..license_manager import is_limited_mode as _is_limited
-    if _is_limited() and not is_admin(user_id):
-        rows.append([_btn("🔒 ربات غیرفعال — اطلاعات بیشتر", callback_data="license:limited_info")])
     return _raw_markup(rows)
 
 

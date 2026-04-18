@@ -1361,6 +1361,47 @@ def _render_discount_code_detail(call, uid, code_id):
 
 
 
+# ── Module-level helper: build package edit panel text + keyboard ────────────
+def _pkg_edit_text_kb(package_row):
+    _BR_LABELS = {"all": "همه", "agents": "فقط نمایندگان", "public": "فقط کاربران عادی"}
+    package_id    = package_row["id"]
+    show_name_val = package_row["show_name"] if "show_name" in package_row.keys() else 1
+    show_name_lbl = "👁 نمایش نام به کاربر: ✅ بله" if show_name_val else "👁 نمایش نام به کاربر: ❌ خیر"
+    pkg_active    = package_row["active"] if "active" in package_row.keys() else 1
+    pkg_status_label = "✅ فعال — کلیک برای غیرفعال" if pkg_active else "❌ غیرفعال — کلیک برای فعال"
+    buyer_role    = package_row["buyer_role"] if "buyer_role" in package_row.keys() else "all"
+    br_label      = _BR_LABELS.get(buyer_role, "همه")
+    kb = types.InlineKeyboardMarkup()
+    kb.add(types.InlineKeyboardButton("✏️ ویرایش نام",   callback_data=f"admin:pkg:ef:name:{package_id}"))
+    kb.add(types.InlineKeyboardButton("💰 ویرایش قیمت",  callback_data=f"admin:pkg:ef:price:{package_id}"))
+    kb.add(types.InlineKeyboardButton("🔋 ویرایش حجم",   callback_data=f"admin:pkg:ef:volume:{package_id}"))
+    kb.add(types.InlineKeyboardButton("⏰ ویرایش مدت",   callback_data=f"admin:pkg:ef:dur:{package_id}"))
+    kb.add(types.InlineKeyboardButton("📌 جایگاه نمایش",  callback_data=f"admin:pkg:ef:position:{package_id}"))
+    kb.add(types.InlineKeyboardButton("👥 محدودیت کاربر", callback_data=f"admin:pkg:ef:maxusers:{package_id}"))
+    kb.add(types.InlineKeyboardButton(show_name_lbl,      callback_data=f"admin:pkg:toggle_sn:{package_id}"))
+    kb.add(types.InlineKeyboardButton(f"🔑 خریداران: {br_label} — تغییر", callback_data=f"admin:pkg:set_br:{package_id}"))
+    kb.add(types.InlineKeyboardButton(pkg_status_label, callback_data=f"admin:pkg:toggleactive:{package_id}"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:types", icon_custom_emoji_id="5253997076169115797"))
+    cur_pos      = package_row["position"] if "position" in package_row.keys() else 0
+    pkg_status_line = "✅ فعال" if pkg_active else "❌ غیرفعال"
+    sn_line      = "✅ بله" if show_name_val else "❌ خیر"
+    mu_val       = package_row["max_users"] if "max_users" in package_row.keys() else 0
+    mu_line      = "نامحدود" if not mu_val else f"{mu_val} کاربره"
+    text = (
+        f"📦 <b>ویرایش پکیج</b>\n\n"
+        f"نام: {esc(package_row['name'])}\n"
+        f"قیمت: {fmt_price(package_row['price'])} تومان\n"
+        f"حجم: {fmt_vol(package_row['volume_gb'])}\n"
+        f"مدت: {fmt_dur(package_row['duration_days'])}\n"
+        f"جایگاه: {cur_pos}\n"
+        f"محدودیت کاربر: {mu_line}\n"
+        f"نمایش نام به کاربر: {sn_line}\n"
+        f"خریداران مجاز: {br_label}\n"
+        f"وضعیت: {pkg_status_line}"
+    )
+    return text, kb
+
+
 @bot.callback_query_handler(func=lambda c: True)
 def on_callback(call):
     uid  = call.from_user.id
@@ -1435,10 +1476,10 @@ def on_callback(call):
         }
         from ..license_manager import is_limited_mode as _is_limited
         if _is_limited() and not is_admin(uid) and data not in _LICENSE_PASSTHROUGH:
-            bot.answer_callback_query(
-                call.id,
-                "🚫 ربات در حال حاضر غیرفعال است.\nبرای تمدید به @Emad_Habibnia پیام دهید.",
-                show_alert=True,
+            bot.answer_callback_query(call.id)
+            bot.send_message(
+                call.message.chat.id,
+                "🚫 ربات در حال حاضر غیرفعال است.",
             )
             return
 
@@ -3797,46 +3838,6 @@ def _dispatch_callback(call, uid, data):
         log_admin_action(uid, f"نوع #{type_id} با تمام پکیج‌ها حذف شد")
         _show_admin_types(call)
         return
-
-    # ── Helper: build package edit panel text + keyboard ─────────────────────
-    def _pkg_edit_text_kb(package_row):
-        _BR_LABELS = {"all": "همه", "agents": "فقط نمایندگان", "public": "فقط کاربران عادی"}
-        package_id    = package_row["id"]
-        show_name_val = package_row["show_name"] if "show_name" in package_row.keys() else 1
-        show_name_lbl = "👁 نمایش نام به کاربر: ✅ بله" if show_name_val else "👁 نمایش نام به کاربر: ❌ خیر"
-        pkg_active    = package_row["active"] if "active" in package_row.keys() else 1
-        pkg_status_label = "✅ فعال — کلیک برای غیرفعال" if pkg_active else "❌ غیرفعال — کلیک برای فعال"
-        buyer_role    = package_row["buyer_role"] if "buyer_role" in package_row.keys() else "all"
-        br_label      = _BR_LABELS.get(buyer_role, "همه")
-        kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("✏️ ویرایش نام",   callback_data=f"admin:pkg:ef:name:{package_id}"))
-        kb.add(types.InlineKeyboardButton("💰 ویرایش قیمت",  callback_data=f"admin:pkg:ef:price:{package_id}"))
-        kb.add(types.InlineKeyboardButton("🔋 ویرایش حجم",   callback_data=f"admin:pkg:ef:volume:{package_id}"))
-        kb.add(types.InlineKeyboardButton("⏰ ویرایش مدت",   callback_data=f"admin:pkg:ef:dur:{package_id}"))
-        kb.add(types.InlineKeyboardButton("📌 جایگاه نمایش",  callback_data=f"admin:pkg:ef:position:{package_id}"))
-        kb.add(types.InlineKeyboardButton("👥 محدودیت کاربر", callback_data=f"admin:pkg:ef:maxusers:{package_id}"))
-        kb.add(types.InlineKeyboardButton(show_name_lbl,      callback_data=f"admin:pkg:toggle_sn:{package_id}"))
-        kb.add(types.InlineKeyboardButton(f"🔑 خریداران: {br_label} — تغییر", callback_data=f"admin:pkg:set_br:{package_id}"))
-        kb.add(types.InlineKeyboardButton(pkg_status_label, callback_data=f"admin:pkg:toggleactive:{package_id}"))
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:types", icon_custom_emoji_id="5253997076169115797"))
-        cur_pos      = package_row["position"] if "position" in package_row.keys() else 0
-        pkg_status_line = "✅ فعال" if pkg_active else "❌ غیرفعال"
-        sn_line      = "✅ بله" if show_name_val else "❌ خیر"
-        mu_val       = package_row["max_users"] if "max_users" in package_row.keys() else 0
-        mu_line      = "نامحدود" if not mu_val else f"{mu_val} کاربره"
-        text = (
-            f"📦 <b>ویرایش پکیج</b>\n\n"
-            f"نام: {esc(package_row['name'])}\n"
-            f"قیمت: {fmt_price(package_row['price'])} تومان\n"
-            f"حجم: {fmt_vol(package_row['volume_gb'])}\n"
-            f"مدت: {fmt_dur(package_row['duration_days'])}\n"
-            f"جایگاه: {cur_pos}\n"
-            f"محدودیت کاربر: {mu_line}\n"
-            f"نمایش نام به کاربر: {sn_line}\n"
-            f"خریداران مجاز: {br_label}\n"
-            f"وضعیت: {pkg_status_line}"
-        )
-        return text, kb
 
     if data.startswith("admin:pkg:add:t:"):
         type_id  = int(data.split(":")[4])

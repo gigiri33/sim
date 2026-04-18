@@ -87,6 +87,10 @@ def start_handler(message):
 
     # Bot status check (before everything else for non-admins)
     if not is_admin(uid):
+        from ..license_manager import is_limited_mode as _is_limited
+        if _is_limited():
+            bot.send_message(message.chat.id, "🚫 ربات در حال حاضر غیرفعال است.")
+            return
         bot_status = setting_get("bot_status", "on")
         if bot_status == "off":
             return
