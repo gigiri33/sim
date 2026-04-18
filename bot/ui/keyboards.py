@@ -128,10 +128,6 @@ def kb_admin_panel(uid=None):
     elif show_pr:
         rows.append([_btn("رسیدهای بررسی نشده", callback_data="admin:pr", emoji_id="5926764846518376076")])
 
-    if is_owner or (uid and admin_has_perm(uid, "manage_panels")):
-        rows.append([_btn("مدیریت پنل‌های 3x-ui",    callback_data="admin:panels",      emoji_id="5343961484080730197")])
-        rows.append([_btn("پنل‌های ثنایی (ایران)", callback_data="admin:iran_panels", emoji_id="6008006386305211203")])
-
     if is_owner or (uid and admin_has_perm(uid, "settings")):
         rows.append([_btn("تنظیمات", callback_data="admin:settings", emoji_id="5370935802844946281")])
 

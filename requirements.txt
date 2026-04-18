@@ -2,7 +2,4 @@ pyTelegramBotAPI>=4.14.1
 qrcode
 pillow
 python-dotenv
-flask
-requests
-cryptography>=41.0
 jdatetime

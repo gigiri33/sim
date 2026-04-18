@@ -28,8 +28,6 @@ from ..db import (
     get_agency_price_config, set_agency_price_config,
     get_agency_type_discount, set_agency_type_discount,
     get_all_admin_users, get_admin_user, add_admin_user, update_admin_permissions, remove_admin_user,
-    get_all_panels, get_panel, add_panel, delete_panel,
-    get_panel_packages, add_panel_package, delete_panel_package, update_panel_field,
     get_conn, create_pending_order, get_pending_order, search_users,
     notify_first_start_if_needed, update_config_field,
     add_pinned_message, update_pinned_message,
@@ -60,9 +58,7 @@ from ..admin.renderers import (
     _show_admin_types, _show_admin_stock, _show_admin_admins_panel,
     _show_perm_selection, _show_admin_users_list, _show_admin_user_detail,
     _show_admin_user_detail_msg, _show_admin_assign_config_type, _fake_call,
-    _show_admin_panels, _show_panel_packages, _show_panel_edit,
 )
-from ..admin.iran_panels import show_create_token_result
 from .callbacks import (
     _DISCOUNT_PROMPT_TEXT, _show_discount_prompt,
     _show_purchase_gateways, _show_renewal_gateways, _show_wallet_gateways,
@@ -2850,83 +2846,6 @@ def universal_handler(message):
                              reply_markup=back_button("adm:emoji:menu"))
             return
 
-        # ── Panel: Register Panel Config (multi-step) ──────────────────────────
-        if sn == "panel_add_name" and is_admin(uid):
-            name = (message.text or "").strip()
-            if not name:
-                bot.send_message(uid, "⚠️ Name cannot be empty."); return
-            state_set(uid, "panel_add_ip", name=name)
-            bot.send_message(uid, f"🖥 Step 2/5: Enter Panel <b>IP</b> (default 127.0.0.1):")
-            return
-
-        if sn == "panel_add_ip" and is_admin(uid):
-            raw = (message.text or "").strip()
-            ip  = raw if raw else "127.0.0.1"
-            state_set(uid, "panel_add_port", name=sd["name"], ip=ip)
-            bot.send_message(uid, "🔌 Step 3/5: Enter Panel <b>Port</b> (default 2053):")
-            return
-
-        if sn == "panel_add_port" and is_admin(uid):
-            raw  = (message.text or "").strip()
-            port = raw if raw.isdigit() else "2053"
-            state_set(uid, "panel_add_patch", name=sd["name"], ip=sd["ip"], port=port)
-            bot.send_message(uid, "📄 Step 4/5: Enter <b>Patch</b> (optional, press / or leave blank):")
-            return
-
-        if sn == "panel_add_patch" and is_admin(uid):
-            raw   = (message.text or "").strip()
-            patch = raw if raw else ""
-            state_set(uid, "panel_add_user", name=sd["name"], ip=sd["ip"],
-                      port=sd["port"], patch=patch)
-            bot.send_message(uid, "👤 Step 5/6: Enter <b>Panel Username</b>:")
-            return
-
-        if sn == "panel_add_user" and is_admin(uid):
-            username = (message.text or "").strip()
-            if not username:
-                bot.send_message(uid, "⚠️ Username cannot be empty."); return
-            state_set(uid, "panel_add_pass", name=sd["name"], ip=sd["ip"],
-                      port=sd["port"], patch=sd["patch"], username=username)
-            bot.send_message(uid, "🔑 Step 6/6: Enter <b>Panel Password</b>:")
-            return
-
-        if sn == "panel_add_pass" and is_admin(uid):
-            password = (message.text or "").strip()
-            if not password:
-                bot.send_message(uid, "⚠️ Password cannot be empty."); return
-            state_clear(uid)
-            new_id = add_panel(sd["name"], sd["ip"], int(sd["port"]), sd["patch"], sd["username"], password)
-            log_admin_action(uid, f"پنل '{sd['name']}' (#{new_id}) ثبت شد")
-            bot.send_message(uid,
-                f"✅ <b>Panel Registered!</b>\n\n"
-                f"🖥 Name: {esc(sd['name'])}\n"
-                f"🌐 IP: {esc(sd['ip'])}\n"
-                f"🔌 Port: {sd['port']}\n"
-                f"📄 Patch: {esc(sd['patch'] or '/')}\n"
-                f"👤 Username: {esc(sd['username'])}\n"
-                f"🆔 Panel ID: #{new_id}",
-                reply_markup=kb_admin_panel(uid))
-            return
-
-        # ── Iran Panel: Token creation (single-step) ───────────────────────────
-        if sn == "ip_mktoken_label" and (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
-            label = (message.text or "").strip() or "بدون عنوان"
-            state_clear(uid)
-            from ..iran_panel.services import make_registration_token
-            token, _tid = make_registration_token(label=label, created_by=uid, ttl_hours=24)
-            log_admin_action(uid, f"توکن ثبت‌نام ثنایی «{label}» ایجاد شد")
-            # Build the API base URL hint from worker_api_port setting
-            api_port = setting_get("worker_api_port", "8080")
-            api_url  = f"http://<آدرس سرور خارج>:{api_port}"
-            from datetime import datetime, timedelta
-            from ..helpers import _TZ_TEHRAN
-            import jdatetime as _jdt
-            expiry_dt  = datetime.now(_TZ_TEHRAN) + timedelta(hours=24)
-            expiry_jdt = _jdt.datetime.fromgregorian(datetime=expiry_dt)
-            expires    = expiry_jdt.strftime("%Y-%m-%d %H:%M")
-            show_create_token_result(message, token, expires, api_url)
-            return
-
         # ── Pinned Messages ───────────────────────────────────────────────────
         if sn == "admin_pin_add" and admin_has_perm(uid, "settings"):
             text = (message.text or "").strip()
@@ -3029,88 +2948,7 @@ def universal_handler(message):
                 f"📝 <b>متن جدید:</b>\n{esc(_pin_preview)}")
             return
 
-        # ── Panel: Add Traffic Package (multi-step) ────────────────────────────
-        if sn == "panel_pkg_add_name" and is_admin(uid):
-            name = (message.text or "").strip()
-            if not name:
-                bot.send_message(uid, "⚠️ Package name cannot be empty."); return
-            state_set(uid, "panel_pkg_add_vol", panel_id=sd["panel_id"], name=name)
-            bot.send_message(uid, "📦 Step 2/3: Enter Volume in <b>GB</b> (e.g. 50):")
-            return
 
-        if sn == "panel_pkg_add_vol" and is_admin(uid):
-            raw = (message.text or "").strip()
-            if not raw.isdigit() or int(raw) <= 0:
-                bot.send_message(uid, "⚠️ Enter a valid number of GB."); return
-            state_set(uid, "panel_pkg_add_days", panel_id=sd["panel_id"],
-                      name=sd["name"], volume_gb=raw)
-            bot.send_message(uid, "⏰ Step 3/4: Enter Duration in <b>Days</b> (e.g. 30):")
-            return
-
-        if sn == "panel_pkg_add_days" and is_admin(uid):
-            raw = (message.text or "").strip()
-            if not raw.isdigit() or int(raw) <= 0:
-                bot.send_message(uid, "⚠️ Enter a valid number of days."); return
-            state_set(uid, "panel_pkg_add_inbound", panel_id=sd["panel_id"],
-                      name=sd["name"], volume_gb=sd["volume_gb"], duration_days=raw)
-            bot.send_message(uid, "🔢 Step 4/4: Enter <b>Inbound ID</b> (the numeric ID of the inbound in 3x-ui, e.g. 1):")
-            return
-
-        if sn == "panel_pkg_add_inbound" and is_admin(uid):
-            raw = (message.text or "").strip()
-            if not raw.isdigit() or int(raw) <= 0:
-                bot.send_message(uid, "⚠️ Enter a valid inbound ID (number)."); return
-            state_clear(uid)
-            pp_id = add_panel_package(sd["panel_id"], sd["name"], int(sd["volume_gb"]),
-                                      int(sd["duration_days"]), int(raw))
-            log_admin_action(uid, f"پکیج پنل '{sd['name']}' (#{pp_id}) ثبت شد")
-            bot.send_message(uid,
-                f"✅ <b>Package Added!</b>\n\n"
-                f"📦 Name: {esc(sd['name'])}\n"
-                f"🔋 Volume: {sd['volume_gb']} GB\n"
-                f"⏰ Duration: {sd['duration_days']} days\n"
-                f"🔢 Inbound ID: #{raw}\n"
-                f"🆔 Package ID: #{pp_id}",
-                reply_markup=kb_admin_panel(uid))
-            return
-
-        # ── Panel: Edit field ──────────────────────────────────────────────────
-        if sn == "panel_edit_field" and is_admin(uid):
-            value    = (message.text or "").strip()
-            field    = sd["field"]
-            panel_id = sd["panel_id"]
-            if not value:
-                bot.send_message(uid, "⚠️ Value cannot be empty."); return
-            if field == "port" and not value.isdigit():
-                bot.send_message(uid, "⚠️ Port must be numeric."); return
-            update_panel_field(panel_id, field, int(value) if field == "port" else value)
-            log_admin_action(uid, f"فیلد {field} پنل #{panel_id} ویرایش شد")
-            state_clear(uid)
-            bot.send_message(uid, f"✅ Field <b>{field}</b> updated.", reply_markup=kb_admin_panel(uid))
-            return
-
-        # ── Panel: Set Worker API Key ──────────────────────────────────────────
-        if sn == "panel_set_api_key" and is_admin(uid):
-            key = (message.text or "").strip()
-            if len(key) < 16 or not re.fullmatch(r"[A-Za-z0-9_\-]+", key):
-                bot.send_message(uid, "⚠️ API key must be at least 16 alphanumeric characters."); return
-            setting_set("worker_api_key", key)
-            log_admin_action(uid, "Worker API key تغییر کرد")
-            state_clear(uid)
-            bot.send_message(uid, f"✅ Worker API key saved.\n\n🔑 <code>{esc(key)}</code>",
-                             reply_markup=kb_admin_panel(uid))
-            return
-
-        # ── Panel: Set Worker API Port ─────────────────────────────────────────
-        if sn == "panel_set_api_port" and is_admin(uid):
-            raw = (message.text or "").strip()
-            if not raw.isdigit() or not (1 <= int(raw) <= 65535):
-                bot.send_message(uid, "⚠️ Enter a valid port number (1-65535)."); return
-            setting_set("worker_api_port", raw)
-            log_admin_action(uid, f"API port به {raw} تغییر کرد")
-            state_clear(uid)
-            bot.send_message(uid, f"✅ API port set to <b>{raw}</b>.", reply_markup=kb_admin_panel(uid))
-            return
 
     except Exception as e:
         print("TEXT_HANDLER_ERROR:", e)

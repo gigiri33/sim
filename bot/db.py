@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 import json
 import sqlite3
 import threading
@@ -169,42 +169,6 @@ def init_db():
                 created_at     TEXT    NOT NULL,
                 status         TEXT    NOT NULL DEFAULT 'waiting'
             );
-            CREATE TABLE IF NOT EXISTS panels (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                name        TEXT    NOT NULL,
-                ip          TEXT    NOT NULL,
-                port        INTEGER NOT NULL DEFAULT 2053,
-                patch       TEXT    NOT NULL DEFAULT '',
-                username    TEXT    NOT NULL,
-                password    TEXT    NOT NULL,
-                is_active   INTEGER NOT NULL DEFAULT 1,
-                created_at  TEXT    NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS panel_packages (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                panel_id      INTEGER NOT NULL,
-                name          TEXT    NOT NULL,
-                volume_gb     INTEGER NOT NULL,
-                duration_days INTEGER NOT NULL,
-                inbound_id    INTEGER NOT NULL DEFAULT 1,
-                created_at    TEXT    NOT NULL,
-                FOREIGN KEY(panel_id) REFERENCES panels(id) ON DELETE CASCADE
-            );
-            CREATE TABLE IF NOT EXISTS xui_jobs (
-                id               INTEGER PRIMARY KEY AUTOINCREMENT,
-                job_uuid         TEXT    NOT NULL UNIQUE,
-                user_id          INTEGER NOT NULL,
-                panel_id         INTEGER NOT NULL,
-                panel_package_id INTEGER NOT NULL,
-                payment_id       INTEGER,
-                status           TEXT    NOT NULL DEFAULT 'pending',
-                result_config    TEXT,
-                result_link      TEXT,
-                error_msg        TEXT,
-                retry_count      INTEGER NOT NULL DEFAULT 0,
-                created_at       TEXT    NOT NULL,
-                updated_at       TEXT    NOT NULL
-            );
             CREATE TABLE IF NOT EXISTS pinned_messages (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 text       TEXT    NOT NULL,
@@ -313,9 +277,6 @@ def init_db():
             "phone_iran_only":   "0",
             "purchase_rules_enabled": "0",
             "purchase_rules_text": "♨️ قوانین استفاده از خدمات ما\n\nلطفاً پیش از استفاده از سرویس‌ها، موارد زیر را با دقت مطالعه فرمایید:\n\n1️⃣ اطلاعیه‌های منتشرشده در کانال را حتماً دنبال کنید.\n\n2️⃣ در صورتی که با مشکلی در اتصال مواجه شدید، به پشتیبانی پیام دهید.\n\n3️⃣ از ارسال مشخصات سرویس از طریق پیامک خودداری کنید.\n\n4️⃣ مسئولیت حفظ اطلاعات سرویس بر عهده کاربر می‌باشد.\n\n5️⃣ هرگونه سوءاستفاده ممکن است منجر به مسدود شدن سرویس شود.",
-            "worker_api_key":     "",
-            "worker_api_port":    "8080",
-            "worker_api_enabled": "0",
             "group_id":                    "",
             "group_topic_backup":           "",
             "group_topic_new_users":        "",
@@ -365,7 +326,6 @@ def init_db():
             "ALTER TABLE payments ADD COLUMN crypto_coin TEXT",
             "ALTER TABLE packages ADD COLUMN position INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE config_types ADD COLUMN description TEXT NOT NULL DEFAULT ''",
-            "ALTER TABLE panel_packages ADD COLUMN inbound_id INTEGER NOT NULL DEFAULT 1",
             "ALTER TABLE config_types ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1",
             "CREATE TABLE IF NOT EXISTS pinned_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL, created_at TEXT NOT NULL)",
             "CREATE TABLE IF NOT EXISTS pinned_message_sends (id INTEGER PRIMARY KEY AUTOINCREMENT, pin_id INTEGER NOT NULL, user_id INTEGER NOT NULL, message_id INTEGER NOT NULL)",
@@ -425,12 +385,6 @@ def init_db():
             except Exception:
                 pass
 
-    # ── Iran Panel tables (separate migration, idempotent) ─────────────────────
-    try:
-        from .iran_panel.db import init_iran_panel_tables
-        init_iran_panel_tables()
-    except Exception:
-        pass
 
 
 # ── Settings ───────────────────────────────────────────────────────────────────
@@ -1285,126 +1239,6 @@ def update_admin_permissions(user_id, permissions_dict):
             "UPDATE admin_users SET permissions=? WHERE user_id=?",
             (perms_json, user_id)
         )
-
-
-# ── 3x-ui Panels ──────────────────────────────────────────────────────────────
-def get_all_panels():
-    with get_conn() as conn:
-        return conn.execute("SELECT * FROM panels ORDER BY id DESC").fetchall()
-
-
-def get_panel(panel_id):
-    with get_conn() as conn:
-        return conn.execute(
-            "SELECT * FROM panels WHERE id=?", (panel_id,)
-        ).fetchone()
-
-
-def add_panel(name, ip, port, patch, username, password):
-    with get_conn() as conn:
-        conn.execute(
-            "INSERT INTO panels(name,ip,port,patch,username,password,is_active,created_at)"
-            " VALUES(?,?,?,?,?,?,1,?)",
-            (name.strip(), ip.strip(), int(port), patch.strip(),
-             username.strip(), password, now_str())
-        )
-        return conn.execute("SELECT last_insert_rowid() AS x").fetchone()["x"]
-
-
-def update_panel_field(panel_id, field, value):
-    allowed = {"name", "ip", "port", "patch", "username", "password", "is_active"}
-    if field not in allowed:
-        return
-    with get_conn() as conn:
-        conn.execute(f"UPDATE panels SET {field}=? WHERE id=?", (value, panel_id))
-
-
-def delete_panel(panel_id):
-    with get_conn() as conn:
-        conn.execute("DELETE FROM panels WHERE id=?", (panel_id,))
-
-
-def get_panel_packages(panel_id):
-    with get_conn() as conn:
-        return conn.execute(
-            "SELECT * FROM panel_packages WHERE panel_id=? ORDER BY id ASC", (panel_id,)
-        ).fetchall()
-
-
-def get_panel_package(pp_id):
-    with get_conn() as conn:
-        return conn.execute(
-            "SELECT * FROM panel_packages WHERE id=?", (pp_id,)
-        ).fetchone()
-
-
-def add_panel_package(panel_id, name, volume_gb, duration_days, inbound_id=1):
-    with get_conn() as conn:
-        conn.execute(
-            "INSERT INTO panel_packages(panel_id,name,volume_gb,duration_days,"
-            "inbound_id,created_at) VALUES(?,?,?,?,?,?)",
-            (panel_id, name.strip(), int(volume_gb),
-             int(duration_days), int(inbound_id), now_str())
-        )
-        return conn.execute("SELECT last_insert_rowid() AS x").fetchone()["x"]
-
-
-def delete_panel_package(pp_id):
-    with get_conn() as conn:
-        conn.execute("DELETE FROM panel_packages WHERE id=?", (pp_id,))
-
-
-def create_xui_job(user_id, panel_id, panel_package_id, payment_id=None):
-    job_uuid_str = str(uuid.uuid4())
-    with get_conn() as conn:
-        conn.execute(
-            "INSERT INTO xui_jobs(job_uuid,user_id,panel_id,panel_package_id,"
-            "payment_id,status,retry_count,created_at,updated_at)"
-            " VALUES(?,?,?,?,?,'pending',0,?,?)",
-            (job_uuid_str, user_id, panel_id, panel_package_id,
-             payment_id, now_str(), now_str())
-        )
-        return conn.execute("SELECT last_insert_rowid() AS x").fetchone()["x"], job_uuid_str
-
-
-def get_xui_job(job_id):
-    with get_conn() as conn:
-        return conn.execute("SELECT * FROM xui_jobs WHERE id=?", (job_id,)).fetchone()
-
-
-def get_pending_xui_jobs():
-    with get_conn() as conn:
-        return conn.execute(
-            "SELECT j.*, p.ip, p.port, p.patch, p.username, p.password,"
-            " pp.name AS pkg_name, pp.volume_gb, pp.duration_days, pp.inbound_id"
-            " FROM xui_jobs j"
-            " JOIN panels p ON p.id=j.panel_id"
-            " JOIN panel_packages pp ON pp.id=j.panel_package_id"
-            " WHERE j.status IN ('pending','failed') AND j.retry_count < 5"
-            " ORDER BY j.created_at ASC LIMIT 20"
-        ).fetchall()
-
-
-def update_xui_job(job_id, status, result_config=None, result_link=None, error_msg=None):
-    with get_conn() as conn:
-        conn.execute(
-            "UPDATE xui_jobs SET status=?, result_config=?, result_link=?, error_msg=?,"
-            " retry_count=retry_count+1, updated_at=? WHERE id=?",
-            (status, result_config, result_link, error_msg, now_str(), job_id)
-        )
-
-
-def get_user_xui_jobs(user_id):
-    with get_conn() as conn:
-        return conn.execute(
-            "SELECT j.*, pp.name AS pkg_name, pp.volume_gb, pp.duration_days,"
-            " p.name AS panel_name"
-            " FROM xui_jobs j"
-            " JOIN panel_packages pp ON pp.id=j.panel_package_id"
-            " JOIN panels p ON p.id=j.panel_id"
-            " WHERE j.user_id=? ORDER BY j.created_at DESC",
-            (user_id,)
-        ).fetchall()
 
 
 # ── Pending Orders ─────────────────────────────────────────────────────────────

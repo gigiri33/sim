@@ -9,7 +9,6 @@ from ..config import ADMIN_PERMS, PERM_EMOJI_IDS
 from ..db import (
     get_all_types, get_packages, get_registered_packages_stock,
     get_all_admin_users, get_user, get_user_detail, get_phone_number,
-    get_panel, get_all_panels, get_panel_packages,
     count_users_stats,
 )
 from ..helpers import esc, fmt_price, display_username, back_button
@@ -311,74 +310,3 @@ def _fake_call(call, new_data):
 
     _dispatch_callback(_FakeCall(call, new_data), call.from_user.id, new_data)
 
-
-# ── 3x-ui Panel renderers ──────────────────────────────────────────────────────
-def _show_admin_panels(call):
-    panels = get_all_panels()
-    kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton("➕ Register Panel Config", callback_data="adm:panel:add"))
-    for p in panels:
-        status_icon = "🟢" if p["is_active"] else "🔴"
-        kb.add(types.InlineKeyboardButton(
-            f"{status_icon} {p['name']} | {p['ip']}:{p['port']}",
-            callback_data="noop"
-        ))
-        kb.row(
-            types.InlineKeyboardButton("✏️ Edit",     callback_data=f"adm:panel:edit:{p['id']}"),
-            types.InlineKeyboardButton("🗑 Delete",   callback_data=f"adm:panel:del:{p['id']}"),
-            types.InlineKeyboardButton("📦 Packages", callback_data=f"adm:panel:pkgs:{p['id']}"),
-        )
-    kb.add(types.InlineKeyboardButton("⚙️ Worker API Settings", callback_data="adm:panel:api_settings"))
-    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
-    send_or_edit(call, "🖥 <b>مدیریت پنل‌های 3x-ui</b>\n\nپنل‌های ثبت‌شده:", kb)
-
-
-def _show_panel_packages(call, panel_id):
-    panel = get_panel(panel_id)
-    if not panel:
-        bot.answer_callback_query(call.id, "Panel not found.", show_alert=True)
-        return
-    pkgs = get_panel_packages(panel_id)
-    kb   = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton("➕ Add Traffic Package", callback_data=f"adm:panel:pkadd:{panel_id}"))
-    for pp in pkgs:
-        inbound_display = pp['inbound_id'] if 'inbound_id' in pp.keys() else 1
-        kb.add(types.InlineKeyboardButton(
-            f"📦 {pp['name']} | {pp['volume_gb']}GB | {pp['duration_days']}d | inbound#{inbound_display}",
-            callback_data="noop"
-        ))
-        kb.add(types.InlineKeyboardButton(
-            f"🗑 Delete {pp['name']}", callback_data=f"adm:panel:pkdel:{pp['id']}"
-        ))
-    kb.add(types.InlineKeyboardButton("🔙 Back to Panels", callback_data="admin:panels"))
-    send_or_edit(call,
-        f"📦 <b>Traffic Packages — {esc(panel['name'])}</b>\n"
-        f"🌐 {esc(panel['ip'])}:{panel['port']}\n\n"
-        "Packages assigned to this panel:", kb)
-
-
-def _show_panel_edit(call, panel_id):
-    panel = get_panel(panel_id)
-    if not panel:
-        bot.answer_callback_query(call.id, "Panel not found.", show_alert=True)
-        return
-    kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton("📝 Edit Name",     callback_data=f"adm:panel:ef:name:{panel_id}"))
-    kb.add(types.InlineKeyboardButton("🌐 Edit IP",       callback_data=f"adm:panel:ef:ip:{panel_id}"))
-    kb.add(types.InlineKeyboardButton("🔌 Edit Port",     callback_data=f"adm:panel:ef:port:{panel_id}"))
-    kb.add(types.InlineKeyboardButton("📄 Edit Patch",    callback_data=f"adm:panel:ef:patch:{panel_id}"))
-    kb.add(types.InlineKeyboardButton("👤 Edit Username", callback_data=f"adm:panel:ef:username:{panel_id}"))
-    kb.add(types.InlineKeyboardButton("🔑 Edit Password", callback_data=f"adm:panel:ef:password:{panel_id}"))
-    status_lbl = "🔴 Deactivate" if panel["is_active"] else "🟢 Activate"
-    new_status  = 0 if panel["is_active"] else 1
-    kb.add(types.InlineKeyboardButton(status_lbl, callback_data=f"adm:panel:toggle:{panel_id}:{new_status}"))
-    kb.add(types.InlineKeyboardButton("🔙 Back", callback_data="admin:panels"))
-    send_or_edit(call,
-        f"✏️ <b>Edit Panel — {esc(panel['name'])}</b>\n\n"
-        f"🌐 IP: <code>{esc(panel['ip'])}</code>\n"
-        f"🔌 Port: <code>{panel['port']}</code>\n"
-        f"📄 Patch: <code>{esc(panel['patch'] or '/')}</code>\n"
-        f"👤 Username: <code>{esc(panel['username'])}</code>\n"
-        f"🔑 Password: <code>{'*' * min(len(panel['password']), 8)}</code>\n"
-        f"Status: {'🟢 Active' if panel['is_active'] else '🔴 Inactive'}",
-        kb)

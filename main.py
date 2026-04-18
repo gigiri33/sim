@@ -62,20 +62,6 @@ def main():
     group_thread = threading.Thread(target=_group_topic_loop, daemon=True)
     group_thread.start()
 
-    # Start worker API server if enabled
-    if setting_get("worker_api_enabled", "0") == "1":
-        try:
-            from api import app as flask_app
-            api_port = int(setting_get("worker_api_port", "8080") or "8080")
-            api_thread = threading.Thread(
-                target=lambda: flask_app.run(host="0.0.0.0", port=api_port, use_reloader=False),
-                daemon=True
-            )
-            api_thread.start()
-            print(f"✅ Worker API server started on port {api_port}")
-        except Exception as e:
-            print(f"⚠️ Could not start API server: {e}")
-
     # Remove any active webhook before starting long-polling (prevents 409 conflict)
     try:
         bot.delete_webhook(drop_pending_updates=True)
