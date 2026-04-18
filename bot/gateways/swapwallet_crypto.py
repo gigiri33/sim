@@ -28,6 +28,13 @@ NETWORK_LABELS = {
 }
 
 
+def get_active_swapwallet_networks():
+    """Return list of (network, token) pairs that are currently enabled in settings."""
+    active_str = setting_get("swapwallet_active_currencies", "TRON,TON,BSC").strip()
+    active_set = {x.strip().upper() for x in active_str.split(",") if x.strip()}
+    return [(net, tok) for net, tok in SWAPWALLET_CRYPTO_NETWORKS if net in active_set]
+
+
 def _get_credentials():
     api_key  = setting_get("swapwallet_crypto_api_key", "").strip()
     username = setting_get("swapwallet_crypto_username", "").strip()
@@ -148,7 +155,8 @@ def show_swapwallet_crypto_page(call, *, amount_toman, invoice_id, result, payme
     text += (
         "ℹ️ <i>در صورت موجود بودن آن ارز در کیف پول سواپ ولت شما، مبلغ از کیف پول کسر می‌شود؛ در غیر این صورت پرداخت به‌صورت ریالی انجام خواهد شد.</i>\n\n"
         "❌ این فاکتور <b>۱ ساعت</b> اعتبار دارد\n"
-        "پس از واریز، دکمه «✅ بررسی پرداخت» را بزنید."
+        "پس از واریز، دکمه «✅ بررسی پرداخت» را بزنید.\n\n"
+        "⚠️ <i>تمامی کارمزد انتقال ارز دیجیتال به عهده واریزکننده می‌باشد</i>"
     )
 
     kb = types.InlineKeyboardMarkup()
@@ -160,9 +168,9 @@ def show_swapwallet_crypto_page(call, *, amount_toman, invoice_id, result, payme
         if name == "SWAP_WALLET":
             kb.add(types.InlineKeyboardButton("💳 پرداخت در SwapWallet", url=url))
         elif name == "TRUST_WALLET":
-            kb.add(types.InlineKeyboardButton("🔒 Trust Wallet", url=url))
+            pass  # Trust Wallet removed
         else:
-            kb.add(types.InlineKeyboardButton(f"🔗 {name}", url=url))
+            pass  # Only SWAP_WALLET link is shown
     kb.add(types.InlineKeyboardButton("✅ بررسی پرداخت", callback_data=verify_cb))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
 

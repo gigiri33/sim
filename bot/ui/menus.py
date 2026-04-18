@@ -6,7 +6,7 @@ import urllib.parse
 from telebot import types
 
 from ..config import BRAND_TITLE, DEFAULT_ADMIN_HANDLE
-from ..db import setting_get, get_user, get_user_purchases, get_referral_stats
+from ..db import setting_get, get_user, get_user_purchases, get_referral_stats, has_pending_rewards
 from ..helpers import esc, fmt_price, display_username, back_button, move_leading_emoji
 from ..bot_instance import bot
 from .helpers import send_or_edit
@@ -230,6 +230,11 @@ def show_referral_menu(target, user_id):
         # With banner: callback so the bot sends the photo to the user for forwarding
         kb.add(types.InlineKeyboardButton("📤 دریافت پست آماده برای اشتراک‌گذاری", callback_data="referral:get_banner"))
     # NOTE: icon_custom_emoji_id for url buttons not supported via types; text fallback kept
+
+    # ── Pending reward claim button ────────────────────────────────────────────
+    if has_pending_rewards(user_id):
+        kb.add(types.InlineKeyboardButton("🎁 دریافت پاداش", callback_data="referral:claim_reward"))
+
     kb.add(types.InlineKeyboardButton("🔗 اشتراک‌گذاری لینک دعوت", url=share_url))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
 

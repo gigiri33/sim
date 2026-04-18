@@ -20,6 +20,7 @@ from ..db import (
     mark_purchase_reward_given, get_referral_by_referee,
     update_balance,
     set_referral_channel_joined, try_claim_start_reward_batch,
+    add_pending_reward,
 )
 from ..helpers import esc, fmt_price, now_str, move_leading_emoji
 from ..bot_instance import bot
@@ -478,23 +479,27 @@ def auto_fulfill_pending_orders(package_id):
 
 # ── Referral Reward Logic ──────────────────────────────────────────────────────
 def _give_referral_reward(referrer_id, reward_prefix):
-    """Give a referral reward (wallet charge or config) to referrer_id.
+    """Queue a referral reward as a pending claim for referrer_id.
     reward_prefix: 'referral_start_reward' or 'referral_purchase_reward'
+    source: 'start' if start-reward, 'purchase' if purchase-reward
     """
+    source = "start" if "start" in reward_prefix else "purchase"
     reward_type = setting_get(f"{reward_prefix}_type", "wallet")
     if reward_type == "wallet":
         amount = int(setting_get(f"{reward_prefix}_amount", "0"))
-        if amount > 0:
-            update_balance(referrer_id, amount)
-            try:
-                bot.send_message(
-                    referrer_id,
-                    f"🎁 <b>هدیه زیرمجموعه‌گیری!</b>\n\n"
-                    f"💰 مبلغ <b>{fmt_price(amount)}</b> تومان به کیف پول شما اضافه شد.",
-                    parse_mode="HTML"
-                )
-            except Exception:
-                pass
+        if amount <= 0:
+            return
+        add_pending_reward(referrer_id, "wallet", amount, None, source)
+        try:
+            bot.send_message(
+                referrer_id,
+                "🎁 <b>پاداش زیرمجموعه‌گیری!</b>\n\n"
+                f"💰 مبلغ <b>{fmt_price(amount)}</b> تومان به عنوان پاداش برای شما ذخیره شد.\n"
+                "برای دریافت، به بخش دعوت دوستان بروید و روی «🎁 دریافت پاداش» بزنید.",
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
     else:
         # Config reward
         pkg_id = setting_get(f"{reward_prefix}_package", "")
@@ -503,32 +508,15 @@ def _give_referral_reward(referrer_id, reward_prefix):
         pkg = get_package(int(pkg_id))
         if not pkg:
             return
-        available = get_available_configs_for_package(int(pkg_id))
-        if not available:
-            try:
-                bot.send_message(
-                    referrer_id,
-                    "🎁 <b>هدیه زیرمجموعه‌گیری!</b>\n\n"
-                    "⚠️ متأسفانه موجودی کانفیگ هدیه تمام شده. "
-                    "لطفاً به پشتیبانی اطلاع دهید.",
-                    parse_mode="HTML"
-                )
-            except Exception:
-                pass
-            return
-        cfg = available[0]
+        add_pending_reward(referrer_id, "config", 0, int(pkg_id), source)
         try:
-            purchase_id = assign_config_to_user(
-                cfg["id"], referrer_id, int(pkg_id), 0, "referral_gift", is_test=0
-            )
             bot.send_message(
                 referrer_id,
-                "🎁 <b>هدیه زیرمجموعه‌گیری!</b>\n\n"
-                "یک کانفیگ رایگان به شما تعلق گرفت! 🎉\n"
-                "جزئیات سرویس در ادامه ارسال می‌شود.",
+                "🎁 <b>پاداش زیرمجموعه‌گیری!</b>\n\n"
+                "یک کانفیگ رایگان برای شما ذخیره شد. 🎉\n"
+                "برای دریافت، به بخش دعوت دوستان بروید و روی «🎁 دریافت پاداش» بزنید.",
                 parse_mode="HTML"
             )
-            deliver_purchase_message(referrer_id, purchase_id)
         except Exception:
             pass
 

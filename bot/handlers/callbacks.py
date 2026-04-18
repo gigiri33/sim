@@ -49,6 +49,8 @@ from ..db import (
     get_voucher_codes_for_batch, get_voucher_code_by_code,
     redeem_voucher_code, delete_voucher_batch,
     get_phone_number,
+    has_pending_rewards, get_unclaimed_rewards, mark_rewards_claimed,
+    get_locked_channels, add_locked_channel, remove_locked_channel_by_id,
 )
 from ..gateways.base import is_gateway_available, is_card_info_complete, get_gateway_range_text, is_gateway_in_range, build_gateway_range_guide
 from ..gateways.crypto import fetch_crypto_prices
@@ -120,12 +122,42 @@ def _v2_name_from_sub(sub_url: str) -> str:
         return (sub_url.rsplit("/", 1)[-1] or "sub")
 
 
+def _v2_name_from_vmess(cfg_text: str) -> str:
+    """Extract the 'ps' (presentation name) field from a VMess base64 config.
+    Falls back to host:port or 'VMess Config' on any error.
+    """
+    import base64, json as _json
+    try:
+        # Strip vmess:// prefix and any trailing #tag
+        body = cfg_text[8:].split("#")[0]
+        # Pad to multiple of 4
+        padded = body + "=" * (-len(body) % 4)
+        data = _json.loads(base64.b64decode(padded).decode("utf-8"))
+        ps = (data.get("ps") or "").strip()
+        if ps:
+            return ps
+        host = (data.get("add") or data.get("host") or "").strip()
+        port = str(data.get("port", "")).strip()
+        return f"{host}:{port}" if host else "VMess Config"
+    except Exception:
+        return "VMess Config"
+
+
 def _v2_name_from_config(cfg_text: str, prefix: str = "", suffix: str = "") -> str:
     """Extract and clean service name from a V2Ray config's URL-encoded #tag.
 
-    Preserves the existing extraction logic (url-decode, strip prefix/suffix,
-    strip leading/trailing separators).
+    For vmess:// configs that lack a #tag, decodes the base64 JSON and uses
+    the 'ps' field (then host:port) as name.
     """
+    # VMess special handling: decode base64 JSON for the ps field
+    if cfg_text.startswith("vmess://"):
+        if "#" not in cfg_text:
+            return _v2_name_from_vmess(cfg_text)
+        # Has a #tag — use the tag (normal path below), but fall back to ps if empty
+        raw_tag = cfg_text.rsplit("#", 1)[1].strip()
+        if not raw_tag:
+            return _v2_name_from_vmess(cfg_text)
+
     if "#" in cfg_text:
         raw = cfg_text.rsplit("#", 1)[1]
     else:
@@ -654,6 +686,8 @@ def _show_invoice_expired(call) -> None:
 def _br_ok(p, is_agent: bool) -> bool:
     """Return True if the package is visible/purchasable for this user type."""
     br = p["buyer_role"] if "buyer_role" in p.keys() else "all"
+    if br == "nobody":
+        return False  # hidden — only for referral gifts, not regular purchase
     if br == "agents" and not is_agent:
         return False
     if br == "public" and is_agent:
@@ -1357,7 +1391,7 @@ def _render_discount_code_detail(call, uid, code_id):
 
 # ── Module-level helper: build package edit panel text + keyboard ────────────
 def _pkg_edit_text_kb(package_row):
-    _BR_LABELS = {"all": "همه", "agents": "فقط نمایندگان", "public": "فقط کاربران عادی"}
+    _BR_LABELS = {"all": "همه", "agents": "فقط نمایندگان", "public": "فقط کاربران عادی", "nobody": "هیچ‌کس (فقط هدیه)"}
     package_id    = package_row["id"]
     show_name_val = package_row["show_name"] if "show_name" in package_row.keys() else 1
     show_name_lbl = "👁 نمایش نام به کاربر: ✅ بله" if show_name_val else "👁 نمایش نام به کاربر: ❌ خیر"
@@ -1448,6 +1482,27 @@ def on_callback(call):
 
     try:
         ensure_user(call.from_user)
+
+        # ── Stale callback guard ─────────────────────────────────────────────
+        # If the inline button is from a message older than 48 h and it's a
+        # payment/purchase action, warn the user and abort to avoid double-pay.
+        _STALE_SENSITIVE = (
+            "pay:", "rpay:", "renew:", "buy:p:", "wallet:charge:",
+            "pay:approve:", "pay:reject:",
+        )
+        try:
+            msg_date = getattr(call.message, "date", 0) or 0
+            import time as _time
+            if msg_date and (_time.time() - msg_date) > 172800:  # 48 hours
+                if any(data.startswith(p) for p in _STALE_SENSITIVE):
+                    bot.answer_callback_query(
+                        call.id,
+                        "⏰ این دکمه منقضی شده است. لطفاً دوباره از منو اقدام کنید.",
+                        show_alert=True
+                    )
+                    return
+        except Exception:
+            pass
 
         if not check_channel_membership(uid):
             bot.answer_callback_query(call.id)
@@ -1849,6 +1904,49 @@ def _dispatch_callback(call, uid, data):
 
     if data == "referral:menu":
         bot.answer_callback_query(call.id)
+        show_referral_menu(call, uid)
+        return
+
+    if data == "referral:claim_reward":
+        rewards = get_unclaimed_rewards(uid)
+        if not rewards:
+            bot.answer_callback_query(call.id, "هیچ پاداش دریافت‌نشده‌ای وجود ندارد.", show_alert=True)
+            return
+        delivered_wallet = 0
+        delivered_config = 0
+        failed_config = 0
+        for row in rewards:
+            if row["reward_type"] == "wallet":
+                update_balance(uid, int(row["amount"] or 0))
+                delivered_wallet += int(row["amount"] or 0)
+            else:
+                pkg_id = row["package_id"]
+                if not pkg_id:
+                    failed_config += 1
+                    continue
+                available = get_available_configs_for_package(int(pkg_id))
+                if not available:
+                    failed_config += 1
+                    continue
+                cfg = available[0]
+                try:
+                    purchase_id = assign_config_to_user(
+                        cfg["id"], uid, int(pkg_id), 0, "referral_gift", is_test=0
+                    )
+                    delivered_config += 1
+                    deliver_purchase_message(uid, purchase_id)
+                except Exception:
+                    failed_config += 1
+        mark_rewards_claimed(uid)
+        parts_msg = []
+        if delivered_wallet:
+            parts_msg.append(f"💰 {fmt_price(delivered_wallet)} تومان به کیف پول شما اضافه شد")
+        if delivered_config:
+            parts_msg.append(f"🎁 {delivered_config} کانفیگ رایگان تحویل داده شد")
+        if failed_config:
+            parts_msg.append(f"⚠️ {failed_config} پاداش کانفیگ به دلیل عدم موجودی تحویل نشد — با پشتیبانی تماس بگیرید")
+        result_text = "\n".join(parts_msg) if parts_msg else "پاداشی برای دریافت وجود نداشت."
+        bot.answer_callback_query(call.id, "✅ پاداش دریافت شد!", show_alert=True)
         show_referral_menu(call, uid)
         return
 
@@ -2709,6 +2807,11 @@ def _dispatch_callback(call, uid, data):
             return
         # ── Buyer role enforcement ────────────────────────────────────────────
         buyer_role = package_row["buyer_role"] if "buyer_role" in package_row.keys() else "all"
+        if buyer_role == "nobody":
+            bot.answer_callback_query(call.id,
+                "🔒 این پکیج در دسترس عموم نیست.",
+                show_alert=True)
+            return
         if buyer_role != "all":
             _user = get_user(uid)
             _is_agent = bool(_user and _user["is_agent"])
@@ -3373,14 +3476,43 @@ def _dispatch_callback(call, uid, data):
                 "لطفاً درگاه دیگری متناسب با این مبلغ انتخاب کنید.",
                 show_alert=True)
             return
-        from ..gateways.swapwallet_crypto import SWAPWALLET_CRYPTO_NETWORKS, NETWORK_LABELS as SW_NET_LABELS
+        from ..gateways.swapwallet_crypto import get_active_swapwallet_networks, NETWORK_LABELS as SW_NET_LABELS
+        _active_nets = get_active_swapwallet_networks()
+        if not _active_nets:
+            bot.answer_callback_query(call.id, "هیچ ارزی برای SwapWallet فعال نشده است.", show_alert=True)
+            return
         state_set(uid, "swcrypto_network_select", kind="wallet_charge", amount=amount)
         kb = types.InlineKeyboardMarkup()
-        for net, _ in SWAPWALLET_CRYPTO_NETWORKS:
-            kb.add(types.InlineKeyboardButton(SW_NET_LABELS.get(net, net), callback_data=f"swcrypto:net:{net}"))
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
-        bot.answer_callback_query(call.id)
-        send_or_edit(call, "💎 <b>پرداخت کریپتو (SwapWallet)</b>\n\nشبکه مورد نظر را انتخاب کنید:", kb)
+        if len(_active_nets) == 1:
+            # Skip selection — go directly with the only available network
+            net = _active_nets[0][0]
+            state_set(uid, "swcrypto_network_select", kind="wallet_charge", amount=amount, _auto_net=net)
+            # Fake a network selection by routing through same handler data
+            bot.answer_callback_query(call.id)
+            # Emit synthetic callback — handled by swcrypto:net: branch below (force inline)
+            _swc_sd = state_data(uid)
+            _swc_sd["_auto_net"] = net
+            from ..gateways.swapwallet_crypto import create_swapwallet_crypto_invoice
+            order_id = f"swc-{uid}-{int(datetime.now().timestamp())}"
+            success, result = create_swapwallet_crypto_invoice(amount, order_id, net, "شارژ کیف پول")
+            if not success:
+                err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
+                _swapwallet_error_inline(call, err_msg)
+                return
+            invoice_id = result.get("id", "")
+            payment_id = create_payment("wallet_charge", uid, None, amount, "swapwallet_crypto", status="pending")
+            with get_conn() as conn:
+                conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id, payment_id))
+            state_set(uid, "await_swapwallet_crypto_verify", payment_id=payment_id, invoice_id=invoice_id)
+            verify_cb = f"pay:swapwallet_crypto:verify:{payment_id}"
+            show_swapwallet_crypto_page(call, amount_toman=amount, invoice_id=invoice_id,
+                                        result=result, payment_id=payment_id, verify_cb=verify_cb)
+        else:
+            for net, _ in _active_nets:
+                kb.add(types.InlineKeyboardButton(SW_NET_LABELS.get(net, net), callback_data=f"swcrypto:net:{net}"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
+            bot.answer_callback_query(call.id)
+            send_or_edit(call, "💎 <b>پرداخت کریپتو (SwapWallet)</b>\n\nشبکه مورد نظر را انتخاب کنید:", kb)
         return
 
     if data == "wallet:charge:tronpays_rial":
@@ -3506,11 +3638,15 @@ def _dispatch_callback(call, uid, data):
                 "لطفاً درگاه دیگری متناسب با این مبلغ انتخاب کنید.",
                 show_alert=True)
             return
-        from ..gateways.swapwallet_crypto import SWAPWALLET_CRYPTO_NETWORKS, NETWORK_LABELS as SW_NET_LABELS
+        from ..gateways.swapwallet_crypto import get_active_swapwallet_networks, NETWORK_LABELS as SW_NET_LABELS
+        _active_nets2 = get_active_swapwallet_networks()
+        if not _active_nets2:
+            bot.answer_callback_query(call.id, "هیچ ارزی برای SwapWallet فعال نشده است.", show_alert=True)
+            return
         state_set(uid, "swcrypto_network_select", kind="config_purchase", package_id=package_id, amount=price,
                   quantity=_qty_sw_init)
         kb = types.InlineKeyboardMarkup()
-        for net, _ in SWAPWALLET_CRYPTO_NETWORKS:
+        for net, _ in _active_nets2:
             kb.add(types.InlineKeyboardButton(SW_NET_LABELS.get(net, net), callback_data=f"swcrypto:net:{net}"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"buy:p:{package_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
@@ -3577,12 +3713,16 @@ def _dispatch_callback(call, uid, data):
                 "لطفاً درگاه دیگری متناسب با این مبلغ انتخاب کنید.",
                 show_alert=True)
             return
-        from ..gateways.swapwallet_crypto import SWAPWALLET_CRYPTO_NETWORKS, NETWORK_LABELS as SW_NET_LABELS
+        from ..gateways.swapwallet_crypto import get_active_swapwallet_networks, NETWORK_LABELS as SW_NET_LABELS
+        _active_nets3 = get_active_swapwallet_networks()
+        if not _active_nets3:
+            bot.answer_callback_query(call.id, "هیچ ارزی برای SwapWallet فعال نشده است.", show_alert=True)
+            return
         state_set(uid, "swcrypto_network_select", kind="renewal",
                   purchase_id=purchase_id, package_id=package_id,
                   amount=price, config_id=item["config_id"])
         kb = types.InlineKeyboardMarkup()
-        for net, _ in SWAPWALLET_CRYPTO_NETWORKS:
+        for net, _ in _active_nets3:
             kb.add(types.InlineKeyboardButton(SW_NET_LABELS.get(net, net), callback_data=f"swcrypto:net:{net}"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"renew:{purchase_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
@@ -3865,8 +4005,8 @@ def _dispatch_callback(call, uid, data):
         if state_name(uid) != "admin_add_package_buyer_role" or not is_admin(uid):
             bot.answer_callback_query(call.id)
             return
-        buyer_role = data.split(":")[4]  # 'all' | 'agents' | 'public'
-        if buyer_role not in ("all", "agents", "public"):
+        buyer_role = data.split(":")[4]  # 'all' | 'agents' | 'public' | 'nobody'
+        if buyer_role not in ("all", "agents", "public", "nobody"):
             bot.answer_callback_query(call.id)
             return
         sd = state_data(uid)
@@ -3876,7 +4016,7 @@ def _dispatch_callback(call, uid, data):
                     show_name=show_name_val, max_users=max_users, buyer_role=buyer_role)
         log_admin_action(uid, f"پکیج '{sd['package_name']}' با buyer_role={buyer_role} ثبت شد")
         state_clear(uid)
-        _br_labels = {"all": "همه", "agents": "فقط نمایندگان", "public": "فقط کاربران عادی"}
+        _br_labels = {"all": "همه", "agents": "فقط نمایندگان", "public": "فقط کاربران عادی", "nobody": "هیچ‌کس (فقط هدیه)"}
         vol_label = "حجم نامحدود" if sd["volume"] == 0 else fmt_vol(sd["volume"])
         dur_label = "زمان نامحدود" if sd["duration"] == 0 else f"{sd['duration']} روز"
         pri_label = "رایگان" if sd["price"] == 0 else f"{fmt_price(sd['price'])} تومان"
@@ -3940,6 +4080,8 @@ def _dispatch_callback(call, uid, data):
             types.InlineKeyboardButton("✅ فقط کاربران عادی"  if buyer_role == "public"  else "فقط کاربران عادی",
                                        callback_data=f"admin:pkg:br:public:{package_id}"),
         )
+        kb.add(types.InlineKeyboardButton("✅ هیچ‌کس (فقط هدیه)" if buyer_role == "nobody" else "هیچ‌کس (فقط هدیه)",
+                                          callback_data=f"admin:pkg:br:nobody:{package_id}"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"admin:pkg:edit:{package_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call,
@@ -3947,15 +4089,16 @@ def _dispatch_callback(call, uid, data):
             "👥 چه کسانی بتوانند این پکیج را بخرند؟\n\n"
             "• <b>همه</b> — هم کاربران عادی، هم نمایندگان\n"
             "• <b>فقط نمایندگان</b> — فقط کاربران نماینده\n"
-            "• <b>فقط کاربران عادی</b> — فقط کاربران غیرنماینده", kb)
+            "• <b>فقط کاربران عادی</b> — فقط کاربران غیرنماینده\n"
+            "• <b>هیچ‌کس</b> — پکیج در خرید عادی نمایش داده نمی‌شود، فقط برای تحویل هدیه", kb)
         return
 
     if data.startswith("admin:pkg:br:"):
         # Admin selects buyer_role for existing package
         parts      = data.split(":")
-        role       = parts[3]   # 'all' | 'agents' | 'public'
+        role       = parts[3]   # 'all' | 'agents' | 'public' | 'nobody'
         package_id = int(parts[4])
-        if role not in ("all", "agents", "public"):
+        if role not in ("all", "agents", "public", "nobody"):
             bot.answer_callback_query(call.id)
             return
         package_row = get_package(package_id)
@@ -6282,7 +6425,7 @@ def _dispatch_callback(call, uid, data):
             types.InlineKeyboardButton("💳 درگاه‌های پرداخت",   callback_data="adm:set:gateways"),
         )
         kb.add(types.InlineKeyboardButton("📢 کانال قفل",        callback_data="adm:set:channel"))
-        kb.add(types.InlineKeyboardButton("✏️ ویرایش متن استارت", callback_data="adm:set:start_text"))
+        kb.add(types.InlineKeyboardButton("📢 مدیریت کانال‌های قفل", callback_data="adm:locked_channels"))
         kb.add(types.InlineKeyboardButton("🎁 تست رایگان",      callback_data="adm:set:freetest"))
         kb.add(types.InlineKeyboardButton("📜 قوانین خرید",     callback_data="adm:set:rules"))
         kb.add(types.InlineKeyboardButton("🏪 مدیریت فروش",    callback_data="adm:set:shop"))
@@ -6357,8 +6500,8 @@ def _dispatch_callback(call, uid, data):
                 types.InlineKeyboardButton("💳 درگاه‌های پرداخت",   callback_data="adm:set:gateways"),
             )
             kb.add(types.InlineKeyboardButton("📢 کانال قفل",        callback_data="adm:set:channel"))
+            kb.add(types.InlineKeyboardButton("📢 مدیریت کانال‌های قفل", callback_data="adm:locked_channels"))
             kb.add(types.InlineKeyboardButton("✏️ ویرایش متن استارت", callback_data="adm:set:start_text"))
-            kb.add(types.InlineKeyboardButton("🎁 تست رایگان",      callback_data="adm:set:freetest"))
             kb.add(types.InlineKeyboardButton("📜 قوانین خرید",     callback_data="adm:set:rules"))
             kb.add(types.InlineKeyboardButton("🏷 تنظیمات فروش",    callback_data="adm:set:shop"))
             kb.add(types.InlineKeyboardButton("🏢 مدیریت گروه",    callback_data="admin:group"))
@@ -7514,6 +7657,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("🔑 تنظیم کلید API",        callback_data="adm:set:swapwallet_crypto_key"))
         kb.add(types.InlineKeyboardButton("👤 نام کاربری فروشگاه",     callback_data="adm:set:swapwallet_crypto_username"))
         kb.add(types.InlineKeyboardButton("🏷 نام نمایشی درگاه", callback_data="adm:gw:swapwallet_crypto:set_name"))
+        kb.add(types.InlineKeyboardButton("💎 ارزهای فعال", callback_data="adm:set:swc_currencies"))
         if not api_key:
             kb.add(types.InlineKeyboardButton("🌐 دریافت کلید API از سواپ ولت", url="https://swapwallet.app"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gateways", icon_custom_emoji_id="5253997076169115797"))
@@ -7798,6 +7942,118 @@ def _dispatch_callback(call, uid, data):
             "برای بازگشت به متن پیش‌فرض، <code>-</code> بفرستید.",
             back_button("admin:settings")
         )
+        return
+
+    # ── Admin: Locked Channels Management ────────────────────────────────────
+    if data == "adm:locked_channels":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        rows = get_locked_channels()
+        kb = types.InlineKeyboardMarkup()
+        for row in rows:
+            ch = row["channel_id"]
+            kb.add(types.InlineKeyboardButton(
+                f"🗑 حذف {ch}", callback_data=f"adm:lch:del:{row['id']}"
+            ))
+        kb.add(types.InlineKeyboardButton("➕ افزودن کانال/گروه", callback_data="adm:lch:add"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        legacy = setting_get("channel_id", "").strip()
+        legacy_note = f"\n⚠️ کانال قدیمی (تنظیمات): <code>{esc(legacy)}</code>" if legacy else ""
+        send_or_edit(call,
+            "📢 <b>مدیریت کانال‌های قفل</b>\n\n"
+            "ربات تنها زمانی اجازه ورود می‌دهد که کاربر در <b>همه</b> کانال‌های زیر عضو باشد.\n\n"
+            f"کانال‌های فعال: <b>{len(rows)}</b>{legacy_note}", kb)
+        return
+
+    if data == "adm:lch:add":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        state_set(uid, "admin_add_locked_channel")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "📢 <b>افزودن کانال قفل</b>\n\n"
+            "آیدی کانال یا گروه را وارد کنید.\n"
+            "مثال: <code>@channelname</code> یا <code>-100123456789</code>\n\n"
+            "⚠️ ربات باید عضو/ادمین کانال باشد.",
+            back_button("adm:locked_channels"))
+        return
+
+    if data.startswith("adm:lch:del:"):
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        row_id = int(data.split(":")[3])
+        remove_locked_channel_by_id(row_id)
+        _invalidate_channel_cache()
+        bot.answer_callback_query(call.id, "✅ کانال حذف شد.")
+        # Reload same menu
+        rows = get_locked_channels()
+        kb = types.InlineKeyboardMarkup()
+        for row in rows:
+            ch = row["channel_id"]
+            kb.add(types.InlineKeyboardButton(f"🗑 حذف {ch}", callback_data=f"adm:lch:del:{row['id']}"))
+        kb.add(types.InlineKeyboardButton("➕ افزودن کانال/گروه", callback_data="adm:lch:add"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
+        legacy = setting_get("channel_id", "").strip()
+        legacy_note = f"\n⚠️ کانال قدیمی (تنظیمات): <code>{esc(legacy)}</code>" if legacy else ""
+        send_or_edit(call,
+            "📢 <b>مدیریت کانال‌های قفل</b>\n\n"
+            "ربات تنها زمانی اجازه ورود می‌دهد که کاربر در <b>همه</b> کانال‌های زیر عضو باشد.\n\n"
+            f"کانال‌های فعال: <b>{len(rows)}</b>{legacy_note}", kb)
+        return
+
+    # ── Admin: SwapWallet active currencies ───────────────────────────────────
+    if data == "adm:set:swc_currencies":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        from ..gateways.swapwallet_crypto import SWAPWALLET_CRYPTO_NETWORKS, NETWORK_LABELS as SW_NET_LABELS
+        active_str = setting_get("swapwallet_active_currencies", "TRON,TON,BSC")
+        active_set = {x.strip().upper() for x in active_str.split(",") if x.strip()}
+        kb = types.InlineKeyboardMarkup()
+        for net, _ in SWAPWALLET_CRYPTO_NETWORKS:
+            check = "✅" if net in active_set else "❌"
+            kb.add(types.InlineKeyboardButton(
+                f"{check} {SW_NET_LABELS.get(net, net)}",
+                callback_data=f"adm:swc:cur:{net}"
+            ))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gw:swapwallet_crypto", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "💎 <b>ارزهای فعال SwapWallet</b>\n\n"
+            "شبکه‌هایی که کاربر می‌تواند برای پرداخت انتخاب کند:\n"
+            "✅ = فعال  |  ❌ = غیرفعال", kb)
+        return
+
+    if data.startswith("adm:swc:cur:"):
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        net_toggle = data.split(":")[3].upper()
+        active_str = setting_get("swapwallet_active_currencies", "TRON,TON,BSC")
+        active_set = {x.strip().upper() for x in active_str.split(",") if x.strip()}
+        if net_toggle in active_set:
+            active_set.discard(net_toggle)
+        else:
+            active_set.add(net_toggle)
+        setting_set("swapwallet_active_currencies", ",".join(sorted(active_set)))
+        bot.answer_callback_query(call.id, f"✅ {net_toggle} {'فعال' if net_toggle in active_set else 'غیرفعال'} شد.")
+        # Reload same menu
+        from ..gateways.swapwallet_crypto import SWAPWALLET_CRYPTO_NETWORKS, NETWORK_LABELS as SW_NET_LABELS
+        active_str2 = setting_get("swapwallet_active_currencies", "TRON,TON,BSC")
+        active_set2 = {x.strip().upper() for x in active_str2.split(",") if x.strip()}
+        kb = types.InlineKeyboardMarkup()
+        for net, _ in SWAPWALLET_CRYPTO_NETWORKS:
+            check = "✅" if net in active_set2 else "❌"
+            kb.add(types.InlineKeyboardButton(f"{check} {SW_NET_LABELS.get(net, net)}", callback_data=f"adm:swc:cur:{net}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gw:swapwallet_crypto", icon_custom_emoji_id="5253997076169115797"))
+        send_or_edit(call,
+            "💎 <b>ارزهای فعال SwapWallet</b>\n\n"
+            "شبکه‌هایی که کاربر می‌تواند برای پرداخت انتخاب کند:\n"
+            "✅ = فعال  |  ❌ = غیرفعال", kb)
         return
 
     # ── Admin: Free Test Settings ─────────────────────────────────────────────

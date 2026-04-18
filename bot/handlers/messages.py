@@ -1179,9 +1179,11 @@ def universal_handler(message):
             kb.add(types.InlineKeyboardButton("همه", callback_data="admin:pkg:add:br:all"))
             kb.add(types.InlineKeyboardButton("فقط نمایندگان", callback_data="admin:pkg:add:br:agents"))
             kb.add(types.InlineKeyboardButton("فقط کاربران عادی", callback_data="admin:pkg:add:br:public"))
+            kb.add(types.InlineKeyboardButton("هیچ‌کس (فقط هدیه)", callback_data="admin:pkg:add:br:nobody"))
             bot.send_message(uid,
                 f"✅ محدودیت کاربر: <b>{mu_label}</b>\n\n"
-                "👥 چه کسانی بتوانند این پکیج را بخرند?",
+                "👥 چه کسانی بتوانند این پکیج را بخرند?\n"
+                "💡 <i>«هیچ‌کس» یعنی پکیج در خرید عادی نمایش داده نمی‌شود، فقط برای تحویل هدیه زیرمجموعه‌گیری قابل استفاده است.</i>",
                 reply_markup=kb)
             return
 
@@ -2316,7 +2318,27 @@ def universal_handler(message):
             bot.send_message(uid, "✅ کانال ذخیره شد.", reply_markup=back_button("admin:settings"))
             return
 
-        if sn == "admin_set_start_text" and is_admin(uid):
+        if sn == "admin_add_locked_channel" and is_admin(uid):
+            from ..db import add_locked_channel
+            from ..ui.helpers import _invalidate_channel_cache
+            val = (message.text or "").strip()
+            if not val or val == "-":
+                state_clear(uid)
+                bot.send_message(uid, "❌ لغو شد.", reply_markup=back_button("adm:locked_channels"))
+                return
+            ok = add_locked_channel(val)
+            _invalidate_channel_cache()
+            state_clear(uid)
+            if ok:
+                log_admin_action(uid, f"کانال قفل {val} افزوده شد")
+                bot.send_message(uid, f"✅ کانال <code>{esc(val)}</code> افزوده شد.",
+                                 parse_mode="HTML", reply_markup=back_button("adm:locked_channels"))
+            else:
+                bot.send_message(uid, f"⚠️ کانال <code>{esc(val)}</code> قبلاً ثبت شده بود.",
+                                 parse_mode="HTML", reply_markup=back_button("adm:locked_channels"))
+            return
+
+
             from ..ui.premium_emoji import serialize_premium_text as _spt
             raw_text = (message.text or message.caption or "").strip()
             entities = message.entities or message.caption_entities or []

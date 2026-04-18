@@ -259,6 +259,7 @@ def init_db():
             "gw_swapwallet_crypto_range_max":     "",
             "swapwallet_crypto_api_key":  "",
             "swapwallet_crypto_username": "",
+            "swapwallet_active_currencies": "TRON,TON,BSC",
             "gw_tronpays_rial_display_name": "",
             "shop_open":         "1",
             "preorder_mode":     "0",
@@ -304,6 +305,7 @@ def init_db():
             "referral_purchase_reward_amount":  "0",
             "referral_purchase_reward_package": "",
             "referral_reward_condition":         "channel",
+            "locked_channels_list":              "[]",
             "discount_codes_enabled":             "1",
             "vouchers_enabled":                   "1",
             "bulk_sale_mode":                     "everyone",
@@ -362,6 +364,28 @@ def init_db():
             "INSERT OR IGNORE INTO settings(key,value) VALUES('license_owner_telegram_id','')",
             "INSERT OR IGNORE INTO settings(key,value) VALUES('license_owner_username','')",
             "INSERT OR IGNORE INTO settings(key,value) VALUES('license_bot_username','')",
+            # ── Pending Rewards (referral claim system) ────────────────────────
+            (
+                "CREATE TABLE IF NOT EXISTS pending_rewards ("
+                "id          INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "user_id     INTEGER NOT NULL,"
+                "reward_type TEXT    NOT NULL DEFAULT 'wallet',"
+                "amount      INTEGER NOT NULL DEFAULT 0,"
+                "package_id  INTEGER,"
+                "source      TEXT    NOT NULL DEFAULT 'start',"
+                "claimed     INTEGER NOT NULL DEFAULT 0,"
+                "created_at  TEXT    NOT NULL,"
+                "claimed_at  TEXT"
+                ")"
+            ),
+            # ── Locked channels list (multi-channel support) ──────────────────
+            (
+                "CREATE TABLE IF NOT EXISTS locked_channels ("
+                "id         INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "channel_id TEXT    NOT NULL UNIQUE,"
+                "added_at   TEXT    NOT NULL"
+                ")"
+            ),
             # ── Panels (3x-ui / Sanaei) ───────────────────────────────────────
             (
                 "CREATE TABLE IF NOT EXISTS panels ("
@@ -1873,3 +1897,79 @@ def update_panel_status(panel_id, status: str, error: str):
 def delete_panel(panel_id):
     with get_conn() as conn:
         conn.execute("DELETE FROM panels WHERE id=?", (panel_id,))
+
+
+# ── Pending Rewards (referral claim system) ────────────────────────────────────
+def add_pending_reward(user_id: int, reward_type: str, amount: int = 0,
+                       package_id=None, source: str = "start") -> None:
+    """Queue a referral reward for the user to claim later."""
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO pending_rewards(user_id,reward_type,amount,package_id,source,claimed,created_at)"
+            " VALUES(?,?,?,?,?,0,?)",
+            (user_id, reward_type, amount, package_id, source, now_str())
+        )
+
+
+def get_unclaimed_rewards(user_id: int):
+    """Return all unclaimed pending_rewards rows for this user."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM pending_rewards WHERE user_id=? AND claimed=0 ORDER BY id ASC",
+            (user_id,)
+        ).fetchall()
+
+
+def has_pending_rewards(user_id: int) -> bool:
+    """Return True if the user has at least one unclaimed reward."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM pending_rewards WHERE user_id=? AND claimed=0 LIMIT 1",
+            (user_id,)
+        ).fetchone()
+    return row is not None
+
+
+def mark_rewards_claimed(user_id: int) -> int:
+    """Mark all unclaimed rewards as claimed. Returns count of rows updated."""
+    ts = now_str()
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE pending_rewards SET claimed=1, claimed_at=? WHERE user_id=? AND claimed=0",
+            (ts, user_id)
+        )
+        return cur.rowcount
+
+
+# ── Locked Channels (multi-channel join enforcement) ──────────────────────────
+def get_locked_channels():
+    """Return all locked channel rows."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM locked_channels ORDER BY id ASC"
+        ).fetchall()
+
+
+def add_locked_channel(channel_id: str) -> bool:
+    """Add a channel to the locked list. Returns True if added, False if already exists."""
+    with get_conn() as conn:
+        try:
+            conn.execute(
+                "INSERT INTO locked_channels(channel_id, added_at) VALUES(?,?)",
+                (channel_id.strip(), now_str())
+            )
+            return True
+        except Exception:
+            return False
+
+
+def remove_locked_channel(channel_id: str) -> None:
+    """Remove a channel from the locked list by its channel_id string."""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM locked_channels WHERE channel_id=?", (channel_id.strip(),))
+
+
+def remove_locked_channel_by_id(row_id: int) -> None:
+    """Remove a locked channel row by primary key."""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM locked_channels WHERE id=?", (row_id,))

@@ -7,7 +7,7 @@ import time
 import threading
 from telebot import types
 
-from ..db import setting_get
+from ..db import setting_get, get_locked_channels
 from ..bot_instance import bot
 
 # ── Channel membership cache (TTL = 60 s) ─────────────────────────────────────
@@ -70,10 +70,35 @@ def send_or_edit(call_or_msg, text, reply_markup=None, disable_preview=True):
             pass
 
 
+def _get_all_locked_channels() -> list:
+    """Return the merged list of channels from DB table + legacy channel_id setting."""
+    channels = []
+    try:
+        rows = get_locked_channels()
+        for row in rows:
+            ch = str(row["channel_id"]).strip()
+            if ch and ch not in channels:
+                channels.append(ch)
+    except Exception:
+        pass
+    legacy = setting_get("channel_id", "").strip()
+    if legacy and legacy not in channels:
+        channels.append(legacy)
+    return channels
+
+
+def _channel_url(channel_id):
+    if channel_id.startswith("@"):
+        return "https://t.me/{}".format(channel_id.lstrip("@"))
+    if channel_id.startswith("-100"):
+        return "https://t.me/c/{}".format(channel_id[4:])
+    return "https://t.me/{}".format(channel_id)
+
+
 # ── Channel lock ───────────────────────────────────────────────────────────────
 def check_channel_membership(user_id):
-    channel_id = setting_get("channel_id", "").strip()
-    if not channel_id:
+    channels = _get_all_locked_channels()
+    if not channels:
         return True
 
     now = time.monotonic()
@@ -84,12 +109,16 @@ def check_channel_membership(user_id):
             if (now - ts) < _CHANNEL_CACHE_TTL:
                 return result
 
-    # Cache miss or stale — do the real API call
-    try:
-        member = bot.get_chat_member(channel_id, user_id)
-        is_member = member.status in ("member", "administrator", "creator")
-    except Exception:
-        is_member = True  # fail-open: don't block users on API errors
+    # Cache miss or stale — user must be in ALL channels
+    is_member = True
+    for channel_id in channels:
+        try:
+            member = bot.get_chat_member(channel_id, user_id)
+            if member.status not in ("member", "administrator", "creator"):
+                is_member = False
+                break
+        except Exception:
+            pass  # fail-open
 
     with _CHANNEL_CACHE_LOCK:
         _CHANNEL_CACHE[user_id] = (is_member, now)
@@ -97,18 +126,18 @@ def check_channel_membership(user_id):
 
 
 def channel_lock_message(target):
-    channel_id = setting_get("channel_id", "").strip()
+    channels = _get_all_locked_channels()
     kb = types.InlineKeyboardMarkup()
-    if channel_id.startswith("@"):
-        channel_url = f"https://t.me/{channel_id.lstrip('@')}"
-    elif channel_id.startswith("-100"):
-        channel_url = f"https://t.me/c/{channel_id[4:]}"
+    if channels:
+        for channel_id in channels:
+            url = _channel_url(channel_id)
+            label = channel_id if channel_id.startswith("@") else "کانال"
+            kb.add(types.InlineKeyboardButton("📢 {}".format(label.lstrip("@")), url=url))
     else:
-        channel_url = f"https://t.me/{channel_id}"
-    kb.add(types.InlineKeyboardButton("📢 عضویت در کانال", url=channel_url))
+        kb.add(types.InlineKeyboardButton("📢 عضویت در کانال", url="https://t.me/"))
     kb.add(types.InlineKeyboardButton("✅ عضو شدم", callback_data="check_channel"))
     send_or_edit(
         target,
-        "🔒 برای استفاده از ربات، ابتدا باید در کانال ما عضو شوید.\n\nپس از عضویت، روی «عضو شدم» بزنید.",
+        "🔒 برای استفاده از ربات، ابتدا باید در کانال‌های ما عضو شوید.\n\nپس از عضویت در همه کانال‌ها، روی «عضو شدم» بزنید.",
         kb
     )

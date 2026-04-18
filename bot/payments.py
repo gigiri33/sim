@@ -174,7 +174,8 @@ def show_crypto_payment_info(target, uid, coin_key, amount):
         f"{ce('💰', '5318912792428814144')} مبلغ: <b>{fmt_price(amount)}</b> تومان"
         f"{equiv_line}\n"
         f"{ce('👛', '5796280694934085416')} <b>آدرس ولت:</b>\n<code>{esc(addr)}</code>\n\n"
-        f"{ce('⬇️', '5314453632828055816')} پس از واریز، تصویر تراکنش یا هش آن را ارسال کنید."
+        f"{ce('⬇️', '5314453632828055816')} پس از واریز، تصویر تراکنش یا هش آن را ارسال کنید.\n\n"
+        f"{ce('⚠️', '5314302076317081739')} <i>تمامی کارمزد انتقال ارز دیجیتال به عهده واریزکننده می‌باشد</i>"
     )
 
     rows = []
@@ -362,9 +363,13 @@ def _clear_payment_admin_buttons(payment_id, status_text, file_id=None):
 
 
 def finish_card_payment_approval(payment_id, admin_note, approved):
-    result = _finish_card_payment_approval_inner(payment_id, admin_note, approved)
+    result, user_notified = _finish_card_payment_approval_inner(payment_id, admin_note, approved)
     if result:
         header = f"{ce('✅', '5900157489759916320')} <b>تراکنش تأیید شد.</b>" if approved else f"{ce('❌', '5215539470849288572')} <b>تراکنش رد شد.</b>"
+        not_notified_note = (
+            "\n\n⚠️ <i>ارسال پیام به کاربر امکان‌پذیر نبود (احتمالاً حساب حذف یا ربات را بلاک کرده است).</i>"
+            if not user_notified else ""
+        )
         file_id = None
         try:
             payment = get_payment(payment_id)
@@ -394,10 +399,11 @@ def finish_card_payment_approval(payment_id, admin_note, approved):
                     f"{ce('💰', '5794002949222964817')} مبلغ: <b>{fmt_price(payment['amount'])}</b> تومان"
                     f"{package_text}\n\n"
                     f"📝 توضیح کاربر:\n{esc(payment['receipt_text'] or '-')}"
+                    f"{not_notified_note}"
                 )
                 file_id = payment["receipt_file_id"]
             else:
-                status_text = header
+                status_text = header + not_notified_note
         except Exception:
             status_text = header
         try:
@@ -412,17 +418,30 @@ def _finish_card_payment_approval_inner(payment_id, admin_note, approved):
         deliver_purchase_message, admin_purchase_notify,
         admin_renewal_notify, notify_pending_order_to_admins,
     )
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+
     payment = get_payment(payment_id)
     if not payment or payment["status"] != "pending":
-        return False
+        return False, True  # (result, user_notified)
     user_id = payment["user_id"]
+
+    def _safe_send(user_id, *args, **kwargs):
+        """Send a message to user; returns True on success, False on 403/deactivated."""
+        try:
+            bot.send_message(user_id, *args, **kwargs)
+            return True
+        except Exception as e:
+            _log.warning("payment_notify: cannot send to user %s: %s", user_id, e)
+            return False
+
     if approved:
         approve_payment(payment_id, admin_note)
         if payment["kind"] == "wallet_charge":
             if not complete_payment(payment_id):
-                return False  # already processed
+                return False, True  # already processed
             update_balance(user_id, payment["amount"])
-            bot.send_message(user_id, f"{ce('✅', '5900157489759916320')} واریزی شما تأیید شد.\n\n{esc(admin_note)}")
+            notified = _safe_send(user_id, f"{ce('✅', '5900157489759916320')} واریزی شما تأیید شد.\n\n{esc(admin_note)}")
             user_row = get_user(user_id)
             receipt_note = payment["receipt_text"] if payment["receipt_text"] else ""
             pay_method   = payment["payment_method"] if payment["payment_method"] else "—"
@@ -437,6 +456,7 @@ def _finish_card_payment_approval_inner(payment_id, admin_note, approved):
                 + (f"📝 توضیحات: {esc(receipt_note)}\n" if receipt_note else "")
                 + f"🕐 زمان: {now_str()[:16]}"
             )
+            return True, notified
 
         elif payment["kind"] == "config_purchase":
             config_id   = payment["config_id"]
@@ -445,8 +465,8 @@ def _finish_card_payment_approval_inner(payment_id, admin_note, approved):
             from .handlers.callbacks import _deliver_bulk_configs, _send_bulk_delivery_result
             _qty_card = int(payment["quantity"]) if "quantity" in payment.keys() else 1
             if not complete_payment(payment_id):
-                return False  # already processed
-            bot.send_message(user_id,
+                return False, True  # already processed
+            notified = _safe_send(user_id,
                 f"{ce('✅', '5900157489759916320')} واریزی شما تأیید شد.\n\n{esc(admin_note)}\n\n"
                 "⏳ کانفیگ‌های شما در حال آماده‌سازی هستند...")
             purchase_ids, pending_ids = _deliver_bulk_configs(
@@ -456,18 +476,20 @@ def _finish_card_payment_approval_inner(payment_id, admin_note, approved):
             _send_bulk_delivery_result(user_id, user_id, package_row,
                                        purchase_ids, pending_ids,
                                        payment["payment_method"])
+            return True, notified
 
         elif payment["kind"] == "renewal":
             package_id  = payment["package_id"]
             package_row = get_package(package_id)
             config_id   = payment["config_id"]
             complete_payment(payment_id)
-            bot.send_message(
+            notified = _safe_send(
                 user_id,
                 "✅ <b>درخواست تمدید ارسال شد</b>\n\n"
                 "🔄 درخواست تمدید سرویس شما با موفقیت ثبت و برای پشتیبانی ارسال شد.\n"
                 "⏳ لطفاً کمی صبر کنید، پس از انجام تمدید به شما اطلاع داده خواهد شد.\n\n"
-                "🙏 از صبر و شکیبایی شما متشکریم."
+                "🙏 از صبر و شکیبایی شما متشکریم.",
+                parse_mode="HTML",
             )
             with get_conn() as conn:
                 row = conn.execute(
@@ -477,10 +499,11 @@ def _finish_card_payment_approval_inner(payment_id, admin_note, approved):
             item        = get_purchase(purchase_id) if purchase_id else None
             if item and package_row:
                 admin_renewal_notify(user_id, item, package_row, payment["amount"], payment["payment_method"])
-        return True
+            return True, notified
+        return True, True
     else:
         reject_payment(payment_id, admin_note)
         if payment["config_id"]:
             release_reserved_config(payment["config_id"])
-        bot.send_message(user_id, f"{ce('❌', '5215539470849288572')} رسید شما رد شد.\n\n{esc(admin_note)}")
-        return True
+        notified = _safe_send(user_id, f"{ce('❌', '5215539470849288572')} رسید شما رد شد.\n\n{esc(admin_note)}")
+        return True, notified
