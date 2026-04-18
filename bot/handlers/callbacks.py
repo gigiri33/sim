@@ -9036,7 +9036,7 @@ def _dispatch_callback(call, uid, data):
             return
         protocol = data.split(":", 3)[3]
         sd = state_data(uid)
-        state_set(uid, "pnl_add_host", name=sd.get("name", ""), protocol=protocol)
+        state_set(uid, "pnl_add_host", pnl_name=sd.get("pnl_name", ""), protocol=protocol)
         bot.answer_callback_query(call.id)
         send_or_edit(call,
             f"🖥 <b>افزودن پنل جدید</b>\n\n"
@@ -9206,7 +9206,7 @@ def _dispatch_callback(call, uid, data):
         sd = state_data(uid)
         state_clear(uid)
         panel_id = add_panel(
-            name=sd.get("name", ""),
+            name=sd.get("pnl_name", ""),
             protocol=sd.get("protocol", "http"),
             host=sd.get("host", ""),
             port=sd.get("port", 2053),
