@@ -35,6 +35,7 @@ ADMIN_PERMS = [
     ("settings",         "دسترسی به تنظیمات ربات"),
     ("approve_payments", "تایید یا رد پرداخت‌ها"),
     ("approve_renewal",  "تایید تمدید کردن"),
+    ("manage_panels",    "مدیریت پنل‌های 3x-ui"),
 ]
 
 # Custom emoji IDs for admin permission labels (icon_custom_emoji_id on buttons, ce() in HTML)
@@ -55,12 +56,13 @@ PERM_EMOJI_IDS = {
     "settings":         "5463036196777128277",
     "approve_payments": "5350396951407895212",
     "approve_renewal":  "6019455416201646359",
+    "manage_panels":    "5372926953978341366",
 }
 PERM_FULL_SET = {
     "types_packages", "register_config", "view_configs", "manage_configs",
     "broadcast_all", "broadcast_cust", "view_users", "agency", "assign_config",
     "manage_balance", "user_status", "full_users", "settings",
-    "approve_payments", "approve_renewal",
+    "approve_payments", "approve_renewal", "manage_panels",
 }
 PERM_USER_FULL = {"agency", "assign_config", "manage_balance", "user_status"}
 

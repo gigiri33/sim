@@ -131,6 +131,9 @@ def kb_admin_panel(uid=None):
     if is_owner or (uid and admin_has_perm(uid, "settings")):
         rows.append([_btn("تنظیمات", callback_data="admin:settings", emoji_id="5370935802844946281")])
 
+    if is_owner or (uid and admin_has_perm(uid, "manage_panels")):
+        rows.append([_btn("مدیریت پنل‌ها", callback_data="admin:panels", emoji_id="5372926953978341366")])
+
     # License management — always visible to owner
     if is_owner:
         from ..license_manager import is_limited_mode as _is_limited

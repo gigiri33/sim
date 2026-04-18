@@ -81,8 +81,13 @@ from ..admin.renderers import (
     _show_admin_types, _show_admin_stock, _show_admin_admins_panel,
     _show_perm_selection, _show_admin_users_list, _show_admin_user_detail,
     _show_admin_user_detail_msg, _show_admin_assign_config_type, _fake_call,
+    _show_admin_panels, _show_panel_detail,
 )
 from ..admin.backup import _send_backup
+from ..db import (
+    get_all_panels, get_panel, add_panel, update_panel_field,
+    toggle_panel_active, update_panel_status, delete_panel,
+)
 
 
 # ── OpenVPN helpers (shared with messages.py) ─────────────────────────────────
@@ -8995,6 +9000,229 @@ def _dispatch_callback(call, uid, data):
 
     if data == "noop":
         bot.answer_callback_query(call.id)
+        return
+
+    # ── Panel management ──────────────────────────────────────────────────────
+
+    if data == "admin:panels":
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        _show_admin_panels(call)
+        return
+
+    if data == "adm:pnl:add":
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+            return
+        state_set(uid, "pnl_add_name")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "🖥 <b>افزودن پنل جدید</b>\n\n"
+            "مرحله ۱/۷ — <b>نام پنل</b>\n"
+            "یک نام دلخواه برای شناسایی این پنل وارد کنید:",
+            back_button("admin:panels"))
+        return
+
+    if data.startswith("adm:pnl:add_proto:"):
+        # adm:pnl:add_proto:{http|https}
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+            return
+        sn = state_name(uid)
+        if sn != "pnl_add_proto":
+            bot.answer_callback_query(call.id, "عملیات منقضی شده.", show_alert=True)
+            return
+        protocol = data.split(":", 3)[3]
+        sd = state_data(uid)
+        state_set(uid, "pnl_add_host", name=sd.get("name", ""), protocol=protocol)
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"🖥 <b>افزودن پنل جدید</b>\n\n"
+            f"مرحله ۳/۷ — <b>آدرس IP یا دامنه</b>\n"
+            f"پروتکل انتخاب‌شده: <b>{protocol}</b>\n\n"
+            "آدرس IP یا دامنه سرور پنل را ارسال کنید:",
+            back_button("admin:panels"))
+        return
+
+    if data.startswith("adm:pnl:ef:protocol:"):
+        # Edit protocol — show buttons
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+            return
+        panel_id = int(data.split(":")[-1])
+        p = get_panel(panel_id)
+        if not p:
+            bot.answer_callback_query(call.id, "پنل یافت نشد.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+        kb = InlineKeyboardMarkup()
+        kb.row(
+            InlineKeyboardButton("http",  callback_data=f"adm:pnl:set_proto:http:{panel_id}"),
+            InlineKeyboardButton("https", callback_data=f"adm:pnl:set_proto:https:{panel_id}"),
+        )
+        kb.add(InlineKeyboardButton("لغو", callback_data=f"adm:pnl:detail:{panel_id}"))
+        send_or_edit(call,
+            f"🌐 <b>ویرایش پروتکل</b>\n\nپنل: {esc(p['name'])}\n\nپروتکل جدید را انتخاب کنید:",
+            kb)
+        return
+
+    if data.startswith("adm:pnl:set_proto:"):
+        # adm:pnl:set_proto:{http|https}:{panel_id}
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+            return
+        parts     = data.split(":")
+        protocol  = parts[3]
+        panel_id  = int(parts[4])
+        if protocol not in ("http", "https"):
+            bot.answer_callback_query(call.id, "پروتکل نامعتبر.", show_alert=True)
+            return
+        update_panel_field(panel_id, "protocol", protocol)
+        bot.answer_callback_query(call.id, f"پروتکل به {protocol} تغییر یافت.")
+        _show_panel_detail(call, panel_id)
+        return
+
+    if data.startswith("adm:pnl:ef:"):
+        # adm:pnl:ef:{field}:{panel_id}
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+            return
+        parts    = data.split(":")
+        field    = parts[3]
+        panel_id = int(parts[4])
+        p = get_panel(panel_id)
+        if not p:
+            bot.answer_callback_query(call.id, "پنل یافت نشد.", show_alert=True)
+            return
+        field_labels = {
+            "name":     "نام پنل",
+            "host":     "آدرس IP / دامنه",
+            "port":     "پورت",
+            "path":     "مسیر (path) — برای عدم وجود / ارسال کنید",
+            "username": "نام کاربری",
+            "password": "رمز عبور",
+        }
+        label = field_labels.get(field, field)
+        state_set(uid, "pnl_edit_field", field=field, panel_id=panel_id)
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"✏️ <b>ویرایش — {label}</b>\n\nپنل: <b>{esc(p['name'])}</b>\n\n"
+            f"مقدار فعلی: <code>{esc(str(p[field] or ''))}</code>\n\n"
+            "مقدار جدید را ارسال کنید:",
+            back_button(f"adm:pnl:detail:{panel_id}"))
+        return
+
+    if data.startswith("adm:pnl:detail:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+            return
+        panel_id = int(data.split(":")[-1])
+        bot.answer_callback_query(call.id)
+        _show_panel_detail(call, panel_id)
+        return
+
+    if data.startswith("adm:pnl:toggle:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+            return
+        parts    = data.split(":")
+        panel_id = int(parts[3])
+        new_val  = int(parts[4])
+        toggle_panel_active(panel_id, new_val)
+        label = "فعال" if new_val else "غیرفعال"
+        bot.answer_callback_query(call.id, f"پنل {label} شد.")
+        _show_panel_detail(call, panel_id)
+        return
+
+    if data.startswith("adm:pnl:del:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+            return
+        panel_id = int(data.split(":")[-1])
+        p = get_panel(panel_id)
+        if not p:
+            bot.answer_callback_query(call.id, "پنل یافت نشد.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+        kb = InlineKeyboardMarkup()
+        kb.row(
+            InlineKeyboardButton("✅ بله، حذف کن",  callback_data=f"adm:pnl:delok:{panel_id}"),
+            InlineKeyboardButton("❌ لغو",           callback_data=f"adm:pnl:detail:{panel_id}"),
+        )
+        send_or_edit(call,
+            f"⚠️ آیا مطمئن هستید که می‌خواهید پنل <b>{esc(p['name'])}</b> را حذف کنید؟",
+            kb)
+        return
+
+    if data.startswith("adm:pnl:delok:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+            return
+        panel_id = int(data.split(":")[-1])
+        delete_panel(panel_id)
+        bot.answer_callback_query(call.id, "پنل حذف شد.")
+        _show_admin_panels(call)
+        return
+
+    if data.startswith("adm:pnl:recheck:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+            return
+        panel_id = int(data.split(":")[-1])
+        p = get_panel(panel_id)
+        if not p:
+            bot.answer_callback_query(call.id, "پنل یافت نشد.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id, "در حال بررسی…")
+        try:
+            from ..panels.client import PanelClient
+            client = PanelClient(
+                protocol=p["protocol"],
+                host=p["host"],
+                port=p["port"],
+                path=p["path"] or "",
+                username=p["username"],
+                password=p["password"],
+            )
+            ok, err = client.health_check()
+            status = "connected" if ok else "disconnected"
+            update_panel_status(panel_id, status, err or "")
+        except Exception as exc:
+            update_panel_status(panel_id, "disconnected", str(exc))
+        _show_panel_detail(call, panel_id)
+        return
+
+    if data == "adm:pnl:save_as_inactive":
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+            return
+        if state_name(uid) != "pnl_add_save_fail":
+            bot.answer_callback_query(call.id, "عملیات منقضی شده.", show_alert=True)
+            return
+        sd = state_data(uid)
+        state_clear(uid)
+        panel_id = add_panel(
+            name=sd.get("name", ""),
+            protocol=sd.get("protocol", "http"),
+            host=sd.get("host", ""),
+            port=sd.get("port", 2053),
+            path=sd.get("path", ""),
+            username=sd.get("username", ""),
+            password=sd.get("password", ""),
+        )
+        toggle_panel_active(panel_id, 0)
+        bot.answer_callback_query(call.id, "پنل با وضعیت غیرفعال ذخیره شد.")
+        _show_panel_detail(call, panel_id)
+        return
+
+    if data == "adm:pnl:add_cancel":
+        state_clear(uid)
+        bot.answer_callback_query(call.id, "لغو شد.")
+        _show_admin_panels(call)
         return
 
     bot.answer_callback_query(call.id)

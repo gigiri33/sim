@@ -310,3 +310,108 @@ def _fake_call(call, new_data):
 
     _dispatch_callback(_FakeCall(call, new_data), call.from_user.id, new_data)
 
+
+# ── Panels ─────────────────────────────────────────────────────────────────────
+
+def _panel_status_icon(panel) -> str:
+    if not panel["is_active"]:
+        return "⏸"
+    s = panel["connection_status"]
+    if s == "connected":
+        return "🟢"
+    if s == "disconnected":
+        return "🔴"
+    return "❓"
+
+
+def _show_admin_panels(call):
+    from ..db import get_all_panels
+    panels = get_all_panels()
+
+    lines = ["🖥 <b>مدیریت پنل‌های 3x-ui</b>"]
+    if not panels:
+        lines.append("\n<i>هیچ پنلی ثبت نشده است.</i>")
+    else:
+        lines.append(f"\n<b>{len(panels)}</b> پنل ثبت‌شده:")
+        for p in panels:
+            icon = _panel_status_icon(p)
+            active_label = "" if p["is_active"] else "  <i>(غیرفعال)</i>"
+            lines.append(f"  {icon} {esc(p['name'])}{active_label}")
+
+    text = "\n".join(lines)
+
+    rows = []
+    for p in panels:
+        icon = _panel_status_icon(p)
+        rows.append([_btn(f"{icon}  {p['name']}", callback_data=f"adm:pnl:detail:{p['id']}")])
+
+    rows.append([_btn("➕ افزودن پنل", callback_data="adm:pnl:add")])
+    rows.append([_btn("بازگشت", callback_data="admin:panel",
+                       emoji_id="5253997076169115797")])
+
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    kb = InlineKeyboardMarkup()
+    for row in rows:
+        kb.row(*[InlineKeyboardButton(**b) for b in row])
+    send_or_edit(call, text, kb)
+
+
+def _show_panel_detail(call, panel_id):
+    from ..db import get_panel
+    p = get_panel(panel_id)
+    if not p:
+        send_or_edit(call, "⚠️ پنل یافت نشد.", None)
+        return
+
+    icon = _panel_status_icon(p)
+    status_label = {
+        "connected":    "🟢 متصل",
+        "disconnected": "🔴 قطع",
+        "unknown":      "❓ بررسی نشده",
+    }.get(p["connection_status"], p["connection_status"])
+
+    path_disp = p["path"] or "<i>(ندارد)</i>"
+    checked   = p["last_checked_at"] or "—"
+    err_line  = f"\n⚠️ خطا: <code>{esc(p['last_error'])}</code>" if p["last_error"] else ""
+
+    text = (
+        f"{icon} <b>{esc(p['name'])}</b>\n\n"
+        f"🔗 آدرس:  <code>{p['protocol']}://{esc(p['host'])}:{p['port']}{esc(p['path'] or '')}</code>\n"
+        f"👤 نام کاربری: <code>{esc(p['username'])}</code>\n"
+        f"🔑 رمز عبور:   <code>{esc(p['password'])}</code>\n"
+        f"📡 وضعیت: {status_label}\n"
+        f"🕐 آخرین بررسی: {checked}"
+        f"{err_line}\n\n"
+        f"📅 افزوده‌شده: {p['created_at']}"
+    )
+
+    is_active = int(p["is_active"])
+    toggle_label    = "⏸ غیرفعال کردن" if is_active else "▶️ فعال کردن"
+    toggle_callback = f"adm:pnl:toggle:{panel_id}:{0 if is_active else 1}"
+
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    kb = InlineKeyboardMarkup()
+    kb.row(
+        InlineKeyboardButton("✏️ نام",          callback_data=f"adm:pnl:ef:name:{panel_id}"),
+        InlineKeyboardButton("🌐 پروتکل",       callback_data=f"adm:pnl:ef:protocol:{panel_id}"),
+    )
+    kb.row(
+        InlineKeyboardButton("🖥 هاست",         callback_data=f"adm:pnl:ef:host:{panel_id}"),
+        InlineKeyboardButton("🔌 پورت",         callback_data=f"adm:pnl:ef:port:{panel_id}"),
+    )
+    kb.row(
+        InlineKeyboardButton("📂 مسیر",         callback_data=f"adm:pnl:ef:path:{panel_id}"),
+        InlineKeyboardButton("👤 نام کاربری",   callback_data=f"adm:pnl:ef:username:{panel_id}"),
+    )
+    kb.row(
+        InlineKeyboardButton("🔑 رمز عبور",     callback_data=f"adm:pnl:ef:password:{panel_id}"),
+        InlineKeyboardButton("🔄 بررسی الان",   callback_data=f"adm:pnl:recheck:{panel_id}"),
+    )
+    kb.row(
+        InlineKeyboardButton(toggle_label,       callback_data=toggle_callback),
+        InlineKeyboardButton("🗑 حذف پنل",      callback_data=f"adm:pnl:del:{panel_id}"),
+    )
+    kb.add(InlineKeyboardButton("بازگشت", callback_data="admin:panels",
+                                icon_custom_emoji_id="5253997076169115797"))
+    send_or_edit(call, text, kb)
+

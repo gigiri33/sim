@@ -362,6 +362,25 @@ def init_db():
             "INSERT OR IGNORE INTO settings(key,value) VALUES('license_owner_telegram_id','')",
             "INSERT OR IGNORE INTO settings(key,value) VALUES('license_owner_username','')",
             "INSERT OR IGNORE INTO settings(key,value) VALUES('license_bot_username','')",
+            # ── Panels (3x-ui / Sanaei) ───────────────────────────────────────
+            (
+                "CREATE TABLE IF NOT EXISTS panels ("
+                "id                INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "name              TEXT    NOT NULL,"
+                "protocol          TEXT    NOT NULL DEFAULT 'http',"
+                "host              TEXT    NOT NULL,"
+                "port              INTEGER NOT NULL,"
+                "path              TEXT    NOT NULL DEFAULT '',"
+                "username          TEXT    NOT NULL,"
+                "password          TEXT    NOT NULL,"
+                "is_active         INTEGER NOT NULL DEFAULT 1,"
+                "connection_status TEXT    NOT NULL DEFAULT 'unknown',"
+                "last_checked_at   TEXT    NOT NULL DEFAULT '',"
+                "last_error        TEXT    NOT NULL DEFAULT '',"
+                "created_at        TEXT    NOT NULL,"
+                "updated_at        TEXT    NOT NULL"
+                ")"
+            ),
         ]
         for sql in migrations:
             try:
@@ -1781,3 +1800,76 @@ def redeem_voucher_code(code_id, user_id):
 def delete_voucher_batch(batch_id):
     with get_conn() as conn:
         conn.execute("DELETE FROM voucher_batches WHERE id=?", (batch_id,))
+
+
+# ── Panels (3x-ui / Sanaei) ───────────────────────────────────────────────────
+
+def get_all_panels():
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM panels ORDER BY id ASC"
+        ).fetchall()
+
+
+def get_active_panels():
+    """Return only panels with is_active=1 (used by background checker)."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM panels WHERE is_active=1 ORDER BY id ASC"
+        ).fetchall()
+
+
+def get_panel(panel_id):
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM panels WHERE id=?", (panel_id,)
+        ).fetchone()
+
+
+def add_panel(name, protocol, host, port, path, username, password):
+    ts = now_str()
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO panels(name,protocol,host,port,path,username,password,"
+            "is_active,connection_status,last_checked_at,last_error,created_at,updated_at)"
+            " VALUES(?,?,?,?,?,?,?,1,'unknown','','',?,?)",
+            (name.strip(), protocol, host.strip(), int(port),
+             path.strip(), username.strip(), password, ts, ts)
+        )
+        return cur.lastrowid
+
+
+_PANEL_EDITABLE_FIELDS = {
+    "name", "protocol", "host", "port", "path", "username", "password",
+}
+
+
+def update_panel_field(panel_id, field, value):
+    if field not in _PANEL_EDITABLE_FIELDS:
+        raise ValueError(f"Non-editable panel field: {field}")
+    with get_conn() as conn:
+        conn.execute(
+            f"UPDATE panels SET {field}=?, updated_at=? WHERE id=?",
+            (value, now_str(), panel_id)
+        )
+
+
+def toggle_panel_active(panel_id, is_active: int):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE panels SET is_active=?, updated_at=? WHERE id=?",
+            (int(is_active), now_str(), panel_id)
+        )
+
+
+def update_panel_status(panel_id, status: str, error: str):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE panels SET connection_status=?, last_checked_at=?, last_error=? WHERE id=?",
+            (status, now_str(), error, panel_id)
+        )
+
+
+def delete_panel(panel_id):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM panels WHERE id=?", (panel_id,))

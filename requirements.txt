@@ -3,3 +3,4 @@ qrcode
 pillow
 python-dotenv
 jdatetime
+requests
