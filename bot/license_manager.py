@@ -20,7 +20,7 @@ from functools import wraps
 log = logging.getLogger("license_manager")
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-LICENSE_API_URL           = os.getenv("LICENSE_API_URL", "https://license.seamless.dev/api/v1")
+LICENSE_API_URL           = os.getenv("LICENSE_API_URL", "")
 LICENSE_CHECK_INTERVAL    = int(os.getenv("LICENSE_CHECK_INTERVAL", "1800"))   # 30 min
 LICENSE_NOTIFY_INTERVAL   = int(os.getenv("LICENSE_NOTIFY_INTERVAL_MINUTES", "360")) * 60  # 6h → seconds
 LICENSE_GRACE_MINUTES     = int(os.getenv("LICENSE_GRACE_MINUTES", "60"))
@@ -125,6 +125,8 @@ def _invalidate_cache() -> None:
 
 def _call_license_api(endpoint: str, payload: dict) -> dict:
     """POST to the license server. Returns parsed JSON or raises."""
+    if not LICENSE_API_URL:
+        raise RuntimeError("متغیر LICENSE_API_URL در فایل .env تنظیم نشده است.")
     url = f"{LICENSE_API_URL.rstrip('/')}/{endpoint.lstrip('/')}"
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
