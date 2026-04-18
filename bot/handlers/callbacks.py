@@ -5128,15 +5128,42 @@ def _dispatch_callback(call, uid, data):
     if data.startswith("adm:stk:fulfill:"):
         package_id  = int(data.split(":")[3])
         package_row = get_package(package_id)
+        if not package_row:
+            bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
+            return
+        with get_conn() as conn:
+            pending_c = conn.execute(
+                "SELECT COUNT(*) AS n FROM pending_orders WHERE package_id=? AND status='waiting'",
+                (package_id,)
+            ).fetchone()["n"]
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton(
+            "⚡ تحویل خودکار از موجودی",
+            callback_data=f"adm:stk:fulfill:auto:{package_id}"
+        ))
+        kb.add(types.InlineKeyboardButton(
+            "📝 ثبت کانفیگ جدید (تکی/عمده) + تحویل",
+            callback_data=f"adm:stk:fulfill:addcfg:{package_id}"
+        ))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:stk:pk:{package_id}", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"⏳ <b>تحویل {pending_c} سفارش در انتظار</b>\n\n"
+            f"📦 پکیج: <b>{esc(package_row['name'])}</b>\n\n"
+            "روش تحویل را انتخاب کنید:", kb)
+        return
+
+    # adm:stk:fulfill:auto:{pkg_id}  →  auto-deliver from existing stock
+    if data.startswith("adm:stk:fulfill:auto:"):
+        package_id = int(data.split(":")[4])
         bot.answer_callback_query(call.id, "⏳ در حال تحویل سفارش‌ها...")
         try:
             fulfilled = auto_fulfill_pending_orders(package_id)
             if fulfilled > 0:
                 send_or_edit(call,
-                    f"✅ <b>{fulfilled}</b> سفارش با موفقیت تحویل داده شد.",
+                    f"✅ <b>{fulfilled}</b> سفارش با موفقیت از موجودی تحویل داده شد.",
                     back_button(f"adm:stk:pk:{package_id}"))
             else:
-                # Check if there are still pending orders (no stock available)
                 with get_conn() as conn:
                     remaining = conn.execute(
                         "SELECT COUNT(*) AS n FROM pending_orders WHERE package_id=? AND status='waiting'",
@@ -5145,16 +5172,65 @@ def _dispatch_callback(call, uid, data):
                 if remaining > 0:
                     send_or_edit(call,
                         f"⚠️ <b>{remaining}</b> سفارش در انتظار وجود دارد ولی موجودی کافی نیست.\n\n"
-                        "لطفاً ابتدا کانفیگ ثبت کنید.",
+                        "برای ثبت کانفیگ جدید روی دکمه «ثبت کانفیگ جدید» بزنید.",
                         back_button(f"adm:stk:pk:{package_id}"))
                 else:
-                    send_or_edit(call,
-                        "✅ هیچ سفارش در انتظاری وجود ندارد.",
-                        back_button(f"adm:stk:pk:{package_id}"))
+                    send_or_edit(call, "✅ هیچ سفارش در انتظاری وجود ندارد.",
+                                 back_button(f"adm:stk:pk:{package_id}"))
         except Exception as e:
             send_or_edit(call,
-                f"❌ خطا در تحویل سفارش‌ها:\n<code>{esc(str(e))}</code>",
+                f"❌ خطا:\n<code>{esc(str(e))}</code>",
                 back_button(f"adm:stk:pk:{package_id}"))
+        return
+
+    # adm:stk:fulfill:addcfg:{pkg_id}  →  register new config(s) then auto-deliver
+    if data.startswith("adm:stk:fulfill:addcfg:"):
+        package_id  = int(data.split(":")[4])
+        package_row = get_package(package_id)
+        if not package_row:
+            bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
+            return
+        # Redirect to the normal config-registration protocol selector,
+        # but save fulfill_after=True in state so after registration runs auto_fulfill.
+        state_set(uid, "admin_cfg_proto_select",
+                  package_id=package_id,
+                  type_id=package_row["type_id"],
+                  fulfill_after=True)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("🌐 V2Ray",    callback_data=f"adm:cfg:proto:v2ray:{package_id}"))
+        kb.add(types.InlineKeyboardButton("🔒 OpenVPN",  callback_data=f"adm:cfg:proto:ovpn:{package_id}"))
+        kb.add(types.InlineKeyboardButton("🛡 WireGuard", callback_data=f"adm:cfg:proto:wg:{package_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:stk:fulfill:{package_id}", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"📦 <b>{esc(package_row['name'])}</b>\n\n"
+            "🔌 <b>پروتکل کانفیگ جدید را انتخاب کنید:</b>\n"
+            "<i>پس از ثبت، سفارش‌های در انتظار به‌صورت خودکار تحویل داده می‌شوند.</i>", kb)
+        return
+
+    # adm:stk:fulfill:addcfg:{pkg_id}  →  register new config(s) then auto-deliver
+    if data.startswith("adm:stk:fulfill:addcfg:"):
+        package_id  = int(data.split(":")[4])
+        package_row = get_package(package_id)
+        if not package_row:
+            bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
+            return
+        # Redirect to the normal config-registration protocol selector,
+        # but save fulfill_after=True in state so after registration runs auto_fulfill.
+        state_set(uid, "admin_cfg_proto_select",
+                  package_id=package_id,
+                  type_id=package_row["type_id"],
+                  fulfill_after=True)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("🌐 V2Ray",    callback_data=f"adm:cfg:proto:v2ray:{package_id}"))
+        kb.add(types.InlineKeyboardButton("🔒 OpenVPN",  callback_data=f"adm:cfg:proto:ovpn:{package_id}"))
+        kb.add(types.InlineKeyboardButton("🛡 WireGuard", callback_data=f"adm:cfg:proto:wg:{package_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:stk:fulfill:{package_id}", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"📦 <b>{esc(package_row['name'])}</b>\n\n"
+            "🔌 <b>پروتکل کانفیگ جدید را انتخاب کنید:</b>\n"
+            "<i>پس از ثبت، سفارش‌های در انتظار به‌صورت خودکار تحویل داده می‌شوند.</i>", kb)
         return
 
     if data.startswith("adm:stk:av:") or data.startswith("adm:stk:sl:") or data.startswith("adm:stk:ex:"):
@@ -9204,25 +9280,309 @@ def _dispatch_callback(call, uid, data):
         if payment["status"] != "pending":
             bot.answer_callback_query(call.id, "این تراکنش قبلاً بررسی شده است.", show_alert=True)
             return
-        finish_card_payment_approval(payment_id, "رسید شما رد شد.", approved=False)
-        bot.answer_callback_query(call.id, "❌ رد شد.")
-        _render_pending_receipts_page(call, uid, page)
+        bot.answer_callback_query(call.id)
+        pkg = get_package(p_row["package_id"])
+        pkg_info = ""
+        if pkg:
+            pkg_info = (
+                f"\n\n📦 <b>اطلاعات پکیج:</b>\n"
+                f"🧩 نوع: {esc(pkg['type_name'])}\n"
+                f"✏️ نام: {esc(pkg['name'])}\n"
+                f"🔋 حجم: {fmt_vol(pkg['volume_gb'])}\n"
+                f"⏰ مدت: {fmt_dur(pkg['duration_days'])}\n"
+                f"💰 قیمت: {fmt_price(pkg['price'])} تومان"
+            )
+        # Step 1: ask protocol (same as regular config registration)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("🌐 V2Ray",    callback_data=f"adm:pnd:proto:v2ray:{pending_id}"))
+        kb.add(types.InlineKeyboardButton("🔒 OpenVPN",  callback_data=f"adm:pnd:proto:ovpn:{pending_id}"))
+        kb.add(types.InlineKeyboardButton("🛡 WireGuard", callback_data=f"adm:pnd:proto:wg:{pending_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
+        send_or_edit(call,
+            f"📝 <b>ثبت کانفیگ برای سفارش #{pending_id}</b>{pkg_info}\n\n"
+            "🔌 <b>پروتکل کانفیگ را انتخاب کنید:</b>",
+            kb)
         return
 
-    if data == "admin:pr:reject_all":
-        if not admin_has_perm(uid, "approve_payments"):
+    # adm:pnd:proto:{proto}:{pending_id}  →  ask single/bulk
+    if data.startswith("adm:pnd:proto:"):
+        if not is_admin(uid):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
             return
+        parts = data.split(":")
+        proto      = parts[3]            # v2ray | ovpn | wg
+        pending_id = int(parts[4])
+        p_row = get_pending_order(pending_id)
+        if not p_row or p_row["status"] == "fulfilled":
+            bot.answer_callback_query(call.id, "سفارش یافت نشد یا قبلاً تکمیل شده است.", show_alert=True)
+            return
+        pkg = get_package(p_row["package_id"])
+        # Save pending_id + proto in state so downstream flow can access it
+        state_set(uid, "admin_cfg_proto_select",
+                  package_id=p_row["package_id"],
+                  type_id=pkg["type_id"] if pkg else 0,
+                  pending_id=pending_id)
         bot.answer_callback_query(call.id)
         kb = types.InlineKeyboardMarkup()
-        kb.row(
-            types.InlineKeyboardButton("🗑 بله، همه را رد کن", callback_data="admin:pr:reject_all:do"),
-            types.InlineKeyboardButton("❌ لغو", callback_data="admin:pr"),
-        )
+        if proto == "v2ray":
+            kb.add(types.InlineKeyboardButton("📝 ثبت تکی",    callback_data=f"adm:pnd:v2:single:{pending_id}"))
+            kb.add(types.InlineKeyboardButton("📋 ثبت دسته‌ای", callback_data=f"adm:pnd:v2:bulk:{pending_id}"))
+        elif proto == "ovpn":
+            kb.add(types.InlineKeyboardButton("📝 ثبت تکی",    callback_data=f"adm:pnd:ovpn:single:{pending_id}"))
+            kb.add(types.InlineKeyboardButton("📋 ثبت دسته‌ای", callback_data=f"adm:pnd:ovpn:bulk:{pending_id}"))
+        elif proto == "wg":
+            kb.add(types.InlineKeyboardButton("📝 ثبت تکی",    callback_data=f"adm:pnd:wg:single:{pending_id}"))
+            kb.add(types.InlineKeyboardButton("📋 ثبت دسته‌ای", callback_data=f"adm:pnd:wg:bulk:{pending_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:pending:addcfg:{pending_id}", icon_custom_emoji_id="5253997076169115797"))
+        send_or_edit(call, f"📝 روش ثبت کانفیگ را انتخاب کنید:", kb)
+        return
+
+    # adm:pnd:v2:single:{pending_id}  →  V2Ray single for pending order
+    if data.startswith("adm:pnd:v2:single:"):
+        if not is_admin(uid): return
+        pending_id = int(data.split(":")[4])
+        p_row = get_pending_order(pending_id)
+        if not p_row or p_row["status"] == "fulfilled":
+            bot.answer_callback_query(call.id, "سفارش یافت/تکمیل نشد.", show_alert=True); return
+        pkg = get_package(p_row["package_id"])
+        state_set(uid, "v2_single_name",
+                  package_id=p_row["package_id"],
+                  type_id=pkg["type_id"] if pkg else 0,
+                  mode=1, pending_id=pending_id)
+        bot.answer_callback_query(call.id)
         send_or_edit(call,
-            "⚠️ <b>رد کردن همه رسیدهای در انتظار</b>\n\n"
-            "آیا مطمئن هستید؟ تمام رسیدهای در انتظار بررسی رد خواهند شد و به کاربران اطلاع داده خواهد شد.",
-            kb)
+            "✏️ <b>نام سرویس</b> را وارد کنید:",
+            back_button(f"adm:pnd:proto:v2ray:{pending_id}"))
+        return
+
+    # adm:pnd:v2:bulk:{pending_id}  →  V2Ray bulk for pending order
+    if data.startswith("adm:pnd:v2:bulk:"):
+        if not is_admin(uid): return
+        pending_id = int(data.split(":")[4])
+        p_row = get_pending_order(pending_id)
+        if not p_row or p_row["status"] == "fulfilled":
+            bot.answer_callback_query(call.id, "سفارش یافت/تکمیل نشد.", show_alert=True); return
+        pkg = get_package(p_row["package_id"])
+        state_set(uid, "v2_bulk_init",
+                  package_id=p_row["package_id"],
+                  type_id=pkg["type_id"] if pkg else 0,
+                  pending_id=pending_id)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("1️⃣ کانفیگ + ساب — تعداد کم",   callback_data=f"adm:pnd:v2bm:1:{pending_id}"))
+        kb.add(types.InlineKeyboardButton("2️⃣ کانفیگ + ساب — تعداد زیاد", callback_data=f"adm:pnd:v2bm:2:{pending_id}"))
+        kb.add(types.InlineKeyboardButton("3️⃣ کانفیگ تنها",               callback_data=f"adm:pnd:v2bm:3:{pending_id}"))
+        kb.add(types.InlineKeyboardButton("4️⃣ ساب تنها",                  callback_data=f"adm:pnd:v2bm:4:{pending_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:pnd:proto:v2ray:{pending_id}", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "📋 <b>نوع ثبت دسته‌ای V2Ray</b> را انتخاب کنید:", kb)
+        return
+
+    # adm:pnd:v2bm:{mode}:{pending_id}  →  bulk mode selected for pending order
+    if data.startswith("adm:pnd:v2bm:"):
+        if not is_admin(uid): return
+        parts = data.split(":")
+        mode = int(parts[3]); pending_id = int(parts[4])
+        p_row = get_pending_order(pending_id)
+        if not p_row or p_row["status"] == "fulfilled":
+            bot.answer_callback_query(call.id, "سفارش یافت/تکمیل نشد.", show_alert=True); return
+        pkg = get_package(p_row["package_id"])
+        s = state_data(uid)
+        bot.answer_callback_query(call.id)
+        if mode in (1, 2, 3):
+            state_set(uid, "v2_bulk_pre",
+                      package_id=p_row["package_id"],
+                      type_id=pkg["type_id"] if pkg else 0,
+                      mode=mode, pending_id=pending_id)
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("⏭ بدون پیشوند", callback_data=f"adm:pnd:v2bpfx:skip:{pending_id}"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:pnd:v2:bulk:{pending_id}", icon_custom_emoji_id="5253997076169115797"))
+            send_or_edit(call,
+                "✂️ <b>پیشوند حذفی از نام کانفیگ</b>\n\n"
+                "اگر ابتدای نام کانفیگ‌ها متن اضافه‌ای دارد وارد کنید، در غیر اینصورت «بدون پیشوند» بزنید.", kb)
+        else:  # mode 4: sub only
+            state_set(uid, "v2_bulk_data",
+                      package_id=p_row["package_id"],
+                      type_id=pkg["type_id"] if pkg else 0,
+                      mode=4, prefix="", suffix="", pending_id=pending_id)
+            send_or_edit(call, _v2_bulk_data_prompt(4), back_button(f"adm:pnd:v2:bulk:{pending_id}"))
+        return
+
+    # adm:pnd:v2bpfx:skip:{pending_id}  →  skip prefix for pending bulk
+    if data.startswith("adm:pnd:v2bpfx:skip:"):
+        if not is_admin(uid): return
+        pending_id = int(data.split(":")[4])
+        s = state_data(uid)
+        state_set(uid, "v2_bulk_suf",
+                  package_id=s["package_id"], type_id=s["type_id"],
+                  mode=s["mode"], prefix="", pending_id=pending_id)
+        bot.answer_callback_query(call.id)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("⏭ بدون پسوند", callback_data=f"adm:pnd:v2bsfx:skip:{pending_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:pnd:v2:bulk:{pending_id}", icon_custom_emoji_id="5253997076169115797"))
+        send_or_edit(call,
+            "✂️ <b>پسوند حذفی از نام کانفیگ</b>\n\n"
+            "اگر انتهای نام‌ها متن اضافه‌ای دارد وارد کنید، در غیر اینصورت «بدون پسوند» بزنید.", kb)
+        return
+
+    # adm:pnd:v2bsfx:skip:{pending_id}  →  skip suffix for pending bulk
+    if data.startswith("adm:pnd:v2bsfx:skip:"):
+        if not is_admin(uid): return
+        pending_id = int(data.split(":")[4])
+        s = state_data(uid)
+        mode = s.get("mode", 1)
+        state_set(uid, "v2_bulk_data",
+                  package_id=s["package_id"], type_id=s["type_id"],
+                  mode=mode, prefix=s.get("prefix", ""), suffix="", pending_id=pending_id)
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, _v2_bulk_data_prompt(mode), back_button(f"adm:pnd:v2:bulk:{pending_id}"))
+        return
+
+    # adm:pnd:ovpn:single:{pending_id}  →  OpenVPN single for pending order
+    if data.startswith("adm:pnd:ovpn:single:"):
+        if not is_admin(uid): return
+        pending_id = int(data.split(":")[5])
+        p_row = get_pending_order(pending_id)
+        if not p_row or p_row["status"] == "fulfilled":
+            bot.answer_callback_query(call.id, "سفارش یافت/تکمیل نشد.", show_alert=True); return
+        state_set(uid, "ovpn_single_file",
+                  package_id=p_row["package_id"], pending_id=pending_id)
+        bot.answer_callback_query(call.id)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:pnd:proto:ovpn:{pending_id}", icon_custom_emoji_id="5253997076169115797"))
+        send_or_edit(call,
+            "📎 <b>ثبت تکی OpenVPN برای سفارش</b>\n\n"
+            "فایل یا فایل‌های <code>.ovpn</code> را ارسال کنید:", kb)
+        return
+
+    # adm:pnd:ovpn:bulk:{pending_id}  →  OpenVPN bulk for pending order
+    if data.startswith("adm:pnd:ovpn:bulk:"):
+        if not is_admin(uid): return
+        pending_id = int(data.split(":")[4])
+        p_row = get_pending_order(pending_id)
+        if not p_row or p_row["status"] == "fulfilled":
+            bot.answer_callback_query(call.id, "سفارش یافت/تکمیل نشد.", show_alert=True); return
+        state_set(uid, "ovpn_bulk_init",
+                  package_id=p_row["package_id"], pending_id=pending_id)
+        kb = types.InlineKeyboardMarkup()
+        kb.row(
+            types.InlineKeyboardButton("✅ بله — یک فایل",    callback_data=f"adm:pnd:ovpn:bshared:{pending_id}"),
+            types.InlineKeyboardButton("❌ خیر — فایل جداگانه", callback_data=f"adm:pnd:ovpn:bdiff:{pending_id}"),
+        )
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:pnd:proto:ovpn:{pending_id}", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "📎 <b>ثبت دسته‌ای OpenVPN برای سفارش</b>\n\n"
+            "آیا همه کاربران از یک فایل <b>.ovpn</b> مشترک استفاده می‌کنند؟", kb)
+        return
+
+    # adm:pnd:ovpn:bshared:{pending_id}  →  shared ovpn file for pending
+    if data.startswith("adm:pnd:ovpn:bshared:"):
+        if not is_admin(uid): return
+        pending_id = int(data.split(":")[4])
+        p_row = get_pending_order(pending_id)
+        if not p_row: return
+        state_set(uid, "ovpn_bulk_shared_file",
+                  package_id=p_row["package_id"], pending_id=pending_id)
+        bot.answer_callback_query(call.id)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:pnd:ovpn:bulk:{pending_id}", icon_custom_emoji_id="5253997076169115797"))
+        send_or_edit(call,
+            "📎 فایل <code>.ovpn</code> مشترک را ارسال کنید:\n"
+            "<i>این فایل برای همه سفارش‌های منتظر استفاده می‌شود.</i>", kb)
+        return
+
+    # adm:pnd:ovpn:bdiff:{pending_id}  →  different ovpn files for pending
+    if data.startswith("adm:pnd:ovpn:bdiff:"):
+        if not is_admin(uid): return
+        pending_id = int(data.split(":")[4])
+        p_row = get_pending_order(pending_id)
+        if not p_row: return
+        state_set(uid, "ovpn_bulk_diff_files",
+                  package_id=p_row["package_id"], pending_id=pending_id,
+                  ovpn_sets=[])
+        bot.answer_callback_query(call.id)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:pnd:ovpn:bulk:{pending_id}", icon_custom_emoji_id="5253997076169115797"))
+        send_or_edit(call,
+            "📎 فایل‌های <code>.ovpn</code> کاربر اول را ارسال کنید.\n"
+            "پس از تأیید، به کاربر بعدی می‌روید.", kb)
+        return
+
+    # adm:pnd:wg:single:{pending_id}  →  WireGuard single for pending order
+    if data.startswith("adm:pnd:wg:single:"):
+        if not is_admin(uid): return
+        pending_id = int(data.split(":")[5])
+        p_row = get_pending_order(pending_id)
+        if not p_row or p_row["status"] == "fulfilled":
+            bot.answer_callback_query(call.id, "سفارش یافت/تکمیل نشد.", show_alert=True); return
+        pkg = get_package(p_row["package_id"])
+        state_set(uid, "wg_single_name",
+                  package_id=p_row["package_id"],
+                  type_id=pkg["type_id"] if pkg else 0,
+                  pending_id=pending_id)
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "✏️ <b>نام سرویس WireGuard</b> را وارد کنید:",
+            back_button(f"adm:pnd:proto:wg:{pending_id}"))
+        return
+
+    # adm:pnd:wg:bulk:{pending_id}  →  WireGuard bulk for pending order
+    if data.startswith("adm:pnd:wg:bulk:"):
+        if not is_admin(uid): return
+        pending_id = int(data.split(":")[4])
+        p_row = get_pending_order(pending_id)
+        if not p_row or p_row["status"] == "fulfilled":
+            bot.answer_callback_query(call.id, "سفارش یافت/تکمیل نشد.", show_alert=True); return
+        pkg = get_package(p_row["package_id"])
+        state_set(uid, "wg_bulk_init",
+                  package_id=p_row["package_id"],
+                  type_id=pkg["type_id"] if pkg else 0,
+                  pending_id=pending_id)
+        kb = types.InlineKeyboardMarkup()
+        kb.row(
+            types.InlineKeyboardButton("✅ بله — یک کانفیگ",    callback_data=f"adm:pnd:wg:bshared:{pending_id}"),
+            types.InlineKeyboardButton("❌ خیر — کانفیگ جداگانه", callback_data=f"adm:pnd:wg:bdiff:{pending_id}"),
+        )
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:pnd:proto:wg:{pending_id}", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "🛡 <b>ثبت دسته‌ای WireGuard برای سفارش</b>\n\n"
+            "آیا همه کاربران از یک کانفیگ مشترک استفاده می‌کنند؟", kb)
+        return
+
+    # adm:pnd:wg:bshared:{pending_id}  →  shared wg config for pending
+    if data.startswith("adm:pnd:wg:bshared:"):
+        if not is_admin(uid): return
+        pending_id = int(data.split(":")[4])
+        p_row = get_pending_order(pending_id)
+        if not p_row: return
+        pkg = get_package(p_row["package_id"])
+        state_set(uid, "wg_bulk_shared_name",
+                  package_id=p_row["package_id"],
+                  type_id=pkg["type_id"] if pkg else 0,
+                  pending_id=pending_id)
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "✏️ <b>نام سرویس مشترک</b> را وارد کنید:",
+            back_button(f"adm:pnd:wg:bulk:{pending_id}"))
+        return
+
+    # adm:pnd:wg:bdiff:{pending_id}  →  different wg configs for pending
+    if data.startswith("adm:pnd:wg:bdiff:"):
+        if not is_admin(uid): return
+        pending_id = int(data.split(":")[4])
+        p_row = get_pending_order(pending_id)
+        if not p_row: return
+        pkg = get_package(p_row["package_id"])
+        state_set(uid, "wg_bulk_diff_name",
+                  package_id=p_row["package_id"],
+                  type_id=pkg["type_id"] if pkg else 0,
+                  pending_id=pending_id,
+                  wg_sets=[])
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "✏️ <b>نام سرویس کاربر اول</b> را وارد کنید:",
+            back_button(f"adm:pnd:wg:bulk:{pending_id}"))
         return
 
     if data == "admin:pr:reject_all:do":
@@ -9255,7 +9615,6 @@ def _dispatch_callback(call, uid, data):
         if p_row["status"] == "fulfilled":
             bot.answer_callback_query(call.id, "این سفارش قبلاً تکمیل شده است.", show_alert=True)
             return
-        state_set(uid, "admin_pending_cfg_name", pending_id=pending_id)
         bot.answer_callback_query(call.id)
         pkg = get_package(p_row["package_id"])
         pkg_info = ""
@@ -9268,10 +9627,297 @@ def _dispatch_callback(call, uid, data):
                 f"⏰ مدت: {fmt_dur(pkg['duration_days'])}\n"
                 f"💰 قیمت: {fmt_price(pkg['price'])} تومان"
             )
+        # Step 1: ask protocol (same as regular config registration)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("🌐 V2Ray",    callback_data=f"adm:pnd:proto:v2ray:{pending_id}"))
+        kb.add(types.InlineKeyboardButton("🔒 OpenVPN",  callback_data=f"adm:pnd:proto:ovpn:{pending_id}"))
+        kb.add(types.InlineKeyboardButton("🛡 WireGuard", callback_data=f"adm:pnd:proto:wg:{pending_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call,
             f"📝 <b>ثبت کانفیگ برای سفارش #{pending_id}</b>{pkg_info}\n\n"
-            "لطفاً <b>نام سرویس</b> را ارسال کنید:",
-            back_button("admin:panel"))
+            "🔌 <b>پروتکل کانفیگ را انتخاب کنید:</b>",
+            kb)
+        return
+
+    # adm:pnd:proto:{proto}:{pending_id}  →  ask single/bulk
+    if data.startswith("adm:pnd:proto:"):
+        if not is_admin(uid):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        parts = data.split(":")
+        proto      = parts[3]            # v2ray | ovpn | wg
+        pending_id = int(parts[4])
+        p_row = get_pending_order(pending_id)
+        if not p_row or p_row["status"] == "fulfilled":
+            bot.answer_callback_query(call.id, "سفارش یافت نشد یا قبلاً تکمیل شده است.", show_alert=True)
+            return
+        pkg = get_package(p_row["package_id"])
+        # Save pending_id + proto in state so downstream flow can access it
+        state_set(uid, "admin_cfg_proto_select",
+                  package_id=p_row["package_id"],
+                  type_id=pkg["type_id"] if pkg else 0,
+                  pending_id=pending_id)
+        bot.answer_callback_query(call.id)
+        kb = types.InlineKeyboardMarkup()
+        if proto == "v2ray":
+            kb.add(types.InlineKeyboardButton("📝 ثبت تکی",    callback_data=f"adm:pnd:v2:single:{pending_id}"))
+            kb.add(types.InlineKeyboardButton("📋 ثبت دسته‌ای", callback_data=f"adm:pnd:v2:bulk:{pending_id}"))
+        elif proto == "ovpn":
+            kb.add(types.InlineKeyboardButton("📝 ثبت تکی",    callback_data=f"adm:pnd:ovpn:single:{pending_id}"))
+            kb.add(types.InlineKeyboardButton("📋 ثبت دسته‌ای", callback_data=f"adm:pnd:ovpn:bulk:{pending_id}"))
+        elif proto == "wg":
+            kb.add(types.InlineKeyboardButton("📝 ثبت تکی",    callback_data=f"adm:pnd:wg:single:{pending_id}"))
+            kb.add(types.InlineKeyboardButton("📋 ثبت دسته‌ای", callback_data=f"adm:pnd:wg:bulk:{pending_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:pending:addcfg:{pending_id}", icon_custom_emoji_id="5253997076169115797"))
+        send_or_edit(call, f"📝 روش ثبت کانفیگ را انتخاب کنید:", kb)
+        return
+
+    # adm:pnd:v2:single:{pending_id}  →  V2Ray single for pending order
+    if data.startswith("adm:pnd:v2:single:"):
+        if not is_admin(uid): return
+        pending_id = int(data.split(":")[4])
+        p_row = get_pending_order(pending_id)
+        if not p_row or p_row["status"] == "fulfilled":
+            bot.answer_callback_query(call.id, "سفارش یافت/تکمیل نشد.", show_alert=True); return
+        pkg = get_package(p_row["package_id"])
+        state_set(uid, "v2_single_name",
+                  package_id=p_row["package_id"],
+                  type_id=pkg["type_id"] if pkg else 0,
+                  mode=1, pending_id=pending_id)
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "✏️ <b>نام سرویس</b> را وارد کنید:",
+            back_button(f"adm:pnd:proto:v2ray:{pending_id}"))
+        return
+
+    # adm:pnd:v2:bulk:{pending_id}  →  V2Ray bulk for pending order
+    if data.startswith("adm:pnd:v2:bulk:"):
+        if not is_admin(uid): return
+        pending_id = int(data.split(":")[4])
+        p_row = get_pending_order(pending_id)
+        if not p_row or p_row["status"] == "fulfilled":
+            bot.answer_callback_query(call.id, "سفارش یافت/تکمیل نشد.", show_alert=True); return
+        pkg = get_package(p_row["package_id"])
+        state_set(uid, "v2_bulk_init",
+                  package_id=p_row["package_id"],
+                  type_id=pkg["type_id"] if pkg else 0,
+                  pending_id=pending_id)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("1️⃣ کانفیگ + ساب — تعداد کم",   callback_data=f"adm:pnd:v2bm:1:{pending_id}"))
+        kb.add(types.InlineKeyboardButton("2️⃣ کانفیگ + ساب — تعداد زیاد", callback_data=f"adm:pnd:v2bm:2:{pending_id}"))
+        kb.add(types.InlineKeyboardButton("3️⃣ کانفیگ تنها",               callback_data=f"adm:pnd:v2bm:3:{pending_id}"))
+        kb.add(types.InlineKeyboardButton("4️⃣ ساب تنها",                  callback_data=f"adm:pnd:v2bm:4:{pending_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:pnd:proto:v2ray:{pending_id}", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "📋 <b>نوع ثبت دسته‌ای V2Ray</b> را انتخاب کنید:", kb)
+        return
+
+    # adm:pnd:v2bm:{mode}:{pending_id}  →  bulk mode selected for pending order
+    if data.startswith("adm:pnd:v2bm:"):
+        if not is_admin(uid): return
+        parts = data.split(":")
+        mode = int(parts[3]); pending_id = int(parts[4])
+        p_row = get_pending_order(pending_id)
+        if not p_row or p_row["status"] == "fulfilled":
+            bot.answer_callback_query(call.id, "سفارش یافت/تکمیل نشد.", show_alert=True); return
+        pkg = get_package(p_row["package_id"])
+        s = state_data(uid)
+        bot.answer_callback_query(call.id)
+        if mode in (1, 2, 3):
+            state_set(uid, "v2_bulk_pre",
+                      package_id=p_row["package_id"],
+                      type_id=pkg["type_id"] if pkg else 0,
+                      mode=mode, pending_id=pending_id)
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("⏭ بدون پیشوند", callback_data=f"adm:pnd:v2bpfx:skip:{pending_id}"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:pnd:v2:bulk:{pending_id}", icon_custom_emoji_id="5253997076169115797"))
+            send_or_edit(call,
+                "✂️ <b>پیشوند حذفی از نام کانفیگ</b>\n\n"
+                "اگر ابتدای نام کانفیگ‌ها متن اضافه‌ای دارد وارد کنید، در غیر اینصورت «بدون پیشوند» بزنید.", kb)
+        else:  # mode 4: sub only
+            state_set(uid, "v2_bulk_data",
+                      package_id=p_row["package_id"],
+                      type_id=pkg["type_id"] if pkg else 0,
+                      mode=4, prefix="", suffix="", pending_id=pending_id)
+            send_or_edit(call, _v2_bulk_data_prompt(4), back_button(f"adm:pnd:v2:bulk:{pending_id}"))
+        return
+
+    # adm:pnd:v2bpfx:skip:{pending_id}  →  skip prefix for pending bulk
+    if data.startswith("adm:pnd:v2bpfx:skip:"):
+        if not is_admin(uid): return
+        pending_id = int(data.split(":")[4])
+        s = state_data(uid)
+        state_set(uid, "v2_bulk_suf",
+                  package_id=s["package_id"], type_id=s["type_id"],
+                  mode=s["mode"], prefix="", pending_id=pending_id)
+        bot.answer_callback_query(call.id)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("⏭ بدون پسوند", callback_data=f"adm:pnd:v2bsfx:skip:{pending_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:pnd:v2:bulk:{pending_id}", icon_custom_emoji_id="5253997076169115797"))
+        send_or_edit(call,
+            "✂️ <b>پسوند حذفی از نام کانفیگ</b>\n\n"
+            "اگر انتهای نام‌ها متن اضافه‌ای دارد وارد کنید، در غیر اینصورت «بدون پسوند» بزنید.", kb)
+        return
+
+    # adm:pnd:v2bsfx:skip:{pending_id}  →  skip suffix for pending bulk
+    if data.startswith("adm:pnd:v2bsfx:skip:"):
+        if not is_admin(uid): return
+        pending_id = int(data.split(":")[4])
+        s = state_data(uid)
+        mode = s.get("mode", 1)
+        state_set(uid, "v2_bulk_data",
+                  package_id=s["package_id"], type_id=s["type_id"],
+                  mode=mode, prefix=s.get("prefix", ""), suffix="", pending_id=pending_id)
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, _v2_bulk_data_prompt(mode), back_button(f"adm:pnd:v2:bulk:{pending_id}"))
+        return
+
+    # adm:pnd:ovpn:single:{pending_id}  →  OpenVPN single for pending order
+    if data.startswith("adm:pnd:ovpn:single:"):
+        if not is_admin(uid): return
+        pending_id = int(data.split(":")[5])
+        p_row = get_pending_order(pending_id)
+        if not p_row or p_row["status"] == "fulfilled":
+            bot.answer_callback_query(call.id, "سفارش یافت/تکمیل نشد.", show_alert=True); return
+        state_set(uid, "ovpn_single_file",
+                  package_id=p_row["package_id"], pending_id=pending_id)
+        bot.answer_callback_query(call.id)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:pnd:proto:ovpn:{pending_id}", icon_custom_emoji_id="5253997076169115797"))
+        send_or_edit(call,
+            "📎 <b>ثبت تکی OpenVPN برای سفارش</b>\n\n"
+            "فایل یا فایل‌های <code>.ovpn</code> را ارسال کنید:", kb)
+        return
+
+    # adm:pnd:ovpn:bulk:{pending_id}  →  OpenVPN bulk for pending order
+    if data.startswith("adm:pnd:ovpn:bulk:"):
+        if not is_admin(uid): return
+        pending_id = int(data.split(":")[4])
+        p_row = get_pending_order(pending_id)
+        if not p_row or p_row["status"] == "fulfilled":
+            bot.answer_callback_query(call.id, "سفارش یافت/تکمیل نشد.", show_alert=True); return
+        state_set(uid, "ovpn_bulk_init",
+                  package_id=p_row["package_id"], pending_id=pending_id)
+        kb = types.InlineKeyboardMarkup()
+        kb.row(
+            types.InlineKeyboardButton("✅ بله — یک فایل",    callback_data=f"adm:pnd:ovpn:bshared:{pending_id}"),
+            types.InlineKeyboardButton("❌ خیر — فایل جداگانه", callback_data=f"adm:pnd:ovpn:bdiff:{pending_id}"),
+        )
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:pnd:proto:ovpn:{pending_id}", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "📎 <b>ثبت دسته‌ای OpenVPN برای سفارش</b>\n\n"
+            "آیا همه کاربران از یک فایل <b>.ovpn</b> مشترک استفاده می‌کنند؟", kb)
+        return
+
+    # adm:pnd:ovpn:bshared:{pending_id}  →  shared ovpn file for pending
+    if data.startswith("adm:pnd:ovpn:bshared:"):
+        if not is_admin(uid): return
+        pending_id = int(data.split(":")[4])
+        p_row = get_pending_order(pending_id)
+        if not p_row: return
+        state_set(uid, "ovpn_bulk_shared_file",
+                  package_id=p_row["package_id"], pending_id=pending_id)
+        bot.answer_callback_query(call.id)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:pnd:ovpn:bulk:{pending_id}", icon_custom_emoji_id="5253997076169115797"))
+        send_or_edit(call,
+            "📎 فایل <code>.ovpn</code> مشترک را ارسال کنید:\n"
+            "<i>این فایل برای همه سفارش‌های منتظر استفاده می‌شود.</i>", kb)
+        return
+
+    # adm:pnd:ovpn:bdiff:{pending_id}  →  different ovpn files for pending
+    if data.startswith("adm:pnd:ovpn:bdiff:"):
+        if not is_admin(uid): return
+        pending_id = int(data.split(":")[4])
+        p_row = get_pending_order(pending_id)
+        if not p_row: return
+        state_set(uid, "ovpn_bulk_diff_files",
+                  package_id=p_row["package_id"], pending_id=pending_id,
+                  ovpn_sets=[])
+        bot.answer_callback_query(call.id)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:pnd:ovpn:bulk:{pending_id}", icon_custom_emoji_id="5253997076169115797"))
+        send_or_edit(call,
+            "📎 فایل‌های <code>.ovpn</code> کاربر اول را ارسال کنید.\n"
+            "پس از تأیید، به کاربر بعدی می‌روید.", kb)
+        return
+
+    # adm:pnd:wg:single:{pending_id}  →  WireGuard single for pending order
+    if data.startswith("adm:pnd:wg:single:"):
+        if not is_admin(uid): return
+        pending_id = int(data.split(":")[5])
+        p_row = get_pending_order(pending_id)
+        if not p_row or p_row["status"] == "fulfilled":
+            bot.answer_callback_query(call.id, "سفارش یافت/تکمیل نشد.", show_alert=True); return
+        pkg = get_package(p_row["package_id"])
+        state_set(uid, "wg_single_name",
+                  package_id=p_row["package_id"],
+                  type_id=pkg["type_id"] if pkg else 0,
+                  pending_id=pending_id)
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "✏️ <b>نام سرویس WireGuard</b> را وارد کنید:",
+            back_button(f"adm:pnd:proto:wg:{pending_id}"))
+        return
+
+    # adm:pnd:wg:bulk:{pending_id}  →  WireGuard bulk for pending order
+    if data.startswith("adm:pnd:wg:bulk:"):
+        if not is_admin(uid): return
+        pending_id = int(data.split(":")[4])
+        p_row = get_pending_order(pending_id)
+        if not p_row or p_row["status"] == "fulfilled":
+            bot.answer_callback_query(call.id, "سفارش یافت/تکمیل نشد.", show_alert=True); return
+        pkg = get_package(p_row["package_id"])
+        state_set(uid, "wg_bulk_init",
+                  package_id=p_row["package_id"],
+                  type_id=pkg["type_id"] if pkg else 0,
+                  pending_id=pending_id)
+        kb = types.InlineKeyboardMarkup()
+        kb.row(
+            types.InlineKeyboardButton("✅ بله — یک کانفیگ",    callback_data=f"adm:pnd:wg:bshared:{pending_id}"),
+            types.InlineKeyboardButton("❌ خیر — کانفیگ جداگانه", callback_data=f"adm:pnd:wg:bdiff:{pending_id}"),
+        )
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:pnd:proto:wg:{pending_id}", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "🛡 <b>ثبت دسته‌ای WireGuard برای سفارش</b>\n\n"
+            "آیا همه کاربران از یک کانفیگ مشترک استفاده می‌کنند؟", kb)
+        return
+
+    # adm:pnd:wg:bshared:{pending_id}  →  shared wg config for pending
+    if data.startswith("adm:pnd:wg:bshared:"):
+        if not is_admin(uid): return
+        pending_id = int(data.split(":")[4])
+        p_row = get_pending_order(pending_id)
+        if not p_row: return
+        pkg = get_package(p_row["package_id"])
+        state_set(uid, "wg_bulk_shared_name",
+                  package_id=p_row["package_id"],
+                  type_id=pkg["type_id"] if pkg else 0,
+                  pending_id=pending_id)
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "✏️ <b>نام سرویس مشترک</b> را وارد کنید:",
+            back_button(f"adm:pnd:wg:bulk:{pending_id}"))
+        return
+
+    # adm:pnd:wg:bdiff:{pending_id}  →  different wg configs for pending
+    if data.startswith("adm:pnd:wg:bdiff:"):
+        if not is_admin(uid): return
+        pending_id = int(data.split(":")[4])
+        p_row = get_pending_order(pending_id)
+        if not p_row: return
+        pkg = get_package(p_row["package_id"])
+        state_set(uid, "wg_bulk_diff_name",
+                  package_id=p_row["package_id"],
+                  type_id=pkg["type_id"] if pkg else 0,
+                  pending_id=pending_id,
+                  wg_sets=[])
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "✏️ <b>نام سرویس کاربر اول</b> را وارد کنید:",
+            back_button(f"adm:pnd:wg:bulk:{pending_id}"))
         return
 
     if data == "noop":
