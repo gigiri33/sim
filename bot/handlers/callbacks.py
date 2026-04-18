@@ -1483,6 +1483,26 @@ def on_callback(call):
     try:
         ensure_user(call.from_user)
 
+        # ── Bot status gate (off / update) ───────────────────────────────────
+        # Applies to ALL callbacks from non-admins, including old inline menus.
+        # Admin callbacks pass through unconditionally.
+        if not is_admin(uid):
+            _bot_status = setting_get("bot_status", "on")
+            if _bot_status == "off":
+                bot.answer_callback_query(
+                    call.id,
+                    "🔴 ربات در حال حاضر خاموش است.",
+                    show_alert=True
+                )
+                return
+            if _bot_status == "update":
+                bot.answer_callback_query(
+                    call.id,
+                    "🔄 ربات در حال بروزرسانی است.\n\nلطفاً کمی صبر کنید و دوباره امتحان کنید. 🙏",
+                    show_alert=True
+                )
+                return
+
         # ── Stale callback guard ─────────────────────────────────────────────
         # If the inline button is from a message older than 48 h and it's a
         # payment/purchase action, warn the user and abort to avoid double-pay.
