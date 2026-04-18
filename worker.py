@@ -58,6 +58,35 @@ POLL_INTERVAL  = int(os.getenv("POLL_INTERVAL", "15"))
 INBOUND_ID     = int(os.getenv("INBOUND_ID", "1"))
 PROTOCOL       = os.getenv("PROTOCOL", "vless").lower()
 
+# ── License check (worker-side) ───────────────────────────────────────────────
+# The worker checks license state via the Bot API before processing jobs.
+# This ensures jobs don't run on unlicensed installations.
+_license_cache_ok: bool = False
+_license_cache_ts: float = 0.0
+_LICENSE_CACHE_TTL: float = 300.0   # 5 minutes
+
+
+def _worker_check_license() -> bool:
+    """
+    Worker-side license check via Bot API.
+    Returns True if the Bot API confirms license is active, False otherwise.
+    Uses a short in-process cache to avoid hammering the API.
+    """
+    global _license_cache_ok, _license_cache_ts
+    now = time.time()
+    if _license_cache_ok and (now - _license_cache_ts) < _LICENSE_CACHE_TTL:
+        return True
+    try:
+        result = _api_request("GET", "/license/status")
+        active = result.get("active", False)
+        _license_cache_ok = active
+        _license_cache_ts = now
+        return active
+    except Exception as e:
+        log.warning("Worker license check failed: %s", e)
+        # On network failure, fall back to cached value
+        return _license_cache_ok
+
 # ── Logging ────────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
@@ -325,10 +354,20 @@ def main():
     consecutive_errors = 0
     while True:
         try:
+            # ── Layer 4: License check before fetching jobs ───────────────────
+            if not _worker_check_license():
+                log.warning("License inactive — skipping job fetch this cycle.")
+                time.sleep(POLL_INTERVAL)
+                continue
+
             jobs = fetch_pending_jobs()
             if jobs:
                 log.info("Fetched %d pending job(s)", len(jobs))
                 for job in jobs:
+                    # ── Layer 5: Per-job license re-check ────────────────────
+                    if not _worker_check_license():
+                        log.warning("License became inactive mid-batch — halting job processing.")
+                        break
                     process_job(job, xui)
             else:
                 log.debug("No pending jobs")

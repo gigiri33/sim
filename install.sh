@@ -390,6 +390,10 @@ update_bot() {
   setup_venv
   systemctl restart "$SERVICE"
   ok "Update of ${BOT_NAME} completed!"
+  echo ""
+  echo -e "${Y}ℹ️  License Notice:${N}"
+  echo -e "${Y}   If this is an existing bot without a license, it will run in${N}"
+  echo -e "${Y}   LIMITED MODE. Use /license_status inside the bot to activate.${N}"
 }
 
 edit_config() {

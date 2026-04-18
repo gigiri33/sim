@@ -1427,6 +1427,21 @@ def on_callback(call):
                 _send_phone_request(call.message.chat.id, uid)
                 return
 
+        # ── Layer 9: License enforcement in callback dispatcher ───────────────
+        # Allow license-related callbacks and admin panel always
+        _LICENSE_PASSTHROUGH = {
+            "nav:main", "admin:panel", "license:activate", "license:status",
+            "license:recheck", "license:limited_info", "support",
+        }
+        from ..license_manager import is_limited_mode as _is_limited
+        if _is_limited() and not is_admin(uid) and data not in _LICENSE_PASSTHROUGH:
+            bot.answer_callback_query(
+                call.id,
+                "🚫 ربات در حال حاضر غیرفعال است.\nبرای تمدید به @Emad_Habibnia پیام دهید.",
+                show_alert=True,
+            )
+            return
+
         # Restricted user check (admins bypass)
         if not is_admin(uid):
             _u = get_user(uid)

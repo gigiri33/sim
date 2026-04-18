@@ -95,6 +95,12 @@ CRYPTO_EMOJI_IDS = {
 # ── Pagination ─────────────────────────────────────────────────────────────────
 CONFIGS_PER_PAGE = 10
 
+# ── License System ─────────────────────────────────────────────────────────────
+LICENSE_API_URL              = os.getenv("LICENSE_API_URL", "https://license.seamless.dev/api/v1")
+LICENSE_CHECK_INTERVAL       = int(os.getenv("LICENSE_CHECK_INTERVAL", "1800"))
+LICENSE_NOTIFY_INTERVAL_MINUTES = int(os.getenv("LICENSE_NOTIFY_INTERVAL_MINUTES", "360"))
+LICENSE_GRACE_MINUTES        = int(os.getenv("LICENSE_GRACE_MINUTES", "60"))
+
 # ── Validation ─────────────────────────────────────────────────────────────────
 if not BOT_TOKEN or ":" not in BOT_TOKEN:
     raise SystemExit("BOT_TOKEN تنظیم نشده یا معتبر نیست.")

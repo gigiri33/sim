@@ -60,6 +60,36 @@ def _api_enabled():
     return row and row["value"] == "1"
 
 
+def _license_active() -> bool:
+    """Read license state directly from DB (api.py is standalone, no bot package import)."""
+    try:
+        with _conn() as c:
+            state_row = c.execute(
+                "SELECT value FROM settings WHERE key='license_state'"
+            ).fetchone()
+            if not state_row or state_row["value"] != "active":
+                return False
+            # Also check expiry
+            exp_row = c.execute(
+                "SELECT value FROM settings WHERE key='license_expires_at'"
+            ).fetchone()
+            expires_at = exp_row["value"] if exp_row else ""
+            if expires_at:
+                from datetime import datetime, timezone
+                for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+                    try:
+                        dt = datetime.strptime(expires_at, fmt).replace(tzinfo=timezone.utc)
+                        grace_seconds = int(os.getenv("LICENSE_GRACE_MINUTES", "60")) * 60
+                        if datetime.now(timezone.utc).timestamp() > dt.timestamp() + grace_seconds:
+                            return False
+                        break
+                    except ValueError:
+                        continue
+            return True
+    except Exception:
+        return False
+
+
 # ── Auth decorator ─────────────────────────────────────────────────────────────
 def require_api_key(f):
     @functools.wraps(f)
@@ -83,10 +113,30 @@ def health():
     return jsonify({"status": "ok", "service": "ConfigFlow Worker API"})
 
 
+@app.route("/license/status", methods=["GET"])
+@require_api_key
+def license_status():
+    """Return current license status (used by worker to check before processing jobs)."""
+    active = _license_active()
+    try:
+        with _conn() as c:
+            state_row = c.execute("SELECT value FROM settings WHERE key='license_state'").fetchone()
+            exp_row   = c.execute("SELECT value FROM settings WHERE key='license_expires_at'").fetchone()
+        state      = state_row["value"] if state_row else "inactive"
+        expires_at = exp_row["value"]   if exp_row   else ""
+    except Exception:
+        state, expires_at = "unknown", ""
+    return jsonify({"active": active, "state": state, "expires_at": expires_at})
+
+
 @app.route("/jobs/pending", methods=["GET"])
 @require_api_key
 def get_pending_jobs():
     """Return up to 20 pending/failed jobs with panel credentials."""
+    # ── Layer 6: License check on job-fetch endpoint ──────────────────────────
+    if not _license_active():
+        return jsonify({"error": "License inactive", "jobs": []}), 402
+
     with _conn() as c:
         rows = c.execute(
             "SELECT j.id, j.job_uuid, j.user_id, j.panel_id, j.panel_package_id,"
@@ -125,6 +175,10 @@ def start_job(job_id):
 @require_api_key
 def post_result(job_id):
     """Worker posts the generated config + link after successful 3x-ui client creation."""
+    # ── Layer 7: License check on result submission ───────────────────────────
+    if not _license_active():
+        return jsonify({"error": "License inactive"}), 402
+
     data = request.get_json(silent=True) or {}
     result_config = (data.get("result_config") or "").strip()
     result_link   = (data.get("result_link") or "").strip()

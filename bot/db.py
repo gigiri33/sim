@@ -391,6 +391,16 @@ def init_db():
             "CREATE TABLE IF NOT EXISTS discount_code_targets (id INTEGER PRIMARY KEY AUTOINCREMENT, code_id INTEGER NOT NULL REFERENCES discount_codes(id) ON DELETE CASCADE, target_type TEXT NOT NULL, target_id INTEGER NOT NULL, UNIQUE(code_id, target_type, target_id))",
             # buyer_role: 'all' | 'agents' | 'public'  (who can purchase this package)
             "ALTER TABLE packages ADD COLUMN buyer_role TEXT NOT NULL DEFAULT 'all'",
+            # ── License system settings migration ──────────────────────────────
+            "INSERT OR IGNORE INTO settings(key,value) VALUES('license_state','inactive')",
+            "INSERT OR IGNORE INTO settings(key,value) VALUES('license_api_key','')",
+            "INSERT OR IGNORE INTO settings(key,value) VALUES('license_expires_at','')",
+            "INSERT OR IGNORE INTO settings(key,value) VALUES('license_machine_id','')",
+            "INSERT OR IGNORE INTO settings(key,value) VALUES('license_last_check','')",
+            "INSERT OR IGNORE INTO settings(key,value) VALUES('license_last_notify','')",
+            "INSERT OR IGNORE INTO settings(key,value) VALUES('license_owner_telegram_id','')",
+            "INSERT OR IGNORE INTO settings(key,value) VALUES('license_owner_username','')",
+            "INSERT OR IGNORE INTO settings(key,value) VALUES('license_bot_username','')",
         ]
         for sql in migrations:
             try:

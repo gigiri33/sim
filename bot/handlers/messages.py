@@ -225,6 +225,20 @@ def universal_handler(message):
     uid    = message.from_user.id
     ensure_user(message.from_user)
 
+    # ── Layer 8: License enforcement in universal handler ─────────────────────
+    from ..license_manager import is_limited_mode as _is_limited
+    if _is_limited() and not is_admin(uid):
+        # Allow only /cancel, /start (so user can see activation menu)
+        txt = (message.text or "").strip()
+        if txt not in ("/start", "/cancel", "لغو"):
+            bot.send_message(
+                message.chat.id,
+                "🚫 ربات در حال حاضر غیرفعال است.\n\n"
+                "برای تمدید اشتراک به @Emad_Habibnia پیام بدهید.",
+                parse_mode="HTML",
+            )
+            return
+
     # Restricted user check
     _u = get_user(uid)
     if _u and _u["status"] == "restricted" and not is_admin(uid):

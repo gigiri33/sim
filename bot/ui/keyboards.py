@@ -67,6 +67,10 @@ def kb_main(user_id):
         rows.append([_btn("درخواست نمایندگی", callback_data="agency:request", emoji_id="5372957680174384345")])
     if is_admin(user_id):
         rows.append([_btn("ورود به پنل مدیریت", callback_data="admin:panel", emoji_id="5370935802844946281")])
+    # Show limited-mode notice to regular users when license is inactive
+    from ..license_manager import is_limited_mode as _is_limited
+    if _is_limited() and not is_admin(user_id):
+        rows.append([_btn("🔒 ربات غیرفعال — اطلاعات بیشتر", callback_data="license:limited_info")])
     return _raw_markup(rows)
 
 
@@ -134,6 +138,14 @@ def kb_admin_panel(uid=None):
 
     if is_owner or (uid and admin_has_perm(uid, "settings")):
         rows.append([_btn("تنظیمات", callback_data="admin:settings", emoji_id="5370935802844946281")])
+
+    # License management — always visible to owner
+    if is_owner:
+        from ..license_manager import is_limited_mode as _is_limited
+        if _is_limited():
+            rows.append([_btn("🔐 فعال‌سازی لایسنس", callback_data="license:activate")])
+        else:
+            rows.append([_btn("🔐 وضعیت لایسنس", callback_data="license:status")])
 
     rows.append([_btn("بازگشت", callback_data="nav:main", emoji_id="5253997076169115797")])
     return _raw_markup(rows)
