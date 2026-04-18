@@ -111,20 +111,33 @@ def check_channel_membership(user_id):
 
     # Cache miss or stale — user must be in ALL channels
     is_member = True
+    all_checked = True  # True only if every channel was successfully queried
     for channel_id in channels:
         try:
             member = bot.get_chat_member(channel_id, user_id)
             if member.status not in ("member", "administrator", "creator"):
+                # Telegram explicitly says user is not a member → block
                 is_member = False
                 break
-        except Exception:
-            # Fail-closed: if bot can't check a channel (not admin there, etc.)
-            # treat user as NOT a member to enforce the lock.
-            is_member = False
-            break
+        except Exception as e:
+            # Two cases:
+            # 1. Bot is not an admin/member of this channel → can't verify → skip (fail-open)
+            # 2. Other API error
+            # Either way we cannot confirm the user IS a member, so mark result as uncertain
+            # and do NOT cache a positive result.
+            err = str(e).lower()
+            # If Telegram explicitly reports user is not a participant → block
+            if "user_not_participant" in err or "participant" in err:
+                is_member = False
+                break
+            # Otherwise (bot lacks permissions, network error, etc.) → skip this channel
+            all_checked = False
 
-    with _CHANNEL_CACHE_LOCK:
-        _CHANNEL_CACHE[user_id] = (is_member, now)
+    # Only cache when every channel could be checked; uncertain results are not cached
+    # so the next request triggers a fresh check.
+    if all_checked or not is_member:
+        with _CHANNEL_CACHE_LOCK:
+            _CHANNEL_CACHE[user_id] = (is_member, now)
     return is_member
 
 
