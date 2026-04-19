@@ -1036,14 +1036,14 @@ def _create_panel_config(uid, package_id, payment_id):
 
     try:
         panel_id      = package_row["panel_id"]
-        panel_port    = int(package_row["panel_port"] or 0)
+        panel_inbound = int(package_row["panel_port"] or 0)   # stored as inbound ID
         delivery_mode = package_row["delivery_mode"] or "config_only"
         panel_type    = package_row["panel_type"] or "sanaei"
     except (IndexError, KeyError):
         return False, "اطلاعات پنل پکیج ناقص است", None
 
-    if not panel_id or not panel_port:
-        return False, "پنل یا پورت پکیج تنظیم نشده", None
+    if not panel_id or not panel_inbound:
+        return False, "پنل یا شماره اینباند پکیج تنظیم نشده", None
 
     panel = get_panel(panel_id)
     if not panel:
@@ -1062,11 +1062,13 @@ def _create_panel_config(uid, package_id, payment_id):
     if not ok:
         return False, f"اتصال به پنل ناموفق: {err}", None
 
-    inbound = client.find_inbound_by_port(panel_port)
+    # Use inbound ID directly — no port-based lookup
+    inbound = client.find_inbound_by_id(panel_inbound)
     if not inbound:
-        return False, f"اینباند با پورت {panel_port} یافت نشد", None
+        return False, f"اینباند با شماره {panel_inbound} در پنل یافت نشد", None
 
-    inbound_id = inbound["id"]
+    inbound_id   = inbound["id"]
+    real_port    = int(inbound.get("port") or 0)   # actual connection port for config URL
 
     # Generate config name: {user_id}_{random6}
     rand_str    = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
@@ -1089,7 +1091,7 @@ def _create_panel_config(uid, package_id, payment_id):
     if not ok:
         return False, f"خطا در ساخت کلاینت: {result}", None
 
-    client_uuid = result
+    client_uuid, sub_id = result
     sub_url     = client.get_sub_url(client_uuid)
 
     # Try to get a vmess/vless config link from the inbound protocol
@@ -1098,14 +1100,14 @@ def _create_panel_config(uid, package_id, payment_id):
         proto = (inbound.get("protocol") or "").lower()
         if proto == "vless":
             config_text = (
-                f"vless://{client_uuid}@{panel['host']}:{panel_port}"
+                f"vless://{client_uuid}@{panel['host']}:{real_port}"
                 f"?type=tcp&security=none#{client_name}"
             )
         elif proto == "vmess":
             import json as _json, base64 as _b64
             vmess_obj = {
                 "v": "2", "ps": client_name, "add": panel["host"],
-                "port": str(panel_port), "id": client_uuid,
+                "port": str(real_port), "id": client_uuid,
                 "aid": "0", "net": "tcp", "type": "none", "tls": "",
             }
             config_text = "vmess://" + _b64.b64encode(
@@ -1120,7 +1122,7 @@ def _create_panel_config(uid, package_id, payment_id):
         panel_id=panel_id,
         panel_type=panel_type,
         inbound_id=inbound_id,
-        inbound_port=panel_port,
+        inbound_port=real_port,
         client_name=client_name,
         client_uuid=client_uuid,
         client_sub_url=sub_url,
@@ -1716,7 +1718,7 @@ def _pkg_edit_text_kb(package_row):
     kb.add(types.InlineKeyboardButton("👥 محدودیت کاربر", callback_data=f"admin:pkg:ef:maxusers:{package_id}"))
     kb.add(types.InlineKeyboardButton(show_name_lbl,      callback_data=f"admin:pkg:toggle_sn:{package_id}"))
     kb.add(types.InlineKeyboardButton(f"🔑 خریداران: {br_label} — تغییر", callback_data=f"admin:pkg:set_br:{package_id}"))
-    src_lbl = "ثبت دستی" if config_source == "manual" else f"پنل #{panel_id} پورت {panel_port}"
+    src_lbl = "ثبت دستی" if config_source == "manual" else f"پنل #{panel_id} اینباند {panel_port}"
     kb.add(types.InlineKeyboardButton(f"🔌 منبع کانفیگ: {src_lbl} — تغییر", callback_data=f"admin:pkg:src:{package_id}"))
     kb.add(types.InlineKeyboardButton(pkg_status_label, callback_data=f"admin:pkg:toggleactive:{package_id}"))
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:types", icon_custom_emoji_id="5253997076169115797"))
@@ -1726,7 +1728,7 @@ def _pkg_edit_text_kb(package_row):
     mu_val       = package_row["max_users"] if "max_users" in package_row.keys() else 0
     mu_line      = "نامحدود" if not mu_val else f"{mu_val} کاربره"
     if config_source == "panel":
-        src_info = f"پنل #{panel_id} | پورت {panel_port} | {_DM_LABELS.get(delivery_mode, delivery_mode)}"
+        src_info = f"پنل #{panel_id} | اینباند {panel_port} | {_DM_LABELS.get(delivery_mode, delivery_mode)}"
     else:
         src_info = "ثبت دستی"
     text = (
@@ -4520,8 +4522,11 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id)
         send_or_edit(call,
             f"🔌 پنل: <b>{esc(panel['name'])}</b>\n\n"
-            "🔢 <b>پورت اینباند</b> را وارد کنید:\n"
-            "کانفیگ‌های این پکیج روی اینباند با این پورت در پنل ساخته می‌شوند.",
+            "🔢 <b>شماره ID اینباند</b> را وارد کنید:\n\n"
+            "📋 <b>راهنما:</b>\n"
+            "در پنل ثنایی به بخش <b>Inbounds</b> بروید.\n"
+            "در ستون اول (ID#) مقابل هر اینباند یک عدد می‌بینید.\n"
+            "مثلاً اگر اینباند شما ID شماره <b>3</b> دارد، عدد <code>3</code> را وارد کنید.",
             back_button("admin:types"))
         return
 
@@ -4554,7 +4559,7 @@ def _dispatch_callback(call, uid, data):
             f"🔋 حجم: {'نامحدود' if sd['volume'] == 0 else fmt_vol(sd['volume'])}\n"
             f"⏰ مدت: {'نامحدود' if sd['duration'] == 0 else str(sd['duration']) + ' روز'}\n"
             f"💰 قیمت: {'رایگان' if sd['price'] == 0 else fmt_price(sd['price']) + ' تومان'}\n"
-            f"🔌 پنل: #{sd['panel_id']}  |  پورت: {sd['panel_port']}\n"
+            f"🔌 پنل: #{sd['panel_id']}  |  اینباند ID: {sd['panel_port']}\n"
             f"📤 تحویل: {_DM_LABELS[mode]}",
             back_button("admin:types"))
         return
@@ -4773,7 +4778,11 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id)
         send_or_edit(call,
             f"🔌 پنل: <b>{esc(panel['name'])}</b>\n\n"
-            "🔢 پورت اینباند را وارد کنید:",
+            "🔢 <b>شماره ID اینباند</b> را وارد کنید:\n\n"
+            "📋 <b>راهنما:</b>\n"
+            "در پنل ثنایی به بخش <b>Inbounds</b> بروید.\n"
+            "در ستون اول (ID#) مقابل هر اینباند یک عدد می‌بینید.\n"
+            "مثلاً اگر اینباند شما ID شماره <b>3</b> دارد، عدد <code>3</code> را وارد کنید.",
             back_button(f"admin:pkg:src:{package_id}"))
         return
 

@@ -109,10 +109,11 @@ class PanelClient:
         """
         Fetch list of all inbounds from the panel.
         Returns (True, list[dict]) or (False, error_str).
+        API: GET /panel/api/inbounds/list
         """
         try:
             resp = self._session.get(
-                f"{self.base_url}/xui/API/inbounds",
+                f"{self.base_url}/panel/api/inbounds/list",
                 timeout=DEFAULT_TIMEOUT, verify=False,
             )
             if resp.status_code == 200:
@@ -139,11 +140,26 @@ class PanelClient:
                 return ib
         return None
 
+    def find_inbound_by_id(self, inbound_id: int):
+        """
+        Find an inbound by its numeric ID.
+        Returns the inbound dict or None if not found.
+        """
+        ok, inbounds = self.get_inbounds()
+        if not ok or not inbounds:
+            return None
+        for ib in inbounds:
+            if int(ib.get("id", -1)) == int(inbound_id):
+                return ib
+        return None
+
     def create_client(self, inbound_id: int, email: str,
                       traffic_bytes: int, expire_ms: int) -> tuple:
         """
         Add a new client to the given inbound.
-        Returns (True, uuid_str) or (False, error_str).
+        API: POST /panel/api/inbounds/addClient
+        Payload: {"id": inbound_id, "settings": "{\"clients\":[...]}"}  
+        Returns (True, (uuid_str, sub_id)) or (False, error_str).
         """
         import uuid as _uuid
         import json as _json
@@ -169,14 +185,14 @@ class PanelClient:
         }
         try:
             resp = self._session.post(
-                f"{self.base_url}/xui/API/inbounds/addClient",
+                f"{self.base_url}/panel/api/inbounds/addClient",
                 json=payload,
                 timeout=DEFAULT_TIMEOUT, verify=False,
             )
             if resp.status_code == 200:
                 data = resp.json()
                 if data.get("success"):
-                    return True, client_uuid
+                    return True, (client_uuid, sub_id)
                 return False, data.get("msg") or "ساخت کلاینت ناموفق"
             return False, f"HTTP {resp.status_code}"
         except Timeout:
@@ -187,11 +203,12 @@ class PanelClient:
     def get_client_traffics(self, email: str) -> tuple:
         """
         Get client traffic/status info by email.
+        API: GET /panel/api/inbounds/getClientTraffics/:email
         Returns (True, client_dict) or (False, error_str).
         """
         try:
             resp = self._session.get(
-                f"{self.base_url}/xui/API/inbounds/getClientTraffics/{email}",
+                f"{self.base_url}/panel/api/inbounds/getClientTraffics/{email}",
                 timeout=DEFAULT_TIMEOUT, verify=False,
             )
             if resp.status_code == 200:
@@ -210,6 +227,7 @@ class PanelClient:
                        expire_ms: int = 0) -> tuple:
         """
         Disable (set enable=False) an existing client.
+        API: POST /panel/api/inbounds/updateClient/:clientId
         Returns (True, None) or (False, error_str).
         """
         import json as _json
@@ -228,7 +246,7 @@ class PanelClient:
         }
         try:
             resp = self._session.post(
-                f"{self.base_url}/xui/API/inbounds/updateClient/{client_uuid}",
+                f"{self.base_url}/panel/api/inbounds/updateClient/{client_uuid}",
                 json=payload,
                 timeout=DEFAULT_TIMEOUT, verify=False,
             )
@@ -244,5 +262,9 @@ class PanelClient:
             return False, str(exc)
 
     def get_sub_url(self, client_uuid: str) -> str:
-        """Return the subscription URL for this client."""
-        return f"{self.base_url}/sub/{client_uuid}"
+        """Return the subscription URL for this client.
+        Uses subId (first 16 chars of UUID without dashes) as per 3x-ui spec.
+        Sub path: /sub/{subId}
+        """
+        sub_id = client_uuid.replace("-", "")[:16]
+        return f"{self.base_url}/sub/{sub_id}"

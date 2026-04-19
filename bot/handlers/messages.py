@@ -1252,39 +1252,39 @@ def universal_handler(message):
                 reply_markup=kb)
             return
 
-        # ── Admin: Package panel port (new package add flow) ───────────────────
+        # ── Admin: Package panel inbound ID (new package add flow) ─────────────
         if sn == "admin_add_package_port" and is_admin(uid):
-            port_val = parse_int(message.text or "")
-            if port_val is None or not (1 <= port_val <= 65535):
-                bot.send_message(uid, "⚠️ پورت معتبر وارد کنید (1-65535).", reply_markup=back_button("admin:types"))
+            inbound_id_val = parse_int(message.text or "")
+            if inbound_id_val is None or inbound_id_val <= 0:
+                bot.send_message(uid, "⚠️ شماره ID اینباند معتبر وارد کنید (عدد مثبت مثل 1).", reply_markup=back_button("admin:types"))
                 return
-            state_set(uid, "admin_add_package_delivery_mode", panel_port=port_val,
+            state_set(uid, "admin_add_package_delivery_mode", panel_port=inbound_id_val,
                       **{k: v for k, v in sd.items() if k != "panel_port"})
             kb_dm = types.InlineKeyboardMarkup()
             kb_dm.add(types.InlineKeyboardButton("📄 فقط کانفیگ",      callback_data="admin:pkg:add:dm:config_only"))
             kb_dm.add(types.InlineKeyboardButton("🔗 فقط ساب",          callback_data="admin:pkg:add:dm:sub_only"))
             kb_dm.add(types.InlineKeyboardButton("📄+🔗 کانفیگ + ساب", callback_data="admin:pkg:add:dm:both"))
             bot.send_message(uid,
-                f"✅ پورت: <b>{port_val}</b>\n\n"
+                f"✅ اینباند ID: <b>{inbound_id_val}</b>\n\n"
                 "📤 نحوه تحویل کانفیگ به کاربر را انتخاب کنید:",
                 reply_markup=kb_dm)
             return
 
-        # ── Admin: Package panel port (package edit flow) ──────────────────────
+        # ── Admin: Package panel inbound ID (package edit flow) ─────────────────
         if sn == "admin_edit_pkg_panel_port" and is_admin(uid):
-            port_val   = parse_int(message.text or "")
+            inbound_id_val = parse_int(message.text or "")
             package_id = sd.get("package_id")
             panel_id   = sd.get("panel_id")
-            if port_val is None or not (1 <= port_val <= 65535):
-                bot.send_message(uid, "⚠️ پورت معتبر وارد کنید (1-65535).", reply_markup=back_button("admin:types"))
+            if inbound_id_val is None or inbound_id_val <= 0:
+                bot.send_message(uid, "⚠️ شماره ID اینباند معتبر وارد کنید (عدد مثبت مثل 1).", reply_markup=back_button("admin:types"))
                 return
-            state_set(uid, "admin_edit_pkg_sdm", package_id=package_id, panel_id=panel_id, panel_port=port_val)
+            state_set(uid, "admin_edit_pkg_sdm", package_id=package_id, panel_id=panel_id, panel_port=inbound_id_val)
             kb_dm = types.InlineKeyboardMarkup()
             kb_dm.add(types.InlineKeyboardButton("📄 فقط کانفیگ",      callback_data=f"admin:pkg:sdm:config_only:{package_id}"))
             kb_dm.add(types.InlineKeyboardButton("🔗 فقط ساب",          callback_data=f"admin:pkg:sdm:sub_only:{package_id}"))
             kb_dm.add(types.InlineKeyboardButton("📄+🔗 کانفیگ + ساب", callback_data=f"admin:pkg:sdm:both:{package_id}"))
             bot.send_message(uid,
-                f"✅ پورت: <b>{port_val}</b>\n\n"
+                f"✅ اینباند ID: <b>{inbound_id_val}</b>\n\n"
                 "📤 نحوه تحویل کانفیگ به کاربر را انتخاب کنید:",
                 reply_markup=kb_dm)
             return
