@@ -836,6 +836,55 @@ def set_user_agent(user_id, is_agent):
         )
 
 
+# ── Bulk user operations ───────────────────────────────────────────────────────
+def _bulk_where(filter_type, user_ids):
+    """Return (WHERE clause, params) for bulk queries."""
+    if filter_type == "all":
+        return "1=1", []
+    if filter_type == "public":
+        return "is_agent=0", []
+    if filter_type == "agents":
+        return "is_agent=1", []
+    # specific list
+    if not user_ids:
+        return "0=1", []
+    ph = ",".join("?" * len(user_ids))
+    return f"user_id IN ({ph})", list(user_ids)
+
+
+def bulk_add_balance(filter_type, user_ids, delta):
+    where, params = _bulk_where(filter_type, user_ids)
+    with get_conn() as conn:
+        conn.execute(f"UPDATE users SET balance=balance+? WHERE {where}", [delta] + params)
+        return conn.execute("SELECT changes()").fetchone()[0]
+
+
+def bulk_zero_balance(filter_type, user_ids):
+    where, params = _bulk_where(filter_type, user_ids)
+    with get_conn() as conn:
+        conn.execute(f"UPDATE users SET balance=0 WHERE {where}", params)
+        return conn.execute("SELECT changes()").fetchone()[0]
+
+
+def bulk_set_status(filter_type, user_ids, status):
+    where, params = _bulk_where(filter_type, user_ids)
+    with get_conn() as conn:
+        conn.execute(f"UPDATE users SET status=? WHERE {where}", [status] + params)
+        return conn.execute("SELECT changes()").fetchone()[0]
+
+
+def count_users_by_filter(filter_type):
+    """Count users for a given filter type ('all', 'public', 'agents')."""
+    with get_conn() as conn:
+        if filter_type == "all":
+            return conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        if filter_type == "public":
+            return conn.execute("SELECT COUNT(*) FROM users WHERE is_agent=0").fetchone()[0]
+        if filter_type == "agents":
+            return conn.execute("SELECT COUNT(*) FROM users WHERE is_agent=1").fetchone()[0]
+    return 0
+
+
 # ── Config Types ───────────────────────────────────────────────────────────────
 def get_all_types():
     with get_conn() as conn:
@@ -2126,6 +2175,14 @@ def update_panel_client_package_samples(cpkg_id, sample_config, sample_sub_url):
             "UPDATE panel_client_packages SET sample_config=?, sample_sub_url=? WHERE id=?",
             (sample_config or "", sample_sub_url or "", cpkg_id)
         )
+
+
+def update_panel_client_package_field(cpkg_id, field, value):
+    _ALLOWED = {"inbound_id", "sample_config", "sample_sub_url", "name", "delivery_mode"}
+    if field not in _ALLOWED:
+        raise ValueError(f"Invalid field: {field}")
+    with get_conn() as conn:
+        conn.execute(f"UPDATE panel_client_packages SET {field}=? WHERE id=?", (value, cpkg_id))
 
 
 

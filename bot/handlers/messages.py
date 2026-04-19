@@ -38,6 +38,9 @@ from ..db import (
     add_voucher_batch, get_voucher_code_by_code, redeem_voucher_code,
     set_phone_number, get_phone_number,
     get_bulk_qty_limits,
+    get_panel_client_package,
+    update_panel_client_package_field,
+    bulk_add_balance, bulk_zero_balance, bulk_set_status, count_users_by_filter,
 )
 from ..gateways.base import is_gateway_available, is_card_info_complete, get_global_amount_range, get_gateway_range_text, is_gateway_in_range, build_gateway_range_guide
 from ..gateways.tetrapay import create_tetrapay_order, verify_tetrapay_order
@@ -1319,7 +1322,150 @@ def universal_handler(message):
             _show_panel_configs(message, search=search_text if search_text else None)
             return
 
-        # ── Admin: Package edit field ──────────────────────────────────────────
+        # ── Admin: Client Package — sample config step ────────────────────────
+        if sn == "cpkg_sample_config" and is_admin(uid):
+            sample_config = (message.text or "").strip()
+            panel_id   = sd.get("panel_id")
+            inbound_id = sd.get("inbound_id")
+            mode       = sd.get("mode", "config_only")
+            if not sample_config:
+                bot.send_message(uid, "⚠️ کانفیگ نمونه نمی‌تواند خالی باشد.",
+                                 reply_markup=back_button(f"adm:pnl:cpkgs:{panel_id}"))
+                return
+            if mode == "config_only":
+                # Save directly, no sub URL needed
+                from ..db import add_panel_client_package as _acp, get_panel as _gp
+                _p = _gp(panel_id)
+                inb_name = f"اینباند #{inbound_id}"
+                cpkg_id = _acp(panel_id=panel_id, inbound_id=inbound_id,
+                                delivery_mode=mode, sample_config=sample_config,
+                                sample_sub_url="", name=inb_name)
+                state_clear(uid)
+                from ..ui.helpers import back_button as _bb
+                bot.send_message(uid,
+                    f"✅ <b>کلاینت پکیج ذخیره شد</b> (ID: {cpkg_id})\n\n"
+                    f"🔌 اینباند: <b>{inbound_id}</b>\n"
+                    "📤 تحویل: 📄 فقط کانفیگ\n\n"
+                    f"📄 <b>نمونه کانفیگ:</b>\n<code>{esc(sample_config[:200])}</code>",
+                    parse_mode="HTML",
+                    reply_markup=back_button(f"adm:pnl:cpkgs:{panel_id}"))
+            else:  # both
+                state_set(uid, "cpkg_sample_sub",
+                          panel_id=panel_id, inbound_id=inbound_id,
+                          mode=mode, sample_config=sample_config)
+                bot.send_message(uid,
+                    "🔗 <b>لینک ساب نمونه</b> را ارسال کنید:\n\n"
+                    "یک URL ساب واقعی از این اینباند کپی کنید.\n"
+                    "مثال:\n"
+                    "<code>http://example.com:2096/sub/abc123xyz456</code>",
+                    parse_mode="HTML",
+                    reply_markup=back_button(f"adm:pnl:cpkgs:{panel_id}"))
+            return
+
+        # ── Admin: Client Package — sample sub URL step ───────────────────────
+        if sn == "cpkg_sample_sub" and is_admin(uid):
+            sample_sub = (message.text or "").strip()
+            panel_id      = sd.get("panel_id")
+            inbound_id    = sd.get("inbound_id")
+            mode          = sd.get("mode", "sub_only")
+            sample_config = sd.get("sample_config", "")
+            if not sample_sub:
+                bot.send_message(uid, "⚠️ لینک ساب نمی‌تواند خالی باشد.",
+                                 reply_markup=back_button(f"adm:pnl:cpkgs:{panel_id}"))
+                return
+            from ..db import add_panel_client_package as _acp
+            cpkg_id = _acp(panel_id=panel_id, inbound_id=inbound_id,
+                            delivery_mode=mode,
+                            sample_config=sample_config,
+                            sample_sub_url=sample_sub,
+                            name=f"اینباند #{inbound_id}")
+            state_clear(uid)
+            _DM = {"config_only": "📄 فقط کانفیگ", "sub_only": "🔗 فقط ساب", "both": "📄+🔗 هر دو"}
+            parts = [
+                f"✅ <b>کلاینت پکیج ذخیره شد</b> (ID: {cpkg_id})\n",
+                f"🔌 اینباند: <b>{inbound_id}</b>",
+                f"📤 تحویل: {_DM.get(mode, mode)}",
+            ]
+            if sample_config:
+                parts.append(f"\n📄 <b>نمونه کانفیگ:</b>\n<code>{esc(sample_config[:200])}</code>")
+            if sample_sub:
+                parts.append(f"\n🔗 <b>نمونه ساب:</b>\n<code>{esc(sample_sub)}</code>")
+            bot.send_message(uid, "\n".join(parts), parse_mode="HTML",
+                             reply_markup=back_button(f"adm:pnl:cpkgs:{panel_id}"))
+            return
+
+        # ── Admin: Cpkg field edit ─────────────────────────────────────────────
+        for _ef_field in ("inbound_id", "sample_config", "sample_sub_url"):
+            if sn == f"cpkg_ef_{_ef_field}" and is_admin(uid):
+                raw     = (message.text or "").strip()
+                cpkg_id = sd.get("cpkg_id")
+                panel_id = sd.get("panel_id")
+                if not raw:
+                    bot.send_message(uid, "⚠️ مقدار نمی‌تواند خالی باشد.",
+                                     reply_markup=back_button(f"adm:pnl:cpkg:edit:{cpkg_id}"))
+                    return
+                if _ef_field == "inbound_id":
+                    val = parse_int(raw)
+                    if val is None:
+                        bot.send_message(uid, "⚠️ شماره اینباند باید عدد باشد.",
+                                         reply_markup=back_button(f"adm:pnl:cpkg:edit:{cpkg_id}"))
+                        return
+                else:
+                    val = raw
+                update_panel_client_package_field(cpkg_id, _ef_field, val)
+                state_clear(uid)
+                _FIELD_LABELS = {
+                    "inbound_id": "شماره اینباند",
+                    "sample_config": "نمونه کانفیگ",
+                    "sample_sub_url": "نمونه آدرس ساب",
+                }
+                bot.send_message(uid,
+                    f"✅ <b>{_FIELD_LABELS.get(_ef_field, _ef_field)}</b> بروزرسانی شد.",
+                    parse_mode="HTML",
+                    reply_markup=back_button(f"adm:pnl:cpkg:edit:{cpkg_id}"))
+                return
+
+        # ── Admin: Bulk operation amount ──────────────────────────────────────
+        if sn == "bulk_amount" and is_admin(uid):
+            raw  = (message.text or "").strip()
+            val  = parse_int(raw)
+            if val is None or val <= 0:
+                bot.send_message(uid, "⚠️ مبلغ معتبر (عدد مثبت) وارد کنید.",
+                                 reply_markup=back_button("adm:usr:bulk"))
+                return
+            op          = sd.get("op", "")
+            filter_type = sd.get("filter_type", "all")
+            selected    = sd.get("selected", [])
+            state_clear(uid)
+
+            _FLT = {"all": "همه کاربران", "public": "کاربران عادی", "agents": "نمایندگان", "pick": "کاربران انتخاب‌شده"}
+            _OP_L = {"add_balance": "افزودن موجودی", "sub_balance": "کاهش موجودی"}
+
+            if filter_type == "pick":
+                count = len(selected)
+                sel_str = ",".join(str(x) for x in selected[:50])
+                exec_cb = f"adm:bulk:exec:{op}:pick:{sel_str}:{val}"
+            else:
+                count = count_users_by_filter(filter_type)
+                exec_cb = f"adm:bulk:exec:{op}:{filter_type}:{val}"
+
+            from telebot import types as _types
+            kb2 = _types.InlineKeyboardMarkup()
+            kb2.add(_types.InlineKeyboardButton(
+                f"✅ تایید — {_OP_L.get(op, op)} {val:,} تومان به {count} کاربر",
+                callback_data=exec_cb))
+            kb2.add(_types.InlineKeyboardButton("لغو", callback_data="adm:usr:bulk"))
+            bot.send_message(uid,
+                f"⚡ <b>تایید عملیات گروهی</b>\n\n"
+                f"عملیات: <b>{_OP_L.get(op, op)}</b>\n"
+                f"مبلغ: <b>{val:,} تومان</b>\n"
+                f"هدف: <b>{_FLT.get(filter_type, filter_type)}</b>\n"
+                f"تعداد: <b>{count}</b>",
+                parse_mode="HTML",
+                reply_markup=kb2)
+            return
+
+
         if sn == "admin_edit_pkg_field" and is_admin(uid):
             field_key  = sd["field_key"]
             package_id = sd["package_id"]

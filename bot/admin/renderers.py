@@ -151,6 +151,7 @@ def _show_admin_users_list(call, page=0, filter_mode="all"):
 
     kb = types.InlineKeyboardMarkup()
     kb.add(types.InlineKeyboardButton("🔍 جستجوی کاربر", callback_data="adm:usr:search"))
+    kb.add(types.InlineKeyboardButton("⚡️ عملیات گروهی روی تمامی کاربران", callback_data="adm:usr:bulk"))
 
     # Filter bar — row 1: general
     all_icon    = "▶️ " if filter_mode == "all"    else ""
@@ -408,35 +409,48 @@ def _show_panel_detail(call, panel_id):
 
     from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
     kb = InlineKeyboardMarkup()
-    kb.row(
-        InlineKeyboardButton("✏️ نام",          callback_data=f"adm:pnl:ef:name:{panel_id}"),
-        InlineKeyboardButton("🌐 پروتکل",       callback_data=f"adm:pnl:ef:protocol:{panel_id}"),
-    )
-    kb.row(
-        InlineKeyboardButton("🖥 هاست",         callback_data=f"adm:pnl:ef:host:{panel_id}"),
-        InlineKeyboardButton("🔌 پورت",         callback_data=f"adm:pnl:ef:port:{panel_id}"),
-    )
-    kb.row(
-        InlineKeyboardButton("📂 مسیر مخفی",     callback_data=f"adm:pnl:ef:path:{panel_id}"),
-        InlineKeyboardButton("👤 نام کاربری",   callback_data=f"adm:pnl:ef:username:{panel_id}"),
-    )
-    kb.row(
-        InlineKeyboardButton("🔑 رمز عبور",     callback_data=f"adm:pnl:ef:password:{panel_id}"),
-        InlineKeyboardButton("🔄 بررسی الان",   callback_data=f"adm:pnl:recheck:{panel_id}"),
-    )
-    kb.add(
-        InlineKeyboardButton("🌐 دامنه ساب (sub_url_base)", callback_data=f"adm:pnl:ef:sub_url_base:{panel_id}"),
-    )
-    kb.row(
-        InlineKeyboardButton(toggle_label,       callback_data=toggle_callback),
-        InlineKeyboardButton("🗑 حذف پنل",      callback_data=f"adm:pnl:del:{panel_id}"),
-    )
     kb.add(
         InlineKeyboardButton("📦 کلاینت پکیج‌ها", callback_data=f"adm:pnl:cpkgs:{panel_id}"),
+    )
+    kb.row(
+        InlineKeyboardButton("🔄 بررسی الان",  callback_data=f"adm:pnl:recheck:{panel_id}"),
+        InlineKeyboardButton(toggle_label,      callback_data=toggle_callback),
+    )
+    kb.row(
+        InlineKeyboardButton("✏️ ویرایش پنل",  callback_data=f"adm:pnl:editpanel:{panel_id}"),
+        InlineKeyboardButton("🗑 حذف پنل",     callback_data=f"adm:pnl:del:{panel_id}"),
     )
     kb.add(InlineKeyboardButton("بازگشت", callback_data="admin:panels",
                                 icon_custom_emoji_id="5253997076169115797"))
     send_or_edit(call, text, kb)
+
+
+def _show_panel_edit_menu(call, panel_id):
+    """Panel edit sub-menu with all field edit buttons."""
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    kb = InlineKeyboardMarkup()
+    kb.row(
+        InlineKeyboardButton("✏️ نام",        callback_data=f"adm:pnl:ef:name:{panel_id}"),
+        InlineKeyboardButton("🌐 پروتکل",     callback_data=f"adm:pnl:ef:protocol:{panel_id}"),
+    )
+    kb.row(
+        InlineKeyboardButton("🖥 هاست",       callback_data=f"adm:pnl:ef:host:{panel_id}"),
+        InlineKeyboardButton("🔌 پورت",       callback_data=f"adm:pnl:ef:port:{panel_id}"),
+    )
+    kb.row(
+        InlineKeyboardButton("📂 مسیر مخفی",  callback_data=f"adm:pnl:ef:path:{panel_id}"),
+        InlineKeyboardButton("👤 نام کاربری", callback_data=f"adm:pnl:ef:username:{panel_id}"),
+    )
+    kb.add(
+        InlineKeyboardButton("🔑 رمز عبور",   callback_data=f"adm:pnl:ef:password:{panel_id}"),
+    )
+    kb.add(InlineKeyboardButton("بازگشت", callback_data=f"adm:pnl:detail:{panel_id}",
+                                icon_custom_emoji_id="5253997076169115797"))
+    from ..db import get_panel as _gp
+    p = _gp(panel_id)
+    send_or_edit(call,
+        f"✏️ <b>ویرایش پنل: {esc(p['name']) if p else panel_id}</b>\n\nفیلد مورد نظر را انتخاب کنید:",
+        kb)
 
 
 # ── Panel Client Packages ──────────────────────────────────────────────────────
@@ -458,14 +472,11 @@ def _show_panel_client_packages(call, panel_id):
     ))
     if cpkgs:
         for cp in cpkgs:
-            label = cp["name"] or f"اینباند #{cp['inbound_id']}"
-            dm_label = _DM.get(cp["delivery_mode"], cp["delivery_mode"])
+            label = (cp["name"] or f"اینباند #{cp['inbound_id']}")[:20]
             kb.row(
-                InlineKeyboardButton(f"🔹 {label}  ({dm_label})", callback_data="noop"),
-            )
-            kb.row(
-                InlineKeyboardButton("🗑 حذف",  callback_data=f"adm:pnl:cpkg:del:{cp['id']}"),
-                InlineKeyboardButton("👁 نمونه", callback_data=f"adm:pnl:cpkg:preview:{cp['id']}"),
+                InlineKeyboardButton(f"📦 {label}",  callback_data="noop"),
+                InlineKeyboardButton("✏️ ویرایش",   callback_data=f"adm:pnl:cpkg:edit:{cp['id']}"),
+                InlineKeyboardButton("🗑 حذف",      callback_data=f"adm:pnl:cpkg:del:{cp['id']}"),
             )
 
     kb.add(InlineKeyboardButton("بازگشت", callback_data=f"adm:pnl:detail:{panel_id}",
@@ -476,6 +487,40 @@ def _show_panel_client_packages(call, panel_id):
         f"📦 <b>کلاینت پکیج‌های پنل:</b> {esc(p['name'])}{count_line}",
         kb,
     )
+
+
+def _show_cpkg_edit_menu(call, cpkg_id):
+    """Show edit sub-menu for a client package."""
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    cp = get_panel_client_package(cpkg_id)
+    if not cp:
+        send_or_edit(call, "⚠️ کلاینت پکیج یافت نشد.", None)
+        return
+    _DM = {"config_only": "📄 فقط کانفیگ", "sub_only": "🔗 فقط ساب", "both": "📄+🔗 هر دو"}
+    text = (
+        f"✏️ <b>ویرایش کلاینت پکیج #{cpkg_id}</b>\n\n"
+        f"🔌 اینباند ID: <code>{cp['inbound_id']}</code>\n"
+        f"📤 تحویل: {_DM.get(cp['delivery_mode'], cp['delivery_mode'])}\n"
+        f"📄 کانفیگ نمونه: <code>{esc(cp['sample_config'][:60]) if cp['sample_config'] else '—'}</code>\n"
+        f"🔗 ساب نمونه: <code>{esc(cp['sample_sub_url'][:60]) if cp['sample_sub_url'] else '—'}</code>\n\n"
+        "فیلد مورد نظر را برای ویرایش انتخاب کنید:"
+    )
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton(
+        f"🔢 ویرایش ID اینباند (فعلی: {cp['inbound_id']})",
+        callback_data=f"adm:pnl:cpkg:ef:inbound_id:{cpkg_id}"
+    ))
+    kb.add(InlineKeyboardButton(
+        "📄 ویرایش کانفیگ نمونه",
+        callback_data=f"adm:pnl:cpkg:ef:sample_config:{cpkg_id}"
+    ))
+    kb.add(InlineKeyboardButton(
+        "🔗 ویرایش لینک ساب نمونه",
+        callback_data=f"adm:pnl:cpkg:ef:sample_sub_url:{cpkg_id}"
+    ))
+    kb.add(InlineKeyboardButton("بازگشت", callback_data=f"adm:pnl:cpkgs:{cp['panel_id']}",
+                                icon_custom_emoji_id="5253997076169115797"))
+    send_or_edit(call, text, kb)
 
 
 def _show_panel_client_package_preview(call, cpkg_id):

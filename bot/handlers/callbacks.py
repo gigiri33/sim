@@ -88,6 +88,7 @@ from ..admin.renderers import (
     _show_admin_user_detail_msg, _show_admin_assign_config_type, _fake_call,
     _show_admin_panels, _show_panel_detail,
     _show_panel_client_packages, _show_panel_client_package_preview,
+    _show_panel_edit_menu, _show_cpkg_edit_menu,
 )
 from ..admin.backup import _send_backup
 from ..db import (
@@ -97,7 +98,8 @@ from ..db import (
     add_panel_config, get_panel_configs, get_panel_configs_count,
     add_panel_client_package, get_panel_client_packages,
     get_panel_client_package, delete_panel_client_package,
-    update_panel_client_package_samples,
+    update_panel_client_package_samples, update_panel_client_package_field,
+    bulk_add_balance, bulk_zero_balance, bulk_set_status, count_users_by_filter,
 )
 
 
@@ -6809,6 +6811,284 @@ def _dispatch_callback(call, uid, data):
             back_button("admin:users"))
         return
 
+    # ── Admin: Bulk user operations ──────────────────────────────────────────
+    if data == "adm:usr:bulk":
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "full_users")):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("➕ اضافه کردن موجودی",      callback_data="adm:bulk:op:add_balance"))
+        kb.add(types.InlineKeyboardButton("➖ کاهش موجودی",            callback_data="adm:bulk:op:sub_balance"))
+        kb.add(types.InlineKeyboardButton("0️⃣ صفر کردن همه موجودی",    callback_data="adm:bulk:op:zero_balance"))
+        kb.add(types.InlineKeyboardButton("🔘 امن کردن کاربران",        callback_data="adm:bulk:op:set_safe"))
+        kb.add(types.InlineKeyboardButton("⚠️ ناامن کردن کاربران",      callback_data="adm:bulk:op:set_unsafe"))
+        kb.add(types.InlineKeyboardButton("🚫 محدود کردن کاربران",      callback_data="adm:bulk:op:set_restricted"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:users",
+                                          icon_custom_emoji_id="5253997076169115797"))
+        send_or_edit(call,
+            "⚡ <b>عملیات گروهی</b>\n\nعملیات مورد نظر را انتخاب کنید:",
+            kb)
+        return
+
+    if data.startswith("adm:bulk:op:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "full_users")):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        op = data.split(":")[3]
+        bot.answer_callback_query(call.id)
+        _OP_LABELS = {
+            "add_balance":    "➕ اضافه کردن موجودی",
+            "sub_balance":    "➖ کاهش موجودی",
+            "zero_balance":   "0️⃣ صفر کردن همه موجودی",
+            "set_safe":       "🔘 امن کردن",
+            "set_unsafe":     "⚠️ ناامن کردن",
+            "set_restricted": "🚫 محدود کردن",
+        }
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("👥 همه کاربران",        callback_data=f"adm:bulk:tgt:{op}:all"))
+        kb.add(types.InlineKeyboardButton("👤 فقط کاربران عادی",   callback_data=f"adm:bulk:tgt:{op}:public"))
+        kb.add(types.InlineKeyboardButton("🤝 فقط نمایندگان",      callback_data=f"adm:bulk:tgt:{op}:agents"))
+        kb.add(types.InlineKeyboardButton("🔎 انتخاب کاربران خاص", callback_data=f"adm:bulk:tgt:{op}:pick:0"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:usr:bulk",
+                                          icon_custom_emoji_id="5253997076169115797"))
+        send_or_edit(call,
+            f"⚡ <b>عملیات گروهی</b>: {_OP_LABELS.get(op, op)}\n\nروی چه دسته‌ای اعمال شود؟",
+            kb)
+        return
+
+    if data.startswith("adm:bulk:tgt:"):
+        # adm:bulk:tgt:{op}:{filter}  OR  adm:bulk:tgt:{op}:pick:{page}
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "full_users")):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        parts = data.split(":")
+        op     = parts[3]
+        filt   = parts[4]
+
+        if filt == "pick":
+            # Paginated user picker
+            page = int(parts[5]) if len(parts) > 5 else 0
+            bot.answer_callback_query(call.id)
+            _PER = 10
+            all_users = get_users()
+            total     = len(all_users)
+            page_users = all_users[page * _PER:(page + 1) * _PER]
+            total_pages = max(1, (total + _PER - 1) // _PER)
+
+            # Load selected IDs from state
+            sd = state_data(uid) if state_name(uid) == "bulk_pick" else {}
+            selected = set(sd.get("selected", []))
+            state_set(uid, "bulk_pick", op=op, selected=list(selected))
+
+            kb = types.InlineKeyboardMarkup()
+            for u in page_users:
+                check = "✅" if u["user_id"] in selected else "⬜"
+                name  = u["full_name"] or str(u["user_id"])
+                kb.add(types.InlineKeyboardButton(
+                    f"{check} {name[:25]}",
+                    callback_data=f"adm:bulk:pick:{u['user_id']}:{page}"))
+
+            nav = []
+            if page > 0:
+                nav.append(types.InlineKeyboardButton("⬅️", callback_data=f"adm:bulk:tgt:{op}:pick:{page-1}"))
+            nav.append(types.InlineKeyboardButton(f"{page+1}/{total_pages}", callback_data="noop"))
+            if page < total_pages - 1:
+                nav.append(types.InlineKeyboardButton("➡️", callback_data=f"adm:bulk:tgt:{op}:pick:{page+1}"))
+            if nav:
+                kb.row(*nav)
+            kb.add(types.InlineKeyboardButton(
+                f"✅ تایید و اجرا ({len(selected)} نفر انتخاب شده)",
+                callback_data=f"adm:bulk:confirm:{op}:pick"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:bulk:op:{op}",
+                                              icon_custom_emoji_id="5253997076169115797"))
+            send_or_edit(call,
+                f"🔎 <b>انتخاب کاربران</b> — صفحه {page+1}/{total_pages}\n"
+                f"✅ {len(selected)} نفر انتخاب شده\n\nکلیک کنید تا انتخاب/لغو شود:",
+                kb)
+            return
+
+        # filter = all / public / agents → ask for amount if needed, else confirm
+        bot.answer_callback_query(call.id)
+        _needs_amount = op in ("add_balance", "sub_balance")
+        if _needs_amount:
+            state_set(uid, "bulk_amount", op=op, filter_type=filt)
+            _FLT = {"all": "همه کاربران", "public": "کاربران عادی", "agents": "نمایندگان"}
+            _OP_L = {"add_balance": "افزودن", "sub_balance": "کاهش"}
+            send_or_edit(call,
+                f"⚡ <b>عملیات گروهی</b>: {_OP_L[op]} موجودی\n"
+                f"🎯 هدف: {_FLT.get(filt, filt)}\n\n"
+                "💰 <b>مبلغ</b> (تومان) را وارد کنید:",
+                back_button(f"adm:bulk:op:{op}"))
+        else:
+            count = count_users_by_filter(filt)
+            state_set(uid, "bulk_confirm_ready", op=op, filter_type=filt, selected=[], amount=0)
+            _FLT = {"all": "همه کاربران", "public": "کاربران عادی", "agents": "نمایندگان"}
+            _OP_L2 = {
+                "zero_balance": "صفر کردن موجودی",
+                "set_safe": "امن کردن",
+                "set_unsafe": "ناامن کردن",
+                "set_restricted": "محدود کردن",
+            }
+            kb2 = types.InlineKeyboardMarkup()
+            kb2.add(types.InlineKeyboardButton(
+                f"✅ تایید — اجرا روی {count} کاربر",
+                callback_data=f"adm:bulk:exec:{op}:{filt}:0"))
+            kb2.add(types.InlineKeyboardButton("لغو", callback_data="adm:usr:bulk",
+                                               icon_custom_emoji_id="5253997076169115797"))
+            send_or_edit(call,
+                f"⚡ <b>تایید عملیات گروهی</b>\n\n"
+                f"عملیات: <b>{_OP_L2.get(op, op)}</b>\n"
+                f"هدف: <b>{_FLT.get(filt, filt)}</b>\n"
+                f"تعداد کاربران: <b>{count}</b>",
+                kb2)
+        return
+
+    if data.startswith("adm:bulk:pick:"):
+        # Toggle a user in pick list
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "full_users")):
+            bot.answer_callback_query(call.id)
+            return
+        parts    = data.split(":")
+        pick_uid = int(parts[3])
+        page     = int(parts[4]) if len(parts) > 4 else 0
+        sd       = state_data(uid) if state_name(uid) == "bulk_pick" else {}
+        op       = sd.get("op", "")
+        selected = set(sd.get("selected", []))
+        if pick_uid in selected:
+            selected.discard(pick_uid)
+        else:
+            selected.add(pick_uid)
+        state_set(uid, "bulk_pick", op=op, selected=list(selected))
+        bot.answer_callback_query(call.id, f"{'✅ انتخاب شد' if pick_uid in selected else '❌ لغو شد'}")
+        # Re-render same page
+        _PER      = 10
+        all_users = get_users()
+        total     = len(all_users)
+        page_users = all_users[page * _PER:(page + 1) * _PER]
+        total_pages = max(1, (total + _PER - 1) // _PER)
+        kb = types.InlineKeyboardMarkup()
+        for u in page_users:
+            check = "✅" if u["user_id"] in selected else "⬜"
+            name  = u["full_name"] or str(u["user_id"])
+            kb.add(types.InlineKeyboardButton(
+                f"{check} {name[:25]}",
+                callback_data=f"adm:bulk:pick:{u['user_id']}:{page}"))
+        nav = []
+        if page > 0:
+            nav.append(types.InlineKeyboardButton("⬅️", callback_data=f"adm:bulk:tgt:{op}:pick:{page-1}"))
+        nav.append(types.InlineKeyboardButton(f"{page+1}/{total_pages}", callback_data="noop"))
+        if page < total_pages - 1:
+            nav.append(types.InlineKeyboardButton("➡️", callback_data=f"adm:bulk:tgt:{op}:pick:{page+1}"))
+        if nav:
+            kb.row(*nav)
+        kb.add(types.InlineKeyboardButton(
+            f"✅ تایید و اجرا ({len(selected)} نفر انتخاب شده)",
+            callback_data=f"adm:bulk:confirm:{op}:pick"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:bulk:op:{op}",
+                                          icon_custom_emoji_id="5253997076169115797"))
+        send_or_edit(call,
+            f"🔎 <b>انتخاب کاربران</b> — صفحه {page+1}/{total_pages}\n"
+            f"✅ {len(selected)} نفر انتخاب شده:",
+            kb)
+        return
+
+    if data.startswith("adm:bulk:confirm:"):
+        # Confirm after manual pick — ask for amount if needed
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "full_users")):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        parts    = data.split(":")
+        op       = parts[3]
+        sd       = state_data(uid) if state_name(uid) == "bulk_pick" else {}
+        selected = sd.get("selected", [])
+        if not selected:
+            bot.answer_callback_query(call.id, "هیچ کاربری انتخاب نشده.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        if op in ("add_balance", "sub_balance"):
+            state_set(uid, "bulk_amount", op=op, filter_type="pick", selected=selected)
+            _OP_L = {"add_balance": "افزودن", "sub_balance": "کاهش"}
+            send_or_edit(call,
+                f"⚡ <b>عملیات گروهی</b>: {_OP_L[op]} موجودی\n"
+                f"🎯 {len(selected)} کاربر انتخاب شده\n\n"
+                "💰 <b>مبلغ</b> (تومان) را وارد کنید:",
+                back_button(f"adm:bulk:op:{op}"))
+        else:
+            count = len(selected)
+            _OP_L2 = {
+                "zero_balance": "صفر کردن موجودی",
+                "set_safe": "امن کردن",
+                "set_unsafe": "ناامن کردن",
+                "set_restricted": "محدود کردن",
+            }
+            sel_str = ",".join(str(x) for x in selected[:50])
+            kb2 = types.InlineKeyboardMarkup()
+            kb2.add(types.InlineKeyboardButton(
+                f"✅ تایید — اجرا روی {count} کاربر",
+                callback_data=f"adm:bulk:exec:{op}:pick:{sel_str}"))
+            kb2.add(types.InlineKeyboardButton("لغو", callback_data="adm:usr:bulk",
+                                               icon_custom_emoji_id="5253997076169115797"))
+            send_or_edit(call,
+                f"⚡ <b>تایید عملیات گروهی</b>\n\n"
+                f"عملیات: <b>{_OP_L2.get(op, op)}</b>\n"
+                f"تعداد کاربران انتخاب شده: <b>{count}</b>",
+                kb2)
+        return
+
+    if data.startswith("adm:bulk:exec:"):
+        # Execute bulk operation
+        # format: adm:bulk:exec:{op}:{filter_type}:{amount_or_sel}
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "full_users")):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        parts       = data.split(":")
+        op          = parts[3]
+        filter_type = parts[4]
+        amount_or_sel = parts[5] if len(parts) > 5 else "0"
+
+        if filter_type == "pick":
+            user_ids = [int(x) for x in amount_or_sel.split(",") if x.isdigit()]
+            amount   = int(parts[6]) if len(parts) > 6 else 0
+        else:
+            user_ids = []
+            amount   = int(amount_or_sel) if amount_or_sel.isdigit() else 0
+
+        bot.answer_callback_query(call.id, "⏳ در حال اجرا…")
+        state_clear(uid)
+
+        count = 0
+        try:
+            if op == "add_balance":
+                count = bulk_add_balance(filter_type, user_ids, amount)
+                result_msg = f"✅ موجودی {amount:,} تومان به {count} کاربر اضافه شد."
+            elif op == "sub_balance":
+                count = bulk_add_balance(filter_type, user_ids, -amount)
+                result_msg = f"✅ موجودی {amount:,} تومان از {count} کاربر کم شد."
+            elif op == "zero_balance":
+                count = bulk_zero_balance(filter_type, user_ids)
+                result_msg = f"✅ موجودی {count} کاربر صفر شد."
+            elif op == "set_safe":
+                count = bulk_set_status(filter_type, user_ids, "safe")
+                result_msg = f"✅ {count} کاربر امن شدند."
+            elif op == "set_unsafe":
+                count = bulk_set_status(filter_type, user_ids, "unsafe")
+                result_msg = f"✅ {count} کاربر ناامن شدند."
+            elif op == "set_restricted":
+                count = bulk_set_status(filter_type, user_ids, "restricted")
+                result_msg = f"✅ {count} کاربر محدود شدند."
+            else:
+                result_msg = "❌ عملیات ناشناخته."
+        except Exception as _e:
+            result_msg = f"❌ خطا: {esc(str(_e)[:200])}"
+
+        log_admin_action(uid, f"عملیات گروهی: {op} | filter={filter_type} | count={count}")
+        kb_back = types.InlineKeyboardMarkup()
+        kb_back.add(types.InlineKeyboardButton("بازگشت به کاربران", callback_data="admin:users",
+                                               icon_custom_emoji_id="5253997076169115797"))
+        send_or_edit(call, result_msg, kb_back)
+        return
+
     # ── Admin: Admins management ──────────────────────────────────────────────
     if data == "admin:admins":
         if uid not in ADMIN_IDS:
@@ -11332,6 +11612,52 @@ def _dispatch_callback(call, uid, data):
         _show_panel_client_package_preview(call, cpkg_id)
         return
 
+    if data.startswith("adm:pnl:cpkg:edit:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+            return
+        cpkg_id = int(data.split(":")[-1])
+        bot.answer_callback_query(call.id)
+        _show_cpkg_edit_menu(call, cpkg_id)
+        return
+
+    if data.startswith("adm:pnl:cpkg:ef:"):
+        # adm:pnl:cpkg:ef:{field}:{cpkg_id}
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+            return
+        parts   = data.split(":")
+        field   = parts[4]
+        cpkg_id = int(parts[5])
+        cp = get_panel_client_package(cpkg_id)
+        if not cp:
+            bot.answer_callback_query(call.id, "کلاینت پکیج یافت نشد.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        _FIELD_LABELS = {
+            "inbound_id":     "🔢 شماره ID اینباند",
+            "sample_config":  "📋 نمونه کانفیگ",
+            "sample_sub_url": "🔗 نمونه آدرس سابسکرایب",
+        }
+        cur_val = cp.get(field, "")
+        cur_display = esc(str(cur_val)[:200]) if cur_val else "<i>خالی</i>"
+        state_set(uid, f"cpkg_ef_{field}", cpkg_id=cpkg_id, panel_id=cp["panel_id"])
+        send_or_edit(call,
+            f"✏️ <b>ویرایش {_FIELD_LABELS.get(field, field)}</b>\n\n"
+            f"مقدار فعلی:\n<code>{cur_display}</code>\n\n"
+            "مقدار جدید را ارسال کنید:",
+            back_button(f"adm:pnl:cpkg:edit:{cpkg_id}"))
+        return
+
+    if data.startswith("adm:pnl:editpanel:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+            return
+        panel_id = int(data.split(":")[-1])
+        bot.answer_callback_query(call.id)
+        _show_panel_edit_menu(call, panel_id)
+        return
+
     if data.startswith("adm:pnl:cpkg:del:"):
         if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
             bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
@@ -11380,92 +11706,28 @@ def _dispatch_callback(call, uid, data):
         if mode not in ("config_only", "sub_only", "both"):
             bot.answer_callback_query(call.id)
             return
-        # Connect to panel and fetch sample config/sub
-        bot.answer_callback_query(call.id, "⏳ در حال اتصال به پنل…")
-        p = get_panel(panel_id)
-        if not p:
-            bot.answer_callback_query(call.id, "پنل یافت نشد.", show_alert=True)
-            return
-        import threading as _threading
 
-        def _fetch_sample():
-            from ..panels.client import PanelClient
-            import random, string, time as _time
-            client = PanelClient(
-                protocol=p["protocol"], host=p["host"], port=p["port"],
-                path=p["path"] or "", username=p["username"],
-                password=p["password"],
-                sub_url_base=p["sub_url_base"] if p["sub_url_base"] else "",
-            )
-            ok, err = client.login()
-            if not ok:
-                bot.send_message(uid,
-                    f"❌ اتصال به پنل ناموفق: <code>{esc(str(err or '')[:200])}</code>",
-                    parse_mode="HTML",
-                    reply_markup=back_button(f"adm:pnl:cpkgs:{panel_id}"))
-                return
+        bot.answer_callback_query(call.id)
 
-            inbound = client.find_inbound_by_id(inbound_id)
-            if not inbound:
-                bot.send_message(uid,
-                    f"❌ اینباند با ID <b>{inbound_id}</b> در پنل یافت نشد.",
-                    parse_mode="HTML",
-                    reply_markup=back_button(f"adm:pnl:cpkgs:{panel_id}"))
-                return
-
-            # Create a temporary client to get a real sample
-            rand_str = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
-            tmp_name = f"sample_{rand_str}"
-            create_ok, create_result = client.create_client(inbound_id, tmp_name, 0, 0)
-            if not create_ok:
-                bot.send_message(uid,
-                    f"❌ خطا در ساخت کلاینت نمونه: <code>{esc(str(create_result or '')[:200])}</code>",
-                    parse_mode="HTML",
-                    reply_markup=back_button(f"adm:pnl:cpkgs:{panel_id}"))
-                return
-
-            tmp_uuid, tmp_sub_id = create_result
-            sample_sub = client.get_sub_url(tmp_uuid)
-            sample_config = ""
-
-            if mode in ("config_only", "both"):
-                fetch_ok, fetch_result = client.fetch_client_config(tmp_sub_id)
-                if fetch_ok and fetch_result:
-                    for line in fetch_result:
-                        if not line.startswith("http://") and not line.startswith("https://"):
-                            sample_config = line
-                            break
-                    if not sample_config:
-                        sample_config = fetch_result[0]
-
-            # Save client package
-            cpkg_id = add_panel_client_package(
-                panel_id=panel_id,
-                inbound_id=inbound_id,
-                delivery_mode=mode,
-                sample_config=sample_config if mode in ("config_only", "both") else "",
-                sample_sub_url=sample_sub if mode in ("sub_only", "both") else "",
-                name=inbound.get("remark") or inbound.get("tag") or f"اینباند #{inbound_id}",
-            )
-
-            _DM = {"config_only": "📄 فقط کانفیگ", "sub_only": "🔗 فقط ساب", "both": "📄+🔗 هر دو"}
-            parts_msg = [
-                f"✅ <b>کلاینت پکیج ذخیره شد</b> (ID: {cpkg_id})\n",
-                f"🔌 اینباند: <b>{esc(inbound.get('remark') or str(inbound_id))}</b>",
-                f"📤 تحویل: {_DM[mode]}",
-            ]
-            if sample_config:
-                parts_msg.append(f"\n📄 <b>نمونه کانفیگ:</b>\n<code>{esc(sample_config)}</code>")
-            if sample_sub and mode in ("sub_only", "both"):
-                parts_msg.append(f"\n🔗 <b>نمونه ساب:</b>\n<code>{esc(sample_sub)}</code>")
-
-            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-            kb_done = InlineKeyboardMarkup()
-            kb_done.add(InlineKeyboardButton("📦 بازگشت به کلاینت پکیج‌ها",
-                                              callback_data=f"adm:pnl:cpkgs:{panel_id}"))
-            bot.send_message(uid, "\n".join(parts_msg), parse_mode="HTML", reply_markup=kb_done)
-
-        _threading.Thread(target=_fetch_sample, daemon=True).start()
+        # ── Manual input flow: ask admin to type sample config / sub URL ──────
+        if mode in ("config_only", "both"):
+            state_set(uid, "cpkg_sample_config", panel_id=panel_id, inbound_id=inbound_id, mode=mode)
+            send_or_edit(call,
+                "📄 <b>کانفیگ نمونه</b> را ارسال کنید:\n\n"
+                "یک خط کانفیگ از این اینباند کپی کنید.\n"
+                "مثال:\n"
+                "<code>vless://abcd1234efgh5678@example.com:2096"
+                "?security=tls&type=tcp&sni=example.com#example-config</code>",
+                back_button(f"adm:pnl:cpkgs:{panel_id}"))
+        else:  # sub_only
+            state_set(uid, "cpkg_sample_sub",
+                      panel_id=panel_id, inbound_id=inbound_id, mode=mode, sample_config="")
+            send_or_edit(call,
+                "🔗 <b>لینک ساب نمونه</b> را ارسال کنید:\n\n"
+                "یک URL ساب واقعی از این اینباند کپی کنید.\n"
+                "مثال:\n"
+                "<code>http://example.com:2096/sub/abc123xyz456</code>",
+                back_button(f"adm:pnl:cpkgs:{panel_id}"))
         return
 
     bot.answer_callback_query(call.id)
