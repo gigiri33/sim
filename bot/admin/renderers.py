@@ -10,6 +10,7 @@ from ..db import (
     get_all_types, get_packages, get_registered_packages_stock,
     get_all_admin_users, get_user, get_user_detail, get_phone_number,
     count_users_stats,
+    get_panel_configs, get_panel_configs_count,
 )
 from ..helpers import esc, fmt_price, display_username, back_button
 from ..ui.keyboards import _btn, _raw_markup
@@ -421,6 +422,61 @@ def _show_panel_detail(call, panel_id):
         InlineKeyboardButton("🗑 حذف پنل",      callback_data=f"adm:pnl:del:{panel_id}"),
     )
     kb.add(InlineKeyboardButton("بازگشت", callback_data="admin:panels",
+                                icon_custom_emoji_id="5253997076169115797"))
+    send_or_edit(call, text, kb)
+
+
+# ── Panel Configs (purchased, auto-created) ────────────────────────────────────
+def _show_panel_configs(call, page=0, search=None, only_expired=False):
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+    PER_PAGE    = 10
+    items       = get_panel_configs(search=search, only_expired=only_expired, page=page, per_page=PER_PAGE)
+    total_count = get_panel_configs_count(search=search, only_expired=only_expired)
+    total_pages = max(1, (total_count + PER_PAGE - 1) // PER_PAGE)
+    filter_str  = "expired" if only_expired else "all"
+
+    lines = ["🔌 <b>کانفیگ های پنل</b>"]
+    if search:
+        lines.append(f"🔍 جستجو: <code>{esc(search)}</code>")
+    lines.append(f"تعداد: <b>{total_count}</b>\n")
+
+    if items:
+        for item in items:
+            expired_mark = " ⌛" if item["is_expired"] else " 🟢"
+            pkg_name     = item["package_name"] or f"پکیج #{item['package_id']}"
+            client_name  = item["client_name"] or "—"
+            expire_line  = f"  انقضا: {item['expire_at'][:10]}" if item["expire_at"] else ""
+            lines.append(
+                f"👤 <code>{item['user_id']}</code> | 📦 {esc(pkg_name)}\n"
+                f"  🔤 {esc(client_name)}{expire_line}{expired_mark}"
+            )
+    else:
+        lines.append("<i>موردی یافت نشد.</i>")
+
+    text = "\n".join(lines)
+
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton("🔍 جستجو", callback_data="admin:pcfg:search"))
+    kb.row(
+        InlineKeyboardButton(
+            "✅ تمامی کانفیگ ها" if not only_expired else "همه کانفیگ ها",
+            callback_data=f"admin:pcfg:f:all:0"),
+        InlineKeyboardButton(
+            "✅ کانفیگ های منقضی شده" if only_expired else "کانفیگ های منقضی شده",
+            callback_data=f"admin:pcfg:f:expired:0"),
+    )
+
+    if total_pages > 1:
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton("◀️", callback_data=f"admin:pcfg:pg:{page - 1}:{filter_str}"))
+        nav.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data="admin:pcfg:noop"))
+        if page < total_pages - 1:
+            nav.append(InlineKeyboardButton("▶️", callback_data=f"admin:pcfg:pg:{page + 1}:{filter_str}"))
+        kb.row(*nav)
+
+    kb.add(InlineKeyboardButton("بازگشت", callback_data="admin:panel",
                                 icon_custom_emoji_id="5253997076169115797"))
     send_or_edit(call, text, kb)
 

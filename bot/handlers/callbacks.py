@@ -89,6 +89,8 @@ from ..admin.backup import _send_backup
 from ..db import (
     get_all_panels, get_panel, add_panel, update_panel_field,
     toggle_panel_active, update_panel_status, delete_panel,
+    update_package_panel_settings,
+    add_panel_config, get_panel_configs, get_panel_configs_count,
 )
 
 
@@ -945,11 +947,44 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
     """
     Deliver `quantity` configs to user after successful payment.
     Returns (delivered_purchase_ids, pending_ids).
-    For configs without stock, creates pending_orders.
+    For panel packages, creates configs in the panel automatically.
+    For manual packages, pulls from stock; creates pending_orders if no stock.
     """
     from ..ui.notifications import deliver_purchase_message, admin_purchase_notify
     package_row   = get_package(package_id)
     unit_price    = max(0, total_amount // quantity) if quantity > 0 else total_amount
+
+    # ── Panel-based packages ──────────────────────────────────────────────────
+    try:
+        config_source = package_row["config_source"] or "manual"
+    except (IndexError, KeyError):
+        config_source = "manual"
+
+    if config_source == "panel":
+        panel_config_ids = []
+        for _ in range(quantity):
+            ok, result, pc_id = _create_panel_config(uid, package_id, payment_id)
+            if ok:
+                panel_config_ids.append(pc_id)
+            else:
+                try:
+                    bot.send_message(
+                        chat_id,
+                        f"⚠️ خطا در ساخت کانفیگ پنل: {result}\n"
+                        "لطفاً با پشتیبانی تماس بگیرید.",
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    pass
+        # Deliver each panel config
+        for pc_id in panel_config_ids:
+            try:
+                _deliver_panel_config_to_user(chat_id, pc_id, package_row)
+            except Exception as e:
+                print(f"[PANEL_DELIVERY] Error delivering panel_config {pc_id}: {e}")
+        return panel_config_ids, []
+
+    # ── Manual / stock-based packages (original logic) ────────────────────────
     purchase_ids  = []
     pending_ids   = []
 
@@ -974,13 +1009,198 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
     return purchase_ids, pending_ids
 
 
+def _create_panel_config(uid, package_id, payment_id):
+    """
+    Create a config in the panel for uid/package_id.
+    Returns (True, delivery_mode, panel_config_id) or (False, error_str, None).
+    """
+    import random
+    import string
+    from datetime import datetime, timedelta
+    from ..panels.client import PanelClient
+
+    package_row = get_package(package_id)
+    if not package_row:
+        return False, "پکیج یافت نشد", None
+
+    try:
+        panel_id      = package_row["panel_id"]
+        panel_port    = int(package_row["panel_port"] or 0)
+        delivery_mode = package_row["delivery_mode"] or "config_only"
+        panel_type    = package_row["panel_type"] or "sanaei"
+    except (IndexError, KeyError):
+        return False, "اطلاعات پنل پکیج ناقص است", None
+
+    if not panel_id or not panel_port:
+        return False, "پنل یا پورت پکیج تنظیم نشده", None
+
+    panel = get_panel(panel_id)
+    if not panel:
+        return False, "پنل مرتبط یافت نشد", None
+
+    client = PanelClient(
+        protocol=panel["protocol"],
+        host=panel["host"],
+        port=panel["port"],
+        path=panel["path"] or "",
+        username=panel["username"],
+        password=panel["password"],
+    )
+
+    ok, err = client.login()
+    if not ok:
+        return False, f"اتصال به پنل ناموفق: {err}", None
+
+    inbound = client.find_inbound_by_port(panel_port)
+    if not inbound:
+        return False, f"اینباند با پورت {panel_port} یافت نشد", None
+
+    inbound_id = inbound["id"]
+
+    # Generate config name: {user_id}_{random6}
+    rand_str    = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
+    client_name = f"{uid}_{rand_str}"
+
+    # Calculate traffic & expiry
+    volume_gb     = float(package_row["volume_gb"] or 0)
+    duration_days = int(package_row["duration_days"] or 0)
+    traffic_bytes = int(volume_gb * 1024 * 1024 * 1024) if volume_gb > 0 else 0
+
+    if duration_days > 0:
+        expire_dt  = datetime.now() + timedelta(days=duration_days)
+        expire_ms  = int(expire_dt.timestamp() * 1000)
+        expire_str = expire_dt.strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        expire_ms  = 0
+        expire_str = None
+
+    ok, result = client.create_client(inbound_id, client_name, traffic_bytes, expire_ms)
+    if not ok:
+        return False, f"خطا در ساخت کلاینت: {result}", None
+
+    client_uuid = result
+    sub_url     = client.get_sub_url(client_uuid)
+
+    # Try to get a vmess/vless config link from the inbound protocol
+    config_text = sub_url  # default fallback
+    try:
+        proto = (inbound.get("protocol") or "").lower()
+        if proto == "vless":
+            config_text = (
+                f"vless://{client_uuid}@{panel['host']}:{panel_port}"
+                f"?type=tcp&security=none#{client_name}"
+            )
+        elif proto == "vmess":
+            import json as _json, base64 as _b64
+            vmess_obj = {
+                "v": "2", "ps": client_name, "add": panel["host"],
+                "port": str(panel_port), "id": client_uuid,
+                "aid": "0", "net": "tcp", "type": "none", "tls": "",
+            }
+            config_text = "vmess://" + _b64.b64encode(
+                _json.dumps(vmess_obj).encode()
+            ).decode()
+    except Exception:
+        pass
+
+    pc_id = add_panel_config(
+        user_id=uid,
+        package_id=package_id,
+        panel_id=panel_id,
+        panel_type=panel_type,
+        inbound_id=inbound_id,
+        inbound_port=panel_port,
+        client_name=client_name,
+        client_uuid=client_uuid,
+        client_sub_url=sub_url,
+        client_config_text=config_text,
+        expire_at=expire_str,
+        payment_id=payment_id,
+    )
+
+    return True, delivery_mode, pc_id
+
+
+def _deliver_panel_config_to_user(chat_id, panel_config_id, package_row):
+    """Send the panel-created config to the user based on delivery_mode."""
+    from ..db import get_panel_config
+    from ..helpers import fmt_vol, fmt_dur
+
+    pc = get_panel_config(panel_config_id)
+    if not pc:
+        return
+
+    try:
+        delivery_mode = package_row["delivery_mode"] or "config_only"
+    except (IndexError, KeyError):
+        delivery_mode = "config_only"
+
+    vol_label = "نامحدود" if not package_row["volume_gb"] else fmt_vol(package_row["volume_gb"])
+    dur_label = "نامحدود" if not package_row["duration_days"] else fmt_dur(package_row["duration_days"])
+    expire_line = f"\n📅 تاریخ انقضا: {pc['expire_at'][:10]}" if pc["expire_at"] else ""
+
+    service_info = (
+        f"🎉 <b>سرویس شما آماده است!</b>\n\n"
+        f"📦 پکیج: <b>{esc(package_row['name'])}</b>\n"
+        f"🔋 حجم: {vol_label}\n"
+        f"⏰ مدت: {dur_label}"
+        f"{expire_line}\n"
+        f"🟢 وضعیت: فعال\n\n"
+    )
+
+    config_text = pc["client_config_text"] or ""
+    sub_url     = pc["client_sub_url"] or ""
+
+    if delivery_mode == "config_only":
+        msg = service_info
+        if config_text:
+            msg += f"📄 <b>کانفیگ:</b>\n<code>{esc(config_text)}</code>"
+        bot.send_message(chat_id, msg, parse_mode="HTML")
+
+    elif delivery_mode == "sub_only":
+        msg = service_info
+        if sub_url:
+            msg += f"🔗 <b>لینک اشتراک:</b>\n<code>{esc(sub_url)}</code>"
+        bot.send_message(chat_id, msg, parse_mode="HTML")
+
+    else:  # both
+        msg = service_info
+        if config_text:
+            msg += f"📄 <b>کانفیگ:</b>\n<code>{esc(config_text)}</code>\n\n"
+        if sub_url:
+            msg += f"🔗 <b>لینک اشتراک:</b>\n<code>{esc(sub_url)}</code>"
+        bot.send_message(chat_id, msg, parse_mode="HTML")
+
+
+
 def _send_bulk_delivery_result(chat_id, uid, package_row, purchase_ids, pending_ids,
                                method_label):
     """
     Send delivery messages to user after bulk purchase.
-    Delivers all purchased configs, then informs about pending ones.
+    For panel packages, delivery is already done inside _deliver_bulk_configs.
+    For manual packages, delivers all purchased configs then informs about pending ones.
     """
     from ..ui.notifications import deliver_purchase_message, admin_purchase_notify
+
+    # Panel packages already delivered their configs; just show a summary
+    try:
+        config_source = package_row["config_source"] or "manual"
+    except (IndexError, KeyError):
+        config_source = "manual"
+
+    if config_source == "panel":
+        if not purchase_ids:
+            try:
+                bot.send_message(
+                    chat_id,
+                    "⚠️ <b>مشکل در تحویل سرویس پنل</b>\n\n"
+                    "لطفاً با پشتیبانی تماس بگیرید.",
+                    parse_mode="HTML",
+                    reply_markup=back_button("main"),
+                )
+            except Exception:
+                pass
+        return
 
     total = len(purchase_ids) + len(pending_ids)
 
@@ -1456,6 +1676,7 @@ def _render_discount_code_detail(call, uid, code_id):
 # ── Module-level helper: build package edit panel text + keyboard ────────────
 def _pkg_edit_text_kb(package_row):
     _BR_LABELS = {"all": "همه", "agents": "فقط نمایندگان", "public": "فقط کاربران عادی", "nobody": "هیچ‌کس (فقط هدیه)"}
+    _DM_LABELS = {"config_only": "فقط کانفیگ", "sub_only": "فقط ساب", "both": "کانفیگ + ساب"}
     package_id    = package_row["id"]
     show_name_val = package_row["show_name"] if "show_name" in package_row.keys() else 1
     show_name_lbl = "👁 نمایش نام به کاربر: ✅ بله" if show_name_val else "👁 نمایش نام به کاربر: ❌ خیر"
@@ -1463,6 +1684,18 @@ def _pkg_edit_text_kb(package_row):
     pkg_status_label = "✅ فعال — کلیک برای غیرفعال" if pkg_active else "❌ غیرفعال — کلیک برای فعال"
     buyer_role    = package_row["buyer_role"] if "buyer_role" in package_row.keys() else "all"
     br_label      = _BR_LABELS.get(buyer_role, "همه")
+    try:
+        config_source = package_row["config_source"] or "manual"
+    except (IndexError, KeyError):
+        config_source = "manual"
+    try:
+        panel_id   = package_row["panel_id"]
+        panel_port = package_row["panel_port"]
+        delivery_mode = package_row["delivery_mode"] or "config_only"
+    except (IndexError, KeyError):
+        panel_id = panel_port = None
+        delivery_mode = "config_only"
+
     kb = types.InlineKeyboardMarkup()
     kb.add(types.InlineKeyboardButton("✏️ ویرایش نام",   callback_data=f"admin:pkg:ef:name:{package_id}"))
     kb.add(types.InlineKeyboardButton("💰 ویرایش قیمت",  callback_data=f"admin:pkg:ef:price:{package_id}"))
@@ -1472,6 +1705,8 @@ def _pkg_edit_text_kb(package_row):
     kb.add(types.InlineKeyboardButton("👥 محدودیت کاربر", callback_data=f"admin:pkg:ef:maxusers:{package_id}"))
     kb.add(types.InlineKeyboardButton(show_name_lbl,      callback_data=f"admin:pkg:toggle_sn:{package_id}"))
     kb.add(types.InlineKeyboardButton(f"🔑 خریداران: {br_label} — تغییر", callback_data=f"admin:pkg:set_br:{package_id}"))
+    src_lbl = "ثبت دستی" if config_source == "manual" else f"پنل #{panel_id} پورت {panel_port}"
+    kb.add(types.InlineKeyboardButton(f"🔌 منبع کانفیگ: {src_lbl} — تغییر", callback_data=f"admin:pkg:src:{package_id}"))
     kb.add(types.InlineKeyboardButton(pkg_status_label, callback_data=f"admin:pkg:toggleactive:{package_id}"))
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:types", icon_custom_emoji_id="5253997076169115797"))
     cur_pos      = package_row["position"] if "position" in package_row.keys() else 0
@@ -1479,6 +1714,10 @@ def _pkg_edit_text_kb(package_row):
     sn_line      = "✅ بله" if show_name_val else "❌ خیر"
     mu_val       = package_row["max_users"] if "max_users" in package_row.keys() else 0
     mu_line      = "نامحدود" if not mu_val else f"{mu_val} کاربره"
+    if config_source == "panel":
+        src_info = f"پنل #{panel_id} | پورت {panel_port} | {_DM_LABELS.get(delivery_mode, delivery_mode)}"
+    else:
+        src_info = "ثبت دستی"
     text = (
         f"📦 <b>ویرایش پکیج</b>\n\n"
         f"نام: {esc(package_row['name'])}\n"
@@ -1489,6 +1728,7 @@ def _pkg_edit_text_kb(package_row):
         f"محدودیت کاربر: {mu_line}\n"
         f"نمایش نام به کاربر: {sn_line}\n"
         f"خریداران مجاز: {br_label}\n"
+        f"منبع کانفیگ: {src_info}\n"
         f"وضعیت: {pkg_status_line}"
     )
     return text, kb
@@ -4194,28 +4434,126 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id)
             return
         sd = state_data(uid)
+        state_set(uid, "admin_add_package_config_source",
+                  type_id=sd["type_id"], package_name=sd["package_name"],
+                  volume=sd["volume"], duration=sd["duration"],
+                  price=sd["price"], show_name=sd.get("show_name", 1),
+                  max_users=int(sd.get("max_users", 0) or 0),
+                  buyer_role=buyer_role)
+        bot.answer_callback_query(call.id)
+        kb_cs = types.InlineKeyboardMarkup()
+        kb_cs.row(
+            types.InlineKeyboardButton("✏️ ثبت دستی",    callback_data="admin:pkg:add:cs:manual"),
+            types.InlineKeyboardButton("🔌 اتصال به پنل", callback_data="admin:pkg:add:cs:panel"),
+        )
+        send_or_edit(call,
+            "🔌 <b>منبع کانفیگ</b>\n\n"
+            "کانفیگ‌های این پکیج چطور تامین می‌شوند?\n\n"
+            "• <b>ثبت دستی</b> — کانفیگ را از بخش موجودی آپلود کنید\n"
+            "• <b>اتصال به پنل</b> — پس از خرید، کانفیگ به‌صورت خودکار در پنل ساخته می‌شود",
+            kb_cs)
+        return
+
+    if data == "admin:pkg:add:cs:manual":
+        if state_name(uid) != "admin_add_package_config_source" or not is_admin(uid):
+            bot.answer_callback_query(call.id)
+            return
+        sd = state_data(uid)
         show_name_val = sd.get("show_name", 1)
         max_users     = int(sd.get("max_users", 0) or 0)
-        add_package(sd["type_id"], sd["package_name"], sd["volume"], sd["duration"], sd["price"],
-                    show_name=show_name_val, max_users=max_users, buyer_role=buyer_role)
-        log_admin_action(uid, f"پکیج '{sd['package_name']}' با buyer_role={buyer_role} ثبت شد")
+        buyer_role    = sd.get("buyer_role", "all")
+        pkg_id = add_package(sd["type_id"], sd["package_name"], sd["volume"], sd["duration"], sd["price"],
+                             show_name=show_name_val, max_users=max_users, buyer_role=buyer_role)
+        update_package_panel_settings(pkg_id, "manual")
+        log_admin_action(uid, f"پکیج '{sd['package_name']}' (دستی) ثبت شد")
         state_clear(uid)
         _br_labels = {"all": "همه", "agents": "فقط نمایندگان", "public": "فقط کاربران عادی", "nobody": "هیچ‌کس (فقط هدیه)"}
         vol_label = "حجم نامحدود" if sd["volume"] == 0 else fmt_vol(sd["volume"])
         dur_label = "زمان نامحدود" if sd["duration"] == 0 else f"{sd['duration']} روز"
         pri_label = "رایگان" if sd["price"] == 0 else f"{fmt_price(sd['price'])} تومان"
-        sn_label  = "بله" if show_name_val else "خیر"
-        mu_label  = "نامحدود" if max_users == 0 else f"{max_users} کاربره"
         bot.answer_callback_query(call.id, "✅ پکیج ثبت شد.")
         send_or_edit(call,
-            f"✅ پکیج با موفقیت ثبت شد.\n\n"
+            f"✅ پکیج دستی با موفقیت ثبت شد.\n\n"
             f"📦 <b>{esc(sd['package_name'])}</b>\n"
             f"🔋 حجم: {vol_label}\n"
             f"⏰ مدت: {dur_label}\n"
             f"💰 قیمت: {pri_label}\n"
-            f"👥 تعداد کاربر: {mu_label}\n"
-            f"👁 نمایش نام: {sn_label}\n"
-            f"🔑 خریداران مجاز: {_br_labels[buyer_role]}",
+            f"🔑 خریداران: {_br_labels.get(buyer_role, buyer_role)}\n"
+            f"📂 منبع: ثبت دستی",
+            back_button("admin:types"))
+        return
+
+    if data == "admin:pkg:add:cs:panel":
+        if state_name(uid) != "admin_add_package_config_source" or not is_admin(uid):
+            bot.answer_callback_query(call.id)
+            return
+        panels = get_all_panels()
+        if not panels:
+            bot.answer_callback_query(call.id, "هیچ پنلی ثبت نشده است. ابتدا یک پنل اضافه کنید.", show_alert=True)
+            return
+        sd = state_data(uid)
+        state_set(uid, "admin_add_package_panel", **{k: v for k, v in sd.items()})
+        kb_pnl = types.InlineKeyboardMarkup()
+        for p in panels:
+            icon = "🟢" if p["connection_status"] == "connected" else "🔴"
+            kb_pnl.add(types.InlineKeyboardButton(f"{icon} {p['name']}", callback_data=f"admin:pkg:add:pnl:{p['id']}"))
+        kb_pnl.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:types",
+                                               icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "🖥 پنلی را که کانفیگ‌های این پکیج روی آن ساخته می‌شوند انتخاب کنید:", kb_pnl)
+        return
+
+    if data.startswith("admin:pkg:add:pnl:"):
+        if state_name(uid) != "admin_add_package_panel" or not is_admin(uid):
+            bot.answer_callback_query(call.id)
+            return
+        panel_id = int(data.split(":")[4])
+        panel    = get_panel(panel_id)
+        if not panel:
+            bot.answer_callback_query(call.id, "پنل یافت نشد.", show_alert=True)
+            return
+        sd = state_data(uid)
+        state_set(uid, "admin_add_package_port", panel_id=panel_id,
+                  **{k: v for k, v in sd.items() if k != "panel_id"})
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"🔌 پنل: <b>{esc(panel['name'])}</b>\n\n"
+            "🔢 <b>پورت اینباند</b> را وارد کنید:\n"
+            "کانفیگ‌های این پکیج روی اینباند با این پورت در پنل ساخته می‌شوند.",
+            back_button("admin:types"))
+        return
+
+    if data.startswith("admin:pkg:add:dm:"):
+        if state_name(uid) != "admin_add_package_delivery_mode" or not is_admin(uid):
+            bot.answer_callback_query(call.id)
+            return
+        mode = data.split(":")[4]
+        if mode not in ("config_only", "sub_only", "both"):
+            bot.answer_callback_query(call.id)
+            return
+        sd = state_data(uid)
+        show_name_val = sd.get("show_name", 1)
+        max_users     = int(sd.get("max_users", 0) or 0)
+        buyer_role    = sd.get("buyer_role", "all")
+        pkg_id = add_package(sd["type_id"], sd["package_name"], sd["volume"], sd["duration"], sd["price"],
+                             show_name=show_name_val, max_users=max_users, buyer_role=buyer_role)
+        update_package_panel_settings(pkg_id, "panel",
+                                       panel_id=int(sd["panel_id"]),
+                                       panel_type="sanaei",
+                                       panel_port=int(sd["panel_port"]),
+                                       delivery_mode=mode)
+        log_admin_action(uid, f"پکیج پنلی '{sd['package_name']}' روی پنل #{sd['panel_id']} ثبت شد")
+        state_clear(uid)
+        _DM_LABELS = {"config_only": "فقط کانفیگ", "sub_only": "فقط ساب", "both": "کانفیگ + ساب"}
+        bot.answer_callback_query(call.id, "✅ پکیج ثبت شد.")
+        send_or_edit(call,
+            f"✅ پکیج پنلی با موفقیت ثبت شد.\n\n"
+            f"📦 <b>{esc(sd['package_name'])}</b>\n"
+            f"🔋 حجم: {'نامحدود' if sd['volume'] == 0 else fmt_vol(sd['volume'])}\n"
+            f"⏰ مدت: {'نامحدود' if sd['duration'] == 0 else str(sd['duration']) + ' روز'}\n"
+            f"💰 قیمت: {'رایگان' if sd['price'] == 0 else fmt_price(sd['price']) + ' تومان'}\n"
+            f"🔌 پنل: #{sd['panel_id']}  |  پورت: {sd['panel_port']}\n"
+            f"📤 تحویل: {_DM_LABELS[mode]}",
             back_button("admin:types"))
         return
 
@@ -4357,6 +4695,154 @@ def _dispatch_callback(call, uid, data):
         _show_admin_types(call)
         return
 
+    # ── Admin: Package config_source edit ─────────────────────────────────────
+    if data.startswith("admin:pkg:src:"):
+        package_id  = int(data.split(":")[3])
+        package_row = get_package(package_id)
+        if not package_row or not is_admin(uid):
+            bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
+            return
+        try:
+            config_source = package_row["config_source"] or "manual"
+        except (IndexError, KeyError):
+            config_source = "manual"
+        kb_src = types.InlineKeyboardMarkup()
+        kb_src.row(
+            types.InlineKeyboardButton(
+                "✅ ثبت دستی" if config_source == "manual" else "ثبت دستی",
+                callback_data=f"admin:pkg:scs:manual:{package_id}"),
+            types.InlineKeyboardButton(
+                "✅ اتصال به پنل" if config_source == "panel" else "اتصال به پنل",
+                callback_data=f"admin:pkg:scs:panel:{package_id}"),
+        )
+        kb_src.add(types.InlineKeyboardButton("بازگشت", callback_data=f"admin:pkg:edit:{package_id}",
+                                              icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"📦 <b>{esc(package_row['name'])}</b>\n\n"
+            "🔌 منبع کانفیگ این پکیج را انتخاب کنید:", kb_src)
+        return
+
+    if data.startswith("admin:pkg:scs:manual:"):
+        package_id = int(data.split(":")[4])
+        if not is_admin(uid):
+            bot.answer_callback_query(call.id)
+            return
+        update_package_panel_settings(package_id, "manual")
+        log_admin_action(uid, f"پکیج #{package_id} منبع کانفیگ به دستی تغییر کرد")
+        bot.answer_callback_query(call.id, "✅ منبع کانفیگ به دستی تغییر کرد.")
+        package_row = get_package(package_id)
+        text, kb = _pkg_edit_text_kb(package_row)
+        send_or_edit(call, text, kb)
+        return
+
+    if data.startswith("admin:pkg:scs:panel:"):
+        package_id = int(data.split(":")[4])
+        if not is_admin(uid):
+            bot.answer_callback_query(call.id)
+            return
+        panels = get_all_panels()
+        if not panels:
+            bot.answer_callback_query(call.id, "هیچ پنلی ثبت نشده است.", show_alert=True)
+            return
+        state_set(uid, "admin_edit_pkg_panel", package_id=package_id)
+        kb_pnl = types.InlineKeyboardMarkup()
+        for p in panels:
+            icon = "🟢" if p["connection_status"] == "connected" else "🔴"
+            kb_pnl.add(types.InlineKeyboardButton(f"{icon} {p['name']}", callback_data=f"admin:pkg:spnl:{p['id']}:{package_id}"))
+        kb_pnl.add(types.InlineKeyboardButton("بازگشت", callback_data=f"admin:pkg:src:{package_id}",
+                                               icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "🖥 پنل مقصد را انتخاب کنید:", kb_pnl)
+        return
+
+    if data.startswith("admin:pkg:spnl:"):
+        parts      = data.split(":")
+        panel_id   = int(parts[3])
+        package_id = int(parts[4])
+        if not is_admin(uid):
+            bot.answer_callback_query(call.id)
+            return
+        panel = get_panel(panel_id)
+        if not panel:
+            bot.answer_callback_query(call.id, "پنل یافت نشد.", show_alert=True)
+            return
+        state_set(uid, "admin_edit_pkg_panel_port", package_id=package_id, panel_id=panel_id)
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"🔌 پنل: <b>{esc(panel['name'])}</b>\n\n"
+            "🔢 پورت اینباند را وارد کنید:",
+            back_button(f"admin:pkg:src:{package_id}"))
+        return
+
+    if data.startswith("admin:pkg:sdm:"):
+        parts      = data.split(":")
+        mode       = parts[3]
+        package_id = int(parts[4])
+        if not is_admin(uid):
+            bot.answer_callback_query(call.id)
+            return
+        if mode not in ("config_only", "sub_only", "both"):
+            bot.answer_callback_query(call.id)
+            return
+        sd = state_data(uid)
+        update_package_panel_settings(package_id, "panel",
+                                       panel_id=int(sd.get("panel_id", 0)),
+                                       panel_type="sanaei",
+                                       panel_port=int(sd.get("panel_port", 0)),
+                                       delivery_mode=mode)
+        log_admin_action(uid, f"پکیج #{package_id} منبع کانفیگ به پنل #{sd.get('panel_id')} تغییر کرد")
+        state_clear(uid)
+        bot.answer_callback_query(call.id, "✅ تنظیمات پنل ذخیره شد.")
+        package_row = get_package(package_id)
+        text, kb = _pkg_edit_text_kb(package_row)
+        send_or_edit(call, text, kb)
+        return
+
+    # ── Admin: Panel Configs list ──────────────────────────────────────────────
+    if data == "admin:panel_configs":
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        from ..admin.renderers import _show_panel_configs
+        _show_panel_configs(call)
+        return
+
+    if data.startswith("admin:pcfg:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+            return
+        from ..admin.renderers import _show_panel_configs
+        bot.answer_callback_query(call.id)
+
+        if data == "admin:pcfg:search":
+            state_set(uid, "admin_pcfg_search")
+            send_or_edit(call, "🔍 عبارت جستجو را وارد کنید:\n(آیدی کاربر، نام کلاینت، یا نام پکیج)",
+                         back_button("admin:panel_configs"))
+            return
+
+        if data.startswith("admin:pcfg:f:"):
+            parts  = data.split(":")
+            flt    = parts[3]   # all | expired
+            page   = int(parts[4]) if len(parts) > 4 else 0
+            only_expired = (flt == "expired")
+            _show_panel_configs(call, page=page, only_expired=only_expired)
+            return
+
+        if data.startswith("admin:pcfg:pg:"):
+            parts  = data.split(":")
+            page   = int(parts[3])
+            flt    = parts[4] if len(parts) > 4 else "all"
+            only_expired = (flt == "expired")
+            _show_panel_configs(call, page=page, only_expired=only_expired)
+            return
+
+        if data == "admin:pcfg:noop":
+            return
+
+        return
+
     # ── Admin: Add Config ─────────────────────────────────────────────────────
     if data == "admin:add_config":
         types_list = get_all_types()
@@ -4367,6 +4853,7 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id)
         send_or_edit(call, "📝 <b>ثبت کانفیگ</b>\n\nنوع کانفیگ را انتخاب کنید:", kb)
         return
+
 
     if data.startswith("adm:cfg:t:"):
         type_id = int(data.split(":")[3])

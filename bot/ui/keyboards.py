@@ -80,7 +80,10 @@ def kb_admin_panel(uid=None):
     if is_owner or (uid and (admin_has_perm(uid, "view_configs") or
                              admin_has_perm(uid, "register_config") or
                              admin_has_perm(uid, "manage_configs"))):
-        rows.append([_btn("کانفیگ‌ها", callback_data="admin:stock", emoji_id="6017209397413941115")])
+        rows.append([
+            _btn("کانفیگ های دستی", callback_data="admin:stock",        emoji_id="6017209397413941115"),
+            _btn("کانفیگ های پنل",  callback_data="admin:panel_configs", emoji_id="5372926953978341366"),
+        ])
 
     show_users = is_owner or (uid and (admin_has_perm(uid, "view_users") or
                                        admin_has_perm(uid, "full_users") or

@@ -481,6 +481,34 @@ def init_db():
             "ALTER TABLE panels ADD COLUMN last_error        TEXT    NOT NULL DEFAULT ''",
             "ALTER TABLE panels ADD COLUMN created_at        TEXT    NOT NULL DEFAULT ''",
             "ALTER TABLE panels ADD COLUMN updated_at        TEXT    NOT NULL DEFAULT ''",
+            # ── Packages: panel-based config source ───────────────────────────
+            "ALTER TABLE packages ADD COLUMN config_source TEXT NOT NULL DEFAULT 'manual'",
+            "ALTER TABLE packages ADD COLUMN panel_id      INTEGER",
+            "ALTER TABLE packages ADD COLUMN panel_type    TEXT",
+            "ALTER TABLE packages ADD COLUMN panel_port    INTEGER",
+            "ALTER TABLE packages ADD COLUMN delivery_mode TEXT NOT NULL DEFAULT 'config_only'",
+            # ── Panel configs (auto-created by purchase) ──────────────────────
+            (
+                "CREATE TABLE IF NOT EXISTS panel_configs ("
+                "id                 INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "user_id            INTEGER NOT NULL,"
+                "package_id         INTEGER NOT NULL,"
+                "panel_id           INTEGER NOT NULL,"
+                "panel_type         TEXT    NOT NULL DEFAULT 'sanaei',"
+                "inbound_id         INTEGER,"
+                "inbound_port       INTEGER,"
+                "client_name        TEXT,"
+                "client_uuid        TEXT,"
+                "client_sub_url     TEXT,"
+                "client_config_text TEXT,"
+                "expire_at          TEXT,"
+                "is_expired         INTEGER NOT NULL DEFAULT 0,"
+                "expired_notified   INTEGER NOT NULL DEFAULT 0,"
+                "created_at         TEXT    NOT NULL,"
+                "purchase_id        INTEGER,"
+                "payment_id         INTEGER"
+                ")"
+            ),
         ]
         for sql in migrations:
             try:
@@ -1977,7 +2005,106 @@ def delete_panel(panel_id):
         conn.execute("DELETE FROM panels WHERE id=?", (panel_id,))
 
 
-# ── Pending Rewards (referral claim system) ────────────────────────────────────
+# ── Package panel settings ─────────────────────────────────────────────────────
+def update_package_panel_settings(package_id, config_source,
+                                   panel_id=None, panel_type=None,
+                                   panel_port=None, delivery_mode=None):
+    with get_conn() as conn:
+        conn.execute(
+            """UPDATE packages SET config_source=?, panel_id=?, panel_type=?,
+               panel_port=?, delivery_mode=? WHERE id=?""",
+            (config_source, panel_id, panel_type, panel_port, delivery_mode, package_id)
+        )
+
+
+# ── Panel configs (auto-created by purchases) ──────────────────────────────────
+def add_panel_config(user_id, package_id, panel_id, panel_type,
+                     inbound_id, inbound_port, client_name, client_uuid,
+                     client_sub_url, client_config_text, expire_at,
+                     purchase_id=None, payment_id=None):
+    with get_conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO panel_configs
+               (user_id, package_id, panel_id, panel_type, inbound_id, inbound_port,
+                client_name, client_uuid, client_sub_url, client_config_text,
+                expire_at, created_at, purchase_id, payment_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (user_id, package_id, panel_id, panel_type, inbound_id, inbound_port,
+             client_name, client_uuid, client_sub_url, client_config_text,
+             expire_at, now_str(), purchase_id, payment_id)
+        )
+        return cur.lastrowid
+
+
+def get_panel_config(config_id):
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM panel_configs WHERE id=?", (config_id,)
+        ).fetchone()
+
+
+def get_panel_configs(search=None, only_expired=False, page=0, per_page=20):
+    base = (
+        "SELECT pc.*, u.full_name, u.username, p.name AS package_name "
+        "FROM panel_configs pc "
+        "LEFT JOIN users u ON pc.user_id=u.user_id "
+        "LEFT JOIN packages p ON pc.package_id=p.id"
+    )
+    wheres, params = [], []
+    if only_expired:
+        wheres.append("pc.is_expired=1")
+    if search:
+        s = f"%{search}%"
+        wheres.append("(CAST(pc.user_id AS TEXT) LIKE ? OR pc.client_name LIKE ? OR p.name LIKE ?)")
+        params += [s, s, s]
+    sql = base
+    if wheres:
+        sql += " WHERE " + " AND ".join(wheres)
+    sql += " ORDER BY pc.id DESC LIMIT ? OFFSET ?"
+    params += [per_page, page * per_page]
+    with get_conn() as conn:
+        return conn.execute(sql, params).fetchall()
+
+
+def get_panel_configs_count(search=None, only_expired=False):
+    base = (
+        "SELECT COUNT(*) AS n FROM panel_configs pc "
+        "LEFT JOIN packages p ON pc.package_id=p.id"
+    )
+    wheres, params = [], []
+    if only_expired:
+        wheres.append("pc.is_expired=1")
+    if search:
+        s = f"%{search}%"
+        wheres.append("(CAST(pc.user_id AS TEXT) LIKE ? OR pc.client_name LIKE ? OR p.name LIKE ?)")
+        params += [s, s, s]
+    sql = base
+    if wheres:
+        sql += " WHERE " + " AND ".join(wheres)
+    with get_conn() as conn:
+        row = conn.execute(sql, params).fetchone()
+        return row["n"] if row else 0
+
+
+def get_unexpired_panel_configs():
+    """Return all panel configs not yet marked expired."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM panel_configs WHERE is_expired=0"
+        ).fetchall()
+
+
+def mark_panel_config_expired(config_id):
+    with get_conn() as conn:
+        conn.execute("UPDATE panel_configs SET is_expired=1 WHERE id=?", (config_id,))
+
+
+def mark_panel_config_notified(config_id):
+    with get_conn() as conn:
+        conn.execute("UPDATE panel_configs SET expired_notified=1 WHERE id=?", (config_id,))
+
+
+
 def add_pending_reward(user_id: int, reward_type: str, amount: int = 0,
                        package_id=None, source: str = "start") -> None:
     """Queue a referral reward for the user to claim later."""
