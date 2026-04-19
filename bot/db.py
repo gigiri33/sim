@@ -57,7 +57,70 @@ def _invalidate_settings_cache() -> None:
 
 
 # ── Database Initialisation ────────────────────────────────────────────────────
+
+def _rebuild_panels_if_legacy() -> None:
+    """
+    If the panels table was created with the old schema (column 'ip' instead of 'host'),
+    rebuild it with the current schema before any other migrations run.
+    This uses a fresh direct connection to avoid transaction conflicts.
+    """
+    import sqlite3 as _sq3
+    try:
+        _c = _sq3.connect(DB_NAME, check_same_thread=False)
+        _c.execute("PRAGMA journal_mode = WAL")
+        cols = {row[1] for row in _c.execute("PRAGMA table_info(panels)").fetchall()}
+        if "ip" not in cols:
+            _c.close()
+            return
+        # Old schema detected — rebuild
+        _c.executescript("""
+            PRAGMA foreign_keys = OFF;
+            BEGIN;
+            CREATE TABLE IF NOT EXISTS _panels_new (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                name              TEXT    NOT NULL,
+                protocol          TEXT    NOT NULL DEFAULT 'http',
+                host              TEXT    NOT NULL DEFAULT '',
+                port              INTEGER NOT NULL DEFAULT 80,
+                path              TEXT    NOT NULL DEFAULT '',
+                username          TEXT    NOT NULL DEFAULT '',
+                password          TEXT    NOT NULL DEFAULT '',
+                is_active         INTEGER NOT NULL DEFAULT 1,
+                connection_status TEXT    NOT NULL DEFAULT 'unknown',
+                last_checked_at   TEXT    NOT NULL DEFAULT '',
+                last_error        TEXT    NOT NULL DEFAULT '',
+                created_at        TEXT    NOT NULL DEFAULT '',
+                updated_at        TEXT    NOT NULL DEFAULT ''
+            );
+            INSERT INTO _panels_new(id, name, protocol, host, port, path,
+                username, password, is_active, connection_status,
+                last_checked_at, last_error, created_at, updated_at)
+            SELECT
+                id,
+                COALESCE(name, ''),
+                COALESCE(CASE WHEN typeof(protocol)='text' THEN protocol END, 'http'),
+                COALESCE(CASE WHEN typeof(ip)='text'       THEN ip       END, ''),
+                COALESCE(port, 80),
+                COALESCE(CASE WHEN typeof(path)='text'     THEN path     END, ''),
+                COALESCE(CASE WHEN typeof(username)='text' THEN username END, ''),
+                COALESCE(CASE WHEN typeof(password)='text' THEN password END, ''),
+                COALESCE(is_active, 1),
+                'unknown', '', '', '', ''
+            FROM panels;
+            DROP TABLE panels;
+            ALTER TABLE _panels_new RENAME TO panels;
+            COMMIT;
+            PRAGMA foreign_keys = ON;
+        """)
+        _c.close()
+    except Exception as _e:
+        pass
+
+
 def init_db():
+    # Step 1: Fix legacy panels schema (ip → host) before any other migration
+    _rebuild_panels_if_legacy()
+
     with get_conn() as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS users (
@@ -424,55 +487,6 @@ def init_db():
                 conn.execute(sql)
             except Exception:
                 pass
-
-        # ── Rebuild panels table if it uses old schema (ip column instead of host) ──
-        try:
-            cols = {row[1] for row in conn.execute("PRAGMA table_info(panels)").fetchall()}
-            if "ip" in cols and "host" not in cols:
-                # Old schema: recreate with new schema, mapping ip → host
-                conn.executescript("""
-                    CREATE TABLE IF NOT EXISTS panels_new (
-                        id                INTEGER PRIMARY KEY AUTOINCREMENT,
-                        name              TEXT    NOT NULL,
-                        protocol          TEXT    NOT NULL DEFAULT 'http',
-                        host              TEXT    NOT NULL DEFAULT '',
-                        port              INTEGER NOT NULL DEFAULT 80,
-                        path              TEXT    NOT NULL DEFAULT '',
-                        username          TEXT    NOT NULL DEFAULT '',
-                        password          TEXT    NOT NULL DEFAULT '',
-                        is_active         INTEGER NOT NULL DEFAULT 1,
-                        connection_status TEXT    NOT NULL DEFAULT 'unknown',
-                        last_checked_at   TEXT    NOT NULL DEFAULT '',
-                        last_error        TEXT    NOT NULL DEFAULT '',
-                        created_at        TEXT    NOT NULL DEFAULT '',
-                        updated_at        TEXT    NOT NULL DEFAULT ''
-                    );
-                    INSERT INTO panels_new(id, name,
-                        protocol, host, port, path,
-                        username, password, is_active,
-                        connection_status, last_checked_at, last_error,
-                        created_at, updated_at)
-                    SELECT
-                        id,
-                        COALESCE(name, ''),
-                        COALESCE(protocol, 'http'),
-                        COALESCE(ip, ''),
-                        COALESCE(port, 80),
-                        COALESCE(path, ''),
-                        COALESCE(username, ''),
-                        COALESCE(password, ''),
-                        COALESCE(is_active, 1),
-                        COALESCE(connection_status, 'unknown'),
-                        COALESCE(last_checked_at, ''),
-                        COALESCE(last_error, ''),
-                        COALESCE(created_at, ''),
-                        COALESCE(updated_at, '')
-                    FROM panels;
-                    DROP TABLE panels;
-                    ALTER TABLE panels_new RENAME TO panels;
-                """)
-        except Exception as _e:
-            pass
 
         # ── Indexes (CREATE IF NOT EXISTS is idempotent) ───────────────────────
         indexes = [
