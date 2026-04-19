@@ -377,7 +377,10 @@ def _show_panel_detail(call, panel_id):
 
     uname_censored = p['username'][:2] + '***' if p['username'] else '—'
     passwd_censored = '••••••••'
-    updated = p['updated_at'] if p.get('updated_at') else '—'
+    try:
+        updated = p['updated_at'] or '—'
+    except (IndexError, KeyError):
+        updated = '—'
 
     text = (
         f"{icon} <b>{esc(p['name'])}</b>\n\n"
