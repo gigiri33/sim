@@ -572,6 +572,8 @@ def _run_init_db_migrations():
                 "payment_id         INTEGER"
                 ")"
             ),
+            # ── User timed restriction ────────────────────────────────────────
+            "ALTER TABLE users ADD COLUMN restricted_until INTEGER NOT NULL DEFAULT 0",
         ]
         for sql in migrations:
             try:
@@ -829,7 +831,35 @@ def set_user_status(user_id, status):
         conn.execute("UPDATE users SET status=? WHERE user_id=?", (status, user_id))
 
 
-def set_user_agent(user_id, is_agent):
+def set_user_restricted(user_id, until_ts: int):
+    """Restrict user. until_ts=0 means permanent; >0 means Unix timestamp when restriction expires."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE users SET status='restricted', restricted_until=? WHERE user_id=?",
+            (until_ts, user_id),
+        )
+
+
+def check_and_release_restriction(user_row: dict) -> dict:
+    """If user has a timed restriction that has expired, auto-release and return updated row."""
+    import time as _time
+    if not user_row:
+        return user_row
+    if user_row.get("status") == "restricted":
+        until = user_row.get("restricted_until", 0)
+        if until and until > 0 and _time.time() > until:
+            set_user_status(user_row["user_id"], "unsafe")
+            with get_conn() as conn:
+                conn.execute(
+                    "UPDATE users SET restricted_until=0 WHERE user_id=?",
+                    (user_row["user_id"],),
+                )
+            user_row = dict(user_row)
+            user_row["status"] = "unsafe"
+            user_row["restricted_until"] = 0
+    return user_row
+
+
     with get_conn() as conn:
         conn.execute(
             "UPDATE users SET is_agent=? WHERE user_id=?", (is_agent, user_id)

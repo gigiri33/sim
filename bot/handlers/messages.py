@@ -41,6 +41,7 @@ from ..db import (
     get_panel_client_package,
     update_panel_client_package_field,
     bulk_add_balance, bulk_zero_balance, bulk_set_status, count_users_by_filter,
+    set_user_restricted, check_and_release_restriction,
 )
 from ..gateways.base import is_gateway_available, is_card_info_complete, get_global_amount_range, get_gateway_range_text, is_gateway_in_range, build_gateway_range_guide
 from ..gateways.tetrapay import create_tetrapay_order, verify_tetrapay_order
@@ -229,7 +230,7 @@ def _send_codes_to_admin(admin_id, header, code_lines, chunk_size=3600):
             pass
 
 
-@bot.message_handler(content_types=["text", "photo", "document", "contact"])
+@bot.message_handler(content_types=["text", "photo", "document", "contact", "video", "animation", "voice", "audio", "video_note", "sticker"])
 def universal_handler(message):
     uid    = message.from_user.id
     ensure_user(message.from_user)
@@ -243,12 +244,30 @@ def universal_handler(message):
         )
         return
     _u = get_user(uid)
+    if _u:
+        _u = check_and_release_restriction(_u)
     if _u and _u["status"] == "restricted" and not is_admin(uid):
+        import time as _t
+        _until = _u.get("restricted_until", 0)
+        if _until and _until > 0:
+            import datetime as _dt
+            _exp = _dt.datetime.fromtimestamp(_until, tz=_dt.timezone.utc).astimezone(
+                _dt.timezone(_dt.timedelta(hours=3, minutes=30)))
+            _exp_str = _exp.strftime("%Y/%m/%d — %H:%M")
+            _dur_txt = f"تا <b>{_exp_str}</b> نمی‌توانید از ربات استفاده کنید."
+        else:
+            _dur_txt = "<b>برای همیشه</b> نمی‌توانید از ربات استفاده کنید."
+        _sup_raw  = setting_get("support_username", "")
+        _sup_link = setting_get("support_link", "")
+        _sup_url  = safe_support_url(_sup_raw) or (_sup_link if _sup_link else None)
+        _sup_line = f"\n\n🎧 برای پیگیری رفع محدودیت به پشتیبانی پیام دهید:\n{_sup_url}" if _sup_url else \
+                    "\n\n🎧 برای پیگیری رفع محدودیت با پشتیبانی در تماس باشید."
         bot.send_message(
             message.chat.id,
-            "🚫 <b>دسترسی محدود شده</b>\n\n"
-            "شما از ربات محدود شده‌اید و نمی‌توانید از آن استفاده کنید.\n"
-            "در صورت نیاز با پشتیبانی تماس بگیرید.",
+            f"🚫 <b>دسترسی شما محدود شده است</b>\n\n"
+            f"⛔ به دلیل ارسال رسید جعلی، حساب شما محدود شد.\n"
+            f"{_dur_txt}"
+            f"{_sup_line}",
             parse_mode="HTML"
         )
         return

@@ -20,6 +20,7 @@ from ..helpers import (
 from ..db import (
     setting_get, setting_set,
     ensure_user, get_user, get_users, count_all_users, set_user_status,
+    set_user_restricted, check_and_release_restriction,
     set_user_agent, update_balance, get_user_detail, get_user_purchases,
     get_purchase, get_available_configs_for_package,
     get_all_types, get_active_types, get_type, add_type, update_type, update_type_description, update_type_active, delete_type,
@@ -2266,10 +2267,21 @@ def on_callback(call):
         # Restricted user check (admins bypass)
         if not is_admin(uid):
             _u = get_user(uid)
+            if _u:
+                _u = check_and_release_restriction(_u)
             if _u and _u["status"] == "restricted":
+                import time as _t
+                _until = _u.get("restricted_until", 0)
+                if _until and _until > 0:
+                    import datetime as _dt
+                    _exp = _dt.datetime.fromtimestamp(_until, tz=_dt.timezone.utc).astimezone(
+                        _dt.timezone(_dt.timedelta(hours=3, minutes=30)))
+                    _dur_txt = f"تا {_exp.strftime('%Y/%m/%d — %H:%M')} نمی‌توانید از ربات استفاده کنید."
+                else:
+                    _dur_txt = "برای همیشه نمی‌توانید از ربات استفاده کنید."
                 bot.answer_callback_query(
                     call.id,
-                    "🚫 شما از ربات محدود شده‌اید و نمی‌توانید از آن استفاده کنید.",
+                    f"🚫 دسترسی محدود شده — {_dur_txt}",
                     show_alert=True
                 )
                 return
@@ -10635,27 +10647,83 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id, "این تراکنش قبلاً بررسی شده است.", show_alert=True)
             return
         bot.answer_callback_query(call.id)
-        pkg = get_package(p_row["package_id"])
-        pkg_info = ""
-        if pkg:
-            pkg_info = (
-                f"\n\n📦 <b>اطلاعات پکیج:</b>\n"
-                f"🧩 نوع: {esc(pkg['type_name'])}\n"
-                f"✏️ نام: {esc(pkg['name'])}\n"
-                f"🔋 حجم: {fmt_vol(pkg['volume_gb'])}\n"
-                f"⏰ مدت: {fmt_dur(pkg['duration_days'])}\n"
-                f"💰 قیمت: {fmt_price(pkg['price'])} تومان"
-            )
-        # Step 1: ask protocol (same as regular config registration)
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("🌐 V2Ray",    callback_data=f"adm:pnd:proto:v2ray:{pending_id}"))
-        kb.add(types.InlineKeyboardButton("🔒 OpenVPN",  callback_data=f"adm:pnd:proto:ovpn:{pending_id}"))
-        kb.add(types.InlineKeyboardButton("🛡 WireGuard", callback_data=f"adm:pnd:proto:wg:{pending_id}"))
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
+        kb.add(types.InlineKeyboardButton(
+            "❌ رد بدون توضیح",
+            callback_data=f"admin:pr:rjdo:plain:{payment_id}:{page}"))
+        kb.add(types.InlineKeyboardButton(
+            "⛔ رسید فیک — محدود ۲۴ ساعت",
+            callback_data=f"admin:pr:rjdo:fake24:{payment_id}:{page}"))
+        kb.add(types.InlineKeyboardButton(
+            "🚫 رسید فیک — محدود همیشه",
+            callback_data=f"admin:pr:rjdo:fakeall:{payment_id}:{page}"))
+        kb.add(types.InlineKeyboardButton(
+            "بازگشت", callback_data=f"admin:pr:det:{payment_id}:{page}",
+            icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call,
-            f"📝 <b>ثبت کانفیگ برای سفارش #{pending_id}</b>{pkg_info}\n\n"
-            "🔌 <b>پروتکل کانفیگ را انتخاب کنید:</b>",
+            f"❌ <b>رد رسید #{payment_id}</b>\n\nنوع رد کردن را انتخاب کنید:",
             kb)
+        return
+
+    if data.startswith("admin:pr:rjdo:"):
+        # admin:pr:rjdo:{mode}:{payment_id}:{page}
+        if not admin_has_perm(uid, "approve_payments"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        parts      = data.split(":")
+        mode       = parts[3]             # plain | fake24 | fakeall
+        payment_id = int(parts[4])
+        page       = int(parts[5]) if len(parts) > 5 else 0
+        payment    = get_payment(payment_id)
+        if not payment:
+            bot.answer_callback_query(call.id, "تراکنش یافت نشد.", show_alert=True)
+            return
+        if payment["status"] != "pending":
+            bot.answer_callback_query(call.id, "این تراکنش قبلاً بررسی شده است.", show_alert=True)
+            return
+
+        # Reject the payment
+        finish_card_payment_approval(payment_id, "رسید شما رد شد.", approved=False)
+        bot.answer_callback_query(call.id, "❌ رد شد.")
+
+        payer_id = payment["user_id"]
+
+        if mode in ("fake24", "fakeall"):
+            import time as _t
+            if mode == "fake24":
+                _until   = int(_t.time()) + 86400
+                _dur_txt = "تا ۲۴ ساعت دیگر نمی‌توانید از ربات استفاده کنید."
+            else:
+                _until   = 0   # permanent
+                _dur_txt = "برای همیشه نمی‌توانید از ربات استفاده کنید."
+
+            set_user_restricted(payer_id, _until)
+            log_admin_action(uid,
+                f"رسید فیک | کاربر <code>{payer_id}</code> محدود شد | mode={mode}")
+
+            # Build support line
+            _sup_raw  = setting_get("support_username", "")
+            _sup_link = setting_get("support_link", "")
+            _sup_url  = safe_support_url(_sup_raw) or (_sup_link if _sup_link else None)
+            _sup_line = (
+                f"\n\n🎧 برای پیگیری رفع محدودیت به پشتیبانی پیام دهید:\n{_sup_url}"
+                if _sup_url else
+                "\n\n🎧 برای پیگیری رفع محدودیت با پشتیبانی در تماس باشید."
+            )
+
+            try:
+                bot.send_message(
+                    payer_id,
+                    f"⛔ <b>حساب شما محدود شد</b>\n\n"
+                    f"به دلیل ارسال رسید جعلی، حساب شما محدود شده است.\n"
+                    f"🚫 {_dur_txt}"
+                    f"{_sup_line}",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+
+        _render_pending_receipts_page(call, uid, page)
         return
 
     # adm:pnd:proto:{proto}:{pending_id}  →  ask single/bulk
