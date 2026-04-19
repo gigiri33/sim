@@ -956,6 +956,41 @@ def _qty_order_summary_text(package_row, unit_price, quantity):
     )
 
 
+def _notify_panel_error(uid, package_row, stage: str, detail: str = "", panel_config_id=None):
+    """
+    Alert owner admins (ADMIN_IDS) and the error_log group topic
+    when a panel config creation or delivery fails.
+    """
+    try:
+        import traceback as _tb
+        pkg_name  = (package_row or {}).get("name", "؟") if hasattr(package_row, "get") else "؟"
+        type_name = (package_row or {}).get("type_name", "؟") if hasattr(package_row, "get") else "؟"
+        cfg_line  = f"\n🗂 panel_config_id: <code>{panel_config_id}</code>" if panel_config_id else ""
+        text = (
+            "🚨 <b>خطای پنل — تحویل کانفیگ</b>\n\n"
+            f"👤 کاربر: <code>{uid}</code>\n"
+            f"🧩 نوع: {esc(str(type_name))}\n"
+            f"📦 پکیج: {esc(str(pkg_name))}\n"
+            f"🔧 مرحله: {esc(stage)}"
+            f"{cfg_line}\n\n"
+            f"⚠️ جزئیات:\n<code>{esc(str(detail)[:600])}</code>"
+        )
+        # Send to owner admin IDs
+        for admin_id in ADMIN_IDS:
+            try:
+                bot.send_message(admin_id, text, parse_mode="HTML")
+            except Exception:
+                pass
+        # Send to error_log group topic
+        try:
+            from ..group_manager import send_to_topic
+            send_to_topic("error_log", text)
+        except Exception:
+            pass
+    except Exception as _ne:
+        log.error("_notify_panel_error itself failed: %s", _ne)
+
+
 def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method,
                           quantity, payment_id):
     """
@@ -990,12 +1025,21 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
                     )
                 except Exception:
                     pass
+                _notify_panel_error(
+                    uid=uid, package_row=package_row,
+                    stage="ساخت کلاینت در پنل", detail=result
+                )
         # Deliver each panel config
         for pc_id in panel_config_ids:
             try:
                 _deliver_panel_config_to_user(chat_id, pc_id, package_row)
             except Exception as e:
-                print(f"[PANEL_DELIVERY] Error delivering panel_config {pc_id}: {e}")
+                log.error("[PANEL_DELIVERY] Error delivering panel_config %s: %s", pc_id, e)
+                _notify_panel_error(
+                    uid=uid, package_row=package_row,
+                    stage="تحویل کانفیگ به کاربر",
+                    detail=str(e), panel_config_id=pc_id
+                )
         return panel_config_ids, []
 
     # ── Manual / stock-based packages (original logic) ────────────────────────
@@ -1313,8 +1357,57 @@ def _deliver_panel_config_to_user(chat_id, panel_config_id, package_row):
 
     pc = get_panel_config(panel_config_id)
     if not pc:
+        log.error("[PANEL_DELIVERY] panel_config %s not found in DB", panel_config_id)
+        _notify_panel_error(
+            uid=chat_id, package_row=package_row,
+            stage="تحویل کانفیگ — رکورد در دیتابیس یافت نشد",
+            detail=f"panel_config_id={panel_config_id}",
+            panel_config_id=panel_config_id,
+        )
+        try:
+            bot.send_message(chat_id,
+                "⚠️ خطا در دریافت اطلاعات سرویس شما.\n"
+                "لطفاً با پشتیبانی تماس بگیرید.",
+                parse_mode="HTML")
+        except Exception:
+            pass
         return
 
+    # ── Pull raw values first (needed for emergency fallback) ─────────────────
+    raw_config_text = pc["client_config_text"] or ""
+    raw_sub_url     = pc["client_sub_url"] or ""
+
+    try:
+        _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc)
+    except Exception as _inner_exc:
+        # Something went wrong in the rendering/QR path — send plain-text fallback
+        log.error("[PANEL_DELIVERY] inner delivery failed for pc=%s: %s", panel_config_id, _inner_exc, exc_info=True)
+        _notify_panel_error(
+            uid=chat_id, package_row=package_row,
+            stage="تحویل کانفیگ — خطای داخلی رندرینگ",
+            detail=str(_inner_exc),
+            panel_config_id=panel_config_id,
+        )
+        # Emergency plain-text fallback — always try to get something to the user
+        try:
+            fallback_lines = ["🎉 <b>سرویس شما آماده است!</b>\n"]
+            if raw_config_text.strip():
+                fallback_lines.append(f"📄 <b>Config:</b>\n<code>{esc(raw_config_text)}</code>")
+            if raw_sub_url.strip():
+                fallback_lines.append(f"🔗 <b>لینک ساب:</b>\n{esc(raw_sub_url)}")
+            if not raw_config_text.strip() and not raw_sub_url.strip():
+                fallback_lines.append("⚠️ کانفیگ در دسترس نیست — با پشتیبانی تماس بگیرید.")
+            kb_back = types.InlineKeyboardMarkup()
+            kb_back.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+            bot.send_message(chat_id, "\n\n".join(fallback_lines),
+                             parse_mode="HTML", reply_markup=kb_back)
+        except Exception as _fb_exc:
+            log.error("[PANEL_DELIVERY] even fallback failed for pc=%s: %s", panel_config_id, _fb_exc)
+
+
+def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
+    """Inner delivery — builds message with premium emoji + QR and sends it."""
+    from ..helpers import fmt_vol, fmt_dur
     import io as _io
     import qrcode as _qrcode
     from ..ui.premium_emoji import ce
@@ -1380,6 +1473,21 @@ def _deliver_panel_config_to_user(chat_id, panel_config_id, package_row):
             log.warning("_deliver_panel_config QR generation failed: %s", _qr_exc)
             bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
 
+    def _fail_no_content(reason: str):
+        """Notify user and alert admins when config content is missing."""
+        bot.send_message(chat_id,
+            f"{header}\n\n{info_block}\n"
+            f"⚠️ <b>خطا در تحویل سرویس:</b> {esc(reason)}\n"
+            "لطفاً با پشتیبانی تماس بگیرید.",
+            parse_mode="HTML", reply_markup=kb)
+        _notify_panel_error(
+            uid=chat_id,
+            package_row=package_row,
+            stage="تحویل کانفیگ — محتوا یافت نشد",
+            detail=f"{reason} | config_id={panel_config_id} | mode={delivery_mode}",
+            panel_config_id=panel_config_id,
+        )
+
     if delivery_mode == "config_only":
         if has_cfg:
             text = (
@@ -1388,8 +1496,7 @@ def _deliver_panel_config_to_user(chat_id, panel_config_id, package_row):
             )
             _send_with_qr(config_text, text)
         else:
-            bot.send_message(chat_id, f"{header}\n\n{info_block}\n⚠️ کانفیگ در دسترس نیست.",
-                             parse_mode="HTML", reply_markup=kb)
+            _fail_no_content("کانفیگ در دسترس نیست")
 
     elif delivery_mode == "sub_only":
         if has_sub:
@@ -1399,8 +1506,7 @@ def _deliver_panel_config_to_user(chat_id, panel_config_id, package_row):
             )
             _send_with_qr(sub_url, text)
         else:
-            bot.send_message(chat_id, f"{header}\n\n{info_block}\n⚠️ لینک ساب در دسترس نیست.",
-                             parse_mode="HTML", reply_markup=kb)
+            _fail_no_content("لینک ساب در دسترس نیست")
 
     else:  # both
         if has_cfg and has_sub:
@@ -1423,8 +1529,7 @@ def _deliver_panel_config_to_user(chat_id, panel_config_id, package_row):
             )
             _send_with_qr(sub_url, text)
         else:
-            bot.send_message(chat_id, f"{header}\n\n{info_block}\n⚠️ کانفیگ و ساب در دسترس نیستند.",
-                             parse_mode="HTML", reply_markup=kb)
+            _fail_no_content("کانفیگ و ساب هر دو در دسترس نیستند")
 
 
 
