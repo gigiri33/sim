@@ -9676,18 +9676,44 @@ def _dispatch_callback(call, uid, data):
         if not admin_has_perm(uid, "approve_payments"):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
             return
-        from ..db import get_pending_payments_page as _gpp
-        _, pending_rows = _gpp(0, 999)
-        rejected_count = 0
-        for prow in pending_rows:
-            try:
-                finish_card_payment_approval(prow["id"], "رسید شما رد شد.", approved=False)
-                rejected_count += 1
-            except Exception:
-                pass
+        from ..db import get_conn as _get_conn, reject_all_pending_payments as _reject_all
+        import threading as _threading, time as _time
+
+        # Snapshot user_ids before the bulk update (for notifications)
+        with _get_conn() as _c:
+            _pending_snap = _c.execute(
+                "SELECT id, user_id FROM payments WHERE status='pending'"
+            ).fetchall()
+
+        # Single SQL UPDATE — instant regardless of count
+        rejected_count = _reject_all()
+
         log_admin_action(uid, f"رد همه رسیدها: {rejected_count} رسید رد شد")
-        bot.answer_callback_query(call.id, f"✅ {rejected_count} رسید رد شد.")
+        bot.answer_callback_query(call.id, f"✅ {rejected_count} رسید رد شد.", show_alert=True)
         _render_pending_receipts_page(call, uid, 0)
+
+        # Notify each unique user once in background (non-blocking)
+        def _notify_rejected_users(rows):
+            seen = set()
+            for prow in rows:
+                u = prow["user_id"]
+                if u in seen:
+                    continue
+                seen.add(u)
+                try:
+                    bot.send_message(
+                        u,
+                        "❌ رسید پرداخت شما توسط ادمین رد شد."
+                    )
+                except Exception:
+                    pass
+                _time.sleep(0.05)  # ≈20 msg/s — well under Telegram limit
+
+        _threading.Thread(
+            target=_notify_rejected_users,
+            args=(_pending_snap,),
+            daemon=True
+        ).start()
         return
 
     if data.startswith("adm:pending:addcfg:"):

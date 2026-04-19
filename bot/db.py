@@ -583,7 +583,9 @@ def get_user_detail(user_id):
             """
             SELECT u.*,
                    (SELECT COUNT(*) FROM purchases p WHERE p.user_id=u.user_id) AS purchase_count,
-                   (SELECT COALESCE(SUM(amount),0) FROM purchases p WHERE p.user_id=u.user_id) AS total_spent
+                   (SELECT COALESCE(SUM(amount),0) FROM purchases p WHERE p.user_id=u.user_id) AS total_spent,
+                   (SELECT COUNT(*) FROM payments py WHERE py.user_id=u.user_id AND py.kind='renewal' AND py.status='completed') AS renewal_count,
+                   (SELECT COALESCE(SUM(amount),0) FROM payments py WHERE py.user_id=u.user_id AND py.kind='renewal' AND py.status='completed') AS total_renewals
             FROM users u WHERE u.user_id=?
             """,
             (user_id,)
