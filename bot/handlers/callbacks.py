@@ -1230,6 +1230,44 @@ def _build_locked_channels_menu():
     return text, kb
 
 
+def _do_reject_all(call, uid, note):
+    """Bulk-reject all pending receipts. note=None means no custom message."""
+    from ..db import get_conn as _get_conn, reject_all_pending_payments as _reject_all
+    import threading as _threading, time as _time
+
+    with _get_conn() as _c:
+        _pending_snap = _c.execute(
+            "SELECT id, user_id FROM payments WHERE status='pending'"
+        ).fetchall()
+
+    rejected_count = _reject_all()
+    log_admin_action(uid, f"رد همه رسیدها: {rejected_count} رسید رد شد")
+    if call.id:
+        bot.answer_callback_query(call.id, f"✅ {rejected_count} رسید رد شد.", show_alert=True)
+    else:
+        bot.send_message(uid, f"✅ {rejected_count} رسید رد شد.", parse_mode="HTML")
+    _render_pending_receipts_page(call, uid, 0)
+
+    def _notify(rows, custom_note):
+        seen = set()
+        for prow in rows:
+            u = prow["user_id"]
+            if u in seen:
+                continue
+            seen.add(u)
+            try:
+                if custom_note:
+                    msg = f"❌ رسید پرداخت شما رد شد.\n\n📝 دلیل: {custom_note}"
+                else:
+                    msg = "❌ رسید پرداخت شما توسط ادمین رد شد."
+                bot.send_message(u, msg)
+            except Exception:
+                pass
+            _time.sleep(0.05)
+
+    _threading.Thread(target=_notify, args=(_pending_snap, note), daemon=True).start()
+
+
 def _render_pending_receipts_page(call, uid, page):
     """Render paginated pending receipts list for admin."""
     PAGE_SIZE = 10
@@ -9662,58 +9700,37 @@ def _dispatch_callback(call, uid, data):
             return
         bot.answer_callback_query(call.id)
         kb = types.InlineKeyboardMarkup()
-        kb.row(
-            types.InlineKeyboardButton("✅ بله، همه را رد کن", callback_data="admin:pr:reject_all:do"),
-            types.InlineKeyboardButton("❌ لغو", callback_data="admin:pr"),
-        )
+        kb.add(types.InlineKeyboardButton("✏️ رد همه با توضیح برای کاربران", callback_data="admin:pr:reject_all:note"))
+        kb.add(types.InlineKeyboardButton("🚫 رد همه بدون توضیح", callback_data="admin:pr:reject_all:do"))
+        kb.add(types.InlineKeyboardButton("❌ لغو", callback_data="admin:pr"))
         send_or_edit(call,
             "⚠️ <b>آیا مطمئن هستید؟</b>\n\n"
-            "همه رسیدهای بررسی‌نشده رد خواهند شد و به کاربران اطلاع داده می‌شود.",
+            "همه رسیدهای بررسی‌نشده رد خواهند شد.\n\n"
+            "• <b>رد همه با توضیح</b>: یک توضیح از شما می‌گیرد و به کاربران ارسال می‌شود.\n"
+            "• <b>رد همه بدون توضیح</b>: فقط پیام رد شدن می‌رود، بدون دلیل.",
             kb)
+        return
+
+    if data == "admin:pr:reject_all:note":
+        if not admin_has_perm(uid, "approve_payments"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        state_set(uid, "admin_reject_all_note")
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("❌ لغو", callback_data="admin:pr:reject_all"))
+        bot.send_message(uid,
+            "✏️ <b>توضیح رد رسیدها</b>\n\n"
+            "متنی که می‌نویسید به همه کاربران ارسال می‌شود.\n"
+            "مثال: <i>رسید تصویر واضح نیست</i>",
+            parse_mode="HTML", reply_markup=kb)
         return
 
     if data == "admin:pr:reject_all:do":
         if not admin_has_perm(uid, "approve_payments"):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
             return
-        from ..db import get_conn as _get_conn, reject_all_pending_payments as _reject_all
-        import threading as _threading, time as _time
-
-        # Snapshot user_ids before the bulk update (for notifications)
-        with _get_conn() as _c:
-            _pending_snap = _c.execute(
-                "SELECT id, user_id FROM payments WHERE status='pending'"
-            ).fetchall()
-
-        # Single SQL UPDATE — instant regardless of count
-        rejected_count = _reject_all()
-
-        log_admin_action(uid, f"رد همه رسیدها: {rejected_count} رسید رد شد")
-        bot.answer_callback_query(call.id, f"✅ {rejected_count} رسید رد شد.", show_alert=True)
-        _render_pending_receipts_page(call, uid, 0)
-
-        # Notify each unique user once in background (non-blocking)
-        def _notify_rejected_users(rows):
-            seen = set()
-            for prow in rows:
-                u = prow["user_id"]
-                if u in seen:
-                    continue
-                seen.add(u)
-                try:
-                    bot.send_message(
-                        u,
-                        "❌ رسید پرداخت شما توسط ادمین رد شد."
-                    )
-                except Exception:
-                    pass
-                _time.sleep(0.05)  # ≈20 msg/s — well under Telegram limit
-
-        _threading.Thread(
-            target=_notify_rejected_users,
-            args=(_pending_snap,),
-            daemon=True
-        ).start()
+        _do_reject_all(call, uid, note=None)
         return
 
     if data.startswith("adm:pending:addcfg:"):

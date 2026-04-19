@@ -347,6 +347,21 @@ def universal_handler(message):
             else:
                 bot.copy_message(target_id, message.chat.id, message.message_id)
 
+        if sn == "admin_reject_all_note" and is_admin(uid):
+            note_text = message.text.strip() if message.text else ""
+            state_clear(uid)
+            if not note_text:
+                bot.send_message(uid, "❌ متن خالی است. عملیات لغو شد.", parse_mode="HTML")
+                return
+            from .callbacks import _do_reject_all
+            # Create a fake call-like object so _do_reject_all can answer/edit
+            class _FakeCall:
+                id = None
+                message = message
+                from_user = message.from_user
+            _do_reject_all(_FakeCall(), uid, note=note_text)
+            return
+
         if sn == "admin_dm_user" and is_admin(uid):
             target_uid = sd.get("target_user_id")
             state_clear(uid)
