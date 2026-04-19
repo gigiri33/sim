@@ -19,13 +19,13 @@ _tls = threading.local()
 def get_conn():
     conn = getattr(_tls, "conn", None)
     if conn is None:
-        conn = sqlite3.connect(DB_NAME, check_same_thread=False)
+        conn = sqlite3.connect(DB_NAME, timeout=30, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA journal_mode = WAL")
         conn.execute("PRAGMA synchronous  = NORMAL")   # safe with WAL, faster
         conn.execute("PRAGMA cache_size    = -8000")   # 8 MB page cache per conn
-        conn.execute("PRAGMA busy_timeout  = 5000")    # wait up to 5s on write contention
+        conn.execute("PRAGMA busy_timeout  = 30000")   # wait up to 30s on write contention
         _tls.conn = conn
     return conn
 
@@ -65,13 +65,13 @@ def _rebuild_panels_if_legacy() -> None:
     This uses a fresh direct connection to avoid transaction conflicts.
     """
     import sqlite3 as _sq3
+    _c = None
     try:
-        _c = _sq3.connect(DB_NAME, check_same_thread=False)
+        _c = _sq3.connect(DB_NAME, timeout=60, check_same_thread=False)
         _c.execute("PRAGMA journal_mode = WAL")
-        _c.execute("PRAGMA busy_timeout  = 10000")  # wait up to 10s if locked
+        _c.execute("PRAGMA busy_timeout  = 60000")  # wait up to 60s if locked
         cols = {row[1] for row in _c.execute("PRAGMA table_info(panels)").fetchall()}
         if "ip" not in cols:
-            _c.close()
             return
         # Old schema detected — rebuild
         _c.executescript("""
@@ -115,9 +115,11 @@ def _rebuild_panels_if_legacy() -> None:
             COMMIT;
             PRAGMA foreign_keys = ON;
         """)
-        _c.close()
     except Exception as _e:
         pass
+    finally:
+        if _c is not None:
+            _c.close()
 
 
 def init_db():
@@ -127,8 +129,10 @@ def init_db():
 
     # Step 2: Run migrations with retry — on rapid systemd restarts the old
     # process may still be alive and holding a write-lock for a few seconds.
-    _MAX_INIT_TRIES = 8
-    _INIT_DELAY     = 2   # seconds between retries
+    # The dedicated init connection already waits up to 60 s internally;
+    # these outer retries are an extra safety net.
+    _MAX_INIT_TRIES = 5
+    _INIT_DELAY     = 10  # seconds between retries
     for _attempt in range(1, _MAX_INIT_TRIES + 1):
         try:
             _run_init_db_migrations()
@@ -145,9 +149,24 @@ def init_db():
 
 
 def _run_init_db_migrations():
-    with get_conn() as conn:
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS users (
+    # Use a fresh dedicated connection (not the shared TLS one) so we can set
+    # a long busy_timeout without affecting runtime queries, and to avoid any
+    # lingering transaction state from the TLS connection.
+    _init_conn = sqlite3.connect(DB_NAME, timeout=60, check_same_thread=False)
+    _init_conn.row_factory = sqlite3.Row
+    _init_conn.execute("PRAGMA journal_mode = WAL")
+    _init_conn.execute("PRAGMA busy_timeout  = 60000")  # wait up to 60 s
+    _init_conn.execute("PRAGMA synchronous   = NORMAL")
+    try:
+        conn = _init_conn
+        # Run CREATE TABLE statements one by one inside a single write
+        # transaction.  executescript() issues a COMMIT first (losing our
+        # BEGIN IMMEDIATE), so we use individual execute() calls instead.
+        # BEGIN IMMEDIATE acquires the write lock now, waiting up to
+        # busy_timeout (60 s) if another writer is still active.
+        conn.execute("BEGIN IMMEDIATE")
+        for _sql in [
+            """CREATE TABLE IF NOT EXISTS users (
                 user_id      INTEGER PRIMARY KEY,
                 full_name    TEXT,
                 username     TEXT,
@@ -157,14 +176,14 @@ def _run_init_db_migrations():
                 first_start_notified INTEGER NOT NULL DEFAULT 0,
                 status       TEXT    NOT NULL DEFAULT 'unsafe',
                 is_agent     INTEGER NOT NULL DEFAULT 0
-            );
-            CREATE TABLE IF NOT EXISTS config_types (
+            )""",
+            """CREATE TABLE IF NOT EXISTS config_types (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 name        TEXT NOT NULL UNIQUE,
                 description TEXT NOT NULL DEFAULT '',
                 is_active   INTEGER NOT NULL DEFAULT 1
-            );
-            CREATE TABLE IF NOT EXISTS packages (
+            )""",
+            """CREATE TABLE IF NOT EXISTS packages (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 type_id       INTEGER NOT NULL,
                 name          TEXT    NOT NULL,
@@ -173,8 +192,8 @@ def _run_init_db_migrations():
                 price         INTEGER NOT NULL,
                 active        INTEGER NOT NULL DEFAULT 1,
                 FOREIGN KEY(type_id) REFERENCES config_types(id) ON DELETE CASCADE
-            );
-            CREATE TABLE IF NOT EXISTS configs (
+            )""",
+            """CREATE TABLE IF NOT EXISTS configs (
                 id                  INTEGER PRIMARY KEY AUTOINCREMENT,
                 type_id             INTEGER NOT NULL,
                 package_id          INTEGER NOT NULL,
@@ -189,8 +208,8 @@ def _run_init_db_migrations():
                 is_expired          INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY(type_id)    REFERENCES config_types(id) ON DELETE CASCADE,
                 FOREIGN KEY(package_id) REFERENCES packages(id)     ON DELETE CASCADE
-            );
-            CREATE TABLE IF NOT EXISTS payments (
+            )""",
+            """CREATE TABLE IF NOT EXISTS payments (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
                 kind            TEXT    NOT NULL,
                 user_id         INTEGER NOT NULL,
@@ -205,8 +224,8 @@ def _run_init_db_migrations():
                 approved_at     TEXT,
                 config_id       INTEGER,
                 crypto_coin     TEXT
-            );
-            CREATE TABLE IF NOT EXISTS purchases (
+            )""",
+            """CREATE TABLE IF NOT EXISTS purchases (
                 id             INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id        INTEGER NOT NULL,
                 package_id     INTEGER NOT NULL,
@@ -215,38 +234,38 @@ def _run_init_db_migrations():
                 payment_method TEXT    NOT NULL,
                 created_at     TEXT    NOT NULL,
                 is_test        INTEGER NOT NULL DEFAULT 0
-            );
-            CREATE TABLE IF NOT EXISTS agency_prices (
+            )""",
+            """CREATE TABLE IF NOT EXISTS agency_prices (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id    INTEGER NOT NULL,
                 package_id INTEGER NOT NULL,
                 price      INTEGER NOT NULL,
                 UNIQUE(user_id, package_id)
-            );
-            CREATE TABLE IF NOT EXISTS agency_price_config (
+            )""",
+            """CREATE TABLE IF NOT EXISTS agency_price_config (
                 user_id     INTEGER PRIMARY KEY,
                 price_mode  TEXT NOT NULL DEFAULT 'package',
                 global_type TEXT NOT NULL DEFAULT 'pct',
                 global_val  INTEGER NOT NULL DEFAULT 0
-            );
-            CREATE TABLE IF NOT EXISTS agency_type_discount (
+            )""",
+            """CREATE TABLE IF NOT EXISTS agency_type_discount (
                 user_id        INTEGER NOT NULL,
                 type_id        INTEGER NOT NULL,
                 discount_type  TEXT NOT NULL DEFAULT 'pct',
                 discount_value INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(user_id, type_id)
-            );
-            CREATE TABLE IF NOT EXISTS settings (
+            )""",
+            """CREATE TABLE IF NOT EXISTS settings (
                 key   TEXT PRIMARY KEY,
                 value TEXT
-            );
-            CREATE TABLE IF NOT EXISTS admin_users (
+            )""",
+            """CREATE TABLE IF NOT EXISTS admin_users (
                 user_id     INTEGER PRIMARY KEY,
                 added_by    INTEGER NOT NULL,
                 added_at    TEXT    NOT NULL,
                 permissions TEXT    NOT NULL DEFAULT '{}'
-            );
-            CREATE TABLE IF NOT EXISTS pending_orders (
+            )""",
+            """CREATE TABLE IF NOT EXISTS pending_orders (
                 id             INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id        INTEGER NOT NULL,
                 package_id     INTEGER NOT NULL,
@@ -255,27 +274,27 @@ def _run_init_db_migrations():
                 payment_method TEXT    NOT NULL,
                 created_at     TEXT    NOT NULL,
                 status         TEXT    NOT NULL DEFAULT 'waiting'
-            );
-            CREATE TABLE IF NOT EXISTS pinned_messages (
+            )""",
+            """CREATE TABLE IF NOT EXISTS pinned_messages (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 text       TEXT    NOT NULL,
                 created_at TEXT    NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS pinned_message_sends (
+            )""",
+            """CREATE TABLE IF NOT EXISTS pinned_message_sends (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 pin_id     INTEGER NOT NULL,
                 user_id    INTEGER NOT NULL,
                 message_id INTEGER NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS referrals (
+            )""",
+            """CREATE TABLE IF NOT EXISTS referrals (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 referrer_id INTEGER NOT NULL,
                 referee_id  INTEGER NOT NULL UNIQUE,
                 created_at  TEXT    NOT NULL,
                 start_reward_given   INTEGER NOT NULL DEFAULT 0,
                 purchase_reward_given INTEGER NOT NULL DEFAULT 0
-            );
-            CREATE TABLE IF NOT EXISTS discount_codes (
+            )""",
+            """CREATE TABLE IF NOT EXISTS discount_codes (
                 id                INTEGER PRIMARY KEY AUTOINCREMENT,
                 code              TEXT    NOT NULL UNIQUE COLLATE NOCASE,
                 discount_type     TEXT    NOT NULL DEFAULT 'pct',
@@ -285,14 +304,14 @@ def _run_init_db_migrations():
                 used_count        INTEGER NOT NULL DEFAULT 0,
                 is_active         INTEGER NOT NULL DEFAULT 1,
                 created_at        TEXT    NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS discount_code_uses (
+            )""",
+            """CREATE TABLE IF NOT EXISTS discount_code_uses (
                 id       INTEGER PRIMARY KEY AUTOINCREMENT,
                 code_id  INTEGER NOT NULL REFERENCES discount_codes(id) ON DELETE CASCADE,
                 user_id  INTEGER NOT NULL,
                 used_at  TEXT    NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS voucher_batches (
+            )""",
+            """CREATE TABLE IF NOT EXISTS voucher_batches (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 name        TEXT    NOT NULL,
                 gift_type   TEXT    NOT NULL DEFAULT 'wallet',
@@ -300,16 +319,18 @@ def _run_init_db_migrations():
                 package_id  INTEGER,
                 total_count INTEGER NOT NULL DEFAULT 0,
                 created_at  TEXT    NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS voucher_codes (
+            )""",
+            """CREATE TABLE IF NOT EXISTS voucher_codes (
                 id        INTEGER PRIMARY KEY AUTOINCREMENT,
                 batch_id  INTEGER NOT NULL REFERENCES voucher_batches(id) ON DELETE CASCADE,
                 code      TEXT    NOT NULL UNIQUE COLLATE NOCASE,
                 is_used   INTEGER NOT NULL DEFAULT 0,
                 used_by   INTEGER,
                 used_at   TEXT
-            );
-        """)
+            )""",
+        ]:
+            conn.execute(_sql)
+
 
         defaults = {
             "support_username": "",
@@ -573,6 +594,9 @@ def _run_init_db_migrations():
                 conn.execute(sql)
             except Exception:
                 pass
+        conn.commit()
+    finally:
+        _init_conn.close()
 
 
 

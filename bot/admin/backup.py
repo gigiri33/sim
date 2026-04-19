@@ -156,10 +156,11 @@ def _send_backup(target_chat_id):
         # Use SQLite online backup API to get a consistent snapshot that
         # includes all WAL data, even if the bot is actively writing.
         import io
-        src_conn = sqlite3.connect(DB_NAME)
+        src_conn = sqlite3.connect(DB_NAME, timeout=30)
+        src_conn.execute("PRAGMA busy_timeout = 30000")
         dst_conn = sqlite3.connect(tmp_backup)
         try:
-            src_conn.backup(dst_conn)
+            src_conn.backup(dst_conn, pages=100, sleep=0.1)
         finally:
             src_conn.close()
             dst_conn.close()
