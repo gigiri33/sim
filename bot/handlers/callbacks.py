@@ -87,6 +87,7 @@ from ..admin.renderers import (
     _show_perm_selection, _show_admin_users_list, _show_admin_user_detail,
     _show_admin_user_detail_msg, _show_admin_assign_config_type, _fake_call,
     _show_admin_panels, _show_panel_detail,
+    _show_panel_client_packages, _show_panel_client_package_preview,
 )
 from ..admin.backup import _send_backup
 from ..db import (
@@ -94,6 +95,9 @@ from ..db import (
     toggle_panel_active, update_panel_status, delete_panel,
     update_package_panel_settings,
     add_panel_config, get_panel_configs, get_panel_configs_count,
+    add_panel_client_package, get_panel_client_packages,
+    get_panel_client_package, delete_panel_client_package,
+    update_panel_client_package_samples,
 )
 
 
@@ -963,8 +967,15 @@ def _notify_panel_error(uid, package_row, stage: str, detail: str = "", panel_co
     """
     try:
         import traceback as _tb
-        pkg_name  = (package_row or {}).get("name", "؟") if hasattr(package_row, "get") else "؟"
-        type_name = (package_row or {}).get("type_name", "؟") if hasattr(package_row, "get") else "؟"
+        def _row_get(row, key, default="؟"):
+            if row is None:
+                return default
+            try:
+                return row[key] if key in row.keys() else default
+            except Exception:
+                return default
+        pkg_name  = _row_get(package_row, "name")
+        type_name = _row_get(package_row, "type_name")
         cfg_line  = f"\n🗂 panel_config_id: <code>{panel_config_id}</code>" if panel_config_id else ""
         text = (
             "🚨 <b>خطای پنل — تحویل کانفیگ</b>\n\n"
@@ -1195,12 +1206,14 @@ def _build_config_from_inbound(inbound, client_uuid, client_name, panel, real_po
 def _create_panel_config(uid, package_id, payment_id):
     """
     Create a config in the panel for uid/package_id.
-    Retries login and client-creation up to MAX_RETRIES times to handle
-    high-latency / proxied connections (e.g. FluxTunnel).
+    If the package has a client_package_id, the sample config/sub URL from that
+    client package is used as a template (only UUID and name are substituted).
+    Otherwise falls back to fetching from the panel API.
     Returns (True, delivery_mode, panel_config_id) or (False, error_str, None).
     """
     import random
     import string
+    import re as _re
     from ..panels.client import PanelClient
 
     MAX_RETRIES  = 3
@@ -1215,6 +1228,7 @@ def _create_panel_config(uid, package_id, payment_id):
         panel_inbound = int(package_row["panel_port"] or 0)   # stored as inbound ID
         delivery_mode = package_row["delivery_mode"] or "config_only"
         panel_type    = package_row["panel_type"] or "sanaei"
+        cpkg_id       = package_row["client_package_id"] if "client_package_id" in package_row.keys() else None
     except (IndexError, KeyError):
         return False, "اطلاعات پنل پکیج ناقص است", None
 
@@ -1224,6 +1238,9 @@ def _create_panel_config(uid, package_id, payment_id):
     panel = get_panel(panel_id)
     if not panel:
         return False, "پنل مرتبط یافت نشد", None
+
+    # Load client package template if available
+    cpkg = get_panel_client_package(cpkg_id) if cpkg_id else None
 
     client = PanelClient(
         protocol=panel["protocol"],
@@ -1249,8 +1266,10 @@ def _create_panel_config(uid, package_id, payment_id):
     if login_err is not None:
         return False, f"اتصال به پنل ناموفق (بعد از {MAX_RETRIES} تلاش): {login_err}", None
 
-    # ── Step 2: fetch inbound with retry ─────────────────────────────────────
-    inbound = None
+    # ── Step 2: fetch inbound (for remark/tag — not needed if template exists) ─
+    inbound      = None
+    inbound_remark = ""
+    real_port    = 0
     for attempt in range(1, MAX_RETRIES + 1):
         inbound = client.find_inbound_by_id(panel_inbound)
         if inbound:
@@ -1261,8 +1280,9 @@ def _create_panel_config(uid, package_id, payment_id):
     if not inbound:
         return False, f"اینباند با شماره {panel_inbound} در پنل یافت نشد", None
 
-    inbound_id   = inbound["id"]
-    real_port    = int(inbound.get("port") or 0)   # actual connection port for config URL
+    inbound_id     = inbound["id"]
+    real_port      = int(inbound.get("port") or 0)
+    inbound_remark = (inbound.get("remark") or inbound.get("tag") or "").strip()
 
     # Generate config name: {user_id}_{random6}
     rand_str    = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
@@ -1293,7 +1313,6 @@ def _create_panel_config(uid, package_id, payment_id):
         log.warning("_create_panel_config: create_client attempt %d/%d failed: %s",
                     attempt, MAX_RETRIES, create_err)
         if attempt < MAX_RETRIES:
-            # Regenerate client name to avoid duplicate-email conflicts on retry
             rand_str    = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
             client_name = f"{uid}_{rand_str}"
             time.sleep(RETRY_DELAY)
@@ -1303,23 +1322,49 @@ def _create_panel_config(uid, package_id, payment_id):
     client_uuid, sub_id = result
     sub_url = client.get_sub_url(client_uuid)
 
-    # ── Step 4: fetch actual config from sub URL ──────────────────────────────
-    # 3x-ui generates correct configs (with CDN/tunnel domains, transport, TLS)
-    # so fetching from the sub URL is always preferred over manual construction.
     config_text = None
-    fetch_ok, fetch_result = client.fetch_client_config(sub_id)
-    if fetch_ok and fetch_result:
-        # Pick first config line (skip lines that are themselves sub URLs)
-        for line in fetch_result:
-            if not line.startswith("http://") and not line.startswith("https://"):
-                config_text = line
-                break
-        if not config_text:
-            config_text = fetch_result[0]
-    else:
-        log.warning("_create_panel_config: sub fetch failed (%s), building from streamSettings", fetch_result)
 
-    # ── Step 5: build config from streamSettings (fallback) ───────────────────
+    # ── Step 4a: Build from client package template (preferred) ──────────────
+    if cpkg and cpkg["sample_config"]:
+        tmpl = cpkg["sample_config"]
+        # Replace UUID: find the UUID pattern in the template and replace it
+        _UUID_RE = _re.compile(
+            r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}',
+            _re.IGNORECASE
+        )
+        config_text = _UUID_RE.sub(client_uuid, tmpl, count=1)
+        # Replace #name at the end
+        if "#" in config_text:
+            config_text = config_text.rsplit("#", 1)[0] + "#" + client_name
+        else:
+            config_text = config_text + "#" + client_name
+        log.info("_create_panel_config: built config from template for uid=%s", uid)
+
+    # ── Step 4b: If sub_only or template sub exists, build sub from template ──
+    if cpkg and cpkg["sample_sub_url"] and delivery_mode in ("sub_only", "both"):
+        tmpl_sub = cpkg["sample_sub_url"].rstrip("/")
+        # Replace last path segment (the sub ID / token)
+        if "/sub/" in tmpl_sub:
+            sub_base = tmpl_sub.rsplit("/", 1)[0]
+            sub_url = f"{sub_base}/{sub_id}"
+        else:
+            # Append sub_id if pattern unclear
+            sub_url = client.get_sub_url(client_uuid)
+
+    # ── Step 4c: Fetch from panel API (fallback when no template) ────────────
+    if not config_text and delivery_mode in ("config_only", "both"):
+        fetch_ok, fetch_result = client.fetch_client_config(sub_id)
+        if fetch_ok and fetch_result:
+            for line in fetch_result:
+                if not line.startswith("http://") and not line.startswith("https://"):
+                    config_text = line
+                    break
+            if not config_text:
+                config_text = fetch_result[0]
+        else:
+            log.warning("_create_panel_config: sub fetch failed (%s), building from streamSettings", fetch_result)
+
+    # ── Step 4d: Build from streamSettings (last fallback) ───────────────────
     if not config_text:
         config_text = _build_config_from_inbound(
             inbound=inbound,
@@ -1327,9 +1372,7 @@ def _create_panel_config(uid, package_id, payment_id):
             client_name=client_name,
             panel=panel,
             real_port=real_port,
-        ) or sub_url  # last resort: sub URL itself
-
-    inbound_remark = (inbound.get("remark") or inbound.get("tag") or "").strip()
+        ) or sub_url
 
     pc_id = add_panel_config(
         user_id=uid,
@@ -1439,9 +1482,10 @@ def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
 
     inbound_remark = pc["inbound_remark"] if "inbound_remark" in (pc.keys() if hasattr(pc, "keys") else {}) else ""
     type_label    = inbound_remark or (package_row["type_name"] if "type_name" in (package_row.keys() if hasattr(package_row, "keys") else {}) else "")
-    show_pkg      = bool(package_row.get("show_name", 1)) if hasattr(package_row, "get") else True
+    show_pkg      = int(package_row["show_name"]) if "show_name" in package_row.keys() else 1
     pkg_line      = f"{ce('📦', '5258134813302332906')} پکیج: <b>{esc(package_row['name'])}</b>\n" if show_pkg else ""
-    expire_line   = f"{ce('📅', '5379748062124056162')} انقضا: <b>{pc['expire_at'][:10]}</b>\n" if pc.get("expire_at") else ""
+    _expire_at    = pc["expire_at"] if "expire_at" in pc.keys() else ""
+    expire_line   = f"{ce('📅', '5379748062124056162')} انقضا: <b>{_expire_at[:10]}</b>\n" if _expire_at else ""
 
     header = f"{ce('✅', '5260463209562776385')} <b>سرویس شما آماده است!</b>"
 
@@ -4863,27 +4907,44 @@ def _dispatch_callback(call, uid, data):
         if not panel:
             bot.answer_callback_query(call.id, "پنل یافت نشد.", show_alert=True)
             return
+        # Show client packages for this panel
+        cpkgs = get_panel_client_packages(panel_id)
+        if not cpkgs:
+            bot.answer_callback_query(call.id,
+                "این پنل هیچ کلاینت پکیجی ندارد.\n"
+                "ابتدا از مدیریت پنل → کلاینت پکیج‌ها یک کلاینت پکیج اضافه کنید.",
+                show_alert=True)
+            return
+        _DM = {"config_only": "📄 کانفیگ", "sub_only": "🔗 ساب", "both": "📄+🔗 هر دو"}
         sd = state_data(uid)
-        state_set(uid, "admin_add_package_port", panel_id=panel_id,
+        state_set(uid, "admin_add_package_cpkg_select", panel_id=panel_id,
                   **{k: v for k, v in sd.items() if k != "panel_id"})
+        kb_cp = types.InlineKeyboardMarkup()
+        for cp in cpkgs:
+            name = cp["name"] or f"اینباند #{cp['inbound_id']}"
+            dm_label = _DM.get(cp["delivery_mode"], cp["delivery_mode"])
+            kb_cp.add(types.InlineKeyboardButton(
+                f"🔹 {name}  ({dm_label})",
+                callback_data=f"admin:pkg:add:cpkg:{cp['id']}",
+            ))
+        kb_cp.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:types",
+                                              icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call,
-            f"🔌 پنل: <b>{esc(panel['name'])}</b>\n\n"
-            "🔢 <b>شماره ID اینباند</b> را وارد کنید:\n\n"
-            "📋 <b>راهنما:</b>\n"
-            "در پنل ثنایی به بخش <b>Inbounds</b> بروید.\n"
-            "در ستون اول (ID#) مقابل هر اینباند یک عدد می‌بینید.\n"
-            "مثلاً اگر اینباند شما ID شماره <b>3</b> دارد، عدد <code>3</code> را وارد کنید.",
-            back_button("admin:types"))
+            f"📦 پنل: <b>{esc(panel['name'])}</b>\n\n"
+            "یک <b>کلاینت پکیج</b> را انتخاب کنید:",
+            kb_cp)
         return
 
-    if data.startswith("admin:pkg:add:dm:"):
-        if state_name(uid) != "admin_add_package_delivery_mode" or not is_admin(uid):
+    if data.startswith("admin:pkg:add:cpkg:"):
+        # Client package selected during new package add flow
+        if state_name(uid) != "admin_add_package_cpkg_select" or not is_admin(uid):
             bot.answer_callback_query(call.id)
             return
-        mode = data.split(":")[4]
-        if mode not in ("config_only", "sub_only", "both"):
-            bot.answer_callback_query(call.id)
+        cpkg_id = int(data.split(":")[4])
+        cp = get_panel_client_package(cpkg_id)
+        if not cp:
+            bot.answer_callback_query(call.id, "کلاینت پکیج یافت نشد.", show_alert=True)
             return
         sd = state_data(uid)
         show_name_val = sd.get("show_name", 1)
@@ -4892,11 +4953,12 @@ def _dispatch_callback(call, uid, data):
         pkg_id = add_package(sd["type_id"], sd["package_name"], sd["volume"], sd["duration"], sd["price"],
                              show_name=show_name_val, max_users=max_users, buyer_role=buyer_role)
         update_package_panel_settings(pkg_id, "panel",
-                                       panel_id=int(sd["panel_id"]),
+                                       panel_id=cp["panel_id"],
                                        panel_type="sanaei",
-                                       panel_port=int(sd["panel_port"]),
-                                       delivery_mode=mode)
-        log_admin_action(uid, f"پکیج پنلی '{sd['package_name']}' روی پنل #{sd['panel_id']} ثبت شد")
+                                       panel_port=cp["inbound_id"],
+                                       delivery_mode=cp["delivery_mode"],
+                                       client_package_id=cpkg_id)
+        log_admin_action(uid, f"پکیج پنلی '{sd['package_name']}' با کلاینت پکیج #{cpkg_id} ثبت شد")
         state_clear(uid)
         _DM_LABELS = {"config_only": "فقط کانفیگ", "sub_only": "فقط ساب", "both": "کانفیگ + ساب"}
         bot.answer_callback_query(call.id, "✅ پکیج ثبت شد.")
@@ -4906,10 +4968,12 @@ def _dispatch_callback(call, uid, data):
             f"🔋 حجم: {'نامحدود' if sd['volume'] == 0 else fmt_vol(sd['volume'])}\n"
             f"⏰ مدت: {'نامحدود' if sd['duration'] == 0 else str(sd['duration']) + ' روز'}\n"
             f"💰 قیمت: {'رایگان' if sd['price'] == 0 else fmt_price(sd['price']) + ' تومان'}\n"
-            f"🔌 پنل: #{sd['panel_id']}  |  اینباند ID: {sd['panel_port']}\n"
-            f"📤 تحویل: {_DM_LABELS[mode]}",
+            f"📦 کلاینت پکیج: {cp['name'] or 'اینباند #' + str(cp['inbound_id'])}\n"
+            f"📤 تحویل: {_DM_LABELS[cp['delivery_mode']]}",
             back_button("admin:types"))
         return
+
+
 
     if data.startswith("admin:pkg:edit:"):
         package_id  = int(data.split(":")[3])
@@ -5099,7 +5163,7 @@ def _dispatch_callback(call, uid, data):
         if not panels:
             bot.answer_callback_query(call.id, "هیچ پنلی ثبت نشده است.", show_alert=True)
             return
-        state_set(uid, "admin_edit_pkg_panel", package_id=package_id)
+        state_set(uid, "admin_edit_pkg_panel_select", package_id=package_id)
         kb_pnl = types.InlineKeyboardMarkup()
         for p in panels:
             icon = "🟢" if p["connection_status"] == "connected" else "🔴"
@@ -5121,41 +5185,62 @@ def _dispatch_callback(call, uid, data):
         if not panel:
             bot.answer_callback_query(call.id, "پنل یافت نشد.", show_alert=True)
             return
-        state_set(uid, "admin_edit_pkg_panel_port", package_id=package_id, panel_id=panel_id)
+        # Show client packages for this panel
+        cpkgs = get_panel_client_packages(panel_id)
+        if not cpkgs:
+            bot.answer_callback_query(call.id,
+                "این پنل هیچ کلاینت پکیجی ندارد.\n"
+                "ابتدا از مدیریت پنل → کلاینت پکیج‌ها یک کلاینت پکیج اضافه کنید.",
+                show_alert=True)
+            return
+        _DM = {"config_only": "📄 کانفیگ", "sub_only": "🔗 ساب", "both": "📄+🔗 هر دو"}
+        kb_cp = types.InlineKeyboardMarkup()
+        for cp in cpkgs:
+            name = cp["name"] or f"اینباند #{cp['inbound_id']}"
+            dm_label = _DM.get(cp["delivery_mode"], cp["delivery_mode"])
+            kb_cp.add(types.InlineKeyboardButton(
+                f"🔹 {name}  ({dm_label})",
+                callback_data=f"admin:pkg:cpkg:{cp['id']}:{package_id}",
+            ))
+        kb_cp.add(types.InlineKeyboardButton("بازگشت", callback_data=f"admin:pkg:src:{package_id}",
+                                              icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call,
-            f"🔌 پنل: <b>{esc(panel['name'])}</b>\n\n"
-            "🔢 <b>شماره ID اینباند</b> را وارد کنید:\n\n"
-            "📋 <b>راهنما:</b>\n"
-            "در پنل ثنایی به بخش <b>Inbounds</b> بروید.\n"
-            "در ستون اول (ID#) مقابل هر اینباند یک عدد می‌بینید.\n"
-            "مثلاً اگر اینباند شما ID شماره <b>3</b> دارد، عدد <code>3</code> را وارد کنید.",
-            back_button(f"admin:pkg:src:{package_id}"))
+            f"📦 پنل: <b>{esc(panel['name'])}</b>\n\n"
+            "یک <b>کلاینت پکیج</b> را انتخاب کنید:\n"
+            "<i>(هر کلاینت پکیج = اینباند + نوع تحویل + قالب کانفیگ)</i>",
+            kb_cp)
         return
 
-    if data.startswith("admin:pkg:sdm:"):
+    if data.startswith("admin:pkg:cpkg:"):
+        # Client package selected for a package
         parts      = data.split(":")
-        mode       = parts[3]
+        cpkg_id    = int(parts[3])
         package_id = int(parts[4])
         if not is_admin(uid):
             bot.answer_callback_query(call.id)
             return
-        if mode not in ("config_only", "sub_only", "both"):
-            bot.answer_callback_query(call.id)
+        cp = get_panel_client_package(cpkg_id)
+        if not cp:
+            bot.answer_callback_query(call.id, "کلاینت پکیج یافت نشد.", show_alert=True)
             return
-        sd = state_data(uid)
-        update_package_panel_settings(package_id, "panel",
-                                       panel_id=int(sd.get("panel_id", 0)),
-                                       panel_type="sanaei",
-                                       panel_port=int(sd.get("panel_port", 0)),
-                                       delivery_mode=mode)
-        log_admin_action(uid, f"پکیج #{package_id} منبع کانفیگ به پنل #{sd.get('panel_id')} تغییر کرد")
+        update_package_panel_settings(
+            package_id, "panel",
+            panel_id=cp["panel_id"],
+            panel_type="sanaei",
+            panel_port=cp["inbound_id"],
+            delivery_mode=cp["delivery_mode"],
+            client_package_id=cpkg_id,
+        )
+        log_admin_action(uid, f"پکیج #{package_id} به کلاینت پکیج #{cpkg_id} (پنل #{cp['panel_id']}) متصل شد")
         state_clear(uid)
-        bot.answer_callback_query(call.id, "✅ تنظیمات پنل ذخیره شد.")
+        bot.answer_callback_query(call.id, "✅ اتصال پنل تنظیم شد.")
         package_row = get_package(package_id)
         text, kb = _pkg_edit_text_kb(package_row)
         send_or_edit(call, text, kb)
         return
+
+
 
     # ── Admin: Panel Configs list ──────────────────────────────────────────────
     if data == "admin:panel_configs":
@@ -11228,4 +11313,160 @@ def _dispatch_callback(call, uid, data):
         _show_admin_panels(call)
         return
 
+    # ── Panel Client Packages management ──────────────────────────────────────
+    if data.startswith("adm:pnl:cpkgs:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+            return
+        panel_id = int(data.split(":")[-1])
+        bot.answer_callback_query(call.id)
+        _show_panel_client_packages(call, panel_id)
+        return
+
+    if data.startswith("adm:pnl:cpkg:preview:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+            return
+        cpkg_id = int(data.split(":")[-1])
+        bot.answer_callback_query(call.id)
+        _show_panel_client_package_preview(call, cpkg_id)
+        return
+
+    if data.startswith("adm:pnl:cpkg:del:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+            return
+        cpkg_id = int(data.split(":")[-1])
+        cp = get_panel_client_package(cpkg_id)
+        if not cp:
+            bot.answer_callback_query(call.id, "یافت نشد.", show_alert=True)
+            return
+        panel_id = cp["panel_id"]
+        delete_panel_client_package(cpkg_id)
+        bot.answer_callback_query(call.id, "✅ کلاینت پکیج حذف شد.")
+        _show_panel_client_packages(call, panel_id)
+        return
+
+    if data.startswith("adm:pnl:cpkg:add:"):
+        # Start the "add client package" wizard
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+            return
+        panel_id = int(data.split(":")[-1])
+        p = get_panel(panel_id)
+        if not p:
+            bot.answer_callback_query(call.id, "پنل یافت نشد.", show_alert=True)
+            return
+        state_set(uid, "cpkg_add_inbound", panel_id=panel_id)
+        bot.answer_callback_query(call.id)
+        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+        send_or_edit(call,
+            f"📦 <b>افزودن کلاینت پکیج — پنل: {esc(p['name'])}</b>\n\n"
+            "🔢 <b>شماره ID اینباند</b> را ارسال کنید:\n\n"
+            "💡 در پنل ثنایی به Inbounds بروید و عدد ستون ID را بنویسید (مثلاً <code>3</code>).",
+            back_button(f"adm:pnl:cpkgs:{panel_id}"))
+        return
+
+    if data.startswith("adm:pnl:cpkg:dm:"):
+        # Delivery mode selected for new client package
+        # format: adm:pnl:cpkg:dm:{mode}:{panel_id}:{inbound_id}
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+            return
+        parts     = data.split(":")
+        mode      = parts[4]
+        panel_id  = int(parts[5])
+        inbound_id = int(parts[6])
+        if mode not in ("config_only", "sub_only", "both"):
+            bot.answer_callback_query(call.id)
+            return
+        # Connect to panel and fetch sample config/sub
+        bot.answer_callback_query(call.id, "⏳ در حال اتصال به پنل…")
+        p = get_panel(panel_id)
+        if not p:
+            bot.answer_callback_query(call.id, "پنل یافت نشد.", show_alert=True)
+            return
+        import threading as _threading
+
+        def _fetch_sample():
+            from ..panels.client import PanelClient
+            import random, string, time as _time
+            client = PanelClient(
+                protocol=p["protocol"], host=p["host"], port=p["port"],
+                path=p["path"] or "", username=p["username"],
+                password=p["password"],
+                sub_url_base=p["sub_url_base"] if p["sub_url_base"] else "",
+            )
+            ok, err = client.login()
+            if not ok:
+                bot.send_message(uid,
+                    f"❌ اتصال به پنل ناموفق: <code>{esc(str(err or '')[:200])}</code>",
+                    parse_mode="HTML",
+                    reply_markup=back_button(f"adm:pnl:cpkgs:{panel_id}"))
+                return
+
+            inbound = client.find_inbound_by_id(inbound_id)
+            if not inbound:
+                bot.send_message(uid,
+                    f"❌ اینباند با ID <b>{inbound_id}</b> در پنل یافت نشد.",
+                    parse_mode="HTML",
+                    reply_markup=back_button(f"adm:pnl:cpkgs:{panel_id}"))
+                return
+
+            # Create a temporary client to get a real sample
+            rand_str = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
+            tmp_name = f"sample_{rand_str}"
+            create_ok, create_result = client.create_client(inbound_id, tmp_name, 0, 0)
+            if not create_ok:
+                bot.send_message(uid,
+                    f"❌ خطا در ساخت کلاینت نمونه: <code>{esc(str(create_result or '')[:200])}</code>",
+                    parse_mode="HTML",
+                    reply_markup=back_button(f"adm:pnl:cpkgs:{panel_id}"))
+                return
+
+            tmp_uuid, tmp_sub_id = create_result
+            sample_sub = client.get_sub_url(tmp_uuid)
+            sample_config = ""
+
+            if mode in ("config_only", "both"):
+                fetch_ok, fetch_result = client.fetch_client_config(tmp_sub_id)
+                if fetch_ok and fetch_result:
+                    for line in fetch_result:
+                        if not line.startswith("http://") and not line.startswith("https://"):
+                            sample_config = line
+                            break
+                    if not sample_config:
+                        sample_config = fetch_result[0]
+
+            # Save client package
+            cpkg_id = add_panel_client_package(
+                panel_id=panel_id,
+                inbound_id=inbound_id,
+                delivery_mode=mode,
+                sample_config=sample_config if mode in ("config_only", "both") else "",
+                sample_sub_url=sample_sub if mode in ("sub_only", "both") else "",
+                name=inbound.get("remark") or inbound.get("tag") or f"اینباند #{inbound_id}",
+            )
+
+            _DM = {"config_only": "📄 فقط کانفیگ", "sub_only": "🔗 فقط ساب", "both": "📄+🔗 هر دو"}
+            parts_msg = [
+                f"✅ <b>کلاینت پکیج ذخیره شد</b> (ID: {cpkg_id})\n",
+                f"🔌 اینباند: <b>{esc(inbound.get('remark') or str(inbound_id))}</b>",
+                f"📤 تحویل: {_DM[mode]}",
+            ]
+            if sample_config:
+                parts_msg.append(f"\n📄 <b>نمونه کانفیگ:</b>\n<code>{esc(sample_config)}</code>")
+            if sample_sub and mode in ("sub_only", "both"):
+                parts_msg.append(f"\n🔗 <b>نمونه ساب:</b>\n<code>{esc(sample_sub)}</code>")
+
+            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+            kb_done = InlineKeyboardMarkup()
+            kb_done.add(InlineKeyboardButton("📦 بازگشت به کلاینت پکیج‌ها",
+                                              callback_data=f"adm:pnl:cpkgs:{panel_id}"))
+            bot.send_message(uid, "\n".join(parts_msg), parse_mode="HTML", reply_markup=kb_done)
+
+        _threading.Thread(target=_fetch_sample, daemon=True).start()
+        return
+
     bot.answer_callback_query(call.id)
+

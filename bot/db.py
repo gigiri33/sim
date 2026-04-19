@@ -68,6 +68,7 @@ def _rebuild_panels_if_legacy() -> None:
     try:
         _c = _sq3.connect(DB_NAME, check_same_thread=False)
         _c.execute("PRAGMA journal_mode = WAL")
+        _c.execute("PRAGMA busy_timeout  = 10000")  # wait up to 10s if locked
         cols = {row[1] for row in _c.execute("PRAGMA table_info(panels)").fetchall()}
         if "ip" not in cols:
             _c.close()
@@ -120,9 +121,30 @@ def _rebuild_panels_if_legacy() -> None:
 
 
 def init_db():
+    import time as _time
     # Step 1: Fix legacy panels schema (ip → host) before any other migration
     _rebuild_panels_if_legacy()
 
+    # Step 2: Run migrations with retry — on rapid systemd restarts the old
+    # process may still be alive and holding a write-lock for a few seconds.
+    _MAX_INIT_TRIES = 8
+    _INIT_DELAY     = 2   # seconds between retries
+    for _attempt in range(1, _MAX_INIT_TRIES + 1):
+        try:
+            _run_init_db_migrations()
+            return
+        except Exception as _exc:
+            if "database is locked" in str(_exc).lower() and _attempt < _MAX_INIT_TRIES:
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "init_db: database locked, retry %d/%d…", _attempt, _MAX_INIT_TRIES
+                )
+                _time.sleep(_INIT_DELAY)
+            else:
+                raise
+
+
+def _run_init_db_migrations():
     with get_conn() as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS users (
@@ -487,11 +509,25 @@ def init_db():
             "ALTER TABLE panels ADD COLUMN sub_url_base      TEXT    NOT NULL DEFAULT ''",
             # ── Packages: panel-based config source ───────────────────────────
             "ALTER TABLE packages ADD COLUMN config_source TEXT NOT NULL DEFAULT 'manual'",
-            "ALTER TABLE packages ADD COLUMN panel_id      INTEGER",
-            "ALTER TABLE packages ADD COLUMN panel_type    TEXT",
-            "ALTER TABLE packages ADD COLUMN panel_port    INTEGER",
-            "ALTER TABLE packages ADD COLUMN delivery_mode TEXT NOT NULL DEFAULT 'config_only'",
+            "ALTER TABLE packages ADD COLUMN panel_id           INTEGER",
+            "ALTER TABLE packages ADD COLUMN panel_type         TEXT",
+            "ALTER TABLE packages ADD COLUMN panel_port         INTEGER",
+            "ALTER TABLE packages ADD COLUMN delivery_mode      TEXT NOT NULL DEFAULT 'config_only'",
+            "ALTER TABLE packages ADD COLUMN client_package_id  INTEGER",
             "ALTER TABLE panel_configs ADD COLUMN inbound_remark TEXT NOT NULL DEFAULT ''",
+            # ── Panel Client Packages (config templates per panel/inbound) ────
+            (
+                "CREATE TABLE IF NOT EXISTS panel_client_packages ("
+                "id             INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "panel_id       INTEGER NOT NULL,"
+                "inbound_id     INTEGER NOT NULL,"
+                "delivery_mode  TEXT    NOT NULL DEFAULT 'config_only',"
+                "sample_config  TEXT    NOT NULL DEFAULT '',"
+                "sample_sub_url TEXT    NOT NULL DEFAULT '',"
+                "name           TEXT    NOT NULL DEFAULT '',"
+                "created_at     TEXT    NOT NULL"
+                ")"
+            ),
             # ── Panel configs (auto-created by purchase) ──────────────────────
             (
                 "CREATE TABLE IF NOT EXISTS panel_configs ("
@@ -2015,13 +2051,58 @@ def delete_panel(panel_id):
 # ── Package panel settings ─────────────────────────────────────────────────────
 def update_package_panel_settings(package_id, config_source,
                                    panel_id=None, panel_type=None,
-                                   panel_port=None, delivery_mode=None):
+                                   panel_port=None, delivery_mode=None,
+                                   client_package_id=None):
     with get_conn() as conn:
         conn.execute(
             """UPDATE packages SET config_source=?, panel_id=?, panel_type=?,
-               panel_port=?, delivery_mode=? WHERE id=?""",
-            (config_source, panel_id, panel_type, panel_port, delivery_mode, package_id)
+               panel_port=?, delivery_mode=?, client_package_id=? WHERE id=?""",
+            (config_source, panel_id, panel_type, panel_port, delivery_mode,
+             client_package_id, package_id)
         )
+
+
+# ── Panel Client Packages (config templates) ───────────────────────────────────
+def add_panel_client_package(panel_id, inbound_id, delivery_mode,
+                              sample_config="", sample_sub_url="", name=""):
+    with get_conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO panel_client_packages
+               (panel_id, inbound_id, delivery_mode, sample_config, sample_sub_url, name, created_at)
+               VALUES (?,?,?,?,?,?,?)""",
+            (panel_id, inbound_id, delivery_mode, sample_config or "", sample_sub_url or "",
+             name or "", now_str())
+        )
+        return cur.lastrowid
+
+
+def get_panel_client_packages(panel_id):
+    conn = get_conn()
+    return conn.execute(
+        "SELECT * FROM panel_client_packages WHERE panel_id=? ORDER BY id",
+        (panel_id,)
+    ).fetchall()
+
+
+def get_panel_client_package(cpkg_id):
+    conn = get_conn()
+    return conn.execute(
+        "SELECT * FROM panel_client_packages WHERE id=?", (cpkg_id,)
+    ).fetchone()
+
+
+def delete_panel_client_package(cpkg_id):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM panel_client_packages WHERE id=?", (cpkg_id,))
+
+
+def update_panel_client_package_samples(cpkg_id, sample_config, sample_sub_url):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE panel_client_packages SET sample_config=?, sample_sub_url=? WHERE id=?",
+            (sample_config or "", sample_sub_url or "", cpkg_id)
+        )
+
 
 
 # ── Panel configs (auto-created by purchases) ──────────────────────────────────

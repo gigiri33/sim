@@ -1289,6 +1289,27 @@ def universal_handler(message):
                 reply_markup=kb_dm)
             return
 
+        # ── Admin: Client Package — inbound ID step ────────────────────────────
+        if sn == "cpkg_add_inbound" and is_admin(uid):
+            inbound_id_val = parse_int(message.text or "")
+            panel_id = sd.get("panel_id")
+            if inbound_id_val is None or inbound_id_val <= 0:
+                bot.send_message(uid, "⚠️ شماره ID اینباند معتبر وارد کنید (عدد مثبت مثل 1).",
+                                 reply_markup=back_button(f"adm:pnl:cpkgs:{panel_id}"))
+                return
+            state_clear(uid)
+            kb_dm = types.InlineKeyboardMarkup()
+            kb_dm.add(types.InlineKeyboardButton("📄 فقط کانفیگ",       callback_data=f"adm:pnl:cpkg:dm:config_only:{panel_id}:{inbound_id_val}"))
+            kb_dm.add(types.InlineKeyboardButton("🔗 فقط ساب",           callback_data=f"adm:pnl:cpkg:dm:sub_only:{panel_id}:{inbound_id_val}"))
+            kb_dm.add(types.InlineKeyboardButton("📄+🔗 کانفیگ + ساب",  callback_data=f"adm:pnl:cpkg:dm:both:{panel_id}:{inbound_id_val}"))
+            kb_dm.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:pnl:cpkgs:{panel_id}",
+                                                  icon_custom_emoji_id="5253997076169115797"))
+            bot.send_message(uid,
+                f"✅ اینباند ID: <b>{inbound_id_val}</b>\n\n"
+                "📤 نحوه تحویل کانفیگ در این کلاینت پکیج را انتخاب کنید:",
+                parse_mode="HTML", reply_markup=kb_dm)
+            return
+
         # ── Admin: Panel configs search ────────────────────────────────────────
         if sn == "admin_pcfg_search" and is_admin(uid):
             search_text = (message.text or "").strip()

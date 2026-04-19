@@ -11,6 +11,8 @@ from ..db import (
     get_all_admin_users, get_user, get_user_detail, get_phone_number,
     count_users_stats,
     get_panel_configs, get_panel_configs_count,
+    get_panel_client_packages, get_panel_client_package,
+    get_panel,
 )
 from ..helpers import esc, fmt_price, display_username, back_button
 from ..ui.keyboards import _btn, _raw_markup
@@ -429,9 +431,78 @@ def _show_panel_detail(call, panel_id):
         InlineKeyboardButton(toggle_label,       callback_data=toggle_callback),
         InlineKeyboardButton("🗑 حذف پنل",      callback_data=f"adm:pnl:del:{panel_id}"),
     )
+    kb.add(
+        InlineKeyboardButton("📦 کلاینت پکیج‌ها", callback_data=f"adm:pnl:cpkgs:{panel_id}"),
+    )
     kb.add(InlineKeyboardButton("بازگشت", callback_data="admin:panels",
                                 icon_custom_emoji_id="5253997076169115797"))
     send_or_edit(call, text, kb)
+
+
+# ── Panel Client Packages ──────────────────────────────────────────────────────
+def _show_panel_client_packages(call, panel_id):
+    """List all client packages (templates) for a panel."""
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    p = get_panel(panel_id)
+    if not p:
+        send_or_edit(call, "⚠️ پنل یافت نشد.", None)
+        return
+
+    cpkgs = get_panel_client_packages(panel_id)
+    _DM = {"config_only": "📄 فقط کانفیگ", "sub_only": "🔗 فقط ساب", "both": "📄+🔗 هر دو"}
+
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton(
+        "➕  افزودن کلاینت پکیج",
+        callback_data=f"adm:pnl:cpkg:add:{panel_id}",
+    ))
+    if cpkgs:
+        for cp in cpkgs:
+            label = cp["name"] or f"اینباند #{cp['inbound_id']}"
+            dm_label = _DM.get(cp["delivery_mode"], cp["delivery_mode"])
+            kb.row(
+                InlineKeyboardButton(f"🔹 {label}  ({dm_label})", callback_data="noop"),
+            )
+            kb.row(
+                InlineKeyboardButton("🗑 حذف",  callback_data=f"adm:pnl:cpkg:del:{cp['id']}"),
+                InlineKeyboardButton("👁 نمونه", callback_data=f"adm:pnl:cpkg:preview:{cp['id']}"),
+            )
+
+    kb.add(InlineKeyboardButton("بازگشت", callback_data=f"adm:pnl:detail:{panel_id}",
+                                icon_custom_emoji_id="5253997076169115797"))
+    count_line = f"\n\n{len(cpkgs)} کلاینت پکیج ثبت‌شده" if cpkgs else "\n\nهنوز کلاینت پکیجی ثبت نشده."
+    send_or_edit(
+        call,
+        f"📦 <b>کلاینت پکیج‌های پنل:</b> {esc(p['name'])}{count_line}",
+        kb,
+    )
+
+
+def _show_panel_client_package_preview(call, cpkg_id):
+    """Show sample config/sub of a client package to admin."""
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    cp = get_panel_client_package(cpkg_id)
+    if not cp:
+        send_or_edit(call, "⚠️ کلاینت پکیج یافت نشد.", None)
+        return
+    _DM = {"config_only": "📄 فقط کانفیگ", "sub_only": "🔗 فقط ساب", "both": "📄+🔗 هر دو"}
+    dm_label = _DM.get(cp["delivery_mode"], cp["delivery_mode"])
+    parts = [
+        f"📦 <b>کلاینت پکیج #{cp['id']}</b>",
+        f"🔹 نام: <b>{esc(cp['name'] or '—')}</b>",
+        f"🔌 اینباند ID: <code>{cp['inbound_id']}</code>",
+        f"📤 تحویل: {dm_label}",
+    ]
+    if cp["sample_config"]:
+        parts.append(f"\n📄 <b>نمونه کانفیگ:</b>\n<code>{esc(cp['sample_config'])}</code>")
+    if cp["sample_sub_url"]:
+        parts.append(f"\n🔗 <b>نمونه ساب:</b>\n<code>{esc(cp['sample_sub_url'])}</code>")
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton("بازگشت", callback_data=f"adm:pnl:cpkgs:{cp['panel_id']}",
+                                icon_custom_emoji_id="5253997076169115797"))
+    send_or_edit(call, "\n".join(parts), kb)
+
+
 
 
 # ── Panel Configs (purchased, auto-created) ────────────────────────────────────
