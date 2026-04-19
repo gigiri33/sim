@@ -1497,7 +1497,9 @@ def universal_handler(message):
                     pairs.append((cfg_line, sub_line))
                 _v2_save_bulk(uid, type_id, package_id, pairs,
                               mode=1, prefix=prefix, suffix=suffix, pending_id=_pnd_bulk)
-                # First all configs, then all subs — collect configs first
+
+            elif mode == 2:
+                # Config+sub separated (large) — step 1: collect configs, wait for subs
                 configs_block = [l for l in lines if not l.lower().startswith("http")]
                 if not configs_block:
                     bot.send_message(uid,
