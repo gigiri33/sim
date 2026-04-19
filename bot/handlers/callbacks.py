@@ -10106,11 +10106,31 @@ def _dispatch_callback(call, uid, data):
         if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
             bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
             return
-        state_set(uid, "pnl_add_name")
+        state_set(uid, "pnl_add_type")
+        bot.answer_callback_query(call.id)
+        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+        kb_type = InlineKeyboardMarkup()
+        kb_type.add(InlineKeyboardButton("🖥 سناعی (3x-ui)", callback_data="adm:pnl:add_type:sanaei"))
+        send_or_edit(call,
+            "🖥 <b>افزودن پنل جدید</b>\n\n"
+            "مرحله ۱/۸ — <b>نوع پنل</b>\n"
+            "نوع پنل مدیریت را انتخاب کنید:",
+            kb_type)
+        return
+
+    if data.startswith("adm:pnl:add_type:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+            return
+        if state_name(uid) != "pnl_add_type":
+            bot.answer_callback_query(call.id, "عملیات منقضی شده.", show_alert=True)
+            return
+        panel_type = data.split(":", 3)[3]
+        state_set(uid, "pnl_add_name", panel_type=panel_type)
         bot.answer_callback_query(call.id)
         send_or_edit(call,
             "🖥 <b>افزودن پنل جدید</b>\n\n"
-            "مرحله ۱/۷ — <b>نام پنل</b>\n"
+            "مرحله ۲/۸ — <b>نام پنل</b>\n"
             "یک نام دلخواه برای شناسایی این پنل وارد کنید:",
             back_button("admin:panels"))
         return
@@ -10126,11 +10146,11 @@ def _dispatch_callback(call, uid, data):
             return
         protocol = data.split(":", 3)[3]
         sd = state_data(uid)
-        state_set(uid, "pnl_add_host", pnl_name=sd.get("pnl_name", ""), protocol=protocol)
+        state_set(uid, "pnl_add_host", pnl_name=sd.get("pnl_name", ""), protocol=protocol, panel_type=sd.get("panel_type", "sanaei"))
         bot.answer_callback_query(call.id)
         send_or_edit(call,
             f"🖥 <b>افزودن پنل جدید</b>\n\n"
-            f"مرحله ۳/۷ — <b>آدرس IP یا دامنه</b>\n"
+            f"مرحله ۴/۸ — <b>آدرس IP یا دامنه</b>\n"
             f"پروتکل انتخاب‌شده: <b>{protocol}</b>\n\n"
             "آدرس IP یا دامنه سرور پنل را ارسال کنید:",
             back_button("admin:panels"))
@@ -10191,7 +10211,7 @@ def _dispatch_callback(call, uid, data):
             "name":     "نام پنل",
             "host":     "آدرس IP / دامنه",
             "port":     "پورت",
-            "path":     "مسیر (path) — برای عدم وجود / ارسال کنید",
+            "path":     "مسیر مخفی — برای عدم وجود / ارسال کنید",
             "username": "نام کاربری",
             "password": "رمز عبور",
         }

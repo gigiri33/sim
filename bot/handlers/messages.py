@@ -3060,7 +3060,8 @@ def universal_handler(message):
             if not name:
                 bot.send_message(uid, "⚠️ نام نمی‌تواند خالی باشد. دوباره ارسال کنید.")
                 return
-            state_set(uid, "pnl_add_proto", pnl_name=name)
+            sd = state_data(uid)
+            state_set(uid, "pnl_add_proto", pnl_name=name, panel_type=sd.get("panel_type", "sanaei"))
             from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
             kb_proto = InlineKeyboardMarkup()
             kb_proto.row(
@@ -3068,7 +3069,7 @@ def universal_handler(message):
                 InlineKeyboardButton("https", callback_data="adm:pnl:add_proto:https"),
             )
             bot.send_message(uid,
-                "مرحله ۲/۷ — <b>پروتکل</b>\n\nپروتکل اتصال به پنل را انتخاب کنید:",
+                "مرحله ۳/۸ — <b>پروتکل</b>\n\nپروتکل اتصال به پنل را انتخاب کنید:",
                 parse_mode="HTML", reply_markup=kb_proto)
             return
 
@@ -3078,9 +3079,9 @@ def universal_handler(message):
                 bot.send_message(uid, "⚠️ آدرس نمی‌تواند خالی باشد.")
                 return
             sd = state_data(uid)
-            state_set(uid, "pnl_add_port", pnl_name=sd.get("pnl_name"), protocol=sd.get("protocol"), host=host)
+            state_set(uid, "pnl_add_port", pnl_name=sd.get("pnl_name"), protocol=sd.get("protocol"), host=host, panel_type=sd.get("panel_type", "sanaei"))
             bot.send_message(uid,
-                "مرحله ۴/۷ — <b>پورت</b>\n\nشماره پورت پنل را ارسال کنید (مثال: 2053):",
+                "مرحله ۵/۸ — <b>پورت</b>\n\nشماره پورت پنل را ارسال کنید (مثال: 2053):",
                 parse_mode="HTML", reply_markup=back_button("admin:panels"))
             return
 
@@ -3093,10 +3094,11 @@ def universal_handler(message):
             sd = state_data(uid)
             state_set(uid, "pnl_add_path",
                       pnl_name=sd.get("pnl_name"), protocol=sd.get("protocol"),
-                      host=sd.get("host"), port=port)
+                      host=sd.get("host"), port=port, panel_type=sd.get("panel_type", "sanaei"))
             bot.send_message(uid,
-                "مرحله ۵/۷ — <b>مسیر (path)</b>\n\n"
+                "مرحله ۶/۸ — <b>مسیر (path)</b>\n\n"
                 "مسیر مخفی پنل را ارسال کنید.\n"
+                "به عنوان مثال: <code>/path/</code>\n"
                 "اگر پنل مسیر مخفی ندارد، <b>/</b> ارسال کنید.",
                 parse_mode="HTML", reply_markup=back_button("admin:panels"))
             return
@@ -3110,9 +3112,9 @@ def universal_handler(message):
             sd = state_data(uid)
             state_set(uid, "pnl_add_user",
                       pnl_name=sd.get("pnl_name"), protocol=sd.get("protocol"),
-                      host=sd.get("host"), port=sd.get("port"), path=path)
+                      host=sd.get("host"), port=sd.get("port"), path=path, panel_type=sd.get("panel_type", "sanaei"))
             bot.send_message(uid,
-                "مرحله ۶/۷ — <b>نام کاربری</b>\n\nنام کاربری پنل را ارسال کنید:",
+                "مرحله ۷/۸ — <b>نام کاربری</b>\n\nنام کاربری پنل را ارسال کنید:",
                 parse_mode="HTML", reply_markup=back_button("admin:panels"))
             return
 
@@ -3125,9 +3127,9 @@ def universal_handler(message):
             state_set(uid, "pnl_add_pass",
                       pnl_name=sd.get("pnl_name"), protocol=sd.get("protocol"),
                       host=sd.get("host"), port=sd.get("port"),
-                      path=sd.get("path", ""), username=username)
+                      path=sd.get("path", ""), username=username, panel_type=sd.get("panel_type", "sanaei"))
             bot.send_message(uid,
-                "مرحله ۷/۷ — <b>رمز عبور</b>\n\nرمز عبور پنل را ارسال کنید:",
+                "مرحله ۸/۸ — <b>رمز عبور</b>\n\nرمز عبور پنل را ارسال کنید:",
                 parse_mode="HTML", reply_markup=back_button("admin:panels"))
             return
 

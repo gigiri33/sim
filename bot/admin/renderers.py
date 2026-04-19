@@ -334,22 +334,14 @@ def _show_admin_panels(call):
     from ..db import get_all_panels
     panels = get_all_panels()
 
-    lines = ["🖥 <b>مدیریت پنل‌های 3x-ui</b>"]
-    if not panels:
-        lines.append("\n<i>هیچ پنلی ثبت نشده است.</i>")
-    else:
-        lines.append(f"\n<b>{len(panels)}</b> پنل ثبت‌شده:")
-        for p in panels:
-            icon = _panel_status_icon(p)
-            active_label = "" if p["is_active"] else "  <i>(غیرفعال)</i>"
-            lines.append(f"  {icon} {esc(p['name'])}{active_label}")
-
-    text = "\n".join(lines)
+    text = "🖥 <b>مدیریت پنل‌ها</b>"
 
     rows = []
     for p in panels:
         icon = _panel_status_icon(p)
-        rows.append([_btn(f"{icon}  {p['name']}", callback_data=f"adm:pnl:detail:{p['id']}")])
+        panel_type = p.get("panel_type") or "sanaei"
+        type_label = "صنایی" if panel_type == "sanaei" else panel_type
+        rows.append([_btn(f"{icon}  {p['name']} ({type_label})", callback_data=f"adm:pnl:detail:{p['id']}")])
 
     rows.append([_btn("➕ افزودن پنل", callback_data="adm:pnl:add")])
     rows.append([_btn("بازگشت", callback_data="admin:panel",
@@ -380,15 +372,20 @@ def _show_panel_detail(call, panel_id):
     checked   = p["last_checked_at"] or "—"
     err_line  = f"\n⚠️ خطا: <code>{esc(p['last_error'])}</code>" if p["last_error"] else ""
 
+    uname_censored = p['username'][:2] + '***' if p['username'] else '—'
+    passwd_censored = '••••••••'
+    updated = p['updated_at'] if p.get('updated_at') else '—'
+
     text = (
         f"{icon} <b>{esc(p['name'])}</b>\n\n"
         f"🔗 آدرس:  <code>{p['protocol']}://{esc(p['host'])}:{p['port']}{esc(p['path'] or '')}</code>\n"
-        f"👤 نام کاربری: <code>{esc(p['username'])}</code>\n"
-        f"🔑 رمز عبور:   <code>{esc(p['password'])}</code>\n"
+        f"👤 نام کاربری: <code>{uname_censored}</code>\n"
+        f"🔑 رمز عبور:   <code>{passwd_censored}</code>\n"
         f"📡 وضعیت: {status_label}\n"
         f"🕐 آخرین بررسی: {checked}"
         f"{err_line}\n\n"
-        f"📅 افزوده‌شده: {p['created_at']}"
+        f"📅 افزوده‌شده: {p['created_at']}\n"
+        f"✏️ ویرایش شده: {updated}"
     )
 
     is_active = int(p["is_active"])
@@ -406,7 +403,7 @@ def _show_panel_detail(call, panel_id):
         InlineKeyboardButton("🔌 پورت",         callback_data=f"adm:pnl:ef:port:{panel_id}"),
     )
     kb.row(
-        InlineKeyboardButton("📂 مسیر",         callback_data=f"adm:pnl:ef:path:{panel_id}"),
+        InlineKeyboardButton("📂 مسیر مخفی",     callback_data=f"adm:pnl:ef:path:{panel_id}"),
         InlineKeyboardButton("👤 نام کاربری",   callback_data=f"adm:pnl:ef:username:{panel_id}"),
     )
     kb.row(
