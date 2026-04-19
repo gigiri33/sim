@@ -425,6 +425,55 @@ def init_db():
             except Exception:
                 pass
 
+        # ── Rebuild panels table if it uses old schema (ip column instead of host) ──
+        try:
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(panels)").fetchall()}
+            if "ip" in cols and "host" not in cols:
+                # Old schema: recreate with new schema, mapping ip → host
+                conn.executescript("""
+                    CREATE TABLE IF NOT EXISTS panels_new (
+                        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name              TEXT    NOT NULL,
+                        protocol          TEXT    NOT NULL DEFAULT 'http',
+                        host              TEXT    NOT NULL DEFAULT '',
+                        port              INTEGER NOT NULL DEFAULT 80,
+                        path              TEXT    NOT NULL DEFAULT '',
+                        username          TEXT    NOT NULL DEFAULT '',
+                        password          TEXT    NOT NULL DEFAULT '',
+                        is_active         INTEGER NOT NULL DEFAULT 1,
+                        connection_status TEXT    NOT NULL DEFAULT 'unknown',
+                        last_checked_at   TEXT    NOT NULL DEFAULT '',
+                        last_error        TEXT    NOT NULL DEFAULT '',
+                        created_at        TEXT    NOT NULL DEFAULT '',
+                        updated_at        TEXT    NOT NULL DEFAULT ''
+                    );
+                    INSERT INTO panels_new(id, name,
+                        protocol, host, port, path,
+                        username, password, is_active,
+                        connection_status, last_checked_at, last_error,
+                        created_at, updated_at)
+                    SELECT
+                        id,
+                        COALESCE(name, ''),
+                        COALESCE(protocol, 'http'),
+                        COALESCE(ip, ''),
+                        COALESCE(port, 80),
+                        COALESCE(path, ''),
+                        COALESCE(username, ''),
+                        COALESCE(password, ''),
+                        COALESCE(is_active, 1),
+                        COALESCE(connection_status, 'unknown'),
+                        COALESCE(last_checked_at, ''),
+                        COALESCE(last_error, ''),
+                        COALESCE(created_at, ''),
+                        COALESCE(updated_at, '')
+                    FROM panels;
+                    DROP TABLE panels;
+                    ALTER TABLE panels_new RENAME TO panels;
+                """)
+        except Exception as _e:
+            pass
+
         # ── Indexes (CREATE IF NOT EXISTS is idempotent) ───────────────────────
         indexes = [
             "CREATE INDEX IF NOT EXISTS idx_configs_pkg_avail   ON configs(package_id) WHERE sold_to IS NULL AND is_expired=0",
