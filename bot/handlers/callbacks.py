@@ -9656,6 +9656,22 @@ def _dispatch_callback(call, uid, data):
             back_button(f"adm:pnd:wg:bulk:{pending_id}"))
         return
 
+    if data == "admin:pr:reject_all":
+        if not admin_has_perm(uid, "approve_payments"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        kb = types.InlineKeyboardMarkup()
+        kb.row(
+            types.InlineKeyboardButton("✅ بله، همه را رد کن", callback_data="admin:pr:reject_all:do"),
+            types.InlineKeyboardButton("❌ لغو", callback_data="admin:pr"),
+        )
+        send_or_edit(call,
+            "⚠️ <b>آیا مطمئن هستید؟</b>\n\n"
+            "همه رسیدهای بررسی‌نشده رد خواهند شد و به کاربران اطلاع داده می‌شود.",
+            kb)
+        return
+
     if data == "admin:pr:reject_all:do":
         if not admin_has_perm(uid, "approve_payments"):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
