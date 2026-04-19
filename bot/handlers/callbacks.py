@@ -6610,7 +6610,7 @@ def _dispatch_callback(call, uid, data):
         )
         kb.add(types.InlineKeyboardButton("📢 کانال قفل",           callback_data="adm:locked_channels"))
         kb.add(types.InlineKeyboardButton("🎁 تست رایگان",      callback_data="adm:set:freetest"))
-        kb.add(types.InlineKeyboardButton("📜 قوانین خرید",     callback_data="adm:set:rules"))
+        kb.add(types.InlineKeyboardButton("� متن‌های ربات",    callback_data="adm:bot_texts"))
         kb.add(types.InlineKeyboardButton("🏪 مدیریت فروش",    callback_data="adm:set:shop"))
         kb.add(types.InlineKeyboardButton("📱 جمع‌آوری شماره تلفن", callback_data="adm:set:phone"))
         kb.add(types.InlineKeyboardButton("🤖 مدیریت عملیات ربات", callback_data="adm:ops"))
@@ -8111,6 +8111,18 @@ def _dispatch_callback(call, uid, data):
         )
         return
 
+    if data == "adm:bot_texts":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("✏️ ویرایش متن استارت", callback_data="adm:set:start_text"))
+        kb.add(types.InlineKeyboardButton("📜 قوانین خرید",        callback_data="adm:set:rules"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "📝 <b>متن‌های ربات</b>\n\nیکی از موارد زیر را انتخاب کنید:", kb)
+        return
+
     if data == "adm:set:start_text":
         current = setting_get("start_text", "")
         state_set(uid, "admin_set_start_text")
@@ -8122,7 +8134,7 @@ def _dispatch_callback(call, uid, data):
             f"متن فعلی:\n{preview}\n\n"
             "متن جدید را ارسال کنید. می‌توانید از تگ‌های HTML استفاده کنید.\n"
             "برای بازگشت به متن پیش‌فرض، <code>-</code> بفرستید.",
-            back_button("admin:settings")
+            back_button("adm:bot_texts")
         )
         return
 
@@ -8347,7 +8359,7 @@ def _dispatch_callback(call, uid, data):
         toggle_label = "🔴 غیرفعال کردن" if enabled == "1" else "🟢 فعال کردن"
         kb.add(types.InlineKeyboardButton(toggle_label, callback_data="adm:rules:toggle"))
         kb.add(types.InlineKeyboardButton("✏️ ویرایش متن قوانین", callback_data="adm:rules:edit"))
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:bot_texts", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call,
             f"📜 <b>قوانین خرید</b>\n\n"

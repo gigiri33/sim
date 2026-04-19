@@ -2362,27 +2362,27 @@ def universal_handler(message):
                                  parse_mode="HTML", reply_markup=back_button("adm:locked_channels"))
             return
 
-
+        if sn == "admin_set_start_text" and is_admin(uid):
             from ..ui.premium_emoji import serialize_premium_text as _spt
             raw_text = (message.text or message.caption or "").strip()
             entities = message.entities or message.caption_entities or []
             if raw_text == "-":
                 setting_set("start_text", "")
+                log_admin_action(uid, "متن استارت تغییر کرد")
+                state_clear(uid)
+                bot.send_message(uid, "✅ متن استارت به پیش‌فرض برگشت.", reply_markup=back_button("adm:bot_texts"))
             else:
                 serialized = _spt(raw_text, entities)
                 setting_set("start_text", serialized)
-                # Debug: count how many custom emoji entities were captured
                 custom_count = sum(1 for e in entities if e.type == "custom_emoji")
                 is_json = serialized.strip().startswith("{")
+                log_admin_action(uid, "متن استارت تغییر کرد")
+                state_clear(uid)
                 bot.send_message(uid,
                     f"✅ متن استارت ذخیره شد.\n"
                     f"<code>ایموجی پرمیوم: {custom_count} | فرمت: {'JSON' if is_json else 'plain'}</code>",
                     parse_mode="HTML",
-                    reply_markup=back_button("admin:settings"))
-            log_admin_action(uid, "متن استارت تغییر کرد")
-            state_clear(uid)
-            if raw_text == "-":
-                bot.send_message(uid, "✅ متن استارت ذخیره شد.", reply_markup=back_button("admin:settings"))
+                    reply_markup=back_button("adm:bot_texts"))
             return
 
         # ── Admin: Free Test settings ──────────────────────────────────────────
@@ -3097,43 +3097,66 @@ def universal_handler(message):
             except Exception as exc:
                 ok, err = False, str(exc)
 
-            if ok:
-                state_clear(uid)
-                from ..db import add_panel as _add_panel
-                panel_id = _add_panel(name=pnl_name, protocol=protocol, host=host,
-                                      port=int(port), path=path, username=username,
-                                      password=password)
-                from ..db import update_panel_status
-                update_panel_status(panel_id, "connected", "")
-                from ..admin.renderers import _show_panel_detail
+            try:
+                if ok:
+                    state_clear(uid)
+                    from ..db import add_panel as _add_panel
+                    panel_id = _add_panel(name=pnl_name or "بدون نام", protocol=protocol,
+                                          host=host, port=int(port or 2053), path=path,
+                                          username=username, password=password)
+                    from ..db import update_panel_status
+                    update_panel_status(panel_id, "connected", "")
+                    from ..admin.renderers import _show_panel_detail
 
-                class _FakeCall:
-                    def __init__(self, msg, cb_data):
-                        class _FU:
-                            id = uid
-                        self.from_user = _FU()
-                        self.message   = msg
-                        self.data      = cb_data
-                        self.id        = 0
+                    class _FakeCall:
+                        def __init__(self, msg, cb_data):
+                            class _FU:
+                                id = uid
+                            self.from_user = _FU()
+                            self.message   = msg
+                            self.data      = cb_data
+                            self.id        = 0
 
-                bot.send_message(uid, "✅ اتصال موفق! پنل ذخیره شد.")
-                _show_panel_detail(_FakeCall(message, f"adm:pnl:detail:{panel_id}"), panel_id)
-            else:
+                    bot.send_message(uid, "✅ اتصال موفق! پنل ذخیره شد.")
+                    _show_panel_detail(_FakeCall(message, f"adm:pnl:detail:{panel_id}"), panel_id)
+                else:
+                    state_set(uid, "pnl_add_save_fail",
+                              pnl_name=pnl_name, protocol=protocol, host=host, port=int(port or 2053),
+                              path=path, username=username, password=password, error=err or "")
+                    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+                    kb_fail = InlineKeyboardMarkup()
+                    kb_fail.row(
+                        InlineKeyboardButton("💾 ذخیره به‌عنوان غیرفعال",
+                                             callback_data="adm:pnl:save_as_inactive"),
+                        InlineKeyboardButton("❌ لغو", callback_data="adm:pnl:add_cancel"),
+                    )
+                    # Truncate err to avoid Telegram 4096-char limit
+                    err_display = (err or "نامشخص")[:300]
+                    bot.send_message(uid,
+                        f"❌ <b>اتصال ناموفق</b>\n\n"
+                        f"خطا: <code>{esc(err_display)}</code>\n\n"
+                        "می‌توانید پنل را به‌صورت غیرفعال ذخیره کنید تا بعداً ویرایش شود.",
+                        parse_mode="HTML", reply_markup=kb_fail)
+            except Exception as panel_exc:
+                import traceback as _tb
+                _tb.print_exc()
+                err_txt = str(panel_exc)[:200]
                 state_set(uid, "pnl_add_save_fail",
-                          pnl_name=pnl_name, protocol=protocol, host=host, port=int(port),
-                          path=path, username=username, password=password, error=err or "")
+                          pnl_name=pnl_name, protocol=protocol, host=host,
+                          port=int(port or 2053), path=path, username=username,
+                          password=password, error=err_txt)
                 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-                kb_fail = InlineKeyboardMarkup()
-                kb_fail.row(
+                kb_fail2 = InlineKeyboardMarkup()
+                kb_fail2.row(
                     InlineKeyboardButton("💾 ذخیره به‌عنوان غیرفعال",
                                          callback_data="adm:pnl:save_as_inactive"),
                     InlineKeyboardButton("❌ لغو", callback_data="adm:pnl:add_cancel"),
                 )
                 bot.send_message(uid,
-                    f"❌ <b>اتصال ناموفق</b>\n\n"
-                    f"خطا: <code>{esc(err or 'نامشخص')}</code>\n\n"
-                    "می‌توانید پنل را به‌صورت غیرفعال ذخیره کنید تا بعداً ویرایش شود.",
-                    parse_mode="HTML", reply_markup=kb_fail)
+                    f"⚠️ <b>خطای داخلی</b>\n\n"
+                    f"<code>{esc(err_txt)}</code>\n\n"
+                    "می‌توانید پنل را به‌صورت غیرفعال ذخیره کنید.",
+                    parse_mode="HTML", reply_markup=kb_fail2)
             return
 
         if sn == "pnl_edit_field":
