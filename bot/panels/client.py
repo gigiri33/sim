@@ -14,7 +14,8 @@ from requests.exceptions import RequestException, Timeout, SSLError
 
 log = logging.getLogger(__name__)
 
-DEFAULT_TIMEOUT = 10  # seconds
+DEFAULT_TIMEOUT = 15   # seconds – normal requests
+LONG_TIMEOUT    = 45   # seconds – slow proxy / high-latency connections
 
 # Suppress InsecureRequestWarning raised by verify=False (self-signed certs are
 # common in self-hosted 3x-ui deployments).
@@ -114,7 +115,7 @@ class PanelClient:
         try:
             resp = self._session.get(
                 f"{self.base_url}/panel/api/inbounds/list",
-                timeout=DEFAULT_TIMEOUT, verify=False,
+                timeout=LONG_TIMEOUT, verify=False,
             )
             if resp.status_code == 200:
                 data = resp.json()
@@ -187,7 +188,7 @@ class PanelClient:
             resp = self._session.post(
                 f"{self.base_url}/panel/api/inbounds/addClient",
                 json=payload,
-                timeout=DEFAULT_TIMEOUT, verify=False,
+                timeout=LONG_TIMEOUT, verify=False,
             )
             if resp.status_code == 200:
                 data = resp.json()
@@ -248,7 +249,7 @@ class PanelClient:
             resp = self._session.post(
                 f"{self.base_url}/panel/api/inbounds/updateClient/{client_uuid}",
                 json=payload,
-                timeout=DEFAULT_TIMEOUT, verify=False,
+                timeout=LONG_TIMEOUT, verify=False,
             )
             if resp.status_code == 200:
                 data = resp.json()

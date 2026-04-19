@@ -1,11 +1,14 @@
 ﻿# -*- coding: utf-8 -*-
 import json
+import logging
 import time
 import threading
 import traceback
 import urllib.parse
 from datetime import datetime, timedelta
 from telebot import types
+
+log = logging.getLogger(__name__)
 from ..config import ADMIN_IDS, ADMIN_PERMS, PERM_FULL_SET, PERM_USER_FULL, PERM_EMOJI_IDS, CRYPTO_COINS, CRYPTO_API_SYMBOLS, CRYPTO_EMOJI_IDS, CONFIGS_PER_PAGE
 from ..bot_instance import bot
 from ..helpers import (
@@ -1023,12 +1026,16 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
 def _create_panel_config(uid, package_id, payment_id):
     """
     Create a config in the panel for uid/package_id.
+    Retries login and client-creation up to MAX_RETRIES times to handle
+    high-latency / proxied connections (e.g. FluxTunnel).
     Returns (True, delivery_mode, panel_config_id) or (False, error_str, None).
     """
     import random
     import string
-    from datetime import datetime, timedelta
     from ..panels.client import PanelClient
+
+    MAX_RETRIES  = 3
+    RETRY_DELAY  = 4   # seconds between attempts
 
     package_row = get_package(package_id)
     if not package_row:
@@ -1058,12 +1065,29 @@ def _create_panel_config(uid, package_id, payment_id):
         password=panel["password"],
     )
 
-    ok, err = client.login()
-    if not ok:
-        return False, f"اتصال به پنل ناموفق: {err}", None
+    # ── Step 1: login with retry ──────────────────────────────────────────────
+    login_err = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        ok, login_err = client.login()
+        if ok:
+            login_err = None
+            break
+        log.warning("_create_panel_config: login attempt %d/%d failed: %s",
+                    attempt, MAX_RETRIES, login_err)
+        if attempt < MAX_RETRIES:
+            time.sleep(RETRY_DELAY)
+    if login_err is not None:
+        return False, f"اتصال به پنل ناموفق (بعد از {MAX_RETRIES} تلاش): {login_err}", None
 
-    # Use inbound ID directly — no port-based lookup
-    inbound = client.find_inbound_by_id(panel_inbound)
+    # ── Step 2: fetch inbound with retry ─────────────────────────────────────
+    inbound = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        inbound = client.find_inbound_by_id(panel_inbound)
+        if inbound:
+            break
+        log.warning("_create_panel_config: find_inbound attempt %d/%d failed", attempt, MAX_RETRIES)
+        if attempt < MAX_RETRIES:
+            time.sleep(RETRY_DELAY)
     if not inbound:
         return False, f"اینباند با شماره {panel_inbound} در پنل یافت نشد", None
 
@@ -1087,9 +1111,24 @@ def _create_panel_config(uid, package_id, payment_id):
         expire_ms  = 0
         expire_str = None
 
-    ok, result = client.create_client(inbound_id, client_name, traffic_bytes, expire_ms)
-    if not ok:
-        return False, f"خطا در ساخت کلاینت: {result}", None
+    # ── Step 3: create client with retry ─────────────────────────────────────
+    create_err = None
+    result     = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        ok, result = client.create_client(inbound_id, client_name, traffic_bytes, expire_ms)
+        if ok:
+            create_err = None
+            break
+        create_err = result
+        log.warning("_create_panel_config: create_client attempt %d/%d failed: %s",
+                    attempt, MAX_RETRIES, create_err)
+        if attempt < MAX_RETRIES:
+            # Regenerate client name to avoid duplicate-email conflicts on retry
+            rand_str    = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
+            client_name = f"{uid}_{rand_str}"
+            time.sleep(RETRY_DELAY)
+    if create_err is not None:
+        return False, f"خطا در ساخت کلاینت (بعد از {MAX_RETRIES} تلاش): {create_err}", None
 
     client_uuid, sub_id = result
     sub_url     = client.get_sub_url(client_uuid)
