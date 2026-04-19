@@ -84,6 +84,12 @@ class PanelClient:
         except Timeout:
             return False, "اتصال منقضی شد (timeout)"
         except SSLError as exc:
+            msg = str(exc)
+            if "WRONG_VERSION_NUMBER" in msg or "wrong version number" in msg.lower():
+                return False, (
+                    "خطای SSL: سرور از پروتکل HTTPS پشتیبانی نمی‌کند.\n"
+                    "لطفاً پروتکل پنل را به «http» تغییر دهید."
+                )
             return False, f"خطای SSL: {exc}"
         except RequestException as exc:
             return False, str(exc)
