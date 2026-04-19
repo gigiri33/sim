@@ -697,6 +697,17 @@ def _br_ok(p, is_agent: bool) -> bool:
     return True
 
 
+def _pkg_has_stock(p, stock_only: bool) -> bool:
+    """Return True if the package is purchasable considering stock mode.
+    Panel-based packages always have availability (no manual stock needed)."""
+    try:
+        if (p["config_source"] or "manual") == "panel":
+            return True
+    except (IndexError, KeyError):
+        pass
+    return not stock_only or p["stock"] > 0
+
+
 def _show_discount_prompt(call, amount=None):
     """Show the discount code prompt. Returns True if shown, False if skipped."""
     # Check if any eligible discount codes exist for this user
@@ -3086,10 +3097,7 @@ def _dispatch_callback(call, uid, data):
         kb = types.InlineKeyboardMarkup()
         has_any = False
         for item in items:
-            if stock_only:
-                packs = [p for p in get_packages(type_id=item['id']) if p['price'] > 0 and p['stock'] > 0]
-            else:
-                packs = [p for p in get_packages(type_id=item['id']) if p['price'] > 0]
+            packs = [p for p in get_packages(type_id=item['id']) if p['price'] > 0 and _pkg_has_stock(p, stock_only)]
             if packs:
                 kb.add(types.InlineKeyboardButton(f"🧩 {item['name']}", callback_data=f"buy:t:{item['id']}"))
                 has_any = True
@@ -3112,10 +3120,7 @@ def _dispatch_callback(call, uid, data):
         stock_only = setting_get("preorder_mode", "0") == "1"
         user = get_user(uid)
         _is_agent = bool(user and user["is_agent"])
-        if stock_only:
-            packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and p["stock"] > 0 and _br_ok(p, _is_agent)]
-        else:
-            packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and _br_ok(p, _is_agent)]
+        packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and _br_ok(p, _is_agent) and _pkg_has_stock(p, stock_only)]
         # For user-count selector, check ALL packages regardless of stock
         all_type_packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and _br_ok(p, _is_agent)]
         user_limits = sorted(set(p["max_users"] if "max_users" in p.keys() else 0 for p in all_type_packages))
@@ -3131,7 +3136,7 @@ def _dispatch_callback(call, uid, data):
         kb   = types.InlineKeyboardMarkup()
         for p in packages:
             price = get_effective_price(uid, p)
-            stock_tag = "" if p["stock"] > 0 else " ⏳"
+            stock_tag = "" if _pkg_has_stock(p, True) else " ⏳"
             _sn = p['show_name'] if 'show_name' in p.keys() else 1
             _name_part = f"{p['name']}{stock_tag} | " if _sn else (f"{stock_tag} | " if stock_tag else "")
             title = f"{_name_part}{fmt_vol(p['volume_gb'])} | {fmt_dur(p['duration_days'])} | {fmt_price(price)} ت"
@@ -3158,15 +3163,12 @@ def _dispatch_callback(call, uid, data):
         stock_only   = setting_get("preorder_mode", "0") == "1"
         user = get_user(uid)
         _is_agent = bool(user and user["is_agent"])
-        if stock_only:
-            all_pkgs = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and p["stock"] > 0 and _br_ok(p, _is_agent)]
-        else:
-            all_pkgs = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and _br_ok(p, _is_agent)]
+        all_pkgs = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and _br_ok(p, _is_agent) and _pkg_has_stock(p, stock_only)]
         packages = [p for p in all_pkgs if (p["max_users"] if "max_users" in p.keys() else 0) == selected_mu]
         kb   = types.InlineKeyboardMarkup()
         for p in packages:
             price     = get_effective_price(uid, p)
-            stock_tag = "" if p["stock"] > 0 else " ⏳"
+            stock_tag = "" if _pkg_has_stock(p, True) else " ⏳"
             _sn       = p['show_name'] if 'show_name' in p.keys() else 1
             _name_part = f"{p['name']}{stock_tag} | " if _sn else (f"{stock_tag} | " if stock_tag else "")
             title = f"{_name_part}{fmt_vol(p['volume_gb'])} | {fmt_dur(p['duration_days'])} | {fmt_price(price)} ت"
@@ -3242,7 +3244,7 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
             return
         preorder_on = setting_get("preorder_mode", "0") == "1"
-        if preorder_on and package_row["stock"] <= 0:
+        if not _pkg_has_stock(package_row, preorder_on):
             bot.answer_callback_query(call.id, "موجودی این پکیج تمام شده است.", show_alert=True)
             return
         price    = _get_state_price(uid, package_row, "buy_select_method")
@@ -3282,7 +3284,7 @@ def _dispatch_callback(call, uid, data):
             return
         package_id  = int(data.split(":")[2])
         package_row = get_package(package_id)
-        if not package_row or (setting_get("preorder_mode", "0") == "1" and package_row["stock"] <= 0):
+        if not package_row or not _pkg_has_stock(package_row, setting_get("preorder_mode", "0") == "1"):
             bot.answer_callback_query(call.id, "موجودی این پکیج تمام شده است.", show_alert=True)
             return
         # Phone gate for card_only mode
@@ -3333,7 +3335,7 @@ def _dispatch_callback(call, uid, data):
             return
         package_id  = int(data.split(":")[2])
         package_row = get_package(package_id)
-        if not package_row or (setting_get("preorder_mode", "0") == "1" and package_row["stock"] <= 0):
+        if not package_row or not _pkg_has_stock(package_row, setting_get("preorder_mode", "0") == "1"):
             bot.answer_callback_query(call.id, "موجودی این پکیج تمام شده است.", show_alert=True)
             return
         price    = _get_state_price(uid, package_row, "buy_select_method")
@@ -3361,7 +3363,7 @@ def _dispatch_callback(call, uid, data):
             amount      = sd.get("amount")
             _qty_coin   = int(sd.get("quantity", 1) or 1)
             package_row = get_package(package_id)
-            if not package_row or (setting_get("preorder_mode", "0") == "1" and package_row["stock"] <= 0):
+            if not package_row or not _pkg_has_stock(package_row, setting_get("preorder_mode", "0") == "1"):
                 bot.answer_callback_query(call.id, "موجودی تمام شده است.", show_alert=True)
                 return
             payment_id = create_payment("config_purchase", uid, package_id, amount, "crypto",
@@ -3465,7 +3467,7 @@ def _dispatch_callback(call, uid, data):
             return
         package_id = int(data.split(":")[2])
         package_row = get_package(package_id)
-        if not package_row or (setting_get("preorder_mode", "0") == "1" and package_row["stock"] <= 0):
+        if not package_row or not _pkg_has_stock(package_row, setting_get("preorder_mode", "0") == "1"):
             bot.answer_callback_query(call.id, "موجودی این پکیج تمام شده است.", show_alert=True)
             return
         price    = _get_state_price(uid, package_row, "buy_select_method")
@@ -3570,7 +3572,7 @@ def _dispatch_callback(call, uid, data):
             return
         package_id  = int(data.split(":")[2])
         package_row = get_package(package_id)
-        if not package_row or (setting_get("preorder_mode", "0") == "1" and package_row["stock"] <= 0):
+        if not package_row or not _pkg_has_stock(package_row, setting_get("preorder_mode", "0") == "1"):
             bot.answer_callback_query(call.id, "موجودی این پکیج تمام شده است.", show_alert=True)
             return
         price   = _get_state_price(uid, package_row, "buy_select_method")
@@ -4009,7 +4011,7 @@ def _dispatch_callback(call, uid, data):
             return
         package_id  = int(data.split(":")[2])
         package_row = get_package(package_id)
-        if not package_row or (setting_get("preorder_mode", "0") == "1" and package_row["stock"] <= 0):
+        if not package_row or not _pkg_has_stock(package_row, setting_get("preorder_mode", "0") == "1"):
             bot.answer_callback_query(call.id, "موجودی این پکیج تمام شده است.", show_alert=True)
             return
         price = _get_state_price(uid, package_row, "buy_select_method")
@@ -8975,10 +8977,7 @@ def _dispatch_callback(call, uid, data):
         kb = types.InlineKeyboardMarkup()
         has_any = False
         for item in items:
-            if stock_only:
-                packs = [p for p in get_packages(type_id=item['id']) if p['price'] > 0 and p['stock'] > 0]
-            else:
-                packs = [p for p in get_packages(type_id=item['id']) if p['price'] > 0]
+            packs = [p for p in get_packages(type_id=item['id']) if p['price'] > 0 and _pkg_has_stock(p, stock_only)]
             if packs:
                 kb.add(types.InlineKeyboardButton(f"🧩 {item['name']}", callback_data=f"buy:t:{item['id']}"))
                 has_any = True
