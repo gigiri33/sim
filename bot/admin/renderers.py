@@ -339,7 +339,10 @@ def _show_admin_panels(call):
     rows = []
     for p in panels:
         icon = _panel_status_icon(p)
-        panel_type = p.get("panel_type") or "sanaei"
+        try:
+            panel_type = p["panel_type"] or "sanaei"
+        except (IndexError, KeyError):
+            panel_type = "sanaei"
         type_label = "صنایی" if panel_type == "sanaei" else panel_type
         rows.append([_btn(f"{icon}  {p['name']} ({type_label})", callback_data=f"adm:pnl:detail:{p['id']}")])
 
