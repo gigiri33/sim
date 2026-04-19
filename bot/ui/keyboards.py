@@ -140,7 +140,7 @@ def kb_admin_panel(uid=None):
         if _is_limited():
             rows.append([_btn("🔐 فعال‌سازی لایسنس", callback_data="license:activate")])
         else:
-            rows.append([_btn("🔐 وضعیت لایسنس", callback_data="license:status")])
+            rows.append([_btn("🔐 مدیریت لایسنس", callback_data="license:status")])
 
     rows.append([_btn("بازگشت", callback_data="nav:main", emoji_id="5253997076169115797")])
     return _raw_markup(rows)

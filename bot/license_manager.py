@@ -393,8 +393,8 @@ def get_license_status_text() -> str:
 
 def notify_expired_if_needed(bot_instance, owner_id: int) -> None:
     """
-    Send expiry notification to owner if license has expired and
-    the notify interval has passed.
+    Send expiry notification to all admins (from env) if license has expired
+    and the notify interval has passed.
     """
     if is_license_active():
         return
@@ -414,12 +414,20 @@ def notify_expired_if_needed(bot_instance, owner_id: int) -> None:
         "ربات با کلی امکانات\n\n"
         "برای اطلاعات بیشتر و خرید اشتراک به @Emad_Habibnia پیام بدهید."
     )
-    try:
-        bot_instance.send_message(owner_id, msg, parse_mode="HTML")
+    # Send to all admins listed in env
+    targets = _get_admin_ids()
+    if owner_id and owner_id not in targets:
+        targets.append(owner_id)
+    sent_any = False
+    for aid in targets:
+        try:
+            bot_instance.send_message(aid, msg, parse_mode="HTML")
+            sent_any = True
+            log.info("Sent expiry notification to admin %d", aid)
+        except Exception as e:
+            log.warning("Could not send expiry notification to %d: %s", aid, e)
+    if sent_any:
         _setting_set(_SETTINGS_KEY_LAST_NOTIFY, _now_iso())
-        log.info("Sent expiry notification to owner %d", owner_id)
-    except Exception as e:
-        log.warning("Could not send expiry notification: %s", e)
 
 
 # ── Decorator ─────────────────────────────────────────────────────────────────
@@ -487,6 +495,164 @@ def _send_limited_mode_message(target) -> None:
         log.debug("Could not send limited mode message: %s", e)
 
 
+# ── Expiry warning helpers ────────────────────────────────────────────────────
+
+_WARN_KEY_48H       = "license_warn_48h_sent"
+_WARN_KEY_24H       = "license_warn_24h_sent"
+_WARN_KEY_12H       = "license_warn_12h_sent"
+_WARN_KEY_EXP       = "license_warn_exp_sent"
+_WARN_PIN_48H       = "license_warn_pin_48h"
+_WARN_PIN_24H       = "license_warn_pin_24h"
+_WARN_PIN_12H       = "license_warn_pin_12h"
+_WARN_PIN_EXP       = "license_warn_pin_exp"
+
+
+def _get_admin_ids() -> list:
+    """Return all admin IDs from environment (ADMIN_IDS)."""
+    try:
+        from .config import ADMIN_IDS
+        return list(ADMIN_IDS)
+    except Exception:
+        return []
+
+
+def _load_pin_map(key: str) -> dict:
+    """Load {str(admin_id): message_id} map stored as JSON in settings."""
+    raw = _setting_get(key)
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw)
+    except Exception:
+        return {}
+
+
+def _save_pin_map(key: str, mapping: dict) -> None:
+    _setting_set(key, json.dumps(mapping))
+
+
+def _unpin_stored(bot_instance, admin_id: int, key: str) -> None:
+    """Unpin and remove the stored pinned message for a given admin."""
+    mapping = _load_pin_map(key)
+    mid = mapping.pop(str(admin_id), None)
+    if mid:
+        try:
+            bot_instance.unpin_chat_message(admin_id, int(mid))
+        except Exception:
+            pass
+    _save_pin_map(key, mapping)
+
+
+def _send_and_pin_warn(bot_instance, admin_id: int, text: str, pin_key: str,
+                       unpin_key: str | None = None) -> None:
+    """Send warning message to admin, pin it, optionally unpin the previous one."""
+    try:
+        sent = bot_instance.send_message(admin_id, text, parse_mode="HTML")
+        try:
+            bot_instance.pin_chat_message(admin_id, sent.message_id, disable_notification=False)
+        except Exception:
+            pass
+        mapping = _load_pin_map(pin_key)
+        mapping[str(admin_id)] = sent.message_id
+        _save_pin_map(pin_key, mapping)
+        if unpin_key:
+            _unpin_stored(bot_instance, admin_id, unpin_key)
+    except Exception as e:
+        log.warning("Could not send/pin warn to admin %d: %s", admin_id, e)
+
+
+def _check_and_send_expiry_warnings(bot_instance) -> None:
+    """
+    Called every cycle. Sends 48h/24h/12h/expired warnings to all admins.
+    Clears all warning flags when license is renewed (remaining > 48h).
+    """
+    state      = _setting_get(_SETTINGS_KEY_STATE, "inactive")
+    expires_at = _setting_get(_SETTINGS_KEY_EXPIRES_AT, "")
+    if not expires_at:
+        return
+
+    exp_ts = _parse_expiry(expires_at)
+    if exp_ts is None:
+        return
+
+    remaining = exp_ts - _now_ts()
+    admin_ids  = _get_admin_ids()
+
+    # ── Renewal detected: remaining > 48h → clear all warning flags ───────────
+    if remaining > 48 * 3600:
+        if _setting_get(_WARN_KEY_48H) == "1":
+            for aid in admin_ids:
+                _unpin_stored(bot_instance, aid, _WARN_PIN_48H)
+                _unpin_stored(bot_instance, aid, _WARN_PIN_24H)
+                _unpin_stored(bot_instance, aid, _WARN_PIN_12H)
+                _unpin_stored(bot_instance, aid, _WARN_PIN_EXP)
+            _setting_set(_WARN_KEY_48H, "")
+            _setting_set(_WARN_KEY_24H, "")
+            _setting_set(_WARN_KEY_12H, "")
+            _setting_set(_WARN_KEY_EXP, "")
+        return
+
+    # ── Expired ───────────────────────────────────────────────────────────────
+    if remaining <= 0 and _setting_get(_WARN_KEY_EXP) != "1":
+        msg = (
+            "🚫 <b>لایسنس ربات شما به پایان رسید!</b>\n\n"
+            "⛔️ ربات برای کاربران عادی غیرفعال شده است.\n\n"
+            "برای تمدید و فعال‌سازی مجدد، هرچه سریع‌تر با ما در تماس باشید:\n"
+            "👤 @emad_habibnia\n\n"
+            "پس از تمدید، لایسنس به‌صورت خودکار فعال می‌شود. 🔄"
+        )
+        for aid in admin_ids:
+            _send_and_pin_warn(bot_instance, aid, msg, _WARN_PIN_EXP, _WARN_PIN_12H)
+        _setting_set(_WARN_KEY_EXP, "1")
+        return
+
+    # ── 12 ساعت مانده ─────────────────────────────────────────────────────────
+    if remaining <= 12 * 3600 and _setting_get(_WARN_KEY_12H) != "1":
+        hours_left = max(0, int(remaining // 3600))
+        msg = (
+            "⚠️ <b>هشدار جدی: لایسنس ربات شما کمتر از ۱۲ ساعت دیگر تمام می‌شود!</b>\n\n"
+            f"⏳ زمان باقی‌مانده: حدود <b>{hours_left} ساعت</b>\n\n"
+            "❌ اگر تا قبل از اتمام لایسنس اقدام نکنید، ربات برای کاربران عادی غیرفعال خواهد شد.\n\n"
+            "📲 برای تمدید فوری همین الان پیام دهید:\n"
+            "👤 @emad_habibnia\n\n"
+            "⚡️ لطفاً هرچه زودتر اقدام کنید!"
+        )
+        for aid in admin_ids:
+            _send_and_pin_warn(bot_instance, aid, msg, _WARN_PIN_12H, _WARN_PIN_24H)
+        _setting_set(_WARN_KEY_12H, "1")
+        return
+
+    # ── 24 ساعت مانده ─────────────────────────────────────────────────────────
+    if remaining <= 24 * 3600 and _setting_get(_WARN_KEY_24H) != "1":
+        msg = (
+            "🔔 <b>هشدار: لایسنس ربات شما ۲۴ ساعت دیگر تمام می‌شود!</b>\n\n"
+            "⏳ زمان باقی‌مانده: <b>کمتر از ۲۴ ساعت</b>\n\n"
+            "🔴 برای جلوگیری از غیرفعال شدن ربات، هر چه زودتر برای تمدید اقدام کنید.\n\n"
+            "📲 جهت تمدید با ما در تماس باشید:\n"
+            "👤 @emad_habibnia\n\n"
+            "✅ پس از تمدید، ربات به‌صورت خودکار فعال می‌ماند."
+        )
+        for aid in admin_ids:
+            _send_and_pin_warn(bot_instance, aid, msg, _WARN_PIN_24H, _WARN_PIN_48H)
+        _setting_set(_WARN_KEY_24H, "1")
+        return
+
+    # ── 48 ساعت مانده ─────────────────────────────────────────────────────────
+    if remaining <= 48 * 3600 and _setting_get(_WARN_KEY_48H) != "1":
+        msg = (
+            "🔔 <b>یادآوری: لایسنس ربات شما ۴۸ ساعت دیگر به پایان می‌رسد.</b>\n\n"
+            "⏳ زمان باقی‌مانده: <b>کمتر از ۴۸ ساعت</b>\n\n"
+            "💡 برای جلوگیری از غیرفعال شدن ربات و حفظ سرویس‌دهی بی‌وقفه، "
+            "لطفاً هر چه زودتر برای تمدید اقدام نمایید.\n\n"
+            "📲 جهت تمدید به آیدی زیر پیام دهید:\n"
+            "👤 @emad_habibnia\n\n"
+            "🙏 با تشکر از اعتماد شما."
+        )
+        for aid in admin_ids:
+            _send_and_pin_warn(bot_instance, aid, msg, _WARN_PIN_48H)
+        _setting_set(_WARN_KEY_48H, "1")
+
+
 # ── Background checker ────────────────────────────────────────────────────────
 
 def _license_background_loop(bot_instance, owner_id: int) -> None:
@@ -502,6 +668,9 @@ def _license_background_loop(bot_instance, owner_id: int) -> None:
 
             if not now_active and owner_id:
                 notify_expired_if_needed(bot_instance, owner_id)
+
+            # Expiry countdown warnings (48h / 24h / 12h / expired)
+            _check_and_send_expiry_warnings(bot_instance)
 
         except Exception as e:
             log.error("License background loop error: %s", e)

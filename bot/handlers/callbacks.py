@@ -1606,6 +1606,7 @@ def on_callback(call):
         _LICENSE_PASSTHROUGH = {
             "nav:main", "admin:panel", "license:activate", "license:status",
             "license:recheck", "license:limited_info", "support",
+            "license:edit_key", "license:edit_url",
         }
         from ..license_manager import is_limited_mode as _is_limited
         if _is_limited() and not is_admin(uid) and data not in _LICENSE_PASSTHROUGH:
@@ -1941,6 +1942,10 @@ def _dispatch_callback(call, uid, data):
             if is_limited_mode():
                 kb.add(types.InlineKeyboardButton("🔐 فعال‌سازی لایسنس", callback_data="license:activate"))
             kb.add(types.InlineKeyboardButton("🔄 بررسی مجدد", callback_data="license:recheck"))
+            kb.row(
+                types.InlineKeyboardButton("ویرایش 🔑 API Key", callback_data="license:edit_key"),
+                types.InlineKeyboardButton("ویرایش 🌐 API URL", callback_data="license:edit_url"),
+            )
             kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:panel"))
             try:
                 bot.edit_message_text(
@@ -1949,6 +1954,39 @@ def _dispatch_callback(call, uid, data):
                 )
             except Exception:
                 bot.send_message(call.message.chat.id, text, parse_mode="HTML", reply_markup=kb)
+            return
+
+        if data == "license:edit_key":
+            if uid not in _AIDS and not is_admin(uid):
+                bot.answer_callback_query(call.id, "⛔ دسترسی فقط برای مالک/ادمین.", show_alert=True)
+                return
+            bot.answer_callback_query(call.id)
+            state_set(uid, "license:edit_api_key")
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("❌ لغو", callback_data="license:status"))
+            bot.send_message(
+                call.message.chat.id,
+                "🔑 <b>ویرایش API Key</b>\n\n"
+                "کلید API جدید را وارد کنید:",
+                parse_mode="HTML", reply_markup=kb,
+            )
+            return
+
+        if data == "license:edit_url":
+            if uid not in _AIDS and not is_admin(uid):
+                bot.answer_callback_query(call.id, "⛔ دسترسی فقط برای مالک/ادمین.", show_alert=True)
+                return
+            bot.answer_callback_query(call.id)
+            state_set(uid, "license:edit_api_url")
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("❌ لغو", callback_data="license:status"))
+            bot.send_message(
+                call.message.chat.id,
+                "🌐 <b>ویرایش API URL</b>\n\n"
+                "آدرس URL جدید سرور لایسنس را وارد کنید:\n"
+                "<i>مثال: https://license.example.com</i>",
+                parse_mode="HTML", reply_markup=kb,
+            )
             return
 
         if data == "license:limited_info":

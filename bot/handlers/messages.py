@@ -329,7 +329,7 @@ def universal_handler(message):
                 expires = result.get("expires_at", "نامشخص")
                 success_text = ACTIVATION_SUCCESS_TEXT.format(expires_at=expires)
                 kb = types.InlineKeyboardMarkup()
-                kb.add(types.InlineKeyboardButton("📊 وضعیت لایسنس", callback_data="license:status"))
+                kb.add(types.InlineKeyboardButton("📊 مدیریت لایسنس", callback_data="license:status"))
                 bot.send_message(message.chat.id, success_text, parse_mode="HTML", reply_markup=kb)
             else:
                 error_msg = result.get("message", "خطای نامشخص")
@@ -337,6 +337,46 @@ def universal_handler(message):
                 kb = types.InlineKeyboardMarkup()
                 kb.add(types.InlineKeyboardButton("🔄 تلاش مجدد", callback_data="license:activate"))
                 bot.send_message(message.chat.id, fail_text, parse_mode="HTML", reply_markup=kb)
+            return
+
+        # ── License edit: API Key ─────────────────────────────────────────────
+        if sn == "license:edit_api_key" and is_admin(uid):
+            new_key = (message.text or "").strip()
+            state_clear(uid)
+            if not new_key or new_key in ("/cancel", "لغو"):
+                bot.send_message(message.chat.id, "❌ لغو شد.")
+                return
+            from ..license_manager import _setting_set as _lic_set, _SETTINGS_KEY_API_KEY, _invalidate_cache as _lic_inv
+            _lic_set(_SETTINGS_KEY_API_KEY, new_key)
+            _lic_inv()
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("📊 مدیریت لایسنس", callback_data="license:status"))
+            bot.send_message(
+                message.chat.id,
+                "✅ <b>API Key با موفقیت ذخیره شد.</b>\n\n"
+                "برای اعمال تغییر، از دکمه «بررسی مجدد» استفاده کنید.",
+                parse_mode="HTML", reply_markup=kb,
+            )
+            return
+
+        # ── License edit: API URL ─────────────────────────────────────────────
+        if sn == "license:edit_api_url" and is_admin(uid):
+            new_url = (message.text or "").strip()
+            state_clear(uid)
+            if not new_url or new_url in ("/cancel", "لغو"):
+                bot.send_message(message.chat.id, "❌ لغو شد.")
+                return
+            from ..license_manager import _setting_set as _lic_set, _SETTINGS_KEY_API_URL, _invalidate_cache as _lic_inv
+            _lic_set(_SETTINGS_KEY_API_URL, new_url.rstrip("/"))
+            _lic_inv()
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("📊 مدیریت لایسنس", callback_data="license:status"))
+            bot.send_message(
+                message.chat.id,
+                "✅ <b>API URL با موفقیت ذخیره شد.</b>\n\n"
+                "برای اعمال تغییر، از دکمه «بررسی مجدد» استفاده کنید.",
+                parse_mode="HTML", reply_markup=kb,
+            )
             return
 
         # ── Broadcast ─────────────────────────────────────────────────────────

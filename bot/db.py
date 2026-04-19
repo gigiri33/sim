@@ -405,6 +405,12 @@ def init_db():
                 "updated_at        TEXT    NOT NULL"
                 ")"
             ),
+            # ── Panels: add missing columns for older DBs ─────────────────────
+            "ALTER TABLE panels ADD COLUMN protocol TEXT NOT NULL DEFAULT 'http'",
+            "ALTER TABLE panels ADD COLUMN path     TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE panels ADD COLUMN connection_status TEXT NOT NULL DEFAULT 'unknown'",
+            "ALTER TABLE panels ADD COLUMN last_checked_at   TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE panels ADD COLUMN last_error        TEXT NOT NULL DEFAULT ''",
         ]
         for sql in migrations:
             try:
