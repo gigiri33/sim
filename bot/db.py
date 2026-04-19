@@ -860,6 +860,7 @@ def check_and_release_restriction(user_row: dict) -> dict:
     return user_row
 
 
+def set_user_agent(user_id, is_agent):
     with get_conn() as conn:
         conn.execute(
             "UPDATE users SET is_agent=? WHERE user_id=?", (is_agent, user_id)
