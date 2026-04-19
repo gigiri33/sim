@@ -71,19 +71,28 @@ def send_or_edit(call_or_msg, text, reply_markup=None, disable_preview=True):
 
 
 def _get_all_locked_channels() -> list:
-    """Return the merged list of channels from DB table + legacy channel_id setting."""
+    """Return the deduplicated list of locked channels from the DB table.
+    The legacy channel_id setting is migrated to the table on startup (main.py).
+    This fallback still reads it so the bot works before the first restart."""
+    seen = set()
     channels = []
+
+    def _add(ch):
+        key = ch.lower().lstrip("@")
+        if key and key not in seen:
+            seen.add(key)
+            channels.append(ch)
+
     try:
         rows = get_locked_channels()
         for row in rows:
-            ch = str(row["channel_id"]).strip()
-            if ch and ch not in channels:
-                channels.append(ch)
+            _add(str(row["channel_id"]).strip())
     except Exception:
         pass
+    # Legacy fallback — cleared by main.py on startup after migration
     legacy = setting_get("channel_id", "").strip()
-    if legacy and legacy not in channels:
-        channels.append(legacy)
+    if legacy:
+        _add(legacy)
     return channels
 
 

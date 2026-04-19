@@ -9,7 +9,7 @@ import threading
 from bot.db import init_db
 from bot.db import cleanup_stale_reservations
 from bot.ui.helpers import set_bot_commands
-from bot.db import setting_get
+from bot.db import setting_get, setting_set, add_locked_channel
 from bot.admin.backup import _backup_loop
 from bot.group_manager import _group_topic_loop
 from bot.panels.checker import start_panel_checker
@@ -27,6 +27,14 @@ from bot.license_manager import (
 def main():
     init_db()
     cleanup_stale_reservations()
+
+    # ── Migrate legacy single-channel setting → locked_channels table ─────────
+    legacy_channel = setting_get("channel_id", "").strip()
+    if legacy_channel:
+        add_locked_channel(legacy_channel)   # no-op if already in table (duplicate guard)
+        setting_set("channel_id", "")        # clear legacy field to avoid showing it twice
+        print(f"✅ Migrated legacy channel_id '{legacy_channel}' → locked_channels table.")
+
     set_bot_commands()
 
     # ── Layer 1: Ensure machine_id exists ─────────────────────────────────────
