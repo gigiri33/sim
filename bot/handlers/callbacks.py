@@ -1023,6 +1023,131 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
     return purchase_ids, pending_ids
 
 
+def _build_config_from_inbound(inbound, client_uuid, client_name, panel, real_port):
+    """
+    Build a config URL by parsing the inbound's streamSettings.
+    This is a fallback used when we cannot fetch the sub URL.
+    Handles ExternalProxy settings (CDN / tunnel addresses).
+    Returns a config string or None.
+    """
+    import json as _json, base64 as _b64, urllib.parse as _up
+    try:
+        proto  = (inbound.get("protocol") or "").lower()
+        ss_raw = inbound.get("streamSettings") or "{}"
+        if isinstance(ss_raw, str):
+            ss = _json.loads(ss_raw)
+        else:
+            ss = ss_raw
+
+        network  = (ss.get("network") or "tcp").lower()
+        security = (ss.get("security") or "none").lower()
+
+        # ── ExternalProxy (CDN / FluxTunnel / Cloudflare, etc.) ──────────────
+        # 3x-ui stores externalProxy as a JSON string or list in the inbound.
+        # If present, the first entry's dest+port override the connection address/port.
+        ext_proxy_addr = None
+        ext_proxy_port = None
+        ep_raw = inbound.get("externalProxy")
+        if ep_raw:
+            try:
+                if isinstance(ep_raw, str):
+                    ep_raw = _json.loads(ep_raw)
+                if isinstance(ep_raw, list) and ep_raw:
+                    ep0 = ep_raw[0]
+                    ext_proxy_addr = (ep0.get("dest") or "").strip() or None
+                    if ep0.get("port"):
+                        ext_proxy_port = int(ep0["port"])
+            except Exception:
+                pass
+
+        # Collect query params
+        params = {"type": network}
+
+        # WS settings
+        if network == "ws":
+            ws = ss.get("wsSettings") or ss.get("wsConfig") or {}
+            ws_path = ws.get("path") or "/"
+            ws_host = (ws.get("headers") or {}).get("Host") or ""
+            params["path"] = ws_path
+            if ws_host:
+                params["host"] = ws_host
+
+        # gRPC settings
+        elif network == "grpc":
+            grpc = ss.get("grpcSettings") or ss.get("grpcConfig") or {}
+            params["serviceName"] = grpc.get("serviceName") or ""
+            params["mode"]        = grpc.get("multiMode") and "multi" or "gun"
+
+        # TCP with HTTP obfs
+        elif network == "tcp":
+            tcp = ss.get("tcpSettings") or {}
+            hdr = tcp.get("header") or {}
+            if (hdr.get("type") or "").lower() == "http":
+                req   = hdr.get("request") or {}
+                hosts = req.get("headers", {}).get("Host") or []
+                t_path = (req.get("path") or ["/"])[0]
+                params["headerType"] = "http"
+                params["path"]       = t_path
+                if isinstance(hosts, list) and hosts:
+                    params["host"] = hosts[0]
+
+        # TLS / reality
+        if security == "tls":
+            params["security"] = "tls"
+            tls = ss.get("tlsSettings") or {}
+            sni = tls.get("serverName") or ""
+            if sni:
+                params["sni"] = sni
+            fp = tls.get("fingerprint") or ""
+            if fp:
+                params["fp"] = fp
+        elif security == "reality":
+            params["security"] = "reality"
+            rs = ss.get("realitySettings") or {}
+            params["sni"] = rs.get("serverNames", [""])[0] if isinstance(rs.get("serverNames"), list) else ""
+            params["pbk"] = rs.get("publicKey") or ""
+            params["fp"]  = rs.get("fingerprint") or "chrome"
+            sid = rs.get("shortIds", [""])[0] if isinstance(rs.get("shortIds"), list) else ""
+            if sid:
+                params["sid"] = sid
+        else:
+            params["security"] = "none"
+            params["encryption"] = "none"
+
+        # Connection address priority:
+        # 1. ExternalProxy dest (CDN/tunnel address configured in 3x-ui)
+        # 2. WS host header / SNI
+        # 3. Panel host (fallback)
+        conn_addr = ext_proxy_addr or params.get("host") or params.get("sni") or panel["host"]
+        # Use ExternalProxy port if available (overrides inbound listen port)
+        conn_port = ext_proxy_port or real_port
+
+        qs = _up.urlencode({k: v for k, v in params.items() if v})
+        remark = _up.quote(client_name)
+
+        if proto == "vless":
+            return f"vless://{client_uuid}@{conn_addr}:{conn_port}?{qs}#{remark}"
+
+        elif proto == "vmess":
+            vmess_obj = {
+                "v": "2", "ps": client_name,
+                "add": conn_addr, "port": str(conn_port),
+                "id": client_uuid, "aid": "0",
+                "net": network, "type": "none",
+                "path": params.get("path", ""),
+                "host": params.get("host", ""),
+                "tls": "tls" if security == "tls" else "",
+            }
+            return "vmess://" + _b64.b64encode(_json.dumps(vmess_obj).encode()).decode()
+
+        elif proto == "trojan":
+            return f"trojan://{client_uuid}@{conn_addr}:{conn_port}?{qs}#{remark}"
+
+    except Exception as exc:
+        log.warning("_build_config_from_inbound error: %s", exc)
+    return None
+
+
 def _create_panel_config(uid, package_id, payment_id):
     """
     Create a config in the panel for uid/package_id.
@@ -1063,6 +1188,7 @@ def _create_panel_config(uid, package_id, payment_id):
         path=panel["path"] or "",
         username=panel["username"],
         password=panel["password"],
+        sub_url_base=panel["sub_url_base"] if panel["sub_url_base"] else "",
     )
 
     # ── Step 1: login with retry ──────────────────────────────────────────────
@@ -1131,29 +1257,35 @@ def _create_panel_config(uid, package_id, payment_id):
         return False, f"خطا در ساخت کلاینت (بعد از {MAX_RETRIES} تلاش): {create_err}", None
 
     client_uuid, sub_id = result
-    sub_url     = client.get_sub_url(client_uuid)
+    sub_url = client.get_sub_url(client_uuid)
 
-    # Try to get a vmess/vless config link from the inbound protocol
-    config_text = sub_url  # default fallback
-    try:
-        proto = (inbound.get("protocol") or "").lower()
-        if proto == "vless":
-            config_text = (
-                f"vless://{client_uuid}@{panel['host']}:{real_port}"
-                f"?type=tcp&security=none#{client_name}"
-            )
-        elif proto == "vmess":
-            import json as _json, base64 as _b64
-            vmess_obj = {
-                "v": "2", "ps": client_name, "add": panel["host"],
-                "port": str(real_port), "id": client_uuid,
-                "aid": "0", "net": "tcp", "type": "none", "tls": "",
-            }
-            config_text = "vmess://" + _b64.b64encode(
-                _json.dumps(vmess_obj).encode()
-            ).decode()
-    except Exception:
-        pass
+    # ── Step 4: fetch actual config from sub URL ──────────────────────────────
+    # 3x-ui generates correct configs (with CDN/tunnel domains, transport, TLS)
+    # so fetching from the sub URL is always preferred over manual construction.
+    config_text = None
+    fetch_ok, fetch_result = client.fetch_client_config(sub_id)
+    if fetch_ok and fetch_result:
+        # Pick first config line (skip lines that are themselves sub URLs)
+        for line in fetch_result:
+            if not line.startswith("http://") and not line.startswith("https://"):
+                config_text = line
+                break
+        if not config_text:
+            config_text = fetch_result[0]
+    else:
+        log.warning("_create_panel_config: sub fetch failed (%s), building from streamSettings", fetch_result)
+
+    # ── Step 5: build config from streamSettings (fallback) ───────────────────
+    if not config_text:
+        config_text = _build_config_from_inbound(
+            inbound=inbound,
+            client_uuid=client_uuid,
+            client_name=client_name,
+            panel=panel,
+            real_port=real_port,
+        ) or sub_url  # last resort: sub URL itself
+
+    inbound_remark = (inbound.get("remark") or inbound.get("tag") or "").strip()
 
     pc_id = add_panel_config(
         user_id=uid,
@@ -1166,6 +1298,7 @@ def _create_panel_config(uid, package_id, payment_id):
         client_uuid=client_uuid,
         client_sub_url=sub_url,
         client_config_text=config_text,
+        inbound_remark=inbound_remark,
         expire_at=expire_str,
         payment_id=payment_id,
     )
@@ -1182,46 +1315,116 @@ def _deliver_panel_config_to_user(chat_id, panel_config_id, package_row):
     if not pc:
         return
 
+    import io as _io
+    import qrcode as _qrcode
+    from ..ui.premium_emoji import ce
+
     try:
         delivery_mode = package_row["delivery_mode"] or "config_only"
     except (IndexError, KeyError):
         delivery_mode = "config_only"
 
-    vol_label = "نامحدود" if not package_row["volume_gb"] else fmt_vol(package_row["volume_gb"])
-    dur_label = "نامحدود" if not package_row["duration_days"] else fmt_dur(package_row["duration_days"])
-    expire_line = f"\n📅 تاریخ انقضا: {pc['expire_at'][:10]}" if pc["expire_at"] else ""
-
-    service_info = (
-        f"🎉 <b>سرویس شما آماده است!</b>\n\n"
-        f"📦 پکیج: <b>{esc(package_row['name'])}</b>\n"
-        f"🔋 حجم: {vol_label}\n"
-        f"⏰ مدت: {dur_label}"
-        f"{expire_line}\n"
-        f"🟢 وضعیت: فعال\n\n"
+    vol_label  = "نامحدود" if not package_row["volume_gb"]     else fmt_vol(package_row["volume_gb"])
+    dur_label  = "نامحدود" if not package_row["duration_days"] else fmt_dur(package_row["duration_days"])
+    max_u      = package_row["max_users"] if "max_users" in (package_row.keys() if hasattr(package_row, "keys") else {}) else 0
+    users_label = "نامحدود" if not max_u else (
+        "تک‌کاربره" if max_u == 1 else f"{max_u} کاربره"
     )
 
-    config_text = pc["client_config_text"] or ""
-    sub_url     = pc["client_sub_url"] or ""
+    service_name  = pc["client_name"] or ""
+    config_text   = pc["client_config_text"] or ""
+    sub_url       = pc["client_sub_url"] or ""
+
+    # Extract the actual service name from the config's #tag (panel may add prefix/suffix)
+    if config_text and "#" in config_text:
+        try:
+            raw_remark = config_text.rsplit("#", 1)[1].strip()
+            if raw_remark:
+                service_name = urllib.parse.unquote(raw_remark)
+        except Exception:
+            pass
+
+    inbound_remark = pc["inbound_remark"] if "inbound_remark" in (pc.keys() if hasattr(pc, "keys") else {}) else ""
+    type_label    = inbound_remark or (package_row["type_name"] if "type_name" in (package_row.keys() if hasattr(package_row, "keys") else {}) else "")
+    show_pkg      = bool(package_row.get("show_name", 1)) if hasattr(package_row, "get") else True
+    pkg_line      = f"{ce('📦', '5258134813302332906')} پکیج: <b>{esc(package_row['name'])}</b>\n" if show_pkg else ""
+    expire_line   = f"{ce('📅', '5379748062124056162')} انقضا: <b>{pc['expire_at'][:10]}</b>\n" if pc.get("expire_at") else ""
+
+    header = f"{ce('✅', '5260463209562776385')} <b>سرویس شما آماده است!</b>"
+
+    info_block = (
+        f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(service_name)}</b>\n"
+        f"{ce('🧩', '5463224921935082813')} نوع سرویس: <b>{esc(type_label)}</b>\n"
+        f"{pkg_line}"
+        f"{ce('🔋', '5924538142198600679')} حجم: <b>{esc(vol_label)}</b>\n"
+        f"{ce('⏰', '5343724178547691280')} مدت: <b>{esc(dur_label)}</b>\n"
+        f"{ce('👥', '5372926953978341366')} تعداد کاربر: <b>{esc(users_label)}</b>\n"
+        f"{expire_line}"
+    )
+
+    has_cfg     = bool(config_text.strip())
+    has_sub     = bool(sub_url.strip())
+
+    kb = types.InlineKeyboardMarkup()
+    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+
+    def _send_with_qr(qr_source, text):
+        try:
+            qr_img = _qrcode.make(qr_source)
+            bio    = _io.BytesIO()
+            qr_img.save(bio, format="PNG")
+            bio.seek(0)
+            bio.name = "qrcode.png"
+            bot.send_photo(chat_id, bio, caption=text, parse_mode="HTML", reply_markup=kb)
+        except Exception as _qr_exc:
+            log.warning("_deliver_panel_config QR generation failed: %s", _qr_exc)
+            bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
 
     if delivery_mode == "config_only":
-        msg = service_info
-        if config_text:
-            msg += f"📄 <b>کانفیگ:</b>\n<code>{esc(config_text)}</code>"
-        bot.send_message(chat_id, msg, parse_mode="HTML")
+        if has_cfg:
+            text = (
+                f"{header}\n\n{info_block}\n"
+                f"{ce('💝', '5900197669178970457')} <b>Config:</b>\n<code>{esc(config_text)}</code>"
+            )
+            _send_with_qr(config_text, text)
+        else:
+            bot.send_message(chat_id, f"{header}\n\n{info_block}\n⚠️ کانفیگ در دسترس نیست.",
+                             parse_mode="HTML", reply_markup=kb)
 
     elif delivery_mode == "sub_only":
-        msg = service_info
-        if sub_url:
-            msg += f"🔗 <b>لینک اشتراک:</b>\n<code>{esc(sub_url)}</code>"
-        bot.send_message(chat_id, msg, parse_mode="HTML")
+        if has_sub:
+            text = (
+                f"{header}\n\n{info_block}\n"
+                f"{ce('🔗', '5271604874419647061')} <b>لینک ساب:</b>\n{esc(sub_url)}"
+            )
+            _send_with_qr(sub_url, text)
+        else:
+            bot.send_message(chat_id, f"{header}\n\n{info_block}\n⚠️ لینک ساب در دسترس نیست.",
+                             parse_mode="HTML", reply_markup=kb)
 
     else:  # both
-        msg = service_info
-        if config_text:
-            msg += f"📄 <b>کانفیگ:</b>\n<code>{esc(config_text)}</code>\n\n"
-        if sub_url:
-            msg += f"🔗 <b>لینک اشتراک:</b>\n<code>{esc(sub_url)}</code>"
-        bot.send_message(chat_id, msg, parse_mode="HTML")
+        if has_cfg and has_sub:
+            text = (
+                f"{header}\n\n{info_block}\n"
+                f"{ce('💝', '5900197669178970457')} <b>Config:</b>\n<code>{esc(config_text)}</code>\n\n"
+                f"{ce('🔗', '5271604874419647061')} <b>لینک ساب:</b>\n{esc(sub_url)}"
+            )
+            _send_with_qr(config_text, text)  # QR for config when both present
+        elif has_cfg:
+            text = (
+                f"{header}\n\n{info_block}\n"
+                f"{ce('💝', '5900197669178970457')} <b>Config:</b>\n<code>{esc(config_text)}</code>"
+            )
+            _send_with_qr(config_text, text)
+        elif has_sub:
+            text = (
+                f"{header}\n\n{info_block}\n"
+                f"{ce('🔗', '5271604874419647061')} <b>لینک ساب:</b>\n{esc(sub_url)}"
+            )
+            _send_with_qr(sub_url, text)
+        else:
+            bot.send_message(chat_id, f"{header}\n\n{info_block}\n⚠️ کانفیگ و ساب در دسترس نیستند.",
+                             parse_mode="HTML", reply_markup=kb)
 
 
 
@@ -10742,12 +10945,13 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id, "پنل یافت نشد.", show_alert=True)
             return
         field_labels = {
-            "name":     "نام پنل",
-            "host":     "آدرس IP / دامنه",
-            "port":     "پورت",
-            "path":     "مسیر مخفی — برای عدم وجود / ارسال کنید",
-            "username": "نام کاربری",
-            "password": "رمز عبور",
+            "name":         "نام پنل",
+            "host":         "آدرس IP / دامنه",
+            "port":         "پورت",
+            "path":         "مسیر مخفی — برای عدم وجود / ارسال کنید",
+            "username":     "نام کاربری",
+            "password":     "رمز عبور",
+            "sub_url_base": "دامنه ساب (مثال: http://stareh.parhiiz.top:2096) — برای حذف /skip ارسال کنید",
         }
         label = field_labels.get(field, field)
         state_set(uid, "pnl_edit_field", field=field, panel_id=panel_id)
@@ -10857,10 +11061,60 @@ def _dispatch_callback(call, uid, data):
             path=sd.get("path", ""),
             username=sd.get("username", ""),
             password=sd.get("password", ""),
+            sub_url_base=sd.get("sub_url_base", ""),
         )
         toggle_panel_active(panel_id, 0)
         bot.answer_callback_query(call.id, "پنل با وضعیت غیرفعال ذخیره شد.")
         _show_panel_detail(call, panel_id)
+        return
+
+    if data == "adm:pnl:skip_sub_url":
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+            return
+        if state_name(uid) != "pnl_add_sub_url":
+            bot.answer_callback_query(call.id, "عملیات منقضی شده.", show_alert=True)
+            return
+        sd = state_data(uid)
+        pnl_name = sd.get("pnl_name", "")
+        protocol = sd.get("protocol", "http")
+        host     = sd.get("host", "")
+        port     = sd.get("port", 2053)
+        path     = sd.get("path", "")
+        username = sd.get("username", "")
+        password = sd.get("password", "")
+        bot.answer_callback_query(call.id)
+        bot.send_message(uid, "⏳ در حال بررسی اتصال به پنل…")
+        try:
+            from ..panels.client import PanelClient as _PC
+            _cl = _PC(protocol=protocol, host=host, port=int(port),
+                      path=path, username=username, password=password)
+            ok, err = _cl.health_check()
+        except Exception as exc:
+            ok, err = False, str(exc)
+        if ok:
+            state_clear(uid)
+            panel_id = add_panel(name=pnl_name or "بدون نام", protocol=protocol,
+                                 host=host, port=int(port or 2053), path=path,
+                                 username=username, password=password, sub_url_base="")
+            from ..db import update_panel_status
+            update_panel_status(panel_id, "connected", "")
+            bot.send_message(uid, "✅ اتصال موفق! پنل ذخیره شد.")
+            _show_panel_detail(call, panel_id)
+        else:
+            state_set(uid, "pnl_add_save_fail",
+                      pnl_name=pnl_name, protocol=protocol, host=host, port=int(port or 2053),
+                      path=path, username=username, password=password, sub_url_base="", error=err or "")
+            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+            kb_fail = InlineKeyboardMarkup()
+            kb_fail.row(
+                InlineKeyboardButton("💾 ذخیره به‌عنوان غیرفعال", callback_data="adm:pnl:save_as_inactive"),
+                InlineKeyboardButton("❌ لغو", callback_data="adm:pnl:add_cancel"),
+            )
+            bot.send_message(uid,
+                f"❌ <b>اتصال ناموفق</b>\n\nخطا: <code>{esc((err or '')[:300])}</code>\n\n"
+                "می‌توانید پنل را به‌صورت غیرفعال ذخیره کنید.",
+                parse_mode="HTML", reply_markup=kb_fail)
         return
 
     if data == "adm:pnl:add_cancel":

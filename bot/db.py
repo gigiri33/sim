@@ -85,6 +85,7 @@ def _rebuild_panels_if_legacy() -> None:
                 path              TEXT    NOT NULL DEFAULT '',
                 username          TEXT    NOT NULL DEFAULT '',
                 password          TEXT    NOT NULL DEFAULT '',
+                sub_url_base      TEXT    NOT NULL DEFAULT '',
                 is_active         INTEGER NOT NULL DEFAULT 1,
                 connection_status TEXT    NOT NULL DEFAULT 'unknown',
                 last_checked_at   TEXT    NOT NULL DEFAULT '',
@@ -93,7 +94,7 @@ def _rebuild_panels_if_legacy() -> None:
                 updated_at        TEXT    NOT NULL DEFAULT ''
             );
             INSERT INTO _panels_new(id, name, protocol, host, port, path,
-                username, password, is_active, connection_status,
+                username, password, sub_url_base, is_active, connection_status,
                 last_checked_at, last_error, created_at, updated_at)
             SELECT
                 id,
@@ -104,6 +105,7 @@ def _rebuild_panels_if_legacy() -> None:
                 COALESCE(CASE WHEN typeof(path)='text'     THEN path     END, ''),
                 COALESCE(CASE WHEN typeof(username)='text' THEN username END, ''),
                 COALESCE(CASE WHEN typeof(password)='text' THEN password END, ''),
+                '',
                 COALESCE(is_active, 1),
                 'unknown', '', '', '', ''
             FROM panels;
@@ -460,6 +462,7 @@ def init_db():
                 "path              TEXT    NOT NULL DEFAULT '',"
                 "username          TEXT    NOT NULL,"
                 "password          TEXT    NOT NULL,"
+                "sub_url_base      TEXT    NOT NULL DEFAULT '',"
                 "is_active         INTEGER NOT NULL DEFAULT 1,"
                 "connection_status TEXT    NOT NULL DEFAULT 'unknown',"
                 "last_checked_at   TEXT    NOT NULL DEFAULT '',"
@@ -481,12 +484,14 @@ def init_db():
             "ALTER TABLE panels ADD COLUMN last_error        TEXT    NOT NULL DEFAULT ''",
             "ALTER TABLE panels ADD COLUMN created_at        TEXT    NOT NULL DEFAULT ''",
             "ALTER TABLE panels ADD COLUMN updated_at        TEXT    NOT NULL DEFAULT ''",
+            "ALTER TABLE panels ADD COLUMN sub_url_base      TEXT    NOT NULL DEFAULT ''",
             # ── Packages: panel-based config source ───────────────────────────
             "ALTER TABLE packages ADD COLUMN config_source TEXT NOT NULL DEFAULT 'manual'",
             "ALTER TABLE packages ADD COLUMN panel_id      INTEGER",
             "ALTER TABLE packages ADD COLUMN panel_type    TEXT",
             "ALTER TABLE packages ADD COLUMN panel_port    INTEGER",
             "ALTER TABLE packages ADD COLUMN delivery_mode TEXT NOT NULL DEFAULT 'config_only'",
+            "ALTER TABLE panel_configs ADD COLUMN inbound_remark TEXT NOT NULL DEFAULT ''",
             # ── Panel configs (auto-created by purchase) ──────────────────────
             (
                 "CREATE TABLE IF NOT EXISTS panel_configs ("
@@ -501,6 +506,7 @@ def init_db():
                 "client_uuid        TEXT,"
                 "client_sub_url     TEXT,"
                 "client_config_text TEXT,"
+                "inbound_remark     TEXT    NOT NULL DEFAULT '',"
                 "expire_at          TEXT,"
                 "is_expired         INTEGER NOT NULL DEFAULT 0,"
                 "expired_notified   INTEGER NOT NULL DEFAULT 0,"
@@ -1956,21 +1962,22 @@ def get_panel(panel_id):
         ).fetchone()
 
 
-def add_panel(name, protocol, host, port, path, username, password):
+def add_panel(name, protocol, host, port, path, username, password, sub_url_base=""):
     ts = now_str()
     with get_conn() as conn:
         cur = conn.execute(
-            "INSERT INTO panels(name,protocol,host,port,path,username,password,"
+            "INSERT INTO panels(name,protocol,host,port,path,username,password,sub_url_base,"
             "is_active,connection_status,last_checked_at,last_error,created_at,updated_at)"
-            " VALUES(?,?,?,?,?,?,?,1,'unknown','','',?,?)",
+            " VALUES(?,?,?,?,?,?,?,?,1,'unknown','','',?,?)",
             (name.strip(), protocol, host.strip(), int(port),
-             path.strip(), username.strip(), password, ts, ts)
+             path.strip(), username.strip(), password,
+             (sub_url_base or "").strip().rstrip("/"), ts, ts)
         )
         return cur.lastrowid
 
 
 _PANEL_EDITABLE_FIELDS = {
-    "name", "protocol", "host", "port", "path", "username", "password",
+    "name", "protocol", "host", "port", "path", "username", "password", "sub_url_base",
 }
 
 
@@ -2021,17 +2028,17 @@ def update_package_panel_settings(package_id, config_source,
 def add_panel_config(user_id, package_id, panel_id, panel_type,
                      inbound_id, inbound_port, client_name, client_uuid,
                      client_sub_url, client_config_text, expire_at,
-                     purchase_id=None, payment_id=None):
+                     inbound_remark="", purchase_id=None, payment_id=None):
     with get_conn() as conn:
         cur = conn.execute(
             """INSERT INTO panel_configs
                (user_id, package_id, panel_id, panel_type, inbound_id, inbound_port,
                 client_name, client_uuid, client_sub_url, client_config_text,
-                expire_at, created_at, purchase_id, payment_id)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                inbound_remark, expire_at, created_at, purchase_id, payment_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (user_id, package_id, panel_id, panel_type, inbound_id, inbound_port,
              client_name, client_uuid, client_sub_url, client_config_text,
-             expire_at, now_str(), purchase_id, payment_id)
+             inbound_remark or "", expire_at, now_str(), purchase_id, payment_id)
         )
         return cur.lastrowid
 

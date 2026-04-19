@@ -3185,19 +3185,42 @@ def universal_handler(message):
                 bot.send_message(uid, "⚠️ رمز عبور نمی‌تواند خالی باشد.")
                 return
             sd = state_data(uid)
-            pnl_name = sd.get("pnl_name", "")
-            protocol = sd.get("protocol", "http")
-            host     = sd.get("host", "")
-            port     = sd.get("port", 2053)
-            path     = sd.get("path", "")
-            username = sd.get("username", "")
+            state_set(uid, "pnl_add_sub_url",
+                      pnl_name=sd.get("pnl_name"), protocol=sd.get("protocol"),
+                      host=sd.get("host"), port=sd.get("port"),
+                      path=sd.get("path", ""), username=sd.get("username"),
+                      password=password, panel_type=sd.get("panel_type", "sanaei"))
+            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+            kb_skip = InlineKeyboardMarkup()
+            kb_skip.add(InlineKeyboardButton("⏭ رد کردن (بدون ساب مجزا)", callback_data="adm:pnl:skip_sub_url"))
+            bot.send_message(uid,
+                "مرحله ۹/۹ — <b>آدرس ساب (Subscription URL Base)</b>\n\n"
+                "اگر پنل شما برای لینک ساب از یک دامنه/آدرس جداگانه استفاده می‌کند، اینجا وارد کنید.\n\n"
+                "مثال: <code>http://stareh.parhiiz.top:2096</code>\n\n"
+                "⚠️ این آدرس باید همان پایه‌ای باشد که کاربران برای دریافت کانفیگ‌شان به آن وصل می‌شوند.\n"
+                "اگر پنل شما ساب مجزا ندارد، دکمه رد کردن را بزنید.",
+                parse_mode="HTML", reply_markup=kb_skip)
+            return
+
+        if sn == "pnl_add_sub_url":
+            raw_sub = (message.text or "").strip().rstrip("/")
+            sd = state_data(uid)
+            pnl_name    = sd.get("pnl_name", "")
+            protocol    = sd.get("protocol", "http")
+            host        = sd.get("host", "")
+            port        = sd.get("port", 2053)
+            path        = sd.get("path", "")
+            username    = sd.get("username", "")
+            password    = sd.get("password", "")
+            sub_url_base = raw_sub
 
             bot.send_message(uid, "⏳ در حال بررسی اتصال به پنل…")
 
             try:
                 from ..panels.client import PanelClient
                 client = PanelClient(protocol=protocol, host=host, port=int(port),
-                                     path=path, username=username, password=password)
+                                     path=path, username=username, password=password,
+                                     sub_url_base=sub_url_base)
                 ok, err = client.health_check()
             except Exception as exc:
                 ok, err = False, str(exc)
@@ -3208,7 +3231,8 @@ def universal_handler(message):
                     from ..db import add_panel as _add_panel
                     panel_id = _add_panel(name=pnl_name or "بدون نام", protocol=protocol,
                                           host=host, port=int(port or 2053), path=path,
-                                          username=username, password=password)
+                                          username=username, password=password,
+                                          sub_url_base=sub_url_base)
                     from ..db import update_panel_status
                     update_panel_status(panel_id, "connected", "")
                     from ..admin.renderers import _show_panel_detail
@@ -3227,7 +3251,8 @@ def universal_handler(message):
                 else:
                     state_set(uid, "pnl_add_save_fail",
                               pnl_name=pnl_name, protocol=protocol, host=host, port=int(port or 2053),
-                              path=path, username=username, password=password, error=err or "")
+                              path=path, username=username, password=password,
+                              sub_url_base=sub_url_base, error=err or "")
                     from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
                     kb_fail = InlineKeyboardMarkup()
                     kb_fail.row(
@@ -3235,7 +3260,6 @@ def universal_handler(message):
                                              callback_data="adm:pnl:save_as_inactive"),
                         InlineKeyboardButton("❌ لغو", callback_data="adm:pnl:add_cancel"),
                     )
-                    # Truncate err to avoid Telegram 4096-char limit
                     err_display = (err or "نامشخص")[:300]
                     bot.send_message(uid,
                         f"❌ <b>اتصال ناموفق</b>\n\n"
@@ -3249,7 +3273,7 @@ def universal_handler(message):
                 state_set(uid, "pnl_add_save_fail",
                           pnl_name=pnl_name, protocol=protocol, host=host,
                           port=int(port or 2053), path=path, username=username,
-                          password=password, error=err_txt)
+                          password=password, sub_url_base=sub_url_base, error=err_txt)
                 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
                 kb_fail2 = InlineKeyboardMarkup()
                 kb_fail2.row(
@@ -3270,7 +3294,7 @@ def universal_handler(message):
             panel_id = sd.get("panel_id")
             new_val  = (message.text or "").strip()
 
-            if not new_val:
+            if not new_val and field != "sub_url_base":
                 bot.send_message(uid, "⚠️ مقدار نمی‌تواند خالی باشد. دوباره ارسال کنید.")
                 return
 
@@ -3286,6 +3310,13 @@ def universal_handler(message):
                     new_val = ""
                 elif not new_val.startswith("/"):
                     new_val = "/" + new_val
+
+            if field == "sub_url_base":
+                # Allow /skip to clear the field
+                if new_val.lower() in ("/skip", "skip", "-", "ندارد"):
+                    new_val = ""
+                else:
+                    new_val = new_val.rstrip("/")
 
             from ..db import update_panel_field as _upf
             _upf(panel_id, field, new_val)

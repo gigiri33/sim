@@ -379,6 +379,10 @@ def _show_panel_detail(call, panel_id):
     uname_censored = p['username'][:2] + '***' if p['username'] else '—'
     passwd_censored = '••••••••'
     try:
+        sub_url_base_disp = p['sub_url_base'] or "<i>(ندارد — از آدرس پنل استفاده می‌شود)</i>"
+    except (IndexError, KeyError):
+        sub_url_base_disp = "<i>(ندارد)</i>"
+    try:
         updated = p['updated_at'] or '—'
     except (IndexError, KeyError):
         updated = '—'
@@ -386,6 +390,7 @@ def _show_panel_detail(call, panel_id):
     text = (
         f"{icon} <b>{esc(p['name'])}</b>\n\n"
         f"🔗 آدرس:  <code>{p['protocol']}://{esc(p['host'])}:{p['port']}{esc(p['path'] or '')}</code>\n"
+        f"📡 ساب:   {sub_url_base_disp}\n"
         f"👤 نام کاربری: <code>{uname_censored}</code>\n"
         f"🔑 رمز عبور:   <code>{passwd_censored}</code>\n"
         f"📡 وضعیت: {status_label}\n"
@@ -416,6 +421,9 @@ def _show_panel_detail(call, panel_id):
     kb.row(
         InlineKeyboardButton("🔑 رمز عبور",     callback_data=f"adm:pnl:ef:password:{panel_id}"),
         InlineKeyboardButton("🔄 بررسی الان",   callback_data=f"adm:pnl:recheck:{panel_id}"),
+    )
+    kb.add(
+        InlineKeyboardButton("🌐 دامنه ساب (sub_url_base)", callback_data=f"adm:pnl:ef:sub_url_base:{panel_id}"),
     )
     kb.row(
         InlineKeyboardButton(toggle_label,       callback_data=toggle_callback),

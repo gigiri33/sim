@@ -26,7 +26,8 @@ class PanelClient:
     """Thin client for a single 3x-ui panel."""
 
     def __init__(self, protocol: str, host: str, port: int,
-                 path: str, username: str, password: str):
+                 path: str, username: str, password: str,
+                 sub_url_base: str = ""):
         self.protocol = protocol.strip().rstrip("/")
         self.host     = host.strip()
         self.port     = int(port)
@@ -37,6 +38,9 @@ class PanelClient:
         self.path     = p.rstrip("/")
         self.username = username.strip()
         self.password = password
+        # sub_url_base: base URL for subscription links (may differ from panel URL)
+        # e.g. "http://stareh.parhiiz.top:2096"  — no trailing slash, no path prefix
+        self.sub_url_base = sub_url_base.strip().rstrip("/") if sub_url_base else ""
 
         self._session = requests.Session()
 
@@ -265,7 +269,48 @@ class PanelClient:
     def get_sub_url(self, client_uuid: str) -> str:
         """Return the subscription URL for this client.
         Uses subId (first 16 chars of UUID without dashes) as per 3x-ui spec.
-        Sub path: /sub/{subId}
+        If sub_url_base is configured, uses that instead of the panel base URL.
+        Otherwise, includes the panel path (Sanaei sub endpoint is under the panel path).
         """
         sub_id = client_uuid.replace("-", "")[:16]
-        return f"{self.base_url}/sub/{sub_id}"
+        if self.sub_url_base:
+            base = self.sub_url_base
+        else:
+            base = f"{self.protocol}://{self.host}:{self.port}"
+            if self.path and self.path not in ("/", ""):
+                base += self.path
+        return f"{base}/sub/{sub_id}"
+
+    def fetch_client_config(self, sub_id: str) -> tuple:
+        """
+        Fetch the actual config text from the subscription URL.
+        3x-ui returns a base64-encoded string of config link(s), one per line.
+        Returns (True, [config_line, ...]) or (False, error_str).
+        """
+        import base64 as _b64
+        # Build the subscription URL directly (sub_id is already the 16-char token)
+        if self.sub_url_base:
+            base = self.sub_url_base
+        else:
+            base = f"{self.protocol}://{self.host}:{self.port}"
+            if self.path and self.path not in ("/", ""):
+                base += self.path
+        url = f"{base}/sub/{sub_id}"
+        try:
+            resp = requests.get(url, timeout=LONG_TIMEOUT, verify=False)
+            if resp.status_code != 200:
+                return False, f"HTTP {resp.status_code}"
+            raw = resp.content
+            # Try base64 decoding (3x-ui returns base64-encoded config list)
+            try:
+                decoded = _b64.b64decode(raw).decode("utf-8", errors="replace")
+            except Exception:
+                decoded = raw.decode("utf-8", errors="replace")
+            lines = [l.strip() for l in decoded.splitlines() if l.strip()]
+            if lines:
+                return True, lines
+            return False, "محتوای ساب خالی است"
+        except Timeout:
+            return False, "اتصال منقضی شد"
+        except RequestException as exc:
+            return False, str(exc)
