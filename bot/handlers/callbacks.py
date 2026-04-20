@@ -5327,7 +5327,10 @@ def _dispatch_callback(call, uid, data):
         if not is_admin(uid):
             bot.answer_callback_query(call.id)
             return
-        update_package_panel_settings(package_id, "manual")
+        package_row = get_package(package_id)
+        # Preserve existing delivery_mode so NOT NULL constraint is not violated
+        existing_delivery_mode = (package_row["delivery_mode"] if package_row else None) or "config_only"
+        update_package_panel_settings(package_id, "manual", delivery_mode=existing_delivery_mode)
         log_admin_action(uid, f"پکیج #{package_id} منبع کانفیگ به دستی تغییر کرد")
         bot.answer_callback_query(call.id, "✅ منبع کانفیگ به دستی تغییر کرد.")
         package_row = get_package(package_id)
