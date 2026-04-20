@@ -1307,6 +1307,64 @@ def get_user_purchases(user_id):
         ).fetchall()
 
 
+def get_user_purchases_paged(user_id, page=0, per_page=10, search=None):
+    """Return paginated purchases for a user with optional search."""
+    with get_conn() as conn:
+        base = """
+            FROM purchases pr
+            JOIN packages p ON p.id=pr.package_id
+            JOIN config_types t ON t.id=p.type_id
+            JOIN configs c ON c.id=pr.config_id
+            WHERE pr.user_id=?
+        """
+        params = [user_id]
+        if search:
+            base += " AND (c.service_name LIKE ? OR c.config_text LIKE ?)"
+            s = f"%{search}%"
+            params += [s, s]
+        count = conn.execute("SELECT COUNT(*) AS n " + base, params).fetchone()["n"]
+        rows = conn.execute(
+            "SELECT pr.*, p.name AS package_name, p.show_name, p.volume_gb, p.duration_days, p.price,"
+            "       t.name AS type_name, t.description AS type_description,"
+            "       c.service_name, c.config_text, c.inquiry_link,"
+            "       CASE WHEN pr.is_test=1"
+            "            AND (julianday('now') - julianday(pr.created_at)) * 24 >= p.duration_days * 24"
+            "            THEN 1 ELSE c.is_expired END AS is_expired,"
+            "       CASE WHEN pr.is_test=1"
+            "            THEN MAX(0, p.duration_days * 24 - CAST((julianday('now') - julianday(pr.created_at)) * 24 AS INTEGER))"
+            "            ELSE NULL END AS test_hours_left "
+            + base +
+            " ORDER BY pr.id DESC LIMIT ? OFFSET ?",
+            params + [per_page, page * per_page]
+        ).fetchall()
+        return rows, count
+
+
+def get_user_panel_configs_paged(user_id, page=0, per_page=10, search=None):
+    """Return paginated panel configs for a user with optional search."""
+    with get_conn() as conn:
+        base = """
+            FROM panel_configs pc
+            LEFT JOIN packages p ON pc.package_id = p.id
+            LEFT JOIN config_types t ON t.id = p.type_id
+            WHERE pc.user_id=?
+        """
+        params = [user_id]
+        if search:
+            base += " AND (pc.client_name LIKE ? OR pc.client_sub_url LIKE ? OR pc.client_config_text LIKE ?)"
+            s = f"%{search}%"
+            params += [s, s, s]
+        count = conn.execute("SELECT COUNT(*) AS n " + base, params).fetchone()["n"]
+        rows = conn.execute(
+            "SELECT pc.*, p.name AS package_name, p.volume_gb, p.duration_days,"
+            "       t.name AS type_name "
+            + base +
+            " ORDER BY pc.id DESC LIMIT ? OFFSET ?",
+            params + [per_page, page * per_page]
+        ).fetchall()
+        return rows, count
+
+
 def user_has_test_for_type(user_id, type_id):
     with get_conn() as conn:
         row = conn.execute(

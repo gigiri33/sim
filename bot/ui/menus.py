@@ -6,7 +6,7 @@ import urllib.parse
 from telebot import types
 
 from ..config import BRAND_TITLE, DEFAULT_ADMIN_HANDLE
-from ..db import setting_get, get_user, get_user_purchases, get_referral_stats, has_pending_rewards, get_pending_rewards_summary, get_user_panel_configs
+from ..db import setting_get, get_user, get_user_purchases, get_referral_stats, has_pending_rewards, get_pending_rewards_summary, get_user_panel_configs, get_user_purchases_paged, get_user_panel_configs_paged
 from ..helpers import esc, fmt_price, display_username, back_button, move_leading_emoji
 from ..bot_instance import bot
 from .helpers import send_or_edit

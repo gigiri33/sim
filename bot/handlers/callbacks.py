@@ -5671,7 +5671,6 @@ def _dispatch_callback(call, uid, data):
             if not pkgs:
                 bot.answer_callback_query(call.id, "پکیج سازگار یافت نشد.", show_alert=True); return
             from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-            from ..helpers import fmt_price, fmt_vol, fmt_dur
             kb = InlineKeyboardMarkup()
             for p in pkgs:
                 kb.add(InlineKeyboardButton(
