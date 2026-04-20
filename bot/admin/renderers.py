@@ -854,10 +854,8 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
             f"زمان خرید: <code>{purchase_time}</code>"
         )
         text = (
-            f"🔌 <b>جزئیات کانفیگ پنل</b>\n\n"
             f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(cfg.get('client_name') or '—')}</b>\n"
             f"{ce('🧩', '5463224921935082813')} نوع سرویس: <b>{esc(cfg.get('type_name') or '—')}</b>\n"
-            f"📌 نوع ثبت: {cpkg_delivery}\n"
             f"{ce('🔋', '5924538142198600679')} حجم: <b>{vol_text}</b>\n"
             f"{ce('⏰', '5343724178547691280')} مدت: <b>{dur_text}</b>"
             f"{config_line}"
@@ -869,25 +867,42 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
 
     if not is_user_view:
         kb.row(
-            InlineKeyboardButton("🔄 لینک ساب جدید",  callback_data=f"admin:pcfg:rsub:{config_id}"),
-            InlineKeyboardButton("🔑 UUID جدید",        callback_data=f"admin:pcfg:ruuid:{config_id}"),
+            InlineKeyboardButton("🔄 بازسازی لینک ساب",  callback_data=f"admin:pcfg:rsub:{config_id}"),
+            InlineKeyboardButton("🔄 بازسازی کانفیگ",     callback_data=f"admin:pcfg:ruuid:{config_id}"),
         )
         ar_label = "♻️ تمدید خودکار: ✅" if auto_renew else "♻️ تمدید خودکار: ❌"
         kb.row(
             InlineKeyboardButton(ar_label,              callback_data=f"admin:pcfg:autorenew:{config_id}"),
-            InlineKeyboardButton("💳 تمدید دستی",       callback_data=f"admin:pcfg:renew:{config_id}"),
+            InlineKeyboardButton("⚡ تمدید فوری",        callback_data=f"admin:pcfg:renew:{config_id}"),
         )
         toggle_label = "✅ فعال‌سازی کانفیگ" if not is_active else "⛔ غیرفعال موقت"
         kb.row(
             InlineKeyboardButton(toggle_label,           callback_data=f"admin:pcfg:toggle:{config_id}"),
             InlineKeyboardButton("🗑 حذف کانفیگ",        callback_data=f"admin:pcfg:del:{config_id}"),
         )
-        if has_config:
-            kb.add(InlineKeyboardButton("📷 QR کانفیگ",    callback_data=f"admin:pcfg:qrc:{config_id}"))
-        if has_sub:
-            kb.add(InlineKeyboardButton("📷 QR سابسکرایب", callback_data=f"admin:pcfg:qrs:{config_id}"))
         kb.add(InlineKeyboardButton("بازگشت", callback_data=back_data,
                                     icon_custom_emoji_id="5253997076169115797"))
+        # Send with QR photo attached
+        qr_source = cfg.get("client_config_text") or ""
+        if not qr_source and has_sub:
+            qr_source = cfg.get("client_sub_url") or ""
+        if qr_source:
+            try:
+                import qrcode as _qr
+                import io as _io
+                bio = _io.BytesIO()
+                _qr.make(qr_source).save(bio, format="PNG")
+                bio.seek(0)
+                bio.name = "qr.png"
+                chat_id = call.message.chat.id if hasattr(call, "message") else call.chat.id
+                try:
+                    bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+                except Exception:
+                    pass
+                bot.send_photo(chat_id, bio, caption=text, parse_mode="HTML", reply_markup=kb)
+                return
+            except Exception:
+                pass
         send_or_edit(call, text, kb)
     else:
         # User view: send QR inline if possible, then show buttons

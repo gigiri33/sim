@@ -5651,42 +5651,52 @@ def _dispatch_callback(call, uid, data):
             import uuid as _uuid
             new_uuid   = str(_uuid.uuid4())
             new_sub_id = new_uuid.replace("-", "")[:16]
-            new_config = _build_config_from_template(cpkg_d, new_uuid, cfg["client_name"] or "")
             new_sub    = _build_sub_from_template(cpkg_d, new_sub_id) if cpkg_d.get("sample_sub_url") else cfg["client_sub_url"]
-            # Disable old UUID on panel
-            send_or_edit(call, "\u23f3 \u062f\u0631 \u062d\u0627\u0644 \u0627\u0631\u062a\u0628\u0627\u0637 \u0628\u0627 \u067e\u0646\u0644\u2026")
+            send_or_edit(call, "⏳ در حال ارتباط با پنل…")
             from ..panels.client import PanelClient
             pc_api = PanelClient(
                 protocol=panel["protocol"], host=panel["host"], port=panel["port"],
                 path=panel["path"] or "", username=panel["username"], password=panel["password"]
             )
-            # Disable old UUID on panel (best-effort)
-            pc_api.disable_client(
-                inbound_id=cfg["inbound_id"], client_uuid=cfg["client_uuid"],
-                email=cfg["client_name"] or "",
-            )
-            # Create new client
+            # Get current client data from panel to preserve totalGB and expiryTime
             import time as _time
-            exp_ms = 0
-            if cfg.get("expire_at"):
-                try:
-                    exp_dt = datetime.strptime(str(cfg["expire_at"])[:19], "%Y-%m-%d %H:%M:%S")
-                    exp_ms = int(exp_dt.timestamp() * 1000)
-                except Exception:
-                    pass
+            exp_ms     = 0
+            traffic_gb = 0
+            ok_td, td = pc_api.get_client_traffics(cfg["client_name"] or "")
+            if ok_td and td:
+                exp_ms     = int(td.get("expiryTime") or 0)
+                total_b    = int(td.get("total") or 0)
+                traffic_gb = int(total_b / (1024 ** 3)) if total_b > 0 else 0
+            else:
+                # Fallback to DB expire_at
+                if cfg.get("expire_at"):
+                    try:
+                        exp_dt = datetime.strptime(str(cfg["expire_at"])[:19], "%Y-%m-%d %H:%M:%S")
+                        exp_ms = int(exp_dt.timestamp() * 1000)
+                    except Exception:
+                        pass
+            # Delete old client from panel
+            pc_api.delete_client(
+                inbound_id=cfg["inbound_id"], client_uuid=cfg["client_uuid"],
+            )
+            # Create new client with same traffic/expiry settings
             ok, res = pc_api.create_client(
                 inbound_id=cfg["inbound_id"], email=cfg["client_name"] or "",
-                traffic_bytes=0, expire_ms=exp_ms,
+                traffic_bytes=traffic_gb * (1024 ** 3), expire_ms=exp_ms,
             )
-            if ok:
-                actual_uuid, _ = res
-            else:
+            if not ok:
                 send_or_edit(call, f"❌ خطا در ساخت کلاینت جدید:\n<code>{esc(str(res))}</code>",
                              back_button(f"admin:pcfg:d:{config_id}")); return
-            actual_config = _build_config_from_template(cpkg_d, actual_uuid, cfg["client_name"] or "") or new_config
+            actual_uuid, actual_sub_id = res
+            # If we have a sub template, rebuild sub with new sub_id; otherwise keep old
+            if cpkg_d.get("sample_sub_url"):
+                actual_sub = _build_sub_from_template(cpkg_d, actual_sub_id) or new_sub
+            else:
+                actual_sub = cfg["client_sub_url"] or ""
+            actual_config = _build_config_from_template(cpkg_d, actual_uuid, cfg["client_name"] or "")
             # Update DB
             update_panel_config_field(config_id, "client_uuid", actual_uuid)
-            update_panel_config_texts(config_id, actual_config, new_sub or "")
+            update_panel_config_texts(config_id, actual_config or "", actual_sub)
             _show_panel_config_detail(call, config_id, back_data="admin:panel_configs")
             return
 

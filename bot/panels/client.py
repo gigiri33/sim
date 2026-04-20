@@ -267,100 +267,46 @@ class PanelClient:
         except RequestException as exc:
             return False, str(exc)
 
-    def disable_client(self, inbound_id: int, client_uuid: str,
-                       email: str, traffic_bytes: int = 0,
-                       expire_ms: int = 0) -> tuple:
+    def get_client_full(self, inbound_id: int, client_uuid: str) -> tuple:
         """
-        Disable (set enable=False) an existing client.
-        API: POST /panel/api/inbounds/updateClient/:clientId
-        Returns (True, None) or (False, error_str).
+        Get the full client object from the inbound's settings JSON.
+        This preserves all fields (flow, subId, totalGB, expiryTime, etc.)
+        Returns (True, client_dict) or (False, error_str).
         """
         import json as _json
-        settings_obj = {
-            "clients": [{
-                "id": client_uuid,
-                "email": email,
-                "enable": False,
-                "totalGB": traffic_bytes,
-                "expiryTime": expire_ms,
-            }]
-        }
-        payload = {
-            "id": inbound_id,
-            "settings": _json.dumps(settings_obj),
-        }
-        try:
-            resp = self._api_call(
-                "POST", f"{self.base_url}/panel/api/inbounds/updateClient/{client_uuid}",
-                json=payload,
-                timeout=LONG_TIMEOUT, verify=False,
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("success"):
-                    return True, None
-                return False, data.get("msg") or "غیرفعال‌سازی ناموفق"
-            return False, f"HTTP {resp.status_code}"
-        except RequestException as exc:
-            return False, str(exc)
+        ok, inbounds = self.get_inbounds()
+        if not ok:
+            return False, inbounds
+        for ib in inbounds:
+            if int(ib.get("id", -1)) == int(inbound_id):
+                try:
+                    settings = _json.loads(ib.get("settings", "{}"))
+                    for client in settings.get("clients", []):
+                        if client.get("id") == client_uuid:
+                            return True, client
+                except Exception as exc:
+                    return False, str(exc)
+                return False, "کلاینت در اینباند یافت نشد"
+        return False, "اینباند یافت نشد"
 
-    def enable_client(self, inbound_id: int, client_uuid: str,
-                      email: str, traffic_bytes: int = 0,
-                      expire_ms: int = 0) -> tuple:
+    def _update_client(self, inbound_id: int, client_uuid: str,
+                       overrides: dict) -> tuple:
         """
-        Enable (set enable=True) an existing client.
-        API: POST /panel/api/inbounds/updateClient/:clientId
+        Fetch the full current client object, apply overrides, then POST update.
+        This preserves all existing fields (flow, subId, totalGB, expiryTime…).
         Returns (True, None) or (False, error_str).
         """
         import json as _json
-        settings_obj = {
-            "clients": [{
-                "id": client_uuid,
-                "email": email,
-                "enable": True,
-                "totalGB": traffic_bytes,
-                "expiryTime": expire_ms,
-            }]
-        }
-        payload = {
-            "id": inbound_id,
-            "settings": _json.dumps(settings_obj),
-        }
-        try:
-            resp = self._api_call(
-                "POST", f"{self.base_url}/panel/api/inbounds/updateClient/{client_uuid}",
-                json=payload,
-                timeout=LONG_TIMEOUT, verify=False,
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("success"):
-                    return True, None
-                return False, data.get("msg") or "فعال‌سازی ناموفق"
-            return False, f"HTTP {resp.status_code}"
-        except RequestException as exc:
-            return False, str(exc)
-
-    def update_client_sub(self, inbound_id: int, client_uuid: str,
-                          email: str, new_sub_id: str,
-                          traffic_bytes: int = 0, expire_ms: int = 0,
-                          enable: bool = True) -> tuple:
-        """
-        Update client settings including a new sub_id (subscription token).
-        API: POST /panel/api/inbounds/updateClient/:clientId
-        Returns (True, None) or (False, error_str).
-        """
-        import json as _json
-        settings_obj = {
-            "clients": [{
-                "id": client_uuid,
-                "email": email,
-                "enable": enable,
-                "totalGB": traffic_bytes,
-                "expiryTime": expire_ms,
-                "subId": new_sub_id,
-            }]
-        }
+        ok, current = self.get_client_full(inbound_id, client_uuid)
+        if ok and current:
+            client_obj = dict(current)
+        else:
+            # Fallback: build minimal object from what we know
+            client_obj = {"id": client_uuid}
+        client_obj.update(overrides)
+        # Ensure id is always set
+        client_obj["id"] = client_uuid
+        settings_obj = {"clients": [client_obj]}
         payload = {
             "id": inbound_id,
             "settings": _json.dumps(settings_obj),
@@ -379,6 +325,34 @@ class PanelClient:
             return False, f"HTTP {resp.status_code}"
         except RequestException as exc:
             return False, str(exc)
+
+    def disable_client(self, inbound_id: int, client_uuid: str,
+                       email: str = "", traffic_bytes: int = 0,
+                       expire_ms: int = 0) -> tuple:
+        """
+        Disable (set enable=False) an existing client while preserving all other fields.
+        Returns (True, None) or (False, error_str).
+        """
+        return self._update_client(inbound_id, client_uuid, {"enable": False})
+
+    def enable_client(self, inbound_id: int, client_uuid: str,
+                      email: str = "", traffic_bytes: int = 0,
+                      expire_ms: int = 0) -> tuple:
+        """
+        Enable (set enable=True) an existing client while preserving all other fields.
+        Returns (True, None) or (False, error_str).
+        """
+        return self._update_client(inbound_id, client_uuid, {"enable": True})
+
+    def update_client_sub(self, inbound_id: int, client_uuid: str,
+                          email: str, new_sub_id: str,
+                          traffic_bytes: int = 0, expire_ms: int = 0,
+                          enable: bool = True) -> tuple:
+        """
+        Update only the subId of an existing client while preserving all other fields.
+        Returns (True, None) or (False, error_str).
+        """
+        return self._update_client(inbound_id, client_uuid, {"subId": new_sub_id})
 
     def delete_client(self, inbound_id: int, client_uuid: str) -> tuple:
         """
