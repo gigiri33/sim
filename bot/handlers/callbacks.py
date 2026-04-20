@@ -5446,7 +5446,7 @@ def _dispatch_callback(call, uid, data):
         )
         from ..db import (
             get_panel_config, get_panel_config_full, get_panel,
-            get_panel_client_package, get_packages,
+            get_panel_client_package,
             update_panel_config_field, update_panel_config_texts,
             delete_panel_config,
         )
