@@ -578,6 +578,9 @@ def _run_init_db_migrations():
             "ALTER TABLE panel_client_packages ADD COLUMN sample_client_name TEXT NOT NULL DEFAULT ''",
             # ── Panel configs: track which template (cpkg) was used ───────────
             "ALTER TABLE panel_configs ADD COLUMN cpkg_id INTEGER",
+            # ── Panel configs: auto-renew and temporary-disable flags ─────────
+            "ALTER TABLE panel_configs ADD COLUMN auto_renew   INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE panel_configs ADD COLUMN is_disabled  INTEGER NOT NULL DEFAULT 0",
         ]
         for sql in migrations:
             try:
@@ -2283,20 +2286,44 @@ def update_panel_config_texts(config_id, config_text, sub_url):
         )
 
 
-def get_panel_configs(search=None, only_expired=False, page=0, per_page=20):
+def get_panel_configs(search=None, only_expired=False, filter_type=None,
+                      package_id=None, page=0, per_page=10):
+    """
+    filter_type: 'all' | 'expiring' | 'expired'  (overrides only_expired)
+    package_id : restrict to a specific package (None = all packages)
+    """
+    if filter_type is None:
+        filter_type = "expired" if only_expired else "all"
     base = (
-        "SELECT pc.*, u.full_name, u.username, p.name AS package_name "
+        "SELECT pc.*, u.full_name, u.username, "
+        "p.name AS package_name, p.volume_gb, p.duration_days, p.price, p.type_id, "
+        "t.name AS type_name "
         "FROM panel_configs pc "
         "LEFT JOIN users u ON pc.user_id=u.user_id "
-        "LEFT JOIN packages p ON pc.package_id=p.id"
+        "LEFT JOIN packages p ON pc.package_id=p.id "
+        "LEFT JOIN config_types t ON t.id=p.type_id"
     )
     wheres, params = [], []
-    if only_expired:
+    if filter_type == "expired":
         wheres.append("pc.is_expired=1")
+    elif filter_type == "expiring":
+        wheres.append("pc.is_expired=0")
+        wheres.append("pc.expire_at IS NOT NULL")
+        wheres.append("pc.expire_at > datetime('now')")
+        wheres.append(
+            "(julianday(pc.expire_at) - julianday('now')) < "
+            "0.2 * CAST(CASE WHEN p.duration_days > 0 THEN p.duration_days ELSE 9999 END AS REAL)"
+        )
+    if package_id is not None:
+        wheres.append("pc.package_id=?")
+        params.append(package_id)
     if search:
         s = f"%{search}%"
-        wheres.append("(CAST(pc.user_id AS TEXT) LIKE ? OR pc.client_name LIKE ? OR p.name LIKE ?)")
-        params += [s, s, s]
+        wheres.append(
+            "(CAST(pc.user_id AS TEXT) LIKE ? OR pc.client_name LIKE ? "
+            "OR p.name LIKE ? OR pc.client_config_text LIKE ? OR pc.client_sub_url LIKE ?)"
+        )
+        params += [s, s, s, s, s]
     sql = base
     if wheres:
         sql += " WHERE " + " AND ".join(wheres)
@@ -2306,24 +2333,98 @@ def get_panel_configs(search=None, only_expired=False, page=0, per_page=20):
         return conn.execute(sql, params).fetchall()
 
 
-def get_panel_configs_count(search=None, only_expired=False):
+def get_panel_configs_count(search=None, only_expired=False, filter_type=None, package_id=None):
+    """
+    filter_type: 'all' | 'expiring' | 'expired'  (overrides only_expired)
+    package_id : restrict to a specific package (None = all packages)
+    """
+    if filter_type is None:
+        filter_type = "expired" if only_expired else "all"
     base = (
         "SELECT COUNT(*) AS n FROM panel_configs pc "
         "LEFT JOIN packages p ON pc.package_id=p.id"
     )
     wheres, params = [], []
-    if only_expired:
+    if filter_type == "expired":
         wheres.append("pc.is_expired=1")
+    elif filter_type == "expiring":
+        wheres.append("pc.is_expired=0")
+        wheres.append("pc.expire_at IS NOT NULL")
+        wheres.append("pc.expire_at > datetime('now')")
+        wheres.append(
+            "(julianday(pc.expire_at) - julianday('now')) < "
+            "0.2 * CAST(CASE WHEN p.duration_days > 0 THEN p.duration_days ELSE 9999 END AS REAL)"
+        )
+    if package_id is not None:
+        wheres.append("pc.package_id=?")
+        params.append(package_id)
     if search:
         s = f"%{search}%"
-        wheres.append("(CAST(pc.user_id AS TEXT) LIKE ? OR pc.client_name LIKE ? OR p.name LIKE ?)")
-        params += [s, s, s]
+        wheres.append(
+            "(CAST(pc.user_id AS TEXT) LIKE ? OR pc.client_name LIKE ? "
+            "OR p.name LIKE ? OR pc.client_config_text LIKE ? OR pc.client_sub_url LIKE ?)"
+        )
+        params += [s, s, s, s, s]
     sql = base
     if wheres:
         sql += " WHERE " + " AND ".join(wheres)
     with get_conn() as conn:
         row = conn.execute(sql, params).fetchone()
         return row["n"] if row else 0
+
+
+def get_panel_config_full(config_id):
+    """Return one panel config joined with user, package, and type info."""
+    with get_conn() as conn:
+        return conn.execute(
+            """
+            SELECT pc.*, u.full_name, u.username,
+                   p.name AS package_name, p.volume_gb, p.duration_days, p.price, p.type_id,
+                   t.name AS type_name
+            FROM panel_configs pc
+            LEFT JOIN users u ON pc.user_id = u.user_id
+            LEFT JOIN packages p ON pc.package_id = p.id
+            LEFT JOIN config_types t ON t.id = p.type_id
+            WHERE pc.id = ?
+            """,
+            (config_id,)
+        ).fetchone()
+
+
+def get_user_panel_configs(user_id):
+    """Return all panel configs for a user, joined with package and type info."""
+    with get_conn() as conn:
+        return conn.execute(
+            """
+            SELECT pc.*, p.name AS package_name, p.volume_gb, p.duration_days,
+                   t.name AS type_name
+            FROM panel_configs pc
+            LEFT JOIN packages p ON pc.package_id = p.id
+            LEFT JOIN config_types t ON t.id = p.type_id
+            WHERE pc.user_id = ?
+            ORDER BY pc.id DESC
+            """,
+            (user_id,)
+        ).fetchall()
+
+
+def update_panel_config_field(config_id, field, value):
+    """Update a single allowed field in panel_configs."""
+    _ALLOWED = {
+        "client_uuid", "client_sub_url", "client_config_text",
+        "expire_at", "is_expired", "auto_renew", "is_disabled",
+        "client_name", "package_id",
+    }
+    if field not in _ALLOWED:
+        raise ValueError(f"update_panel_config_field: field {field!r} not allowed")
+    with get_conn() as conn:
+        conn.execute(f"UPDATE panel_configs SET {field}=? WHERE id=?", (value, config_id))
+
+
+def delete_panel_config(config_id):
+    """Permanently delete a panel config record."""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM panel_configs WHERE id=?", (config_id,))
 
 
 def get_unexpired_panel_configs():

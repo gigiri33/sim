@@ -266,6 +266,130 @@ class PanelClient:
         except RequestException as exc:
             return False, str(exc)
 
+    def enable_client(self, inbound_id: int, client_uuid: str,
+                      email: str, traffic_bytes: int = 0,
+                      expire_ms: int = 0) -> tuple:
+        """
+        Enable (set enable=True) an existing client.
+        API: POST /panel/api/inbounds/updateClient/:clientId
+        Returns (True, None) or (False, error_str).
+        """
+        import json as _json
+        settings_obj = {
+            "clients": [{
+                "id": client_uuid,
+                "email": email,
+                "enable": True,
+                "totalGB": traffic_bytes,
+                "expiryTime": expire_ms,
+            }]
+        }
+        payload = {
+            "id": inbound_id,
+            "settings": _json.dumps(settings_obj),
+        }
+        try:
+            resp = self._session.post(
+                f"{self.base_url}/panel/api/inbounds/updateClient/{client_uuid}",
+                json=payload,
+                timeout=LONG_TIMEOUT, verify=False,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("success"):
+                    return True, None
+                return False, data.get("msg") or "فعال‌سازی ناموفق"
+            return False, f"HTTP {resp.status_code}"
+        except Timeout:
+            return False, "اتصال منقضی شد"
+        except RequestException as exc:
+            return False, str(exc)
+
+    def update_client_sub(self, inbound_id: int, client_uuid: str,
+                          email: str, new_sub_id: str,
+                          traffic_bytes: int = 0, expire_ms: int = 0,
+                          enable: bool = True) -> tuple:
+        """
+        Update client settings including a new sub_id (subscription token).
+        API: POST /panel/api/inbounds/updateClient/:clientId
+        Returns (True, None) or (False, error_str).
+        """
+        import json as _json
+        settings_obj = {
+            "clients": [{
+                "id": client_uuid,
+                "email": email,
+                "enable": enable,
+                "totalGB": traffic_bytes,
+                "expiryTime": expire_ms,
+                "subId": new_sub_id,
+            }]
+        }
+        payload = {
+            "id": inbound_id,
+            "settings": _json.dumps(settings_obj),
+        }
+        try:
+            resp = self._session.post(
+                f"{self.base_url}/panel/api/inbounds/updateClient/{client_uuid}",
+                json=payload,
+                timeout=LONG_TIMEOUT, verify=False,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("success"):
+                    return True, None
+                return False, data.get("msg") or "بروزرسانی ناموفق"
+            return False, f"HTTP {resp.status_code}"
+        except Timeout:
+            return False, "اتصال منقضی شد"
+        except RequestException as exc:
+            return False, str(exc)
+
+    def delete_client(self, inbound_id: int, client_uuid: str) -> tuple:
+        """
+        Delete a client from an inbound.
+        API: POST /panel/api/inbounds/{inbound_id}/delClient/{client_uuid}
+        Returns (True, None) or (False, error_str).
+        """
+        try:
+            resp = self._session.post(
+                f"{self.base_url}/panel/api/inbounds/{inbound_id}/delClient/{client_uuid}",
+                timeout=LONG_TIMEOUT, verify=False,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("success"):
+                    return True, None
+                return False, data.get("msg") or "حذف کلاینت ناموفق"
+            return False, f"HTTP {resp.status_code}"
+        except Timeout:
+            return False, "اتصال منقضی شد"
+        except RequestException as exc:
+            return False, str(exc)
+
+    def reset_client_traffic(self, inbound_id: int, email: str) -> tuple:
+        """
+        Reset a client's traffic counter.
+        API: POST /panel/api/inbounds/{inbound_id}/resetClientTraffic/{email}
+        Returns (True, None) or (False, error_str).
+        """
+        try:
+            resp = self._session.post(
+                f"{self.base_url}/panel/api/inbounds/{inbound_id}/resetClientTraffic/{email}",
+                timeout=LONG_TIMEOUT, verify=False,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("success"):
+                    return True, None
+                return False, data.get("msg") or "ریست ترافیک ناموفق"
+            return False, f"HTTP {resp.status_code}"
+        except Timeout:
+            return False, "اتصال منقضی شد"
+        except RequestException as exc:
+            return False, str(exc)
+
     def get_sub_url(self, client_uuid: str) -> str:
         """Return the subscription URL for this client.
         Uses subId (first 16 chars of UUID without dashes) as per 3x-ui spec.

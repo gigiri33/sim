@@ -1333,9 +1333,8 @@ def universal_handler(message):
         if sn == "admin_pcfg_search" and is_admin(uid):
             search_text = (message.text or "").strip()
             state_clear(uid)
-            from ..admin.renderers import _show_panel_configs
-            from ..ui.helpers import send_or_edit as _soe
-            _show_panel_configs(message, search=search_text if search_text else None)
+            from ..admin.renderers import _show_panel_config_list
+            _show_panel_config_list(message, filter_type="all", search=search_text if search_text else None)
             return
 
         # ── Admin: Client Package — sample config step ────────────────────────

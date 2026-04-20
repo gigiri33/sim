@@ -6,7 +6,7 @@ import urllib.parse
 from telebot import types
 
 from ..config import BRAND_TITLE, DEFAULT_ADMIN_HANDLE
-from ..db import setting_get, get_user, get_user_purchases, get_referral_stats, has_pending_rewards, get_pending_rewards_summary
+from ..db import setting_get, get_user, get_user_purchases, get_referral_stats, has_pending_rewards, get_pending_rewards_summary, get_user_panel_configs
 from ..helpers import esc, fmt_price, display_username, back_button, move_leading_emoji
 from ..bot_instance import bot
 from .helpers import send_or_edit
@@ -122,8 +122,9 @@ def show_support(target):
 
 
 def show_my_configs(target, user_id):
-    items = get_user_purchases(user_id)
-    if not items:
+    items       = get_user_purchases(user_id)
+    panel_items = get_user_panel_configs(user_id) or []
+    if not items and not panel_items:
         send_or_edit(target, f"{ce('📭', '5258134813302332906')} هنوز کانفیگی برای حساب شما ثبت نشده است.", back_button("main"))
         return
     renewal_enabled = setting_get("manual_renewal_enabled", "1") == "1"
@@ -147,6 +148,16 @@ def show_my_configs(target, user_id):
         if renewal_enabled and not item["is_test"]:
             row.append(types.InlineKeyboardButton("♻️ تمدید", callback_data=f"renew:{item['id']}"))
         kb.add(*row)
+    # Panel configs
+    for pc in panel_items:
+        if pc["is_expired"]:
+            marker = " ⌛"
+        elif int(pc.get("is_disabled") or 0):
+            marker = " ⛔"
+        else:
+            marker = " 🟢"
+        name = esc(pc["client_name"] or pc.get("package_name") or "—")
+        kb.add(types.InlineKeyboardButton(f"🔌 {name}{marker}", callback_data=f"mypnlcfg:d:{pc['id']}"))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
     send_or_edit(target, f"{ce('📦', '5332618260703624145')} <b>کانفیگ‌های من</b>\n\nیکی از سرویس‌ها را انتخاب کنید:", kb)
 

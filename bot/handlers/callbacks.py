@@ -5440,29 +5440,349 @@ def _dispatch_callback(call, uid, data):
         if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
             bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
             return
-        from ..admin.renderers import _show_panel_configs
+        from ..admin.renderers import (
+            _show_panel_configs, _show_panel_config_list,
+            _show_panel_config_pkg, _show_panel_config_detail,
+        )
+        from ..db import (
+            get_panel_config, get_panel_config_full, get_panel,
+            get_panel_client_package, get_packages,
+            update_panel_config_field, update_panel_config_texts,
+            delete_panel_config,
+        )
         bot.answer_callback_query(call.id)
 
         if data == "admin:pcfg:search":
             state_set(uid, "admin_pcfg_search")
-            send_or_edit(call, "🔍 عبارت جستجو را وارد کنید:\n(آیدی کاربر، نام کلاینت، یا نام پکیج)",
-                         back_button("admin:panel_configs"))
+            send_or_edit(call,
+                "🔍 عبارت جستجو را وارد کنید:\n"
+                "(نام کلاینت، نام پکیج، لینک کانفیگ یا لینک ساب)",
+                back_button("admin:panel_configs"))
             return
 
+        # admin:pcfg:fl:{filter_type}:{page}[:{package_id}]
+        if data.startswith("admin:pcfg:fl:"):
+            parts      = data.split(":")
+            flt        = parts[3]
+            page       = int(parts[4]) if len(parts) > 4 else 0
+            pkg_id     = int(parts[5]) if len(parts) > 5 else None
+            _show_panel_config_list(call, filter_type=flt, package_id=pkg_id, page=page)
+            return
+
+        # admin:pcfg:pkg:{package_id}
+        if data.startswith("admin:pcfg:pkg:"):
+            package_id = int(data.split(":")[-1])
+            _show_panel_config_pkg(call, package_id)
+            return
+
+        # admin:pcfg:d:{config_id}  — detail view
+        if data.startswith("admin:pcfg:d:"):
+            config_id = int(data.split(":")[-1])
+            _show_panel_config_detail(call, config_id, back_data="admin:panel_configs")
+            return
+
+        # admin:pcfg:qrc:{config_id}  — QR for config
+        if data.startswith("admin:pcfg:qrc:"):
+            config_id = int(data.split(":")[-1])
+            cfg = get_panel_config(config_id)
+            if cfg and cfg["client_config_text"]:
+                try:
+                    import qrcode as _qrcode
+                    from io import BytesIO
+                    qr_img = _qrcode.make(cfg["client_config_text"])
+                    bio = BytesIO(); qr_img.save(bio, format="PNG"); bio.seek(0)
+                    bio.name = "qr_config.png"
+                    bot.send_photo(uid, bio, caption="📷 QR کانفیگ")
+                except Exception as e:
+                    bot.send_message(uid, f"خطا در QR: {e}")
+            else:
+                bot.answer_callback_query(call.id, "کانفیگ موجود نیست.", show_alert=True)
+            return
+
+        # admin:pcfg:qrs:{config_id}  — QR for subscription
+        if data.startswith("admin:pcfg:qrs:"):
+            config_id = int(data.split(":")[-1])
+            cfg = get_panel_config(config_id)
+            if cfg and cfg["client_sub_url"]:
+                try:
+                    import qrcode as _qrcode
+                    from io import BytesIO
+                    qr_img = _qrcode.make(cfg["client_sub_url"])
+                    bio = BytesIO(); qr_img.save(bio, format="PNG"); bio.seek(0)
+                    bio.name = "qr_sub.png"
+                    bot.send_photo(uid, bio, caption="📷 QR سابسکرایب")
+                except Exception as e:
+                    bot.send_message(uid, f"خطا در QR: {e}")
+            else:
+                bot.answer_callback_query(call.id, "لینک ساب موجود نیست.", show_alert=True)
+            return
+
+        # admin:pcfg:autorenew:{config_id}  — toggle auto-renew
+        if data.startswith("admin:pcfg:autorenew:"):
+            config_id = int(data.split(":")[-1])
+            cfg = get_panel_config(config_id)
+            if not cfg:
+                bot.answer_callback_query(call.id, "کانفیگ یافت نشد.", show_alert=True); return
+            new_val = 0 if int(cfg["auto_renew"] or 0) else 1
+            update_panel_config_field(config_id, "auto_renew", new_val)
+            label = "فعال" if new_val else "غیرفعال"
+            bot.answer_callback_query(call.id, f"تمدید خودکار {label} شد.")
+            _show_panel_config_detail(call, config_id, back_data="admin:panel_configs")
+            return
+
+        # admin:pcfg:toggle:{config_id}  — enable/disable on panel
+        if data.startswith("admin:pcfg:toggle:"):
+            config_id = int(data.split(":")[-1])
+            cfg = get_panel_config(config_id)
+            if not cfg:
+                bot.answer_callback_query(call.id, "کانفیگ یافت نشد.", show_alert=True); return
+            panel = get_panel(cfg["panel_id"])
+            if not panel:
+                bot.answer_callback_query(call.id, "پنل یافت نشد.", show_alert=True); return
+            from ..panels.client import PanelClient
+            pc_api = PanelClient(
+                protocol=panel["protocol"], host=panel["host"], port=panel["port"],
+                path=panel["path"] or "", username=panel["username"], password=panel["password"]
+            )
+            cur_disabled = int(cfg.get("is_disabled") or 0)
+            if cur_disabled:
+                # re-enable
+                ok, err = pc_api.enable_client(
+                    inbound_id=cfg["inbound_id"], client_uuid=cfg["client_uuid"],
+                    email=cfg["client_name"] or "", traffic_bytes=0, expire_ms=0,
+                )
+                if ok:
+                    update_panel_config_field(config_id, "is_disabled", 0)
+                    bot.answer_callback_query(call.id, "✅ کانفیگ فعال شد.")
+                else:
+                    bot.answer_callback_query(call.id, f"خطا: {err}", show_alert=True); return
+            else:
+                ok, err = pc_api.disable_client(
+                    inbound_id=cfg["inbound_id"], client_uuid=cfg["client_uuid"],
+                    email=cfg["client_name"] or "", traffic_bytes=0, expire_ms=0,
+                )
+                if ok:
+                    update_panel_config_field(config_id, "is_disabled", 1)
+                    bot.answer_callback_query(call.id, "⛔ کانفیگ غیرفعال شد.")
+                else:
+                    bot.answer_callback_query(call.id, f"خطا: {err}", show_alert=True); return
+            _show_panel_config_detail(call, config_id, back_data="admin:panel_configs")
+            return
+
+        # admin:pcfg:rsub:{config_id}  — regenerate subscription link
+        if data.startswith("admin:pcfg:rsub:"):
+            config_id = int(data.split(":")[-1])
+            cfg = get_panel_config(config_id)
+            if not cfg:
+                bot.answer_callback_query(call.id, "کانفیگ یافت نشد.", show_alert=True); return
+            panel = get_panel(cfg["panel_id"])
+            cpkg = get_panel_client_package(cfg["cpkg_id"]) if cfg.get("cpkg_id") else None
+            if not cpkg or not cfg.get("client_uuid"):
+                bot.answer_callback_query(call.id, "اطلاعات قالب کانفیگ ناقص است.", show_alert=True); return
+            import uuid as _uuid
+            new_sub_id = str(_uuid.uuid4()).replace("-", "")[:16]
+            cpkg_d = dict(cpkg)
+            new_sub_url = _build_sub_from_template(cpkg_d, new_sub_id) if cpkg_d.get("sample_sub_url") else None
+            if not new_sub_url:
+                bot.answer_callback_query(call.id, "قالب ساب در cpkg تنظیم نشده.", show_alert=True); return
+            # Update panel
+            if panel:
+                from ..panels.client import PanelClient
+                pc_api = PanelClient(
+                    protocol=panel["protocol"], host=panel["host"], port=panel["port"],
+                    path=panel["path"] or "", username=panel["username"], password=panel["password"]
+                )
+                pc_api.update_client_sub(
+                    inbound_id=cfg["inbound_id"], client_uuid=cfg["client_uuid"],
+                    email=cfg["client_name"] or "", new_sub_id=new_sub_id,
+                )
+            # Save to DB
+            update_panel_config_texts(config_id, cfg["client_config_text"], new_sub_url)
+            bot.answer_callback_query(call.id, "✅ لینک ساب جدید ساخته شد.")
+            _show_panel_config_detail(call, config_id, back_data="admin:panel_configs")
+            return
+
+        # admin:pcfg:ruuid:{config_id}  — regenerate UUID / config
+        if data.startswith("admin:pcfg:ruuid:"):
+            config_id = int(data.split(":")[-1])
+            cfg = get_panel_config(config_id)
+            if not cfg:
+                bot.answer_callback_query(call.id, "کانفیگ یافت نشد.", show_alert=True); return
+            panel = get_panel(cfg["panel_id"])
+            cpkg = get_panel_client_package(cfg["cpkg_id"]) if cfg.get("cpkg_id") else None
+            if not cpkg or not panel:
+                bot.answer_callback_query(call.id, "اطلاعات قالب یا پنل ناقص.", show_alert=True); return
+            cpkg_d = dict(cpkg)
+            import uuid as _uuid
+            new_uuid   = str(_uuid.uuid4())
+            new_sub_id = new_uuid.replace("-", "")[:16]
+            new_config = _build_config_from_template(cpkg_d, new_uuid, cfg["client_name"] or "")
+            new_sub    = _build_sub_from_template(cpkg_d, new_sub_id) if cpkg_d.get("sample_sub_url") else cfg["client_sub_url"]
+            # Disable old UUID on panel
+            from ..panels.client import PanelClient
+            pc_api = PanelClient(
+                protocol=panel["protocol"], host=panel["host"], port=panel["port"],
+                path=panel["path"] or "", username=panel["username"], password=panel["password"]
+            )
+            pc_api.disable_client(
+                inbound_id=cfg["inbound_id"], client_uuid=cfg["client_uuid"],
+                email=cfg["client_name"] or "",
+            )
+            # Create new client
+            import time as _time
+            exp_ms = 0
+            if cfg.get("expire_at"):
+                try:
+                    from datetime import datetime
+                    exp_dt = datetime.strptime(str(cfg["expire_at"])[:19], "%Y-%m-%d %H:%M:%S")
+                    exp_ms = int(exp_dt.timestamp() * 1000)
+                except Exception:
+                    pass
+            ok, res = pc_api.create_client(
+                inbound_id=cfg["inbound_id"], email=cfg["client_name"] or "",
+                traffic_bytes=0, expire_ms=exp_ms,
+            )
+            if ok:
+                actual_uuid, _ = res
+            else:
+                actual_uuid = new_uuid  # fallback if panel refuses
+            actual_config = _build_config_from_template(cpkg_d, actual_uuid, cfg["client_name"] or "") or new_config
+            # Update DB
+            update_panel_config_field(config_id, "client_uuid", actual_uuid)
+            update_panel_config_texts(config_id, actual_config, new_sub or "")
+            bot.answer_callback_query(call.id, "✅ UUID و کانفیگ جدید ساخته شد.")
+            _show_panel_config_detail(call, config_id, back_data="admin:panel_configs")
+            return
+
+        # admin:pcfg:renew:{config_id}  — manual renew: show package list
+        if data.startswith("admin:pcfg:renew:") and not data.startswith("admin:pcfg:renewok:"):
+            config_id = int(data.split(":")[-1])
+            cfg = get_panel_config_full(config_id)
+            if not cfg:
+                bot.answer_callback_query(call.id, "کانفیگ یافت نشد.", show_alert=True); return
+            cfg = dict(cfg)
+            type_id = cfg.get("type_id")
+            pkgs = [p for p in (get_packages(type_id=type_id, include_inactive=False) or []) if p["active"]]
+            if not pkgs:
+                bot.answer_callback_query(call.id, "پکیج سازگار یافت نشد.", show_alert=True); return
+            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+            from ..helpers import fmt_price, fmt_vol, fmt_dur
+            kb = InlineKeyboardMarkup()
+            for p in pkgs:
+                kb.add(InlineKeyboardButton(
+                    f"📦 {esc(p['name'])} | {fmt_vol(p['volume_gb'])} | {fmt_dur(p['duration_days'])} | {fmt_price(p['price'])}ت",
+                    callback_data=f"admin:pcfg:renewok:{config_id}:{p['id']}"
+                ))
+            kb.add(InlineKeyboardButton("لغو", callback_data=f"admin:pcfg:d:{config_id}",
+                                        icon_custom_emoji_id="5253997076169115797"))
+            send_or_edit(call, f"📦 پکیج مورد نظر برای تمدید را انتخاب کنید:", kb)
+            return
+
+        # admin:pcfg:renewok:{config_id}:{package_id}
+        if data.startswith("admin:pcfg:renewok:"):
+            parts     = data.split(":")
+            config_id = int(parts[3])
+            pkg_id    = int(parts[4])
+            cfg = get_panel_config(config_id)
+            if not cfg:
+                bot.answer_callback_query(call.id, "کانفیگ یافت نشد.", show_alert=True); return
+            from ..db import get_package
+            pkg = get_package(pkg_id)
+            if not pkg:
+                bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True); return
+            panel = get_panel(cfg["panel_id"])
+            if not panel:
+                bot.answer_callback_query(call.id, "پنل یافت نشد.", show_alert=True); return
+            from ..panels.client import PanelClient
+            pc_api = PanelClient(
+                protocol=panel["protocol"], host=panel["host"], port=panel["port"],
+                path=panel["path"] or "", username=panel["username"], password=panel["password"]
+            )
+            # Reset traffic
+            pc_api.reset_client_traffic(cfg["inbound_id"], cfg["client_name"] or "")
+            # Calculate new expiry
+            from datetime import datetime, timedelta
+            dur_days = int(pkg["duration_days"] or 0)
+            if dur_days:
+                new_exp_dt = datetime.utcnow() + timedelta(days=dur_days)
+                new_exp_str = new_exp_dt.strftime("%Y-%m-%d %H:%M:%S")
+                new_exp_ms  = int(new_exp_dt.timestamp() * 1000)
+            else:
+                new_exp_str = None
+                new_exp_ms  = 0
+            # Update on panel: set new expiryTime + re-enable
+            pc_api.enable_client(
+                inbound_id=cfg["inbound_id"], client_uuid=cfg["client_uuid"],
+                email=cfg["client_name"] or "",
+                traffic_bytes=int((pkg["volume_gb"] or 0) * 1073741824),
+                expire_ms=new_exp_ms,
+            )
+            # Update DB
+            update_panel_config_field(config_id, "expire_at",  new_exp_str)
+            update_panel_config_field(config_id, "is_expired",  0)
+            update_panel_config_field(config_id, "is_disabled", 0)
+            update_panel_config_field(config_id, "package_id",  pkg_id)
+            bot.answer_callback_query(call.id, "✅ تمدید انجام شد.")
+            _show_panel_config_detail(call, config_id, back_data="admin:panel_configs")
+            return
+
+        # admin:pcfg:del:{config_id}  — confirm deletion
+        if data.startswith("admin:pcfg:del:") and not data.startswith("admin:pcfg:delok:"):
+            config_id = int(data.split(":")[-1])
+            cfg = get_panel_config(config_id)
+            if not cfg:
+                bot.answer_callback_query(call.id, "کانفیگ یافت نشد.", show_alert=True); return
+            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+            kb = InlineKeyboardMarkup()
+            kb.row(
+                InlineKeyboardButton("✅ بله، حذف کن",  callback_data=f"admin:pcfg:delok:{config_id}"),
+                InlineKeyboardButton("❌ لغو",           callback_data=f"admin:pcfg:d:{config_id}"),
+            )
+            send_or_edit(call,
+                "⚠️ <b>تأیید حذف کانفیگ</b>\n\n"
+                "این کانفیگ به صورت <b>دائمی</b> حذف می‌شود.\n"
+                "سرویس قابل تمدید نخواهد بود و هیچ مبلغی برگشت داده نمی‌شود.\n\n"
+                "آیا مطمئن هستید؟", kb)
+            return
+
+        # admin:pcfg:delok:{config_id}
+        if data.startswith("admin:pcfg:delok:"):
+            config_id = int(data.split(":")[-1])
+            cfg = get_panel_config(config_id)
+            if not cfg:
+                bot.answer_callback_query(call.id, "کانفیگ یافت نشد.", show_alert=True); return
+            # Delete from panel
+            panel = get_panel(cfg["panel_id"])
+            if panel and cfg.get("client_uuid"):
+                try:
+                    from ..panels.client import PanelClient
+                    pc_api = PanelClient(
+                        protocol=panel["protocol"], host=panel["host"], port=panel["port"],
+                        path=panel["path"] or "", username=panel["username"], password=panel["password"]
+                    )
+                    pc_api.delete_client(cfg["inbound_id"], cfg["client_uuid"])
+                except Exception:
+                    pass
+            # Delete from DB
+            delete_panel_config(config_id)
+            bot.answer_callback_query(call.id, "✅ کانفیگ حذف شد.")
+            _show_panel_configs(call)
+            return
+
+        # Legacy compat: admin:pcfg:f:* (old filter pattern)
         if data.startswith("admin:pcfg:f:"):
-            parts  = data.split(":")
-            flt    = parts[3]   # all | expired
-            page   = int(parts[4]) if len(parts) > 4 else 0
-            only_expired = (flt == "expired")
-            _show_panel_configs(call, page=page, only_expired=only_expired)
+            parts = data.split(":")
+            flt   = parts[3]
+            page  = int(parts[4]) if len(parts) > 4 else 0
+            _show_panel_config_list(call, filter_type=flt, page=page)
             return
 
+        # Legacy compat: admin:pcfg:pg:* (old pagination)
         if data.startswith("admin:pcfg:pg:"):
-            parts  = data.split(":")
-            page   = int(parts[3])
-            flt    = parts[4] if len(parts) > 4 else "all"
-            only_expired = (flt == "expired")
-            _show_panel_configs(call, page=page, only_expired=only_expired)
+            parts = data.split(":")
+            page  = int(parts[3])
+            flt   = parts[4] if len(parts) > 4 else "all"
+            _show_panel_config_list(call, filter_type=flt, page=page)
             return
 
         if data == "admin:pcfg:noop":
@@ -5470,9 +5790,114 @@ def _dispatch_callback(call, uid, data):
 
         return
 
-    # ── Admin: Add Config ─────────────────────────────────────────────────────
-    if data == "admin:add_config":
-        types_list = get_all_types()
+    # ── User: My Panel Configs ─────────────────────────────────────────────────
+    if data.startswith("mypnlcfg:"):
+        from ..db import (
+            get_panel_config, get_panel, update_panel_config_field,
+            update_panel_config_texts, get_panel_client_package,
+        )
+        from ..admin.renderers import _show_panel_config_detail
+
+        # mypnlcfg:d:{config_id}
+        if data.startswith("mypnlcfg:d:"):
+            config_id = int(data.split(":")[-1])
+            cfg = get_panel_config(config_id)
+            if not cfg or cfg["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            bot.answer_callback_query(call.id)
+            _show_panel_config_detail(call, config_id, back_data="my_panel_configs",
+                                      is_user_view=True)
+            return
+
+        # mypnlcfg:autorenew:{config_id}
+        if data.startswith("mypnlcfg:autorenew:"):
+            config_id = int(data.split(":")[-1])
+            cfg = get_panel_config(config_id)
+            if not cfg or cfg["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            new_val = 0 if int(cfg["auto_renew"] or 0) else 1
+            update_panel_config_field(config_id, "auto_renew", new_val)
+            bot.answer_callback_query(call.id, f"تمدید خودکار {'فعال' if new_val else 'غیرفعال'} شد.")
+            _show_panel_config_detail(call, config_id, back_data="my_panel_configs",
+                                      is_user_view=True)
+            return
+
+        # mypnlcfg:rsub:{config_id}
+        if data.startswith("mypnlcfg:rsub:"):
+            config_id = int(data.split(":")[-1])
+            cfg = get_panel_config(config_id)
+            if not cfg or cfg["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            cpkg = get_panel_client_package(cfg["cpkg_id"]) if cfg.get("cpkg_id") else None
+            if not cpkg:
+                bot.answer_callback_query(call.id, "قالب ساب موجود نیست.", show_alert=True); return
+            cpkg_d = dict(cpkg)
+            import uuid as _uuid
+            new_sub_id  = str(_uuid.uuid4()).replace("-", "")[:16]
+            new_sub_url = _build_sub_from_template(cpkg_d, new_sub_id)
+            if not new_sub_url:
+                bot.answer_callback_query(call.id, "خطا در ساخت لینک ساب.", show_alert=True); return
+            panel = get_panel(cfg["panel_id"])
+            if panel:
+                from ..panels.client import PanelClient
+                pc_api = PanelClient(
+                    protocol=panel["protocol"], host=panel["host"], port=panel["port"],
+                    path=panel["path"] or "", username=panel["username"], password=panel["password"]
+                )
+                pc_api.update_client_sub(
+                    inbound_id=cfg["inbound_id"], client_uuid=cfg["client_uuid"],
+                    email=cfg["client_name"] or "", new_sub_id=new_sub_id,
+                )
+            update_panel_config_texts(config_id, cfg["client_config_text"], new_sub_url)
+            bot.answer_callback_query(call.id, "✅ لینک ساب جدید ساخته شد.")
+            _show_panel_config_detail(call, config_id, back_data="my_panel_configs",
+                                      is_user_view=True)
+            return
+
+        # mypnlcfg:qrc:{config_id}
+        if data.startswith("mypnlcfg:qrc:"):
+            config_id = int(data.split(":")[-1])
+            cfg = get_panel_config(config_id)
+            if not cfg or cfg["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            if cfg["client_config_text"]:
+                try:
+                    import qrcode as _qrcode
+                    from io import BytesIO
+                    bio = BytesIO(); _qrcode.make(cfg["client_config_text"]).save(bio, format="PNG"); bio.seek(0)
+                    bio.name = "qr_config.png"
+                    bot.answer_callback_query(call.id)
+                    bot.send_photo(uid, bio, caption="📷 QR کانفیگ")
+                except Exception as e:
+                    bot.answer_callback_query(call.id, str(e), show_alert=True)
+            else:
+                bot.answer_callback_query(call.id, "کانفیگ موجود نیست.", show_alert=True)
+            return
+
+        # mypnlcfg:qrs:{config_id}
+        if data.startswith("mypnlcfg:qrs:"):
+            config_id = int(data.split(":")[-1])
+            cfg = get_panel_config(config_id)
+            if not cfg or cfg["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            if cfg["client_sub_url"]:
+                try:
+                    import qrcode as _qrcode
+                    from io import BytesIO
+                    bio = BytesIO(); _qrcode.make(cfg["client_sub_url"]).save(bio, format="PNG"); bio.seek(0)
+                    bio.name = "qr_sub.png"
+                    bot.answer_callback_query(call.id)
+                    bot.send_photo(uid, bio, caption="📷 QR سابسکرایب")
+                except Exception as e:
+                    bot.answer_callback_query(call.id, str(e), show_alert=True)
+            else:
+                bot.answer_callback_query(call.id, "لینک ساب موجود نیست.", show_alert=True)
+            return
+
+        bot.answer_callback_query(call.id)
+        return
+
+
         kb = types.InlineKeyboardMarkup()
         for item in types_list:
             kb.add(types.InlineKeyboardButton(f"🧩 {item['name']}", callback_data=f"adm:cfg:t:{item['id']}"))

@@ -10,7 +10,7 @@ from ..db import (
     get_all_types, get_packages, get_registered_packages_stock,
     get_all_admin_users, get_user, get_user_detail, get_phone_number,
     count_users_stats,
-    get_panel_configs, get_panel_configs_count,
+    get_panel_configs, get_panel_configs_count, get_panel_config_full,
     get_panel_client_packages, get_panel_client_package,
     get_panel,
 )
@@ -560,57 +560,332 @@ def _show_panel_client_package_preview(call, cpkg_id):
 
 
 
+
 # ── Panel Configs (purchased, auto-created) ────────────────────────────────────
-def _show_panel_configs(call, page=0, search=None, only_expired=False):
+
+def _is_expiring_time(item):
+    """Return True if the config is close to expiry (time-based, < 20% remaining)."""
+    from datetime import datetime
+    if not item["expire_at"] or not item.get("duration_days"):
+        return False
+    try:
+        expire_dt = datetime.strptime(str(item["expire_at"])[:19], "%Y-%m-%d %H:%M:%S")
+        remaining = (expire_dt - datetime.utcnow()).total_seconds()
+        if remaining <= 0:
+            return True
+        total = (item["duration_days"] or 0) * 86400
+        if total <= 0:
+            return False
+        return (remaining / total) < 0.2
+    except Exception:
+        return False
+
+
+def _show_panel_configs(call, page=0, search=None, only_expired=False,
+                        filter_type=None, package_id=None):
+    """
+    Main panel-configs landing menu: search + 3 filter buttons with counts
+    + package list.  When filter_type/search is provided, delegates to list.
+    """
     from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-    PER_PAGE    = 10
-    items       = get_panel_configs(search=search, only_expired=only_expired, page=page, per_page=PER_PAGE)
-    total_count = get_panel_configs_count(search=search, only_expired=only_expired)
-    total_pages = max(1, (total_count + PER_PAGE - 1) // PER_PAGE)
-    filter_str  = "expired" if only_expired else "all"
+    # Delegate to list view when an explicit filter is requested
+    if filter_type or search or only_expired:
+        ft = filter_type or ("expired" if only_expired else "all")
+        _show_panel_config_list(call, filter_type=ft, package_id=package_id,
+                                page=page, search=search)
+        return
 
-    lines = ["🔌 <b>کانفیگ های پنل</b>"]
+    cnt_all      = get_panel_configs_count(filter_type="all")
+    cnt_expiring = get_panel_configs_count(filter_type="expiring")
+    cnt_expired  = get_panel_configs_count(filter_type="expired")
+
+    text = "🔌 <b>کانفیگ های پنل</b>"
+
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton("جستجو 🔎", callback_data="admin:pcfg:search"))
+    kb.add(InlineKeyboardButton(
+        f"تمامی کانفیگ ها ({cnt_all})",
+        callback_data="admin:pcfg:fl:all:0"
+    ))
+    kb.add(InlineKeyboardButton(
+        f"کانفیگ های رو به پایان ({cnt_expiring})",
+        callback_data="admin:pcfg:fl:expiring:0"
+    ))
+    kb.add(InlineKeyboardButton(
+        f"کانفیگ های به اتمام رسیده ({cnt_expired})",
+        callback_data="admin:pcfg:fl:expired:0"
+    ))
+
+    # Package list (only packages that have at least one panel config)
+    all_pkgs = get_packages(include_inactive=True) or []
+    pkgs_used = [p for p in all_pkgs
+                 if get_panel_configs_count(filter_type="all", package_id=p["id"]) > 0]
+    if pkgs_used:
+        kb.add(InlineKeyboardButton("─── پکیج ها ───", callback_data="admin:pcfg:noop"))
+        for p in pkgs_used:
+            pc_cnt = get_panel_configs_count(filter_type="all", package_id=p["id"])
+            kb.add(InlineKeyboardButton(
+                f"📦 {esc(p['name'])} ({pc_cnt})",
+                callback_data=f"admin:pcfg:pkg:{p['id']}"
+            ))
+
+    kb.add(InlineKeyboardButton("بازگشت", callback_data="admin:panel",
+                                icon_custom_emoji_id="5253997076169115797"))
+    send_or_edit(call, text, kb)
+
+
+def _show_panel_config_list(call, filter_type="all", package_id=None,
+                            page=0, search=None):
+    """
+    Paginated list of panel configs for the given filter / package.
+    Each item is a clickable button opening the config detail.
+    """
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+    PER_PAGE = 10
+    items = get_panel_configs(
+        search=search, filter_type=filter_type,
+        package_id=package_id, page=page, per_page=PER_PAGE
+    )
+    total = get_panel_configs_count(
+        search=search, filter_type=filter_type, package_id=package_id
+    )
+    total_pages = max(1, (total + PER_PAGE - 1) // PER_PAGE)
+
+    _FILTER_LABELS = {
+        "all":      "تمامی کانفیگ ها",
+        "expiring": "کانفیگ های رو به پایان",
+        "expired":  "کانفیگ های به اتمام رسیده",
+    }
+
+    lines = [f"🔌 <b>{_FILTER_LABELS.get(filter_type, filter_type)}</b>"]
     if search:
-        lines.append(f"🔍 جستجو: <code>{esc(search)}</code>")
-    lines.append(f"تعداد: <b>{total_count}</b>\n")
-
-    if items:
-        for item in items:
-            expired_mark = " ⌛" if item["is_expired"] else " 🟢"
-            pkg_name     = item["package_name"] or f"پکیج #{item['package_id']}"
-            client_name  = item["client_name"] or "—"
-            expire_line  = f"  انقضا: {item['expire_at'][:10]}" if item["expire_at"] else ""
-            lines.append(
-                f"👤 <code>{item['user_id']}</code> | 📦 {esc(pkg_name)}\n"
-                f"  🔤 {esc(client_name)}{expire_line}{expired_mark}"
-            )
-    else:
-        lines.append("<i>موردی یافت نشد.</i>")
+        lines.append(f"🔍 {esc(search)}")
+    lines.append(f"تعداد: <b>{total}</b>")
+    if not items:
+        lines.append("\n<i>موردی یافت نشد.</i>")
 
     text = "\n".join(lines)
 
+    back_cb = f"admin:pcfg:pkg:{package_id}" if package_id else "admin:panel_configs"
+
+    def _pg_cb(p):
+        if package_id:
+            return f"admin:pcfg:fl:{filter_type}:{p}:{package_id}"
+        return f"admin:pcfg:fl:{filter_type}:{p}"
+
     kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton("🔍 جستجو", callback_data="admin:pcfg:search"))
-    kb.row(
-        InlineKeyboardButton(
-            "✅ تمامی کانفیگ ها" if not only_expired else "همه کانفیگ ها",
-            callback_data=f"admin:pcfg:f:all:0"),
-        InlineKeyboardButton(
-            "✅ کانفیگ های منقضی شده" if only_expired else "کانفیگ های منقضی شده",
-            callback_data=f"admin:pcfg:f:expired:0"),
-    )
+    for item in items:
+        if item["is_expired"]:
+            marker = "⌛"
+        elif _is_expiring_time(item):
+            marker = "🟡"
+        else:
+            marker = "🟢"
+        pkg_name    = (item["package_name"] or f"#{item['package_id']}")[:20]
+        client_name = (item["client_name"] or "—")[:30]
+        btn_text    = f"{marker} {client_name} | {pkg_name}"
+        kb.add(InlineKeyboardButton(btn_text, callback_data=f"admin:pcfg:d:{item['id']}"))
 
     if total_pages > 1:
         nav = []
         if page > 0:
-            nav.append(InlineKeyboardButton("◀️", callback_data=f"admin:pcfg:pg:{page - 1}:{filter_str}"))
+            nav.append(InlineKeyboardButton("صفحه قبل", callback_data=_pg_cb(page - 1)))
         nav.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data="admin:pcfg:noop"))
         if page < total_pages - 1:
-            nav.append(InlineKeyboardButton("▶️", callback_data=f"admin:pcfg:pg:{page + 1}:{filter_str}"))
+            nav.append(InlineKeyboardButton("صفحه بعد", callback_data=_pg_cb(page + 1)))
         kb.row(*nav)
 
-    kb.add(InlineKeyboardButton("بازگشت", callback_data="admin:panel",
+    kb.add(InlineKeyboardButton("بازگشت", callback_data=back_cb,
+                                icon_custom_emoji_id="5253997076169115797"))
+    send_or_edit(call, text, kb)
+
+
+def _show_panel_config_pkg(call, package_id):
+    """Package submenu: 3 filter buttons scoped to one package."""
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    from ..db import get_package as _gp
+
+    p = _gp(package_id)
+    pkg_name = esc(p["name"]) if p else f"#{package_id}"
+
+    cnt_all      = get_panel_configs_count(filter_type="all",      package_id=package_id)
+    cnt_expiring = get_panel_configs_count(filter_type="expiring", package_id=package_id)
+    cnt_expired  = get_panel_configs_count(filter_type="expired",  package_id=package_id)
+
+    text = f"🔌 <b>کانفیگ های پنل</b>\n📦 پکیج: {pkg_name}"
+
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton(
+        f"تمامی کانفیگ ها ({cnt_all})",
+        callback_data=f"admin:pcfg:fl:all:0:{package_id}"
+    ))
+    kb.add(InlineKeyboardButton(
+        f"کانفیگ های رو به پایان ({cnt_expiring})",
+        callback_data=f"admin:pcfg:fl:expiring:0:{package_id}"
+    ))
+    kb.add(InlineKeyboardButton(
+        f"کانفیگ های به اتمام رسیده ({cnt_expired})",
+        callback_data=f"admin:pcfg:fl:expired:0:{package_id}"
+    ))
+    kb.add(InlineKeyboardButton("بازگشت", callback_data="admin:panel_configs",
+                                icon_custom_emoji_id="5253997076169115797"))
+    send_or_edit(call, text, kb)
+
+
+def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
+                              is_user_view=False):
+    """
+    Full detail view for one panel config.
+    Shows static DB data + best-effort live traffic from panel API.
+    """
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    from datetime import datetime
+
+    cfg = get_panel_config_full(config_id)
+    if not cfg:
+        try:
+            bot.answer_callback_query(call.id, "کانفیگ یافت نشد.", show_alert=True)
+        except Exception:
+            pass
+        return
+    cfg = dict(cfg)
+
+    # ── Remaining time from DB expire_at ─────────────────────────────────────
+    remaining_time_str = "نامحدود"
+    if cfg.get("expire_at"):
+        try:
+            expire_dt = datetime.strptime(str(cfg["expire_at"])[:19], "%Y-%m-%d %H:%M:%S")
+            rem = (expire_dt - datetime.utcnow()).total_seconds()
+            if rem <= 0:
+                remaining_time_str = "منقضی شده ⌛"
+            else:
+                d = int(rem // 86400)
+                h = int((rem % 86400) // 3600)
+                remaining_time_str = f"{d} روز و {h} ساعت مانده"
+        except Exception:
+            remaining_time_str = str(cfg["expire_at"])[:10]
+
+    # ── Try live traffic from panel API ──────────────────────────────────────
+    remaining_vol_str   = "—"
+    client_enabled_live = None
+    try:
+        panel = get_panel(cfg["panel_id"])
+        if panel:
+            from ..panels.client import PanelClient
+            pc_api = PanelClient(
+                protocol=panel["protocol"], host=panel["host"], port=panel["port"],
+                path=panel["path"] or "", username=panel["username"], password=panel["password"]
+            )
+            ok, td = pc_api.get_client_traffics(cfg.get("client_name") or "")
+            if ok and td:
+                total_b = td.get("total", 0) or 0
+                used_b  = (td.get("up", 0) or 0) + (td.get("down", 0) or 0)
+                client_enabled_live = td.get("enable", True)
+                if total_b == 0:
+                    remaining_vol_str = "نامحدود"
+                else:
+                    rem_gb = max(0, total_b - used_b) / (1024 ** 3)
+                    remaining_vol_str = f"{rem_gb:.2f} GB مانده"
+                exp_ms = td.get("expiryTime", 0) or 0
+                if exp_ms > 0 and remaining_time_str == "نامحدود":
+                    import time as _time
+                    rem_s = exp_ms / 1000 - _time.time()
+                    if rem_s <= 0:
+                        remaining_time_str = "منقضی شده ⌛"
+                    else:
+                        d = int(rem_s // 86400)
+                        h = int((rem_s % 86400) // 3600)
+                        remaining_time_str = f"{d} روز و {h} ساعت مانده"
+    except Exception:
+        pass
+
+    # ── Static package info ───────────────────────────────────────────────────
+    vol_text = "نامحدود" if not cfg.get("volume_gb")    else f"{cfg['volume_gb']} گیگ"
+    dur_text = "زمان نامحدود" if not cfg.get("duration_days") else f"{cfg['duration_days']} روز"
+
+    cpkg_delivery = "—"
+    if cfg.get("cpkg_id"):
+        cp = get_panel_client_package(cfg["cpkg_id"])
+        if cp:
+            dm = dict(cp).get("delivery_mode", "both")
+            mode_map = {"config_only": "کانفیگ", "sub_only": "ساب", "both": "کانفیگ + ساب"}
+            cpkg_delivery = mode_map.get(dm, dm)
+
+    purchase_time = str(cfg.get("created_at") or "—")[:19]
+    auto_renew    = int(cfg.get("auto_renew")  or 0)
+    is_disabled   = int(cfg.get("is_disabled") or 0)
+    is_active     = (not is_disabled) if client_enabled_live is None else bool(client_enabled_live)
+
+    config_line = ""
+    if cfg.get("client_config_text"):
+        cfg_txt = str(cfg["client_config_text"])[:800]
+        config_line += f"\n\n💝 <b>Config:</b>\n<code>{esc(cfg_txt)}</code>"
+    if cfg.get("client_sub_url"):
+        config_line += f"\n\n🔗 <b>Subscription:</b>\n<code>{esc(cfg['client_sub_url'])}</code>"
+
+    user_block = ""
+    if not is_user_view:
+        buyer_name     = esc(str(cfg.get("full_name") or "—"))
+        buyer_username = esc(str(cfg.get("username")  or "—"))
+        buyer_id       = cfg.get("user_id", "—")
+        user_block = (
+            f"\n\n🛒 <b>خریدار:</b>\n"
+            f"نام: {buyer_name}\n"
+            f"نام کاربری: @{buyer_username}\n"
+            f"آیدی: <code>{buyer_id}</code>\n"
+            f"زمان خرید: <code>{purchase_time}</code>"
+        )
+
+    text = (
+        f"🔌 <b>جزئیات کانفیگ پنل</b>\n\n"
+        f"🔮 نام سرویس: <b>{esc(cfg.get('client_name') or '—')}</b>\n"
+        f"🧩 نوع سرویس: {esc(cfg.get('type_name') or '—')}\n"
+        f"📌 نوع ثبت: {cpkg_delivery}\n"
+        f"🔋 حجم: {vol_text}\n"
+        f"⏰ مدت: {dur_text}"
+        f"{config_line}"
+        f"{user_block}\n\n"
+        f"━━━━━━━━━━━━━\n"
+        f"📊 <b>وضعیت مصرف:</b>\n"
+        f"حجم مانده: {remaining_vol_str}\n"
+        f"زمان مانده: {remaining_time_str}"
+    )
+
+    kb = InlineKeyboardMarkup()
+
+    if not is_user_view:
+        kb.row(
+            InlineKeyboardButton("🔄 لینک ساب جدید",  callback_data=f"admin:pcfg:rsub:{config_id}"),
+            InlineKeyboardButton("🔑 UUID جدید",        callback_data=f"admin:pcfg:ruuid:{config_id}"),
+        )
+        ar_label = "♻️ تمدید خودکار: ✅" if auto_renew else "♻️ تمدید خودکار: ❌"
+        kb.row(
+            InlineKeyboardButton(ar_label,              callback_data=f"admin:pcfg:autorenew:{config_id}"),
+            InlineKeyboardButton("💳 تمدید دستی",       callback_data=f"admin:pcfg:renew:{config_id}"),
+        )
+        toggle_label = "✅ فعال‌سازی کانفیگ" if not is_active else "⛔ غیرفعال موقت"
+        kb.row(
+            InlineKeyboardButton(toggle_label,           callback_data=f"admin:pcfg:toggle:{config_id}"),
+            InlineKeyboardButton("🗑 حذف کانفیگ",        callback_data=f"admin:pcfg:del:{config_id}"),
+        )
+        if cfg.get("client_config_text"):
+            kb.add(InlineKeyboardButton("📷 QR کانفیگ",    callback_data=f"admin:pcfg:qrc:{config_id}"))
+        if cfg.get("client_sub_url"):
+            kb.add(InlineKeyboardButton("📷 QR سابسکرایب", callback_data=f"admin:pcfg:qrs:{config_id}"))
+    else:
+        ar_label = "♻️ تمدید خودکار: ✅" if auto_renew else "♻️ تمدید خودکار: ❌"
+        kb.add(InlineKeyboardButton(ar_label, callback_data=f"mypnlcfg:autorenew:{config_id}"))
+        if cfg.get("client_sub_url"):
+            kb.row(
+                InlineKeyboardButton("🔄 لینک ساب جدید",  callback_data=f"mypnlcfg:rsub:{config_id}"),
+                InlineKeyboardButton("📷 QR ساب",          callback_data=f"mypnlcfg:qrs:{config_id}"),
+            )
+        if cfg.get("client_config_text"):
+            kb.add(InlineKeyboardButton("📷 QR کانفیگ",    callback_data=f"mypnlcfg:qrc:{config_id}"))
+
+    kb.add(InlineKeyboardButton("بازگشت", callback_data=back_data,
                                 icon_custom_emoji_id="5253997076169115797"))
     send_or_edit(call, text, kb)
 
