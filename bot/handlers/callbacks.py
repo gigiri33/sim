@@ -1108,6 +1108,10 @@ def _build_config_from_template(cpkg, client_uuid, client_name):
     import re as _re
     import urllib.parse as _up
 
+    # sqlite3.Row doesn't support .get() — normalise to dict
+    if not isinstance(cpkg, dict):
+        cpkg = dict(cpkg)
+
     tmpl = (cpkg.get("sample_config") or "").strip()
     if not tmpl:
         return None
@@ -1156,6 +1160,10 @@ def _build_sub_from_template(cpkg, sub_id):
       sub_id   : 3721ec6100d94a4b
       result   : http://stareh.parhiiz.top:2096/sub/3721ec6100d94a4b
     """
+    # sqlite3.Row doesn't support .get() — normalise to dict
+    if not isinstance(cpkg, dict):
+        cpkg = dict(cpkg)
+
     tmpl = (cpkg.get("sample_sub_url") or "").strip().rstrip("/")
     if not tmpl:
         return None
@@ -1188,6 +1196,10 @@ def _rebuild_panel_configs_for_cpkg(cpkg_id):
     if not cpkg:
         log.warning("[TEMPLATE_REBUILD] cpkg %s not found", cpkg_id)
         return 0
+
+    # sqlite3.Row doesn't support .get() — normalise to dict
+    if not isinstance(cpkg, dict):
+        cpkg = dict(cpkg)
 
     configs = get_panel_configs_by_cpkg(cpkg_id)
     rebuilt = 0
@@ -1388,6 +1400,9 @@ def _create_panel_config(uid, package_id, payment_id):
     cpkg = get_panel_client_package(cpkg_id) if cpkg_id else None
     if not cpkg:
         cpkg = get_panel_client_package_by_inbound(panel_id, panel_inbound)
+    # sqlite3.Row doesn't support .get() — normalise to dict
+    if cpkg is not None and not isinstance(cpkg, dict):
+        cpkg = dict(cpkg)
 
     client = PanelClient(
         protocol=panel["protocol"],
