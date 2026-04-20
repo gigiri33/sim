@@ -5670,7 +5670,6 @@ def _dispatch_callback(call, uid, data):
             exp_ms = 0
             if cfg.get("expire_at"):
                 try:
-                    from datetime import datetime
                     exp_dt = datetime.strptime(str(cfg["expire_at"])[:19], "%Y-%m-%d %H:%M:%S")
                     exp_ms = int(exp_dt.timestamp() * 1000)
                 except Exception:
@@ -5737,7 +5736,6 @@ def _dispatch_callback(call, uid, data):
             # Reset traffic
             pc_api.reset_client_traffic(cfg["inbound_id"], cfg["client_name"] or "")
             # Calculate new expiry
-            from datetime import datetime, timedelta
             dur_days = int(pkg["duration_days"] or 0)
             if dur_days:
                 new_exp_dt = datetime.utcnow() + timedelta(days=dur_days)
@@ -6017,10 +6015,11 @@ def _dispatch_callback(call, uid, data):
             send_or_edit(call, header, kb)
             return
 
-        bot.answer_callback_query(call.id)
-        return
-
-
+    if data == "admin:add_config":
+        if not (admin_has_perm(uid, "register_config") or admin_has_perm(uid, "manage_configs")):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        types_list = get_all_types()
         kb = types.InlineKeyboardMarkup()
         for item in types_list:
             kb.add(types.InlineKeyboardButton(f"🧩 {item['name']}", callback_data=f"adm:cfg:t:{item['id']}"))
