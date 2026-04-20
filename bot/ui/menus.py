@@ -152,11 +152,11 @@ def show_my_configs(target, user_id):
     for pc in panel_items:
         if pc["is_expired"]:
             marker = " ⌛"
-        elif int(pc.get("is_disabled") or 0):
+        elif int(pc["is_disabled"] or 0):
             marker = " ⛔"
         else:
             marker = " 🟢"
-        name = esc(pc["client_name"] or pc.get("package_name") or "—")
+        name = esc(pc["client_name"] or pc["package_name"] or "—")
         kb.add(types.InlineKeyboardButton(f"🔌 {name}{marker}", callback_data=f"mypnlcfg:d:{pc['id']}"))
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
     send_or_edit(target, f"{ce('📦', '5332618260703624145')} <b>کانفیگ‌های من</b>\n\nیکی از سرویس‌ها را انتخاب کنید:", kb)
