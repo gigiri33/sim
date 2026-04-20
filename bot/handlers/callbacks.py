@@ -5984,11 +5984,6 @@ def _dispatch_callback(call, uid, data):
             flt_labels = {"all": "📋 همه", "expiring": "⚠️ رو به پایان", "expired": "❌ منقضی"}
             bot.answer_callback_query(call.id)
             kb = types.InlineKeyboardMarkup()
-            kb.row(
-                types.InlineKeyboardButton("📋 همه",            callback_data="mypnlcfg:list:all:0"),
-                types.InlineKeyboardButton("⚠️ رو به پایان",    callback_data="mypnlcfg:list:expiring:0"),
-                types.InlineKeyboardButton("❌ منقضی",           callback_data="mypnlcfg:list:expired:0"),
-            )
             for row in rows:
                 if row["is_expired"]:
                     marker = " ⌛"

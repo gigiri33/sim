@@ -604,18 +604,11 @@ def _show_panel_configs(call, page=0, search=None, only_expired=False,
 
     kb = InlineKeyboardMarkup()
     kb.add(InlineKeyboardButton("جستجو 🔎", callback_data="admin:pcfg:search"))
-    kb.add(InlineKeyboardButton(
-        f"تمامی کانفیگ ها ({cnt_all})",
-        callback_data="admin:pcfg:fl:all:0"
-    ))
-    kb.add(InlineKeyboardButton(
-        f"کانفیگ های رو به پایان ({cnt_expiring})",
-        callback_data="admin:pcfg:fl:expiring:0"
-    ))
-    kb.add(InlineKeyboardButton(
-        f"کانفیگ های به اتمام رسیده ({cnt_expired})",
-        callback_data="admin:pcfg:fl:expired:0"
-    ))
+    kb.row(
+        InlineKeyboardButton(f"📋 همه ({cnt_all})",           callback_data="admin:pcfg:fl:all:0"),
+        InlineKeyboardButton(f"⚠️ رو به پایان ({cnt_expiring})", callback_data="admin:pcfg:fl:expiring:0"),
+        InlineKeyboardButton(f"❌ منقضی ({cnt_expired})",       callback_data="admin:pcfg:fl:expired:0"),
+    )
 
     # Package list (only packages that have at least one panel config)
     all_pkgs = get_packages(include_inactive=True) or []
