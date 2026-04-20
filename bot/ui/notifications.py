@@ -556,7 +556,12 @@ def notify_referral_join(referrer_id, referee_id):
 
     # ── Notify the INVITER directly ────────────────────────────────────────
     try:
-        referee_name = esc(referee["full_name"] or "کاربر جدید")
+        # Build clickable referee link
+        if referee.get("username"):
+            referee_link = f"@{esc(referee['username'])}"
+        else:
+            referee_link = f"<a href=\"tg://user?id={referee_id}\">{esc(referee['full_name'] or 'کاربر جدید')}</a>"
+
         start_enabled = setting_get("referral_start_reward_enabled", "0") == "1"
         required_count = int(setting_get("referral_start_reward_count", "1") or "1")
         channel_required = _channel_reward_required()
@@ -574,7 +579,7 @@ def notify_referral_join(referrer_id, referee_id):
 
         inviter_text = (
             f"💃 <b>به به!</b>\n\n"
-            f"کاربر [{referee_name}] از طریق لینک دعوتت اومد تو ربات! 🎉"
+            f"کاربر {referee_link} از طریق لینک دعوتت اومد تو ربات! 🎉"
             f"{progress_line}\n\n"
             f"👥 تعداد دعوت‌های کل: <b>{total}</b>"
         )

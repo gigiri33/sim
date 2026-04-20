@@ -1949,12 +1949,18 @@ def try_claim_start_reward_batch(referrer_id: int, required_count: int,
                                   channel_required: bool) -> bool:
     """
     Atomically claim `required_count` eligible unrewarded start-referrals.
-    Uses a single UPDATE+subquery so only one concurrent caller can win.
+    First checks if enough eligible rows exist; only then performs the UPDATE.
     Returns True if the batch was fully claimed (caller should now give the reward).
     Thread-safe against race conditions.
     """
     ch = "AND channel_joined=1" if channel_required else ""
     with get_conn() as conn:
+        count = conn.execute(
+            f"SELECT COUNT(*) AS n FROM referrals WHERE referrer_id=? AND start_reward_given=0 {ch}",
+            (referrer_id,)
+        ).fetchone()["n"]
+        if count < required_count:
+            return False
         cur = conn.execute(
             f"""UPDATE referrals
                    SET start_reward_given=1, rewarded_at=?
@@ -2379,11 +2385,24 @@ def get_pending_rewards_summary(user_id: int) -> dict:
 def try_claim_purchase_reward_batch(referrer_id: int, required_count: int) -> bool:
     """
     Atomically claim `required_count` eligible unrewarded purchase-referrals.
-    Uses a single UPDATE+subquery so only one concurrent caller can win.
+    First checks if enough eligible rows exist; only then performs the UPDATE.
     Returns True if the batch was fully claimed (caller should now give the reward).
     Thread-safe against race conditions.
     """
     with get_conn() as conn:
+        count = conn.execute(
+            """SELECT COUNT(*) AS n FROM referrals r
+                WHERE r.referrer_id=? AND r.purchase_reward_given=0
+                  AND (
+                      EXISTS (SELECT 1 FROM purchases p
+                              WHERE p.user_id = r.referee_id AND p.is_test = 0)
+                      OR EXISTS (SELECT 1 FROM panel_configs pc
+                                 WHERE pc.user_id = r.referee_id)
+                  )""",
+            (referrer_id,)
+        ).fetchone()["n"]
+        if count < required_count:
+            return False
         cur = conn.execute(
             """UPDATE referrals
                    SET purchase_reward_given=1
