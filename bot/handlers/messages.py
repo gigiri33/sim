@@ -1411,7 +1411,7 @@ def universal_handler(message):
             return
 
         # ── Admin: Cpkg field edit ─────────────────────────────────────────────
-        for _ef_field in ("inbound_id", "sample_config", "sample_sub_url"):
+        for _ef_field in ("inbound_id", "sample_config", "sample_sub_url", "sample_client_name"):
             if sn == f"cpkg_ef_{_ef_field}" and is_admin(uid):
                 raw     = (message.text or "").strip()
                 cpkg_id = sd.get("cpkg_id")
@@ -1431,12 +1431,26 @@ def universal_handler(message):
                 update_panel_client_package_field(cpkg_id, _ef_field, val)
                 state_clear(uid)
                 _FIELD_LABELS = {
-                    "inbound_id": "شماره اینباند",
-                    "sample_config": "نمونه کانفیگ",
-                    "sample_sub_url": "نمونه آدرس ساب",
+                    "inbound_id":        "شماره اینباند",
+                    "sample_config":     "نمونه کانفیگ",
+                    "sample_sub_url":    "نمونه آدرس ساب",
+                    "sample_client_name": "نام نمونه در فرگمنت",
                 }
+
+                # When the config or sub template changes, rebuild all sold configs
+                # that were created from this template so users always see the new format
+                if _ef_field in ("sample_config", "sample_sub_url"):
+                    try:
+                        from .callbacks import _rebuild_panel_configs_for_cpkg
+                        rebuilt = _rebuild_panel_configs_for_cpkg(cpkg_id)
+                        extra = f"\n🔄 <b>{rebuilt}</b> کانفیگ فروخته‌شده بازسازی شد." if rebuilt else ""
+                    except Exception as _rb_exc:
+                        extra = f"\n⚠️ بازسازی کانفیگ‌های قدیمی ناموفق: {_rb_exc}"
+                else:
+                    extra = ""
+
                 bot.send_message(uid,
-                    f"✅ <b>{_FIELD_LABELS.get(_ef_field, _ef_field)}</b> بروزرسانی شد.",
+                    f"✅ <b>{_FIELD_LABELS.get(_ef_field, _ef_field)}</b> بروزرسانی شد.{extra}",
                     parse_mode="HTML",
                     reply_markup=back_button(f"adm:pnl:cpkg:edit:{cpkg_id}"))
                 return

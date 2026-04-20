@@ -574,6 +574,10 @@ def _run_init_db_migrations():
             ),
             # ── User timed restriction ────────────────────────────────────────
             "ALTER TABLE users ADD COLUMN restricted_until INTEGER NOT NULL DEFAULT 0",
+            # ── Panel template: client name used in the sample config fragment ─
+            "ALTER TABLE panel_client_packages ADD COLUMN sample_client_name TEXT NOT NULL DEFAULT ''",
+            # ── Panel configs: track which template (cpkg) was used ───────────
+            "ALTER TABLE panel_configs ADD COLUMN cpkg_id INTEGER",
         ]
         for sql in migrations:
             try:
@@ -2218,7 +2222,7 @@ def update_panel_client_package_samples(cpkg_id, sample_config, sample_sub_url):
 
 
 def update_panel_client_package_field(cpkg_id, field, value):
-    _ALLOWED = {"inbound_id", "sample_config", "sample_sub_url", "name", "delivery_mode"}
+    _ALLOWED = {"inbound_id", "sample_config", "sample_sub_url", "sample_client_name", "name", "delivery_mode"}
     if field not in _ALLOWED:
         raise ValueError(f"Invalid field: {field}")
     with get_conn() as conn:
@@ -2230,17 +2234,17 @@ def update_panel_client_package_field(cpkg_id, field, value):
 def add_panel_config(user_id, package_id, panel_id, panel_type,
                      inbound_id, inbound_port, client_name, client_uuid,
                      client_sub_url, client_config_text, expire_at,
-                     inbound_remark="", purchase_id=None, payment_id=None):
+                     inbound_remark="", purchase_id=None, payment_id=None, cpkg_id=None):
     with get_conn() as conn:
         cur = conn.execute(
             """INSERT INTO panel_configs
                (user_id, package_id, panel_id, panel_type, inbound_id, inbound_port,
                 client_name, client_uuid, client_sub_url, client_config_text,
-                inbound_remark, expire_at, created_at, purchase_id, payment_id)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                inbound_remark, expire_at, created_at, purchase_id, payment_id, cpkg_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (user_id, package_id, panel_id, panel_type, inbound_id, inbound_port,
              client_name, client_uuid, client_sub_url, client_config_text,
-             inbound_remark or "", expire_at, now_str(), purchase_id, payment_id)
+             inbound_remark or "", expire_at, now_str(), purchase_id, payment_id, cpkg_id)
         )
         return cur.lastrowid
 
@@ -2250,6 +2254,24 @@ def get_panel_config(config_id):
         return conn.execute(
             "SELECT * FROM panel_configs WHERE id=?", (config_id,)
         ).fetchone()
+
+
+def get_panel_configs_by_cpkg(cpkg_id):
+    """Return all panel_configs that were created from the given client package template."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM panel_configs WHERE cpkg_id=? ORDER BY id",
+            (cpkg_id,)
+        ).fetchall()
+
+
+def update_panel_config_texts(config_id, config_text, sub_url):
+    """Update the rendered config text and sub URL of a sold panel_config (used after template rebuild)."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE panel_configs SET client_config_text=?, client_sub_url=? WHERE id=?",
+            (config_text or "", sub_url or "", config_id)
+        )
 
 
 def get_panel_configs(search=None, only_expired=False, page=0, per_page=20):

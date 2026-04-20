@@ -497,12 +497,18 @@ def _show_cpkg_edit_menu(call, cpkg_id):
         send_or_edit(call, "⚠️ کلاینت پکیج یافت نشد.", None)
         return
     _DM = {"config_only": "📄 فقط کانفیگ", "sub_only": "🔗 فقط ساب", "both": "📄+🔗 هر دو"}
+    # sample_client_name may not exist in older rows
+    try:
+        scn = cp["sample_client_name"] or ""
+    except (KeyError, IndexError):
+        scn = ""
     text = (
         f"✏️ <b>ویرایش کلاینت پکیج #{cpkg_id}</b>\n\n"
         f"🔌 اینباند ID: <code>{cp['inbound_id']}</code>\n"
         f"📤 تحویل: {_DM.get(cp['delivery_mode'], cp['delivery_mode'])}\n"
         f"📄 کانفیگ نمونه: <code>{esc(cp['sample_config'][:60]) if cp['sample_config'] else '—'}</code>\n"
-        f"🔗 ساب نمونه: <code>{esc(cp['sample_sub_url'][:60]) if cp['sample_sub_url'] else '—'}</code>\n\n"
+        f"🔗 ساب نمونه: <code>{esc(cp['sample_sub_url'][:60]) if cp['sample_sub_url'] else '—'}</code>\n"
+        f"🏷 نام نمونه در فرگمنت: <code>{esc(scn) if scn else '— (تنظیم نشده)'}</code>\n\n"
         "فیلد مورد نظر را برای ویرایش انتخاب کنید:"
     )
     kb = InlineKeyboardMarkup()
@@ -517,6 +523,10 @@ def _show_cpkg_edit_menu(call, cpkg_id):
     kb.add(InlineKeyboardButton(
         "🔗 ویرایش لینک ساب نمونه",
         callback_data=f"adm:pnl:cpkg:ef:sample_sub_url:{cpkg_id}"
+    ))
+    kb.add(InlineKeyboardButton(
+        "🏷 ویرایش نام نمونه در فرگمنت",
+        callback_data=f"adm:pnl:cpkg:ef:sample_client_name:{cpkg_id}"
     ))
     kb.add(InlineKeyboardButton("بازگشت", callback_data=f"adm:pnl:cpkgs:{cp['panel_id']}",
                                 icon_custom_emoji_id="5253997076169115797"))

@@ -100,6 +100,7 @@ from ..db import (
     add_panel_client_package, get_panel_client_packages,
     get_panel_client_package, delete_panel_client_package,
     update_panel_client_package_samples, update_panel_client_package_field,
+    get_panel_configs_by_cpkg, update_panel_config_texts,
     bulk_add_balance, bulk_zero_balance, bulk_set_status, count_users_by_filter,
 )
 
@@ -1088,6 +1089,139 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
     return purchase_ids, pending_ids
 
 
+def _build_config_from_template(cpkg, client_uuid, client_name):
+    """
+    Build a VLESS/VMess/Trojan config URL from a saved sample template.
+
+    Only two dynamic parts are replaced:
+      1. The UUID in the URL body (regex, first occurrence).
+      2. The #fragment — if cpkg['sample_client_name'] is non-empty and is found
+         inside the decoded fragment, ONLY that substring is replaced with
+         client_name, preserving any prefix / suffix (e.g. ⚕️TUN_-NAME-main).
+         If sample_client_name is empty or not found, the entire fragment is
+         replaced with client_name (safe backward-compat fallback).
+
+    Everything else (domain, port, path, host header, query params order, …)
+    is taken verbatim from the template — the panel IP is never used.
+    """
+    import re as _re
+    import urllib.parse as _up
+
+    tmpl = (cpkg.get("sample_config") or "").strip()
+    if not tmpl:
+        return None
+
+    _UUID_RE = _re.compile(
+        r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}',
+        _re.IGNORECASE
+    )
+
+    # Step 1: replace UUID (only first occurrence — the one right after the scheme)
+    config = _UUID_RE.sub(client_uuid, tmpl, count=1)
+
+    # Step 2: replace the fragment while preserving template prefix/suffix
+    if "#" in config:
+        base_part, frag_encoded = config.rsplit("#", 1)
+        frag_decoded = _up.unquote(frag_encoded)
+
+        sample_name = (cpkg.get("sample_client_name") or "").strip()
+        if sample_name and sample_name in frag_decoded:
+            # Replace ONLY the sample name portion — prefix/suffix stays intact
+            new_frag = frag_decoded.replace(sample_name, client_name, 1)
+        else:
+            # Fallback: replace entire fragment
+            new_frag = client_name
+
+        # Re-encode so special chars (emojis, /, …) are preserved correctly
+        new_frag_encoded = _up.quote(new_frag, safe="")
+        config = base_part + "#" + new_frag_encoded
+    else:
+        config = config + "#" + _up.quote(client_name, safe="")
+
+    return config
+
+
+def _build_sub_from_template(cpkg, sub_id):
+    """
+    Build a subscription URL from the saved sample sub URL template.
+
+    Only the last path segment (the unique per-client token) is replaced with
+    sub_id. The base URL, port, and path structure are taken from the template,
+    so the panel's path prefix (e.g. /emadhb/) is NEVER included unless the
+    admin explicitly put it in the sample_sub_url.
+
+    Example:
+      template : http://stareh.parhiiz.top:2096/sub/vn4tzbq10exfcep9
+      sub_id   : 3721ec6100d94a4b
+      result   : http://stareh.parhiiz.top:2096/sub/3721ec6100d94a4b
+    """
+    tmpl = (cpkg.get("sample_sub_url") or "").strip().rstrip("/")
+    if not tmpl:
+        return None
+
+    # Replace the last path segment (the sub identifier)
+    if "/" in tmpl:
+        base = tmpl.rsplit("/", 1)[0]
+        return f"{base}/{sub_id}"
+    # Degenerate case — just append
+    return f"{tmpl}/{sub_id}"
+
+
+def _rebuild_panel_configs_for_cpkg(cpkg_id):
+    """
+    Called after admin edits sample_config or sample_sub_url on a client package.
+
+    Fetches every sold panel_config that was created from this template (cpkg_id)
+    and re-renders client_config_text / client_sub_url using the updated template.
+
+    Dynamic per-user values that are PRESERVED:
+      - client_uuid  (never regenerated)
+      - client_name  (service name, never changed)
+      - sub_id       (derived from uuid, always the same)
+
+    Everything else is taken from the new template.
+
+    Returns the number of configs rebuilt.
+    """
+    cpkg = get_panel_client_package(cpkg_id)
+    if not cpkg:
+        log.warning("[TEMPLATE_REBUILD] cpkg %s not found", cpkg_id)
+        return 0
+
+    configs = get_panel_configs_by_cpkg(cpkg_id)
+    rebuilt = 0
+
+    for pc in configs:
+        try:
+            client_uuid = (pc["client_uuid"] or "").strip()
+            client_name = (pc["client_name"] or "").strip()
+            # sub_id is always first-16-hex-chars of UUID (same as create_client)
+            sub_id = client_uuid.replace("-", "")[:16] if client_uuid else ""
+
+            new_config = (
+                _build_config_from_template(cpkg, client_uuid, client_name)
+                if cpkg["sample_config"]
+                else pc["client_config_text"]
+            )
+            new_sub = (
+                _build_sub_from_template(cpkg, sub_id)
+                if cpkg["sample_sub_url"]
+                else pc["client_sub_url"]
+            )
+
+            update_panel_config_texts(
+                pc["id"],
+                new_config or pc["client_config_text"],
+                new_sub    or pc["client_sub_url"],
+            )
+            rebuilt += 1
+        except Exception as exc:
+            log.warning("[TEMPLATE_REBUILD] failed for panel_config %s: %s", pc["id"], exc)
+
+    log.info("[TEMPLATE_REBUILD] rebuilt %d configs for cpkg %s", rebuilt, cpkg_id)
+    return rebuilt
+
+
 def _build_config_from_inbound(inbound, client_uuid, client_name, panel, real_port):
     """
     Build a config URL by parsing the inbound's streamSettings.
@@ -1330,38 +1464,29 @@ def _create_panel_config(uid, package_id, payment_id):
         return False, f"خطا در ساخت کلاینت (بعد از {MAX_RETRIES} تلاش): {create_err}", None
 
     client_uuid, sub_id = result
+    # Default sub URL from panel — may be overridden by template below
     sub_url = client.get_sub_url(client_uuid)
 
     config_text = None
 
-    # ── Step 4a: Build from client package template (preferred) ──────────────
+    # ── Step 4a: Build config from client package template (preferred path) ──
+    # Uses _build_config_from_template which:
+    #   • replaces ONLY the UUID in the URL body
+    #   • in the #fragment, replaces only cpkg['sample_client_name'] with
+    #     client_name — preserving emoji prefix / -main suffix etc.
+    #   • keeps domain, port, host header, path, query params from template
     if cpkg and cpkg["sample_config"]:
-        tmpl = cpkg["sample_config"]
-        # Replace UUID: find the UUID pattern in the template and replace it
-        _UUID_RE = _re.compile(
-            r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}',
-            _re.IGNORECASE
-        )
-        config_text = _UUID_RE.sub(client_uuid, tmpl, count=1)
-        # Replace #name at the end
-        if "#" in config_text:
-            config_text = config_text.rsplit("#", 1)[0] + "#" + client_name
-        else:
-            config_text = config_text + "#" + client_name
+        config_text = _build_config_from_template(cpkg, client_uuid, client_name)
         log.info("_create_panel_config: built config from template for uid=%s", uid)
 
-    # ── Step 4b: If sub_only or template sub exists, build sub from template ──
-    if cpkg and cpkg["sample_sub_url"] and delivery_mode in ("sub_only", "both"):
-        tmpl_sub = cpkg["sample_sub_url"].rstrip("/")
-        # Replace last path segment (the sub ID / token)
-        if "/sub/" in tmpl_sub:
-            sub_base = tmpl_sub.rsplit("/", 1)[0]
-            sub_url = f"{sub_base}/{sub_id}"
-        else:
-            # Append sub_id if pattern unclear
-            sub_url = client.get_sub_url(client_uuid)
+    # ── Step 4b: Build sub URL from template (always, when available) ────────
+    # NOT limited to sub_only/both — the sub URL is stored in DB regardless of
+    # delivery_mode and must be correct for future reference / re-renders.
+    # The panel's path prefix (e.g. /emadhb/) is NEVER injected here.
+    if cpkg and cpkg["sample_sub_url"]:
+        sub_url = _build_sub_from_template(cpkg, sub_id) or sub_url
 
-    # ── Step 4c: Fetch from panel API (fallback when no template) ────────────
+    # ── Step 4c: Fetch from panel API (fallback when no config template) ─────
     if not config_text and delivery_mode in ("config_only", "both"):
         fetch_ok, fetch_result = client.fetch_client_config(sub_id)
         if fetch_ok and fetch_result:
@@ -1398,6 +1523,7 @@ def _create_panel_config(uid, package_id, payment_id):
         inbound_remark=inbound_remark,
         expire_at=expire_str,
         payment_id=payment_id,
+        cpkg_id=cpkg["id"] if cpkg else None,  # store which template was used
     )
 
     return True, delivery_mode, pc_id
@@ -11772,9 +11898,10 @@ def _dispatch_callback(call, uid, data):
             return
         bot.answer_callback_query(call.id)
         _FIELD_LABELS = {
-            "inbound_id":     "🔢 شماره ID اینباند",
-            "sample_config":  "📋 نمونه کانفیگ",
-            "sample_sub_url": "🔗 نمونه آدرس سابسکرایب",
+            "inbound_id":          "🔢 شماره ID اینباند",
+            "sample_config":       "📋 نمونه کانفیگ",
+            "sample_sub_url":      "🔗 نمونه آدرس سابسکرایب",
+            "sample_client_name":  "🏷 نام نمونه در فرگمنت (مثلاً emad-tun)",
         }
         try:
             cur_val = cp[field]

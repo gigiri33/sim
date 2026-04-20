@@ -625,9 +625,17 @@ def notify_referral_join(referrer_id, referee_id):
 
 
 def notify_referral_first_purchase(referee_id):
-    """Called after a purchase. If buyer was referred, log the event to referral_log."""
+    """Called after a purchase. If buyer was referred AND this is their first purchase, log the event to referral_log."""
     ref = get_referral_by_referee(referee_id)
     if not ref:
+        return
+    # Only notify for the very first non-test purchase
+    with get_conn() as conn:
+        purchase_count = conn.execute(
+            "SELECT COUNT(*) AS n FROM purchases WHERE user_id=? AND is_test=0",
+            (referee_id,)
+        ).fetchone()["n"]
+    if purchase_count != 1:
         return
     referrer_id = ref["referrer_id"]
     referrer = get_user(referrer_id)
