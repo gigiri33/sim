@@ -121,7 +121,7 @@ def deliver_purchase_message(chat_id, purchase_id):
             username = cfg_data.get("username", "")
             password = cfg_data.get("password", "")
             caption = (
-                f"{ce('✅', '5260463209562776385')} <b>{title_line}</b>\n\n"
+                f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(service_name)}</b>\n"
                 f"{ce('🧩', '5463224921935082813')} نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
                 f"{package_line}"
                 f"{ce('🔋', '5924538142198600679')} حجم: <b>{esc(vol_text)}</b>\n"
@@ -136,13 +136,12 @@ def deliver_purchase_message(chat_id, purchase_id):
             )
         else:  # wg
             caption = (
-                f"{ce('✅', '5260463209562776385')} <b>{title_line}</b>\n\n"
+                f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(service_name)}</b>\n"
                 f"{ce('🧩', '5463224921935082813')} نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
                 f"{package_line}"
                 f"{ce('🔋', '5924538142198600679')} حجم: <b>{esc(vol_text)}</b>\n"
                 f"{ce('⏰', '5343724178547691280')} مدت: <b>{esc(dur_text)}</b>\n"
-                f"{ce('👥', '5372926953978341366')} نوع کاربری: <b>{esc(users_label)}</b>\n"
-                f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(service_name)}</b>"
+                f"{ce('👥', '5372926953978341366')} نوع کاربری: <b>{esc(users_label)}</b>"
                 f"{inq_line}"
                 f"{expired_note}"
             )
@@ -161,7 +160,6 @@ def deliver_purchase_message(chat_id, purchase_id):
         if has_config and has_sub:
             # Mode: config + sub
             text = (
-                f"{ce('✅', '5260463209562776385')} <b>{title_line}</b>\n\n"
                 f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(service_name)}</b>\n"
                 f"{ce('🧩', '5463224921935082813')} نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
                 f"{package_line}"
@@ -176,7 +174,6 @@ def deliver_purchase_message(chat_id, purchase_id):
         elif has_config:
             # Mode: config only
             text = (
-                f"{ce('✅', '5260463209562776385')} <b>{title_line}</b>\n\n"
                 f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(service_name)}</b>\n"
                 f"{ce('🧩', '5463224921935082813')} نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
                 f"{package_line}"
@@ -190,7 +187,6 @@ def deliver_purchase_message(chat_id, purchase_id):
         elif has_sub:
             # Mode: sub only
             text = (
-                f"{ce('✅', '5260463209562776385')} <b>{title_line}</b>\n\n"
                 f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(service_name)}</b>\n"
                 f"{ce('🧩', '5463224921935082813')} نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
                 f"{package_line}"
@@ -204,7 +200,6 @@ def deliver_purchase_message(chat_id, purchase_id):
         else:
             # Fallback: legacy display
             text = (
-                f"{ce('✅', '5260463209562776385')} <b>{title_line}</b>\n\n"
                 f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(service_name)}</b>\n"
                 f"{ce('🧩', '5463224921935082813')} نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
                 f"{package_line}"
@@ -212,7 +207,7 @@ def deliver_purchase_message(chat_id, purchase_id):
                 f"{ce('⏰', '5343724178547691280')} مدت: <b>{esc(_dur_text_v2)}</b>\n"
                 f"{ce('👥', '5372926953978341366')} تعداد کاربر: <b>{esc(_users_v2)}</b>\n\n"
                 f"{ce('💝', '5900197669178970457')} <b>Config:</b>\n<code>{esc(cfg or '-')}</code>\n\n"
-                f"🔋 Volume web: {esc(inquiry_link or '-')}"
+                f"{ce('🔗', '5271604874419647061')} <b>لینک ساب:</b>\n{esc(inquiry_link or '-')}"
                 f"{expired_note}"
             )
             qr_source = cfg or inquiry_link or ""

@@ -5843,7 +5843,7 @@ def _dispatch_callback(call, uid, data):
             if not cfg or cfg["user_id"] != uid:
                 bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
             bot.answer_callback_query(call.id)
-            _show_panel_config_detail(call, config_id, back_data="my_panel_configs",
+            _show_panel_config_detail(call, config_id, back_data="my_configs",
                                       is_user_view=True)
             return
 
@@ -5856,7 +5856,7 @@ def _dispatch_callback(call, uid, data):
             new_val = 0 if int(cfg["auto_renew"] or 0) else 1
             update_panel_config_field(config_id, "auto_renew", new_val)
             bot.answer_callback_query(call.id, f"تمدید خودکار {'فعال' if new_val else 'غیرفعال'} شد.")
-            _show_panel_config_detail(call, config_id, back_data="my_panel_configs",
+            _show_panel_config_detail(call, config_id, back_data="my_configs",
                                       is_user_view=True)
             return
 
@@ -5888,7 +5888,7 @@ def _dispatch_callback(call, uid, data):
                 )
             update_panel_config_texts(config_id, cfg["client_config_text"], new_sub_url)
             bot.answer_callback_query(call.id, "✅ لینک ساب جدید ساخته شد.")
-            _show_panel_config_detail(call, config_id, back_data="my_panel_configs",
+            _show_panel_config_detail(call, config_id, back_data="my_configs",
                                       is_user_view=True)
             return
 
@@ -5930,6 +5930,91 @@ def _dispatch_callback(call, uid, data):
                     bot.answer_callback_query(call.id, str(e), show_alert=True)
             else:
                 bot.answer_callback_query(call.id, "لینک ساب موجود نیست.", show_alert=True)
+            return
+
+        # mypnlcfg:list:{filter}:{page}  →  user's filtered panel config list
+        if data.startswith("mypnlcfg:list:"):
+            parts = data.split(":")
+            flt   = parts[2]  # all | expiring | expired
+            page  = int(parts[3]) if len(parts) > 3 else 0
+            if flt not in ("all", "expiring", "expired"):
+                flt = "all"
+            PER = 10
+            with get_conn() as _c:
+                _base = (
+                    "SELECT COUNT(*) AS n FROM panel_configs pc "
+                    "LEFT JOIN packages p ON pc.package_id=p.id "
+                    "WHERE pc.user_id=?"
+                )
+                _params = [uid]
+                if flt == "expired":
+                    _base += " AND pc.is_expired=1"
+                elif flt == "expiring":
+                    _base += (
+                        " AND pc.is_expired=0"
+                        " AND pc.expire_at IS NOT NULL"
+                        " AND pc.expire_at > datetime('now')"
+                        " AND (julianday(pc.expire_at)-julianday('now')) < "
+                        "0.2*CAST(CASE WHEN p.duration_days>0 THEN p.duration_days ELSE 9999 END AS REAL)"
+                    )
+                user_total = _c.execute(_base, _params).fetchone()["n"]
+                total_pages = max(1, (user_total + PER - 1) // PER)
+                page = max(0, min(page, total_pages - 1))
+                _base2 = (
+                    "SELECT pc.*, p.name AS package_name, p.volume_gb, p.duration_days,"
+                    " t.name AS type_name"
+                    " FROM panel_configs pc"
+                    " LEFT JOIN packages p ON pc.package_id=p.id"
+                    " LEFT JOIN config_types t ON t.id=p.type_id"
+                    " WHERE pc.user_id=?"
+                )
+                _p2 = [uid]
+                if flt == "expired":
+                    _base2 += " AND pc.is_expired=1"
+                elif flt == "expiring":
+                    _base2 += (
+                        " AND pc.is_expired=0"
+                        " AND pc.expire_at IS NOT NULL"
+                        " AND pc.expire_at > datetime('now')"
+                        " AND (julianday(pc.expire_at)-julianday('now')) < "
+                        "0.2*CAST(CASE WHEN p.duration_days>0 THEN p.duration_days ELSE 9999 END AS REAL)"
+                    )
+                _base2 += " ORDER BY pc.id DESC LIMIT ? OFFSET ?"
+                _p2 += [PER, page * PER]
+                rows = _c.execute(_base2, _p2).fetchall()
+
+            flt_labels = {"all": "📋 همه", "expiring": "⚠️ رو به پایان", "expired": "❌ منقضی"}
+            bot.answer_callback_query(call.id)
+            kb = types.InlineKeyboardMarkup()
+            kb.row(
+                types.InlineKeyboardButton("📋 همه",            callback_data="mypnlcfg:list:all:0"),
+                types.InlineKeyboardButton("⚠️ رو به پایان",    callback_data="mypnlcfg:list:expiring:0"),
+                types.InlineKeyboardButton("❌ منقضی",           callback_data="mypnlcfg:list:expired:0"),
+            )
+            for row in rows:
+                if row["is_expired"]:
+                    marker = " ⌛"
+                elif int(row["is_disabled"] or 0):
+                    marker = " ⛔"
+                else:
+                    marker = " 🟢"
+                name = esc(row["client_name"] or row["package_name"] or "—")
+                kb.add(types.InlineKeyboardButton(f"{name}{marker}", callback_data=f"mypnlcfg:d:{row['id']}"))
+            if total_pages > 1:
+                nav = []
+                if page > 0:
+                    nav.append(types.InlineKeyboardButton("◀️ قبلی", callback_data=f"mypnlcfg:list:{flt}:{page-1}"))
+                nav.append(types.InlineKeyboardButton(f"📄 {page+1}/{total_pages}", callback_data="noop"))
+                if page < total_pages - 1:
+                    nav.append(types.InlineKeyboardButton("▶️ بعدی", callback_data=f"mypnlcfg:list:{flt}:{page+1}"))
+                kb.row(*nav)
+            kb.add(types.InlineKeyboardButton("🔙 بازگشت به سرویس‌ها", callback_data="my_configs"))
+            header = f"{flt_labels.get(flt, '📋')} <b>کانفیگ‌های پنل</b>"
+            if not rows:
+                header += "\n\n📭 موردی یافت نشد."
+            else:
+                header += f"\n\nیکی از سرویس‌ها را انتخاب کنید:"
+            send_or_edit(call, header, kb)
             return
 
         bot.answer_callback_query(call.id)

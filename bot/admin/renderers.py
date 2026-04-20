@@ -742,6 +742,7 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
     """
     from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
     from datetime import datetime
+    from ..ui.premium_emoji import ce
 
     cfg = get_panel_config_full(config_id)
     if not cfg:
@@ -803,7 +804,7 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
 
     # ── Static package info ───────────────────────────────────────────────────
     vol_text = "نامحدود" if not cfg.get("volume_gb")    else f"{cfg['volume_gb']} گیگ"
-    dur_text = "زمان نامحدود" if not cfg.get("duration_days") else f"{cfg['duration_days']} روز"
+    dur_text = "نامحدود" if not cfg.get("duration_days") else f"{cfg['duration_days']} روز"
 
     cpkg_delivery = "—"
     if cfg.get("cpkg_id"):
@@ -818,15 +819,37 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
     is_disabled   = int(cfg.get("is_disabled") or 0)
     is_active     = (not is_disabled) if client_enabled_live is None else bool(client_enabled_live)
 
-    config_line = ""
-    if cfg.get("client_config_text"):
-        cfg_txt = str(cfg["client_config_text"])[:800]
-        config_line += f"\n\n💝 <b>Config:</b>\n<code>{esc(cfg_txt)}</code>"
-    if cfg.get("client_sub_url"):
-        config_line += f"\n\n🔗 <b>Subscription:</b>\n<code>{esc(cfg['client_sub_url'])}</code>"
+    has_config = bool(cfg.get("client_config_text"))
+    has_sub    = bool(cfg.get("client_sub_url"))
 
-    user_block = ""
-    if not is_user_view:
+    # ── Build config/sub lines ────────────────────────────────────────────────
+    config_line = ""
+    if has_config:
+        cfg_txt = str(cfg["client_config_text"])[:800]
+        config_line += f"\n\n{ce('💝', '5900197669178970457')} <b>Config:</b>\n<code>{esc(cfg_txt)}</code>"
+    if has_sub:
+        config_line += f"\n\n{ce('🔗', '5271604874419647061')} <b>لینک ساب:</b>\n{esc(cfg['client_sub_url'])}"
+
+    # ── Usage stats block ─────────────────────────────────────────────────────
+    usage_block = (
+        f"\n\n━━━━━━━━━━━━━\n"
+        f"📊 <b>وضعیت مصرف:</b>\n"
+        f"حجم مانده: {remaining_vol_str}\n"
+        f"زمان مانده: {remaining_time_str}"
+    )
+
+    if is_user_view:
+        text = (
+            f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(cfg.get('client_name') or '—')}</b>\n"
+            f"{ce('🧩', '5463224921935082813')} نوع سرویس: <b>{esc(cfg.get('type_name') or '—')}</b>\n"
+            f"{ce('🔋', '5924538142198600679')} حجم: <b>{vol_text}</b>\n"
+            f"{ce('⏰', '5343724178547691280')} مدت: <b>{dur_text}</b>\n"
+            f"{ce('👥', '5372926953978341366')} تعداد کاربر: <b>نامحدود</b>"
+            f"{config_line}"
+            f"{usage_block}"
+        )
+    else:
+        user_block = ""
         buyer_name     = esc(str(cfg.get("full_name") or "—"))
         buyer_username = esc(str(cfg.get("username")  or "—"))
         buyer_id       = cfg.get("user_id", "—")
@@ -837,21 +860,17 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
             f"آیدی: <code>{buyer_id}</code>\n"
             f"زمان خرید: <code>{purchase_time}</code>"
         )
-
-    text = (
-        f"🔌 <b>جزئیات کانفیگ پنل</b>\n\n"
-        f"🔮 نام سرویس: <b>{esc(cfg.get('client_name') or '—')}</b>\n"
-        f"🧩 نوع سرویس: {esc(cfg.get('type_name') or '—')}\n"
-        f"📌 نوع ثبت: {cpkg_delivery}\n"
-        f"🔋 حجم: {vol_text}\n"
-        f"⏰ مدت: {dur_text}"
-        f"{config_line}"
-        f"{user_block}\n\n"
-        f"━━━━━━━━━━━━━\n"
-        f"📊 <b>وضعیت مصرف:</b>\n"
-        f"حجم مانده: {remaining_vol_str}\n"
-        f"زمان مانده: {remaining_time_str}"
-    )
+        text = (
+            f"🔌 <b>جزئیات کانفیگ پنل</b>\n\n"
+            f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(cfg.get('client_name') or '—')}</b>\n"
+            f"{ce('🧩', '5463224921935082813')} نوع سرویس: <b>{esc(cfg.get('type_name') or '—')}</b>\n"
+            f"📌 نوع ثبت: {cpkg_delivery}\n"
+            f"{ce('🔋', '5924538142198600679')} حجم: <b>{vol_text}</b>\n"
+            f"{ce('⏰', '5343724178547691280')} مدت: <b>{dur_text}</b>"
+            f"{config_line}"
+            f"{user_block}"
+            f"{usage_block}"
+        )
 
     kb = InlineKeyboardMarkup()
 
@@ -870,22 +889,49 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
             InlineKeyboardButton(toggle_label,           callback_data=f"admin:pcfg:toggle:{config_id}"),
             InlineKeyboardButton("🗑 حذف کانفیگ",        callback_data=f"admin:pcfg:del:{config_id}"),
         )
-        if cfg.get("client_config_text"):
+        if has_config:
             kb.add(InlineKeyboardButton("📷 QR کانفیگ",    callback_data=f"admin:pcfg:qrc:{config_id}"))
-        if cfg.get("client_sub_url"):
+        if has_sub:
             kb.add(InlineKeyboardButton("📷 QR سابسکرایب", callback_data=f"admin:pcfg:qrs:{config_id}"))
+        kb.add(InlineKeyboardButton("بازگشت", callback_data=back_data,
+                                    icon_custom_emoji_id="5253997076169115797"))
+        send_or_edit(call, text, kb)
     else:
+        # User view: send QR inline if possible, then show buttons
         ar_label = "♻️ تمدید خودکار: ✅" if auto_renew else "♻️ تمدید خودکار: ❌"
         kb.add(InlineKeyboardButton(ar_label, callback_data=f"mypnlcfg:autorenew:{config_id}"))
-        if cfg.get("client_sub_url"):
-            kb.row(
-                InlineKeyboardButton("🔄 لینک ساب جدید",  callback_data=f"mypnlcfg:rsub:{config_id}"),
-                InlineKeyboardButton("📷 QR ساب",          callback_data=f"mypnlcfg:qrs:{config_id}"),
-            )
-        if cfg.get("client_config_text"):
-            kb.add(InlineKeyboardButton("📷 QR کانفیگ",    callback_data=f"mypnlcfg:qrc:{config_id}"))
+        if has_sub:
+            kb.add(InlineKeyboardButton("🔄 لینک ساب جدید", callback_data=f"mypnlcfg:rsub:{config_id}"))
+        # ── 3 filter buttons in a row ─────────────────────────────────────────
+        kb.row(
+            InlineKeyboardButton("📋 همه", callback_data="mypnlcfg:list:all:0"),
+            InlineKeyboardButton("⚠️ رو به پایان", callback_data="mypnlcfg:list:expiring:0"),
+            InlineKeyboardButton("❌ منقضی", callback_data="mypnlcfg:list:expired:0"),
+        )
+        kb.add(InlineKeyboardButton("بازگشت", callback_data=back_data,
+                                    icon_custom_emoji_id="5253997076169115797"))
 
-    kb.add(InlineKeyboardButton("بازگشت", callback_data=back_data,
-                                icon_custom_emoji_id="5253997076169115797"))
-    send_or_edit(call, text, kb)
+        # Determine QR source
+        qr_source = cfg.get("client_config_text") or cfg.get("client_sub_url") or ""
+        if has_sub and not has_config:
+            qr_source = cfg["client_sub_url"]
+
+        if qr_source:
+            try:
+                import qrcode as _qr
+                import io as _io
+                bio = _io.BytesIO()
+                _qr.make(qr_source).save(bio, format="PNG")
+                bio.seek(0)
+                bio.name = "qr.png"
+                chat_id = call.message.chat.id if hasattr(call, "message") else call.chat.id
+                try:
+                    bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+                except Exception:
+                    pass
+                bot.send_photo(chat_id, bio, caption=text, parse_mode="HTML", reply_markup=kb)
+            except Exception:
+                send_or_edit(call, text, kb)
+        else:
+            send_or_edit(call, text, kb)
 
