@@ -5690,7 +5690,6 @@ def _dispatch_callback(call, uid, data):
             cfg = get_panel_config(config_id)
             if not cfg:
                 bot.answer_callback_query(call.id, "کانفیگ یافت نشد.", show_alert=True); return
-            from ..db import get_package
             pkg = get_package(pkg_id)
             if not pkg:
                 bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True); return
