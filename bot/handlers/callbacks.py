@@ -11776,7 +11776,10 @@ def _dispatch_callback(call, uid, data):
             "sample_config":  "📋 نمونه کانفیگ",
             "sample_sub_url": "🔗 نمونه آدرس سابسکرایب",
         }
-        cur_val = cp.get(field, "")
+        try:
+            cur_val = cp[field]
+        except (KeyError, IndexError):
+            cur_val = ""
         cur_display = esc(str(cur_val)[:200]) if cur_val else "<i>خالی</i>"
         state_set(uid, f"cpkg_ef_{field}", cpkg_id=cpkg_id, panel_id=cp["panel_id"])
         send_or_edit(call,
