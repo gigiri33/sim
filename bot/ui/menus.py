@@ -223,24 +223,27 @@ def show_referral_menu(target, user_id):
         f"{pending_text}"
     )
 
-    # Build share text — link goes at the BOTTOM inside text= only (no url= param)
+    # Build share text — ref_link goes in url= param, text in text= param
     custom_banner = setting_get("referral_banner_text", "").strip()
     if custom_banner:
-        share_text = f"{custom_banner}\n\n{ref_link}"
+        share_body = custom_banner
     else:
-        share_text = (
+        share_body = (
             f"🔥 می‌خوای با سرعت بالا و پایداری عالی به اینترنت آزاد وصل بشی؟\n\n"
             f"من از {BRAND_TITLE} سرویس VPN خریدم و کاملاً راضیم! 😍\n\n"
             f"✅ سرعت فوق‌العاده\n"
             f"✅ پایداری بالا\n"
             f"✅ پشتیبانی ۲۴ ساعته\n\n"
             # NOTE: share text uses plain emojis (custom emojis can't render outside bot context)
-            f"تو هم از لینک من وارد شو و سرویست رو بخر 👇\n{ref_link}"
+            f"تو هم از لینک من وارد شو و سرویست رو بخر 👇"
         )
 
     import urllib.parse as _up
-    # safe='' ensures slashes inside ref_link are encoded and don't break the URL
-    share_url = f"https://t.me/share/url?text={_up.quote(share_text, safe='')}"
+    share_url = (
+        f"https://t.me/share/url"
+        f"?url={_up.quote(ref_link, safe='')}"
+        f"&text={_up.quote(share_body, safe='')}"
+    )
 
     kb = types.InlineKeyboardMarkup()
 

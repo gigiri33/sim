@@ -403,11 +403,8 @@ def universal_handler(message):
 
         # ── Broadcast ─────────────────────────────────────────────────────────
         def _bc_send(target_id):
-            """Forward if admin forwarded something, copy if admin wrote directly."""
-            if message.forward_date:
-                bot.forward_message(target_id, message.chat.id, message.message_id)
-            else:
-                bot.copy_message(target_id, message.chat.id, message.message_id)
+            """Copy message to target (supports text, photo, video, etc.)."""
+            bot.copy_message(target_id, message.chat.id, message.message_id)
 
         if sn == "admin_reject_all_note" and is_admin(uid):
             note_text = message.text.strip() if message.text else ""

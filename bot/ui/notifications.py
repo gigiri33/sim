@@ -480,7 +480,7 @@ def auto_fulfill_pending_orders(package_id):
 
 # ── Referral Reward Logic ──────────────────────────────────────────────────────
 def _give_referral_reward(referrer_id, reward_prefix):
-    """Queue a referral reward as a pending claim for referrer_id.
+    """Give a referral reward to referrer_id immediately.
     reward_prefix: 'referral_start_reward' or 'referral_purchase_reward'
     source: 'start' if start-reward, 'purchase' if purchase-reward
     """
@@ -501,20 +501,44 @@ def _give_referral_reward(referrer_id, reward_prefix):
         except Exception:
             pass
     else:
-        # Config reward
+        # Config reward — auto-deliver immediately
         pkg_id = setting_get(f"{reward_prefix}_package", "")
         if not pkg_id or not pkg_id.isdigit():
             return
         pkg = get_package(int(pkg_id))
         if not pkg:
             return
+        available = get_available_configs_for_package(int(pkg_id))
+        if available:
+            cfg = available[0]
+            try:
+                purchase_id = assign_config_to_user(
+                    cfg["id"], referrer_id, int(pkg_id), 0, "referral_gift", is_test=0
+                )
+                try:
+                    bot.send_message(
+                        referrer_id,
+                        "🎁 <b>پاداش زیرمجموعه‌گیری!</b>\n\n"
+                        "✅ یک کانفیگ رایگان به سرویس‌های شما اضافه شد! 🎉",
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    pass
+                try:
+                    deliver_purchase_message(referrer_id, purchase_id)
+                except Exception:
+                    pass
+                return
+            except Exception:
+                pass
+        # Fallback: no stock or assign failed — queue as pending
         add_pending_reward(referrer_id, "config", 0, int(pkg_id), source)
         try:
             bot.send_message(
                 referrer_id,
                 "🎁 <b>پاداش زیرمجموعه‌گیری!</b>\n\n"
-                "یک کانفیگ رایگان برای شما ذخیره شد. 🎉\n"
-                "برای دریافت، به بخش دعوت دوستان بروید و روی «🎁 دریافت پاداش» بزنید.",
+                "⚠️ در حال حاضر موجودی کانفیگ تمام شده.\n"
+                "پاداش شما ذخیره شد و به محض اضافه شدن موجودی، از بخش دعوت دوستان → «🎁 دریافت پاداش» قابل دریافت است.",
                 parse_mode="HTML"
             )
         except Exception:
@@ -522,12 +546,43 @@ def _give_referral_reward(referrer_id, reward_prefix):
 
 
 def notify_referral_join(referrer_id, referee_id):
-    """Send a join-referral log to admins (own/bot) and the referral_log topic."""
+    """Send a join-referral log to admins (own/bot) and the referral_log topic.
+    Also send a real-time notification to the inviter."""
     referrer = get_user(referrer_id)
     referee  = get_user(referee_id)
     if not referrer or not referee:
         return
     total = count_referrals(referrer_id)
+
+    # ── Notify the INVITER directly ────────────────────────────────────────
+    try:
+        referee_name = esc(referee["full_name"] or "کاربر جدید")
+        start_enabled = setting_get("referral_start_reward_enabled", "0") == "1"
+        required_count = int(setting_get("referral_start_reward_count", "1") or "1")
+        channel_required = _channel_reward_required()
+        ch = "AND channel_joined=1" if channel_required else ""
+        with get_conn() as conn:
+            unrewarded = conn.execute(
+                f"SELECT COUNT(*) AS n FROM referrals WHERE referrer_id=? AND start_reward_given=0 {ch}",
+                (referrer_id,)
+            ).fetchone()["n"]
+        progress = unrewarded if unrewarded <= required_count else unrewarded % required_count or required_count
+
+        progress_line = ""
+        if start_enabled and required_count > 0:
+            progress_line = f"\n\n⭐️ {progress} دعوت از {required_count} دعوت برای دریافت پاداش"
+
+        inviter_text = (
+            f"💃 <b>به به!</b>\n\n"
+            f"کاربر [{referee_name}] از طریق لینک دعوتت اومد تو ربات! 🎉"
+            f"{progress_line}\n\n"
+            f"👥 تعداد دعوت‌های کل: <b>{total}</b>"
+        )
+        bot.send_message(referrer_id, inviter_text, parse_mode="HTML")
+    except Exception:
+        pass
+
+    # ── Admin / topic log ──────────────────────────────────────────────────
     text = (
         f"🔗 <b>زیرمجموعه‌گیری جدید</b>\n\n"
         f"👤 <b>دعوت‌کننده:</b>\n"

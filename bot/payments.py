@@ -482,7 +482,8 @@ def _finish_card_payment_approval_inner(payment_id, admin_note, approved):
             package_id  = payment["package_id"]
             package_row = get_package(package_id)
             config_id   = payment["config_id"]
-            complete_payment(payment_id)
+            if not complete_payment(payment_id):
+                return True, True  # already processed by another path
             notified = _safe_send(
                 user_id,
                 "✅ <b>درخواست تمدید ارسال شد</b>\n\n"

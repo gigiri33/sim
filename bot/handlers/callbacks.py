@@ -2382,7 +2382,8 @@ def _tetrapay_auto_verify(payment_id, authority, uid, chat_id, message_id, kind,
             elif kind == "config_purchase":
                 pkg_row = get_package(package_id)
                 _qty_tp_auto = int(payment["quantity"]) if "quantity" in payment.keys() else 1
-                complete_payment(payment_id)
+                if not complete_payment(payment_id):
+                    return
                 state_clear(uid)
                 try:
                     bot.edit_message_text(
@@ -2407,7 +2408,8 @@ def _tetrapay_auto_verify(payment_id, authority, uid, chat_id, message_id, kind,
                     row = conn.execute("SELECT purchase_id FROM configs WHERE id=?", (cfg_id,)).fetchone()
                 pid = row["purchase_id"] if row else 0
                 item = get_purchase(pid) if pid else None
-                complete_payment(payment_id)
+                if not complete_payment(payment_id):
+                    return
                 state_clear(uid)
                 msg_text = (
                     "✅ <b>درخواست تمدید ارسال شد</b>\n\n"
@@ -2494,7 +2496,8 @@ def _tronpays_rial_auto_verify(payment_id, invoice_id, uid, chat_id, message_id,
             elif kind == "config_purchase":
                 pkg_row = get_package(package_id)
                 _qty_trp_auto = int(payment["quantity"]) if "quantity" in payment.keys() else 1
-                complete_payment(payment_id)
+                if not complete_payment(payment_id):
+                    return
                 state_clear(uid)
                 try:
                     bot.edit_message_text(
@@ -2519,7 +2522,8 @@ def _tronpays_rial_auto_verify(payment_id, invoice_id, uid, chat_id, message_id,
                     row = conn.execute("SELECT purchase_id FROM configs WHERE id=?", (cfg_id,)).fetchone()
                 pid = row["purchase_id"] if row else 0
                 item = get_purchase(pid) if pid else None
-                complete_payment(payment_id)
+                if not complete_payment(payment_id):
+                    return
                 state_clear(uid)
                 msg_text = (
                     "✅ <b>درخواست تمدید ارسال شد</b>\n\n"
@@ -3206,7 +3210,9 @@ def _dispatch_callback(call, uid, data):
         authority = payment["receipt_text"]
         success, result = verify_tetrapay_order(authority)
         if success:
-            complete_payment(payment_id)
+            if not complete_payment(payment_id):
+                bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+                return
             package_row = get_package(payment["package_id"])
             config_id = payment["config_id"]
             with get_conn() as conn:
@@ -3315,7 +3321,9 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id, "خطا در بررسی وضعیت فاکتور.", show_alert=True)
             return
         if is_tronpays_paid(status):
-            complete_payment(payment_id)
+            if not complete_payment(payment_id):
+                bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+                return
             package_row = get_package(payment["package_id"])
             config_id   = payment["config_id"]
             with get_conn() as conn:
@@ -3857,7 +3865,9 @@ def _dispatch_callback(call, uid, data):
                 package_id = payment["package_id"]
                 package_row = get_package(package_id)
                 _qty_tp    = int(payment["quantity"]) if "quantity" in payment.keys() else 1
-                complete_payment(payment_id)
+                if not complete_payment(payment_id):
+                    bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+                    return
                 bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد!")
                 send_or_edit(call, "✅ پرداخت شما تأیید شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
                              back_button("main"))
@@ -3963,7 +3973,9 @@ def _dispatch_callback(call, uid, data):
                 package_id = payment["package_id"]
                 package_row = get_package(package_id)
                 _qty_tron  = int(payment["quantity"]) if "quantity" in payment.keys() else 1
-                complete_payment(payment_id)
+                if not complete_payment(payment_id):
+                    bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+                    return
                 bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد!")
                 send_or_edit(call, "✅ پرداخت شما تأیید شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
                              back_button("main"))
@@ -4404,7 +4416,9 @@ def _dispatch_callback(call, uid, data):
                 package_id = payment["package_id"]
                 package_row = get_package(package_id)
                 _qty_sw = int(payment["quantity"]) if "quantity" in payment.keys() else 1
-                complete_payment(payment_id)
+                if not complete_payment(payment_id):
+                    bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+                    return
                 bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد!")
                 send_or_edit(call, "✅ پرداخت شما تأیید شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
                              back_button("main"))
@@ -4488,7 +4502,9 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id, "خطا در بررسی وضعیت فاکتور.", show_alert=True)
             return
         if inv.get("status") in ("PAID", "COMPLETED") or inv.get("paidAt"):
-            complete_payment(payment_id)
+            if not complete_payment(payment_id):
+                bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+                return
             package_row = get_package(payment["package_id"])
             config_id   = payment["config_id"]
             with get_conn() as conn:
