@@ -98,7 +98,7 @@ def deliver_purchase_message(chat_id, purchase_id):
     kb = types.InlineKeyboardMarkup()
     if setting_get("manual_renewal_enabled", "1") == "1" and not item["is_test"]:
         kb.add(types.InlineKeyboardButton("♻️ تمدید", callback_data=f"renew:{purchase_id}"))
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+    kb.add(types.InlineKeyboardButton("🔙 بازگشت به لیست", callback_data="my_configs"))
 
     # Detect file-based configs (OpenVPN / WireGuard)
     cfg_data = None

@@ -304,6 +304,16 @@ def universal_handler(message):
     sd = state_data(uid)
 
     try:
+        # ── My Configs search ─────────────────────────────────────────────────
+        if sn == "my_cfgs_search":
+            query = (message.text or "").strip()
+            state_clear(uid)
+            if not query or query in ("/cancel", "لغو"):
+                show_my_configs(message, uid, page=0)
+            else:
+                show_my_configs(message, uid, page=0, search=query)
+            return
+
         # ── License activation state — step 1: API Key ───────────────────────
         if sn == "license:waiting_api_key" and is_admin(uid):
             text = (message.text or "").strip()

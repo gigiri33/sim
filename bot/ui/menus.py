@@ -121,14 +121,80 @@ def show_support(target):
     send_or_edit(target, text, kb)
 
 
-def show_my_configs(target, user_id):
-    items       = get_user_purchases(user_id)
-    panel_items = get_user_panel_configs(user_id) or []
-    if not items and not panel_items:
+# Per-user active search query for "My Configs" view (in-memory)
+_user_cfg_search = {}
+
+_MY_CFGS_PER_PAGE = 10
+
+
+def show_my_configs(target, user_id, page=0, search=None):
+    """Show paginated My Configs with optional search and navigation."""
+    PER_PAGE = _MY_CFGS_PER_PAGE
+
+    # Update search cache
+    if search is not None:
+        if search:
+            _user_cfg_search[user_id] = search
+        else:
+            _user_cfg_search.pop(user_id, None)
+
+    active_search = _user_cfg_search.get(user_id)
+
+    # Get total counts (needed for pagination math)
+    _, items_total = get_user_purchases_paged(user_id, page=0, per_page=1, search=active_search)
+    _, panel_total = get_user_panel_configs_paged(user_id, page=0, per_page=1, search=active_search)
+    total = items_total + panel_total
+
+    if total == 0 and not active_search:
         send_or_edit(target, f"{ce('📭', '5258134813302332906')} هنوز کانفیگی برای حساب شما ثبت نشده است.", back_button("main"))
         return
-    renewal_enabled = setting_get("manual_renewal_enabled", "1") == "1"
+
+    total_pages = max(1, (total + PER_PAGE - 1) // PER_PAGE)
+    page = max(0, min(page, total_pages - 1))
+    offset = page * PER_PAGE
+
+    # Compute per-source slice
+    if offset < items_total:
+        buy_count = min(PER_PAGE, items_total - offset)
+        buy_start = offset
+    else:
+        buy_count = 0
+        buy_start = 0
+
+    panel_start = max(0, offset - items_total)
+    panel_count = PER_PAGE - buy_count
+
+    # Fetch page data from each source
+    if buy_count > 0:
+        all_items, _ = get_user_purchases_paged(
+            user_id, page=0, per_page=buy_start + buy_count, search=active_search
+        )
+        items = list(all_items)[buy_start:]
+    else:
+        items = []
+
+    if panel_count > 0 and panel_start < panel_total:
+        actual_panel = min(panel_count, panel_total - panel_start)
+        all_panel, _ = get_user_panel_configs_paged(
+            user_id, page=0, per_page=panel_start + actual_panel, search=active_search
+        )
+        panel_items = list(all_panel)[panel_start:]
+    else:
+        panel_items = []
+
     kb = types.InlineKeyboardMarkup()
+
+    # ── Search button row at top ──────────────────────────────────────────────
+    if active_search:
+        q_display = active_search[:18] + ("…" if len(active_search) > 18 else "")
+        kb.row(
+            types.InlineKeyboardButton(f"🔍 {q_display}", callback_data="my_configs:search"),
+            types.InlineKeyboardButton("❌ پاک کردن جست‌وجو", callback_data="my_configs:csearch"),
+        )
+    else:
+        kb.add(types.InlineKeyboardButton("🔍 جست‌وجو در کانفیگ‌ها", callback_data="my_configs:search"))
+
+    # ── Config buttons (no inline renewal) ───────────────────────────────────
     for item in items:
         expired_mark = " ❌" if item["is_expired"] else ""
         svc_name     = move_leading_emoji(urllib.parse.unquote(item["service_name"] or ""))
@@ -144,11 +210,9 @@ def show_my_configs(target, user_id):
             else:
                 test_label = " 🎁"
         title = f"{svc_name}{test_label}{expired_mark}"
-        row = [types.InlineKeyboardButton(title, callback_data=f"mycfg:{item['id']}")]
-        if renewal_enabled and not item["is_test"]:
-            row.append(types.InlineKeyboardButton("♻️ تمدید", callback_data=f"renew:{item['id']}"))
-        kb.add(*row)
-    # Panel configs
+        kb.add(types.InlineKeyboardButton(title, callback_data=f"mycfg:{item['id']}"))
+
+    # ── Panel configs ─────────────────────────────────────────────────────────
     for pc in panel_items:
         if pc["is_expired"]:
             marker = " ⌛"
@@ -158,8 +222,28 @@ def show_my_configs(target, user_id):
             marker = " 🟢"
         name = esc(pc["client_name"] or pc["package_name"] or "—")
         kb.add(types.InlineKeyboardButton(f"🔌 {name}{marker}", callback_data=f"mypnlcfg:d:{pc['id']}"))
+
+    # ── Pagination row ────────────────────────────────────────────────────────
+    if total_pages > 1:
+        nav = []
+        if page > 0:
+            nav.append(types.InlineKeyboardButton("◀️ قبلی", callback_data=f"my_configs:p:{page - 1}"))
+        nav.append(types.InlineKeyboardButton(f"📄 {page + 1} / {total_pages}", callback_data="noop"))
+        if page < total_pages - 1:
+            nav.append(types.InlineKeyboardButton("▶️ بعدی", callback_data=f"my_configs:p:{page + 1}"))
+        kb.row(*nav)
+
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
-    send_or_edit(target, f"{ce('📦', '5332618260703624145')} <b>کانفیگ‌های من</b>\n\nیکی از سرویس‌ها را انتخاب کنید:", kb)
+
+    # ── Header ────────────────────────────────────────────────────────────────
+    header = f"{ce('📦', '5332618260703624145')} <b>کانفیگ‌های من</b>"
+    if active_search:
+        header += f"\n🔍 جست‌وجو: <code>{esc(active_search)}</code>"
+    if total == 0:
+        header += "\n\n📭 نتیجه‌ای یافت نشد."
+    else:
+        header += "\n\nیکی از سرویس‌ها را انتخاب کنید:"
+    send_or_edit(target, header, kb)
 
 
 def show_referral_menu(target, user_id):

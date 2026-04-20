@@ -3168,7 +3168,39 @@ def _dispatch_callback(call, uid, data):
 
     if data == "my_configs":
         bot.answer_callback_query(call.id)
-        show_my_configs(call, uid)
+        show_my_configs(call, uid, page=0, search="")  # clear search on fresh entry
+        return
+
+    if data.startswith("my_configs:p:"):
+        # Paginate: my_configs:p:{page}
+        bot.answer_callback_query(call.id)
+        try:
+            page = int(data.split(":")[-1])
+        except (ValueError, IndexError):
+            page = 0
+        show_my_configs(call, uid, page=page)
+        return
+
+    if data == "my_configs:search":
+        # Enter search mode — ask user to type a query
+        state_set(uid, "my_cfgs_search")
+        bot.answer_callback_query(call.id)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("❌ لغو", callback_data="my_configs"))
+        send_or_edit(call,
+            "🔍 <b>جست‌وجو در کانفیگ‌ها</b>\n\n"
+            "متن مورد نظر را ارسال کنید:\n"
+            "• نام کانفیگ\n"
+            "• متن کانفیگ (config link)\n"
+            "• لینک ساب‌اسکرایب\n\n"
+            "<i>برای لغو دکمه لغو را بزنید.</i>",
+            kb)
+        return
+
+    if data == "my_configs:csearch":
+        # Clear active search and return to page 0
+        bot.answer_callback_query(call.id)
+        show_my_configs(call, uid, page=0, search="")
         return
 
     if data.startswith("mycfg:"):
