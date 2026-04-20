@@ -6,6 +6,7 @@ Handles login and health-check only.  No inbound or client management yet.
 Passwords are stored and transmitted as plain text; add encryption later if
 needed.
 """
+import time
 import warnings
 import logging
 
@@ -14,8 +15,10 @@ from requests.exceptions import RequestException, Timeout, SSLError
 
 log = logging.getLogger(__name__)
 
-DEFAULT_TIMEOUT = 15   # seconds – normal requests
-LONG_TIMEOUT    = 45   # seconds – slow proxy / high-latency connections
+DEFAULT_TIMEOUT = 20   # seconds – normal requests
+LONG_TIMEOUT    = 60   # seconds – slow proxy / high-latency connections
+MAX_RETRIES     = 3    # login + call retries for panel operations
+RETRY_DELAY     = 2    # seconds to wait between retries
 
 # Suppress InsecureRequestWarning raised by verify=False (self-signed certs are
 # common in self-hosted 3x-ui deployments).
@@ -42,9 +45,50 @@ class PanelClient:
         # e.g. "http://stareh.parhiiz.top:2096"  — no trailing slash, no path prefix
         self.sub_url_base = sub_url_base.strip().rstrip("/") if sub_url_base else ""
 
-        self._session = requests.Session()
+        self._session    = requests.Session()
+        self._logged_in  = False
 
     # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def _ensure_logged_in(self) -> tuple:
+        """
+        Log in if not already authenticated.
+        Returns (True, None) on success or (False, error_str) on failure.
+        """
+        if self._logged_in:
+            return True, None
+        ok, err = self.login()
+        if ok:
+            self._logged_in = True
+        return ok, err
+
+    def _api_call(self, method: str, url: str, **kwargs) -> tuple:
+        """
+        Execute an API call with automatic login + retry on failure.
+        Retries up to MAX_RETRIES times; re-logs in before each retry.
+        Returns the raw requests.Response or raises RequestException.
+        """
+        last_err = None
+        for attempt in range(MAX_RETRIES):
+            # Force fresh login on every retry (re-auth)
+            self._logged_in = False
+            ok, err = self._ensure_logged_in()
+            if not ok:
+                last_err = err
+                if attempt < MAX_RETRIES - 1:
+                    time.sleep(RETRY_DELAY)
+                continue
+            try:
+                resp = self._session.request(method, url, **kwargs)
+                return resp
+            except Timeout:
+                last_err = "اتصال منقضی شد (timeout)"
+            except RequestException as exc:
+                last_err = str(exc)
+            if attempt < MAX_RETRIES - 1:
+                self._logged_in = False
+                time.sleep(RETRY_DELAY)
+        raise RequestException(last_err or "خطای ناشناخته پس از چند تلاش")
 
     @property
     def base_url(self) -> str:
@@ -77,11 +121,13 @@ class PanelClient:
                 try:
                     data = resp.json()
                     if data.get("success") is True:
+                        self._logged_in = True
                         return True, None
                     return False, data.get("msg") or "احراز هویت ناموفق"
                 except ValueError:
                     # Panel returned 200 but non-JSON body — treat as success
                     # (some versions redirect to the dashboard).
+                    self._logged_in = True
                     return True, None
 
             return False, f"HTTP {resp.status_code}"
@@ -117,8 +163,8 @@ class PanelClient:
         API: GET /panel/api/inbounds/list
         """
         try:
-            resp = self._session.get(
-                f"{self.base_url}/panel/api/inbounds/list",
+            resp = self._api_call(
+                "GET", f"{self.base_url}/panel/api/inbounds/list",
                 timeout=LONG_TIMEOUT, verify=False,
             )
             if resp.status_code == 200:
@@ -127,8 +173,6 @@ class PanelClient:
                     return True, data.get("obj", [])
                 return False, data.get("msg") or "دریافت اینباندها ناموفق"
             return False, f"HTTP {resp.status_code}"
-        except Timeout:
-            return False, "اتصال منقضی شد"
         except RequestException as exc:
             return False, str(exc)
 
@@ -189,8 +233,8 @@ class PanelClient:
             "settings": _json.dumps(settings_obj),
         }
         try:
-            resp = self._session.post(
-                f"{self.base_url}/panel/api/inbounds/addClient",
+            resp = self._api_call(
+                "POST", f"{self.base_url}/panel/api/inbounds/addClient",
                 json=payload,
                 timeout=LONG_TIMEOUT, verify=False,
             )
@@ -200,8 +244,6 @@ class PanelClient:
                     return True, (client_uuid, sub_id)
                 return False, data.get("msg") or "ساخت کلاینت ناموفق"
             return False, f"HTTP {resp.status_code}"
-        except Timeout:
-            return False, "اتصال منقضی شد"
         except RequestException as exc:
             return False, str(exc)
 
@@ -212,8 +254,8 @@ class PanelClient:
         Returns (True, client_dict) or (False, error_str).
         """
         try:
-            resp = self._session.get(
-                f"{self.base_url}/panel/api/inbounds/getClientTraffics/{email}",
+            resp = self._api_call(
+                "GET", f"{self.base_url}/panel/api/inbounds/getClientTraffics/{email}",
                 timeout=DEFAULT_TIMEOUT, verify=False,
             )
             if resp.status_code == 200:
@@ -222,8 +264,6 @@ class PanelClient:
                     return True, data.get("obj")
                 return False, data.get("msg") or "کلاینت یافت نشد"
             return False, f"HTTP {resp.status_code}"
-        except Timeout:
-            return False, "اتصال منقضی شد"
         except RequestException as exc:
             return False, str(exc)
 
@@ -250,8 +290,8 @@ class PanelClient:
             "settings": _json.dumps(settings_obj),
         }
         try:
-            resp = self._session.post(
-                f"{self.base_url}/panel/api/inbounds/updateClient/{client_uuid}",
+            resp = self._api_call(
+                "POST", f"{self.base_url}/panel/api/inbounds/updateClient/{client_uuid}",
                 json=payload,
                 timeout=LONG_TIMEOUT, verify=False,
             )
@@ -261,8 +301,6 @@ class PanelClient:
                     return True, None
                 return False, data.get("msg") or "غیرفعال‌سازی ناموفق"
             return False, f"HTTP {resp.status_code}"
-        except Timeout:
-            return False, "اتصال منقضی شد"
         except RequestException as exc:
             return False, str(exc)
 
@@ -289,8 +327,8 @@ class PanelClient:
             "settings": _json.dumps(settings_obj),
         }
         try:
-            resp = self._session.post(
-                f"{self.base_url}/panel/api/inbounds/updateClient/{client_uuid}",
+            resp = self._api_call(
+                "POST", f"{self.base_url}/panel/api/inbounds/updateClient/{client_uuid}",
                 json=payload,
                 timeout=LONG_TIMEOUT, verify=False,
             )
@@ -300,8 +338,6 @@ class PanelClient:
                     return True, None
                 return False, data.get("msg") or "فعال‌سازی ناموفق"
             return False, f"HTTP {resp.status_code}"
-        except Timeout:
-            return False, "اتصال منقضی شد"
         except RequestException as exc:
             return False, str(exc)
 
@@ -330,8 +366,8 @@ class PanelClient:
             "settings": _json.dumps(settings_obj),
         }
         try:
-            resp = self._session.post(
-                f"{self.base_url}/panel/api/inbounds/updateClient/{client_uuid}",
+            resp = self._api_call(
+                "POST", f"{self.base_url}/panel/api/inbounds/updateClient/{client_uuid}",
                 json=payload,
                 timeout=LONG_TIMEOUT, verify=False,
             )
@@ -341,8 +377,6 @@ class PanelClient:
                     return True, None
                 return False, data.get("msg") or "بروزرسانی ناموفق"
             return False, f"HTTP {resp.status_code}"
-        except Timeout:
-            return False, "اتصال منقضی شد"
         except RequestException as exc:
             return False, str(exc)
 
@@ -353,8 +387,8 @@ class PanelClient:
         Returns (True, None) or (False, error_str).
         """
         try:
-            resp = self._session.post(
-                f"{self.base_url}/panel/api/inbounds/{inbound_id}/delClient/{client_uuid}",
+            resp = self._api_call(
+                "POST", f"{self.base_url}/panel/api/inbounds/{inbound_id}/delClient/{client_uuid}",
                 timeout=LONG_TIMEOUT, verify=False,
             )
             if resp.status_code == 200:
@@ -363,8 +397,6 @@ class PanelClient:
                     return True, None
                 return False, data.get("msg") or "حذف کلاینت ناموفق"
             return False, f"HTTP {resp.status_code}"
-        except Timeout:
-            return False, "اتصال منقضی شد"
         except RequestException as exc:
             return False, str(exc)
 
@@ -375,8 +407,8 @@ class PanelClient:
         Returns (True, None) or (False, error_str).
         """
         try:
-            resp = self._session.post(
-                f"{self.base_url}/panel/api/inbounds/{inbound_id}/resetClientTraffic/{email}",
+            resp = self._api_call(
+                "POST", f"{self.base_url}/panel/api/inbounds/{inbound_id}/resetClientTraffic/{email}",
                 timeout=LONG_TIMEOUT, verify=False,
             )
             if resp.status_code == 200:
@@ -385,8 +417,6 @@ class PanelClient:
                     return True, None
                 return False, data.get("msg") or "ریست ترافیک ناموفق"
             return False, f"HTTP {resp.status_code}"
-        except Timeout:
-            return False, "اتصال منقضی شد"
         except RequestException as exc:
             return False, str(exc)
 

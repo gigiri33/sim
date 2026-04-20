@@ -5539,23 +5539,23 @@ def _dispatch_callback(call, uid, data):
             panel = get_panel(cfg["panel_id"])
             if not panel:
                 bot.answer_callback_query(call.id, "پنل یافت نشد.", show_alert=True); return
+            cur_disabled = int(cfg.get("is_disabled") or 0)
+            send_or_edit(call, "⏳ در حال ارتباط با پنل…")
             from ..panels.client import PanelClient
             pc_api = PanelClient(
                 protocol=panel["protocol"], host=panel["host"], port=panel["port"],
                 path=panel["path"] or "", username=panel["username"], password=panel["password"]
             )
-            cur_disabled = int(cfg.get("is_disabled") or 0)
             if cur_disabled:
-                # re-enable
                 ok, err = pc_api.enable_client(
                     inbound_id=cfg["inbound_id"], client_uuid=cfg["client_uuid"],
                     email=cfg["client_name"] or "", traffic_bytes=0, expire_ms=0,
                 )
                 if ok:
                     update_panel_config_field(config_id, "is_disabled", 0)
-                    bot.answer_callback_query(call.id, "✅ کانفیگ فعال شد.")
                 else:
-                    bot.answer_callback_query(call.id, f"خطا: {err}", show_alert=True); return
+                    send_or_edit(call, f"❌ خطا در فعال‌سازی:\n<code>{esc(str(err))}</code>",
+                                 back_button(f"admin:pcfg:d:{config_id}")); return
             else:
                 ok, err = pc_api.disable_client(
                     inbound_id=cfg["inbound_id"], client_uuid=cfg["client_uuid"],
@@ -5563,9 +5563,9 @@ def _dispatch_callback(call, uid, data):
                 )
                 if ok:
                     update_panel_config_field(config_id, "is_disabled", 1)
-                    bot.answer_callback_query(call.id, "⛔ کانفیگ غیرفعال شد.")
                 else:
-                    bot.answer_callback_query(call.id, f"خطا: {err}", show_alert=True); return
+                    send_or_edit(call, f"❌ خطا در غیرفعال‌سازی:\n<code>{esc(str(err))}</code>",
+                                 back_button(f"admin:pcfg:d:{config_id}")); return
             _show_panel_config_detail(call, config_id, back_data="admin:panel_configs")
             return
 
@@ -5587,18 +5587,21 @@ def _dispatch_callback(call, uid, data):
                 bot.answer_callback_query(call.id, "قالب ساب در cpkg تنظیم نشده.", show_alert=True); return
             # Update panel
             if panel:
+                send_or_edit(call, "⏳ در حال ارتباط با پنل…")
                 from ..panels.client import PanelClient
                 pc_api = PanelClient(
                     protocol=panel["protocol"], host=panel["host"], port=panel["port"],
                     path=panel["path"] or "", username=panel["username"], password=panel["password"]
                 )
-                pc_api.update_client_sub(
+                ok_sub, err_sub = pc_api.update_client_sub(
                     inbound_id=cfg["inbound_id"], client_uuid=cfg["client_uuid"],
                     email=cfg["client_name"] or "", new_sub_id=new_sub_id,
                 )
+                if not ok_sub:
+                    send_or_edit(call, f"❌ خطا در بروزرسانی ساب روی پنل:\n<code>{esc(str(err_sub))}</code>",
+                                 back_button(f"admin:pcfg:d:{config_id}")); return
             # Save to DB
             update_panel_config_texts(config_id, cfg["client_config_text"], new_sub_url)
-            bot.answer_callback_query(call.id, "✅ لینک ساب جدید ساخته شد.")
             _show_panel_config_detail(call, config_id, back_data="admin:panel_configs")
             return
 
@@ -5619,11 +5622,13 @@ def _dispatch_callback(call, uid, data):
             new_config = _build_config_from_template(cpkg_d, new_uuid, cfg["client_name"] or "")
             new_sub    = _build_sub_from_template(cpkg_d, new_sub_id) if cpkg_d.get("sample_sub_url") else cfg["client_sub_url"]
             # Disable old UUID on panel
+            send_or_edit(call, "\u23f3 \u062f\u0631 \u062d\u0627\u0644 \u0627\u0631\u062a\u0628\u0627\u0637 \u0628\u0627 \u067e\u0646\u0644\u2026")
             from ..panels.client import PanelClient
             pc_api = PanelClient(
                 protocol=panel["protocol"], host=panel["host"], port=panel["port"],
                 path=panel["path"] or "", username=panel["username"], password=panel["password"]
             )
+            # Disable old UUID on panel (best-effort)
             pc_api.disable_client(
                 inbound_id=cfg["inbound_id"], client_uuid=cfg["client_uuid"],
                 email=cfg["client_name"] or "",
@@ -5645,12 +5650,12 @@ def _dispatch_callback(call, uid, data):
             if ok:
                 actual_uuid, _ = res
             else:
-                actual_uuid = new_uuid  # fallback if panel refuses
+                send_or_edit(call, f"❌ خطا در ساخت کلاینت جدید:\n<code>{esc(str(res))}</code>",
+                             back_button(f"admin:pcfg:d:{config_id}")); return
             actual_config = _build_config_from_template(cpkg_d, actual_uuid, cfg["client_name"] or "") or new_config
             # Update DB
             update_panel_config_field(config_id, "client_uuid", actual_uuid)
             update_panel_config_texts(config_id, actual_config, new_sub or "")
-            bot.answer_callback_query(call.id, "✅ UUID و کانفیگ جدید ساخته شد.")
             _show_panel_config_detail(call, config_id, back_data="admin:panel_configs")
             return
 
@@ -5693,6 +5698,7 @@ def _dispatch_callback(call, uid, data):
             panel = get_panel(cfg["panel_id"])
             if not panel:
                 bot.answer_callback_query(call.id, "پنل یافت نشد.", show_alert=True); return
+            send_or_edit(call, "⏳ در حال تمدید روی پنل…")
             from ..panels.client import PanelClient
             pc_api = PanelClient(
                 protocol=panel["protocol"], host=panel["host"], port=panel["port"],
@@ -5711,18 +5717,20 @@ def _dispatch_callback(call, uid, data):
                 new_exp_str = None
                 new_exp_ms  = 0
             # Update on panel: set new expiryTime + re-enable
-            pc_api.enable_client(
+            ok_renew, err_renew = pc_api.enable_client(
                 inbound_id=cfg["inbound_id"], client_uuid=cfg["client_uuid"],
                 email=cfg["client_name"] or "",
                 traffic_bytes=int((pkg["volume_gb"] or 0) * 1073741824),
                 expire_ms=new_exp_ms,
             )
+            if not ok_renew:
+                send_or_edit(call, f"❌ خطا در بروزرسانی پنل:\n<code>{esc(str(err_renew))}</code>",
+                             back_button(f"admin:pcfg:d:{config_id}")); return
             # Update DB
             update_panel_config_field(config_id, "expire_at",  new_exp_str)
             update_panel_config_field(config_id, "is_expired",  0)
             update_panel_config_field(config_id, "is_disabled", 0)
             update_panel_config_field(config_id, "package_id",  pkg_id)
-            bot.answer_callback_query(call.id, "✅ تمدید انجام شد.")
             _show_panel_config_detail(call, config_id, back_data="admin:panel_configs")
             return
 
@@ -5754,6 +5762,7 @@ def _dispatch_callback(call, uid, data):
             # Delete from panel
             panel = get_panel(cfg["panel_id"])
             if panel and cfg.get("client_uuid"):
+                send_or_edit(call, "\u23f3 \u062f\u0631 \u062d\u0627\u0644 \u062d\u0630\u0641 \u0627\u0632 \u067e\u0646\u0644\u2026")
                 try:
                     from ..panels.client import PanelClient
                     pc_api = PanelClient(
@@ -5765,7 +5774,6 @@ def _dispatch_callback(call, uid, data):
                     pass
             # Delete from DB
             delete_panel_config(config_id)
-            bot.answer_callback_query(call.id, "✅ کانفیگ حذف شد.")
             _show_panel_configs(call)
             return
 
