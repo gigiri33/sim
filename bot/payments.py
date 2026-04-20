@@ -233,9 +233,12 @@ def send_payment_to_admins(payment_id):
         method_label += f" ({coin_key})"
     package_text = ""
     if package_row:
+        qty = int(payment.get("quantity") or 1)
+        qty_line = f"\n🔢 تعداد کانفیگ: <b>{qty} عدد</b>" if qty > 1 else ""
         package_text = (
             f"\n🧩 نوع: {esc(package_row['type_name'])}"
             f"\n📦 پکیج: {esc(package_row['name'])}"
+            f"{qty_line}"
             f"\n🔋 حجم: {package_row['volume_gb']} گیگ"
             f"\n⏰ مدت: {package_row['duration_days']} روز"
             f"\n👥 تعداد کاربر: {'نامحدود' if not (package_row['max_users'] if 'max_users' in package_row.keys() else 0) else str(package_row['max_users']) + ' کاربره'}"

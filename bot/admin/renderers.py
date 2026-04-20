@@ -895,12 +895,6 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
         kb.add(InlineKeyboardButton(ar_label, callback_data=f"mypnlcfg:autorenew:{config_id}"))
         if has_sub:
             kb.add(InlineKeyboardButton("🔄 لینک ساب جدید", callback_data=f"mypnlcfg:rsub:{config_id}"))
-        # ── 3 filter buttons in a row ─────────────────────────────────────────
-        kb.row(
-            InlineKeyboardButton("📋 همه", callback_data="mypnlcfg:list:all:0"),
-            InlineKeyboardButton("⚠️ رو به پایان", callback_data="mypnlcfg:list:expiring:0"),
-            InlineKeyboardButton("❌ منقضی", callback_data="mypnlcfg:list:expired:0"),
-        )
         kb.add(InlineKeyboardButton("بازگشت", callback_data=back_data,
                                     icon_custom_emoji_id="5253997076169115797"))
 
