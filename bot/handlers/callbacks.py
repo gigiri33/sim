@@ -10542,7 +10542,13 @@ def _dispatch_callback(call, uid, data):
             f"📝 دلیل رد را تایپ کنید، یا دکمه‌ی زیر را بزنید:"
         )
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("❌ رد بدون توضیحات", callback_data=f"adm:pay:rjc:{payment_id}"))
+        kb.add(types.InlineKeyboardButton("❌ رد بدون توضیحات", callback_data=f"adm:pay:rjc:plain:{payment_id}"))
+        kb.add(types.InlineKeyboardButton(
+            "⛔ رسید فیک — محدود ۲۴ ساعت",
+            callback_data=f"adm:pay:rjc:fake24:{payment_id}"))
+        kb.add(types.InlineKeyboardButton(
+            "🚫 رسید فیک — محدود همیشه",
+            callback_data=f"adm:pay:rjc:fakeall:{payment_id}"))
         kb.add(types.InlineKeyboardButton("🔙 انصراف", callback_data="nav:admin:panel"))
         state_set(uid, "admin_payment_reject_note", payment_id=payment_id)
         bot.answer_callback_query(call.id)
@@ -10553,7 +10559,9 @@ def _dispatch_callback(call, uid, data):
         if not admin_has_perm(uid, "approve_payments"):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
             return
-        payment_id = int(data.split(":")[3])
+        parts      = data.split(":")
+        mode       = parts[3]             # plain | fake24 | fakeall
+        payment_id = int(parts[4])
         payment    = get_payment(payment_id)
         if not payment:
             bot.answer_callback_query(call.id, "تراکنش یافت نشد.", show_alert=True)
@@ -10564,6 +10572,44 @@ def _dispatch_callback(call, uid, data):
         state_clear(uid)
         finish_card_payment_approval(payment_id, "رسید شما رد شد.", approved=False)
         bot.answer_callback_query(call.id, "❌ رد شد.")
+
+        payer_id = payment["user_id"]
+
+        if mode in ("fake24", "fakeall"):
+            import time as _t
+            if mode == "fake24":
+                _until   = int(_t.time()) + 86400
+                _dur_txt = "تا ۲۴ ساعت دیگر نمی‌توانید از ربات استفاده کنید."
+            else:
+                _until   = 0   # permanent
+                _dur_txt = "برای همیشه نمی‌توانید از ربات استفاده کنید."
+
+            set_user_restricted(payer_id, _until)
+            log_admin_action(uid,
+                f"رسید فیک | کاربر <code>{payer_id}</code> محدود شد | mode={mode}")
+
+            # Build support line
+            _sup_raw  = setting_get("support_username", "")
+            _sup_link = setting_get("support_link", "")
+            _sup_url  = safe_support_url(_sup_raw) or (_sup_link if _sup_link else None)
+            _sup_line = (
+                f"\n\n🎧 برای پیگیری رفع محدودیت به پشتیبانی پیام دهید:\n{_sup_url}"
+                if _sup_url else
+                "\n\n🎧 برای پیگیری رفع محدودیت با پشتیبانی در تماس باشید."
+            )
+
+            try:
+                bot.send_message(
+                    payer_id,
+                    f"⛔ <b>حساب شما محدود شد</b>\n\n"
+                    f"به دلیل ارسال رسید جعلی، حساب شما محدود شده است.\n"
+                    f"🚫 {_dur_txt}"
+                    f"{_sup_line}",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+
         send_or_edit(call, "❌ تراکنش رد شد.", kb_admin_panel(uid))
         return
 
