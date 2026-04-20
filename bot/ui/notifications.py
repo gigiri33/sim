@@ -490,13 +490,12 @@ def _give_referral_reward(referrer_id, reward_prefix):
         amount = int(setting_get(f"{reward_prefix}_amount", "0"))
         if amount <= 0:
             return
-        add_pending_reward(referrer_id, "wallet", amount, None, source)
+        update_balance(referrer_id, amount)
         try:
             bot.send_message(
                 referrer_id,
                 "🎁 <b>پاداش زیرمجموعه‌گیری!</b>\n\n"
-                f"💰 مبلغ <b>{fmt_price(amount)}</b> تومان به عنوان پاداش برای شما ذخیره شد.\n"
-                "برای دریافت، به بخش دعوت دوستان بروید و روی «🎁 دریافت پاداش» بزنید.",
+                f"💰 مبلغ <b>{fmt_price(amount)}</b> تومان به کیف‌پول شما اضافه شد! 🎉",
                 parse_mode="HTML"
             )
         except Exception:

@@ -840,11 +840,14 @@ def set_user_restricted(user_id, until_ts: int):
         )
 
 
-def check_and_release_restriction(user_row: dict) -> dict:
+def check_and_release_restriction(user_row) -> dict:
     """If user has a timed restriction that has expired, auto-release and return updated row."""
     import time as _time
     if not user_row:
         return user_row
+    # sqlite3.Row lacks .get(); convert to dict for safe access
+    if not isinstance(user_row, dict):
+        user_row = dict(user_row)
     if user_row.get("status") == "restricted":
         until = user_row.get("restricted_until", 0)
         if until and until > 0 and _time.time() > until:
@@ -2387,8 +2390,13 @@ def try_claim_purchase_reward_batch(referrer_id: int, required_count: int) -> bo
                  WHERE referrer_id=? AND purchase_reward_given=0
                    AND referee_id IN (
                          SELECT r.referee_id FROM referrals r
-                          JOIN purchases p ON p.user_id = r.referee_id AND p.is_test = 0
                           WHERE r.referrer_id=? AND r.purchase_reward_given=0
+                            AND (
+                                EXISTS (SELECT 1 FROM purchases p
+                                        WHERE p.user_id = r.referee_id AND p.is_test = 0)
+                                OR EXISTS (SELECT 1 FROM panel_configs pc
+                                           WHERE pc.user_id = r.referee_id)
+                            )
                           LIMIT ?
                        )""",
             (referrer_id, referrer_id, required_count)

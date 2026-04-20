@@ -1054,6 +1054,13 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
                     stage="تحویل کانفیگ به کاربر",
                     detail=str(e), panel_config_id=pc_id
                 )
+        # Check referral purchase reward for panel deliveries
+        if panel_config_ids:
+            try:
+                from ..ui.notifications import check_and_give_referral_purchase_reward
+                check_and_give_referral_purchase_reward(uid)
+            except Exception:
+                pass
         return panel_config_ids, []
 
     # ── Manual / stock-based packages (original logic) ────────────────────────
