@@ -98,7 +98,8 @@ from ..db import (
     update_package_panel_settings,
     add_panel_config, get_panel_configs, get_panel_configs_count,
     add_panel_client_package, get_panel_client_packages,
-    get_panel_client_package, delete_panel_client_package,
+    get_panel_client_package, get_panel_client_package_by_inbound,
+    delete_panel_client_package,
     update_panel_client_package_samples, update_panel_client_package_field,
     get_panel_configs_by_cpkg, update_panel_config_texts,
     bulk_add_balance, bulk_zero_balance, bulk_set_status, count_users_by_filter,
@@ -1383,8 +1384,10 @@ def _create_panel_config(uid, package_id, payment_id):
     if not panel:
         return False, "پنل مرتبط یافت نشد", None
 
-    # Load client package template if available
+    # Load client package template — first try explicit link, then auto-detect by panel+inbound
     cpkg = get_panel_client_package(cpkg_id) if cpkg_id else None
+    if not cpkg:
+        cpkg = get_panel_client_package_by_inbound(panel_id, panel_inbound)
 
     client = PanelClient(
         protocol=panel["protocol"],

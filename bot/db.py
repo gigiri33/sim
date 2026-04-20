@@ -2208,6 +2208,15 @@ def get_panel_client_package(cpkg_id):
     ).fetchone()
 
 
+def get_panel_client_package_by_inbound(panel_id, inbound_id):
+    """Auto-detect a client package by matching panel_id + inbound_id."""
+    conn = get_conn()
+    return conn.execute(
+        "SELECT * FROM panel_client_packages WHERE panel_id=? AND inbound_id=? ORDER BY id LIMIT 1",
+        (panel_id, inbound_id)
+    ).fetchone()
+
+
 def delete_panel_client_package(cpkg_id):
     with get_conn() as conn:
         conn.execute("DELETE FROM panel_client_packages WHERE id=?", (cpkg_id,))
