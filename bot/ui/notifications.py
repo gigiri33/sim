@@ -557,8 +557,9 @@ def notify_referral_join(referrer_id, referee_id):
     # ── Notify the INVITER directly ────────────────────────────────────────
     try:
         # Build clickable referee link
-        if referee.get("username"):
-            referee_link = f"@{esc(referee['username'])}"
+        ref_username = referee["username"] if referee["username"] else None
+        if ref_username:
+            referee_link = f"@{esc(ref_username)}"
         else:
             referee_link = f"<a href=\"tg://user?id={referee_id}\">{esc(referee['full_name'] or 'کاربر جدید')}</a>"
 
