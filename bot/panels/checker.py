@@ -131,7 +131,7 @@ def _check_panel_configs_expiry() -> None:
                                             update_panel_config_field(cfg["id"], "expire_at",  new_exp_str)
                                             update_panel_config_field(cfg["id"], "is_expired",  0)
                                             update_panel_config_field(cfg["id"], "is_disabled", 0)
-                    if renew_ok:
+                                    if renew_ok:
                                         auto_renewed = True
                                         try:
                                             price_text = f"{price:,} تومان" if price > 0 else "رایگان"

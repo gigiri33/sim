@@ -3083,9 +3083,6 @@ def _dispatch_callback(call, uid, data):
         state_clear(uid)
         with get_conn() as conn:
             conn.execute("UPDATE users SET is_agent=1 WHERE user_id=?", (target_uid,))
-        default_pct = int(setting_get("agency_default_discount_pct", "20") or "20")
-        if default_pct > 0:
-            set_agency_price_config(target_uid, "global", "pct", default_pct)
         bot.answer_callback_query(call.id, "✅ نمایندگی تأیید شد.")
         # Remove buttons from all tracked messages
         for row in get_agency_request_messages(target_uid):

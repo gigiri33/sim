@@ -400,7 +400,7 @@ def _run_init_db_migrations():
             "group_topic_broadcast_report": "",
             "group_topic_error_log":        "",
             "agency_request_enabled":       "1",
-            "agency_default_discount_pct":  "20",
+            "agency_default_discount_pct":  "0",
             "referral_enabled":             "1",
             "referral_banner_text":         "",
             "referral_banner_photo":        "",

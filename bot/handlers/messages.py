@@ -3003,9 +3003,6 @@ def universal_handler(message):
                     reply_markup=back_button("admin:agents"))
                 return
             set_user_agent(target_user["user_id"], 1)
-            default_pct = int(setting_get("agency_default_discount_pct", "20") or "20")
-            if default_pct > 0:
-                set_agency_price_config(target_user["user_id"], "global", "pct", default_pct)
             kb_r = types.InlineKeyboardMarkup()
             kb_r.add(types.InlineKeyboardButton(
                 "💰 قیمت نمایندگی",
@@ -3013,8 +3010,7 @@ def universal_handler(message):
             ))
             kb_r.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:agents", icon_custom_emoji_id="5253997076169115797"))
             bot.send_message(uid,
-                f"✅ کاربر <b>{esc(target_user['full_name'])}</b> (کد <code>{target_user['user_id']}</code>) به نماینده تبدیل شد.\n\n"
-                f"📊 تخفیف پیش‌فرض {default_pct}% اعمال شد.",
+                f"✅ کاربر <b>{esc(target_user['full_name'])}</b> (کد <code>{target_user['user_id']}</code>) به نماینده تبدیل شد.",
                 reply_markup=kb_r)
             try:
                 bot.send_message(target_user["user_id"],
@@ -3187,16 +3183,13 @@ def universal_handler(message):
             state_clear(uid)
             with get_conn() as conn:
                 conn.execute("UPDATE users SET is_agent=1 WHERE user_id=?", (target_uid,))
-            default_pct = int(setting_get("agency_default_discount_pct", "20") or "20")
-            if default_pct > 0:
-                set_agency_price_config(target_uid, "global", "pct", default_pct)
             kb_conf = types.InlineKeyboardMarkup()
             kb_conf.add(types.InlineKeyboardButton(
                 "💰 قیمت نمایندگی کاربر", callback_data=f"adm:agcfg:{target_uid}"))
             kb_conf.add(types.InlineKeyboardButton(
                 "بازگشت", callback_data="admin:users"))
             bot.send_message(uid,
-                f"✅ نمایندگی تأیید شد.\n📊 تخفیف پیش‌فرض {default_pct}% اعمال شد.",
+                "✅ نمایندگی تأیید شد.",
                 reply_markup=kb_conf)
             _show_admin_user_detail_msg(uid, target_uid)
             try:
