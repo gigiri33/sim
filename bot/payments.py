@@ -226,6 +226,20 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
     rows.append([_btn("بازگشت", callback_data="nav:main", emoji_id="5352759161945867747")])
     kb = _raw_markup(rows)
 
+    # Fallback keyboard without copy_text buttons (standard InlineKeyboardMarkup)
+    # used if Telegram rejects the copy_text button type
+    kb_fallback = types.InlineKeyboardMarkup()
+    kb_fallback.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main"))
+
+    def _send(chat_id, msg_text):
+        """Try sending with copy_text keyboard; fall back to plain keyboard."""
+        try:
+            bot.send_message(chat_id, msg_text, reply_markup=kb,
+                             parse_mode="HTML", disable_web_page_preview=True)
+        except Exception:
+            bot.send_message(chat_id, msg_text, reply_markup=kb_fallback,
+                             parse_mode="HTML", disable_web_page_preview=True)
+
     if hasattr(target, "message"):
         chat_id = target.message.chat.id
         msg_id  = target.message.message_id
@@ -249,15 +263,16 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
                 )
             except Exception:
                 pass
-        bot.send_message(chat_id, text, reply_markup=kb,
-                         parse_mode="HTML", disable_web_page_preview=True)
+        _send(chat_id, text)
         return True
     elif hasattr(target, "chat"):
-        bot.send_message(target.chat.id, text, reply_markup=kb,
-                         parse_mode="HTML", disable_web_page_preview=True)
+        _send(target.chat.id, text)
         return True
     else:
-        send_or_edit(target, text, kb)
+        try:
+            send_or_edit(target, text, kb)
+        except Exception:
+            send_or_edit(target, text, kb_fallback)
         return True
 
 
