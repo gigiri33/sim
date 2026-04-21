@@ -160,13 +160,21 @@ def show_crypto_selection(target, amount=None):
 
 
 def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
+    """Render the crypto payment instruction page (wallet + amount + memo for TON).
+
+    Returns True when the full info page was successfully rendered to the user,
+    False when rendering was aborted (e.g. missing admin-configured address).
+    Callers MUST only transition the user into an ``await_*_receipt`` state
+    after this function returns True, otherwise the next arbitrary message
+    would incorrectly be treated as a payment receipt.
+    """
     from .db import setting_get
     addr   = setting_get(f"crypto_{coin_key}", "")
     label  = next((l for k, l in CRYPTO_COINS if k == coin_key), coin_key)
     symbol = CRYPTO_API_SYMBOLS.get(coin_key, "")
     if not addr:
         send_or_edit(target, "⚠️ آدرس این ارز هنوز توسط ادمین ثبت نشده است.", back_button("main"))
-        return
+        return False
 
     coin_amount_str = ""
     prices = _get_prices()
@@ -228,7 +236,7 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
                 parse_mode="HTML",
                 disable_web_page_preview=True,
             )
-            return
+            return True
         except Exception:
             pass
         try:
@@ -243,11 +251,14 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
                 pass
         bot.send_message(chat_id, text, reply_markup=kb,
                          parse_mode="HTML", disable_web_page_preview=True)
+        return True
     elif hasattr(target, "chat"):
         bot.send_message(target.chat.id, text, reply_markup=kb,
                          parse_mode="HTML", disable_web_page_preview=True)
+        return True
     else:
         send_or_edit(target, text, kb)
+        return True
 
 
 # ── Send payment receipt to admins ─────────────────────────────────────────────

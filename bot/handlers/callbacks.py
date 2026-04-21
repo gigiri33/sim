@@ -3966,16 +3966,20 @@ def _dispatch_callback(call, uid, data):
                 return
             payment_id = create_payment("config_purchase", uid, package_id, amount, "crypto",
                                         status="pending", crypto_coin=coin_key, quantity=_qty_coin)
-            state_set(uid, "await_purchase_receipt", payment_id=payment_id)
             bot.answer_callback_query(call.id)
-            show_crypto_payment_info(call, uid, coin_key, amount, payment_id=payment_id)
+            # Render the crypto payment-info page FIRST (wallet + amount + TON memo).
+            # Only after it is actually shown do we transition the user to the
+            # "await receipt" state, so that coin selection itself can never be
+            # mistaken for a receipt submission.
+            if show_crypto_payment_info(call, uid, coin_key, amount, payment_id=payment_id):
+                state_set(uid, "await_purchase_receipt", payment_id=payment_id)
         elif sn == "wallet_crypto_select_coin":
             amount     = sd.get("amount")
             payment_id = sd.get("payment_id") or create_payment("wallet_charge", uid, None, amount, "crypto",
                                                                   status="pending", crypto_coin=coin_key)
-            state_set(uid, "await_wallet_receipt", payment_id=payment_id, amount=amount)
             bot.answer_callback_query(call.id)
-            show_crypto_payment_info(call, uid, coin_key, amount, payment_id=payment_id)
+            if show_crypto_payment_info(call, uid, coin_key, amount, payment_id=payment_id):
+                state_set(uid, "await_wallet_receipt", payment_id=payment_id, amount=amount)
         elif sn == "renew_crypto_select_coin":
             package_id  = sd.get("package_id")
             amount      = sd.get("amount")
@@ -3983,9 +3987,9 @@ def _dispatch_callback(call, uid, data):
             purchase_id = sd.get("purchase_id")
             payment_id = create_payment("renewal", uid, package_id, amount, "crypto",
                                         status="pending", crypto_coin=coin_key, config_id=config_id_r)
-            state_set(uid, "await_renewal_receipt", payment_id=payment_id, purchase_id=purchase_id)
             bot.answer_callback_query(call.id)
-            show_crypto_payment_info(call, uid, coin_key, amount, payment_id=payment_id)
+            if show_crypto_payment_info(call, uid, coin_key, amount, payment_id=payment_id):
+                state_set(uid, "await_renewal_receipt", payment_id=payment_id, purchase_id=purchase_id)
         else:
             bot.answer_callback_query(call.id)
         return

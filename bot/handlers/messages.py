@@ -797,6 +797,14 @@ def universal_handler(message):
                 file_id = message.photo[-1].file_id
             elif message.document:
                 file_id = message.document.file_id
+            # Ignore messages that contain no receipt content (no text, no media).
+            # This prevents unrelated messages (contacts, stickers, voice, …) sent
+            # while the user is viewing the payment-info page from being recorded
+            # as a receipt submission.
+            if not text_value and not file_id:
+                bot.send_message(uid,
+                    "⚠️ لطفاً هش تراکنش را به صورت متن، یا تصویر/فایل رسید را ارسال کنید.")
+                return
             # TON anti-fraud: reject duplicate tx hash
             _pay_row = get_payment(payment_id) if payment_id else None
             if _pay_row and _pay_row["crypto_coin"] == "ton" and text_value:
@@ -825,6 +833,10 @@ def universal_handler(message):
                 file_id = message.photo[-1].file_id
             elif message.document:
                 file_id = message.document.file_id
+            if not text_value and not file_id:
+                bot.send_message(uid,
+                    "⚠️ لطفاً هش تراکنش را به صورت متن، یا تصویر/فایل رسید را ارسال کنید.")
+                return
             # TON anti-fraud: reject duplicate tx hash
             _pay_row = get_payment(payment_id) if payment_id else None
             if _pay_row and _pay_row["crypto_coin"] == "ton" and text_value:
@@ -853,6 +865,10 @@ def universal_handler(message):
                 file_id = message.photo[-1].file_id
             elif message.document:
                 file_id = message.document.file_id
+            if not text_value and not file_id:
+                bot.send_message(uid,
+                    "⚠️ لطفاً هش تراکنش را به صورت متن، یا تصویر/فایل رسید را ارسال کنید.")
+                return
             # TON anti-fraud: reject duplicate tx hash
             _pay_row = get_payment(payment_id) if payment_id else None
             if _pay_row and _pay_row["crypto_coin"] == "ton" and text_value:
