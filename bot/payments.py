@@ -243,6 +243,7 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
     if hasattr(target, "message"):
         chat_id = target.message.chat.id
         msg_id  = target.message.message_id
+        # Try edit with full keyboard (copy_text buttons)
         try:
             bot.edit_message_text(
                 text, chat_id, msg_id,
@@ -253,6 +254,18 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
             return True
         except Exception:
             pass
+        # Try edit with fallback keyboard (no copy_text) before deleting
+        try:
+            bot.edit_message_text(
+                text, chat_id, msg_id,
+                reply_markup=kb_fallback,
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+            )
+            return True
+        except Exception:
+            pass
+        # Last resort: delete old message and send fresh
         try:
             bot.delete_message(chat_id, msg_id)
         except Exception:
