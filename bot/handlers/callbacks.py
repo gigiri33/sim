@@ -5855,6 +5855,78 @@ def _dispatch_callback(call, uid, data):
                                       is_user_view=True)
             return
 
+        # mypnlcfg:renewconfirm:{config_id}  — show confirmation before instant renew
+        if data.startswith("mypnlcfg:renewconfirm:") and not data.startswith("mypnlcfg:renewok:"):
+            config_id = int(data.split(":")[-1])
+            cfg = get_panel_config(config_id)
+            if not cfg or cfg["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            bot.answer_callback_query(call.id)
+            kb = types.InlineKeyboardMarkup()
+            kb.row(
+                types.InlineKeyboardButton("✅ تایید", callback_data=f"mypnlcfg:renewok:{config_id}"),
+                types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"mypnlcfg:d:{config_id}"),
+            )
+            send_or_edit(call,
+                "⚡ <b>تمدید فوری سرویس</b>\n\n"
+                "⚠️ با تمدید فوری، <b>زمان و حجم مانده</b> کانفیگ شما <b>ریست می‌شود</b> "
+                "و کانفیگ با اطلاعات جدید مجدداً فعال خواهد شد.\n\n"
+                "اگر می‌خواهید تا آخرین حجم و زمان کانفیگ فعال بماند و پس از اتمام به‌صورت خودکار "
+                "تمدید شود، کیف پول خود را به اندازه هزینه سرویس شارژ کنید و گزینه "
+                "<b>تمدید خودکار</b> را فعال کنید تا کانفیگ پس از اتمام تمدید شود.\n\n"
+                "آیا از تمدید فوری مطمئن هستید؟",
+                kb)
+            return
+
+        # mypnlcfg:renewok:{config_id}  — execute instant renew
+        if data.startswith("mypnlcfg:renewok:"):
+            config_id = int(data.split(":")[-1])
+            cfg = get_panel_config(config_id)
+            if not cfg or cfg["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            if not cfg.get("package_id"):
+                bot.answer_callback_query(call.id, "اطلاعات پکیج ناقص است.", show_alert=True); return
+            from ..db import get_package as _get_pkg
+            pkg = _get_pkg(cfg["package_id"])
+            if not pkg:
+                bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True); return
+            panel = get_panel(cfg["panel_id"])
+            if not panel:
+                bot.answer_callback_query(call.id, "پنل یافت نشد.", show_alert=True); return
+            bot.answer_callback_query(call.id)
+            send_or_edit(call, "⏳ در حال تمدید سرویس…")
+            from ..panels.client import PanelClient
+            from datetime import datetime as _dt, timedelta as _td
+            pc_api = PanelClient(
+                protocol=panel["protocol"], host=panel["host"], port=panel["port"],
+                path=panel["path"] or "", username=panel["username"], password=panel["password"]
+            )
+            pc_api.reset_client_traffic(cfg["inbound_id"], cfg["client_name"] or "")
+            dur_days = int(pkg["duration_days"] or 0)
+            if dur_days:
+                new_exp_dt  = _dt.utcnow() + _td(days=dur_days)
+                new_exp_str = new_exp_dt.strftime("%Y-%m-%d %H:%M:%S")
+                new_exp_ms  = int(new_exp_dt.timestamp() * 1000)
+            else:
+                new_exp_str = None
+                new_exp_ms  = 0
+            ok_r, err_r = pc_api.enable_client(
+                inbound_id=cfg["inbound_id"], client_uuid=cfg["client_uuid"],
+                email=cfg["client_name"] or "",
+                traffic_bytes=int((pkg["volume_gb"] or 0) * 1073741824),
+                expire_ms=new_exp_ms,
+            )
+            if not ok_r:
+                send_or_edit(call,
+                    f"❌ خطا در تمدید سرویس:\n<code>{esc(str(err_r))}</code>",
+                    back_button(f"mypnlcfg:d:{config_id}"))
+                return
+            update_panel_config_field(config_id, "expire_at",  new_exp_str)
+            update_panel_config_field(config_id, "is_expired",  0)
+            update_panel_config_field(config_id, "is_disabled", 0)
+            _show_panel_config_detail(call, config_id, back_data="my_configs", is_user_view=True)
+            return
+
         # mypnlcfg:autorenew:{config_id}
         if data.startswith("mypnlcfg:autorenew:"):
             config_id = int(data.split(":")[-1])
@@ -5862,6 +5934,25 @@ def _dispatch_callback(call, uid, data):
             if not cfg or cfg["user_id"] != uid:
                 bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
             new_val = 0 if int(cfg["auto_renew"] or 0) else 1
+            # When enabling auto-renew, check if user has enough balance
+            if new_val == 1 and cfg.get("package_id"):
+                from ..db import get_package as _get_pkg2
+                from ..payments import get_effective_price as _gep
+                _pkg = _get_pkg2(cfg["package_id"])
+                _usr = get_user(uid)
+                if _pkg and _usr:
+                    _price   = _gep(uid, _pkg)
+                    _balance = int(_usr["balance"] or 0)
+                    if _price > 0 and _balance < _price:
+                        bot.answer_callback_query(
+                            call.id,
+                            f"⛔ موجودی کافی ندارید.\n"
+                            f"برای فعال‌سازی تمدید خودکار این کانفیگ، "
+                            f"کیف پول خود را به میزان {fmt_price(_price)} تومان "
+                            f"(معادل هزینه سرویس) شارژ کنید.",
+                            show_alert=True
+                        )
+                        return
             update_panel_config_field(config_id, "auto_renew", new_val)
             bot.answer_callback_query(call.id, f"تمدید خودکار {'فعال' if new_val else 'غیرفعال'} شد.")
             _show_panel_config_detail(call, config_id, back_data="my_configs",
