@@ -17,7 +17,6 @@ from .db import (
     assign_config_to_user, get_conn, create_pending_order, get_purchase,
     get_all_admin_users,
     save_payment_admin_message, get_payment_admin_messages, delete_payment_admin_messages,
-    set_payment_crypto_comment,
 )
 from .helpers import esc, fmt_price, display_username, back_button, now_str
 import time
@@ -187,106 +186,20 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
         if coin_amount_str else ""
     )
 
-    # TON-specific: generate a unique comment/memo code
-    comment_section = ""
-    comment_code = None
-    if coin_key == "ton" and payment_id:
-        comment_code = f"SIM{payment_id:06d}"
-        try:
-            set_payment_crypto_comment(payment_id, comment_code)
-        except Exception:
-            pass
-        comment_section = (
-            f"\n\n{ce('🔑', '5316979637987594548')} <b>کد یکتای واریز (الزامی):</b>\n"
-            f"<code>{comment_code}</code>\n"
-            f"{ce('⚠️', '5314302076317081739')} <b>این کد را حتماً در فیلد <i>Comment</i> تراکنش TON وارد کنید.</b>\n"
-            f"{ce('⚠️', '5314302076317081739')} <i>واریز بدون این کد قابل شناسایی نیست و تأیید نخواهد شد.</i>"
-        )
-
     text = (
         f"{ce('💎', '5794002949222964817')} <b>پرداخت با {label}</b>\n\n"
         f"{ce('💰', '5318912792428814144')} مبلغ: <b>{fmt_price(amount)}</b> تومان"
         f"{equiv_line}\n"
-        f"{ce('👛', '5796280694934085416')} <b>آدرس ولت:</b>\n<code>{esc(addr)}</code>"
-        f"{comment_section}\n\n"
+        f"{ce('👛', '5796280694934085416')} <b>آدرس ولت:</b>\n<code>{esc(addr)}</code>\n\n"
         f"{ce('⬇️', '5314453632828055816')} پس از واریز، تصویر تراکنش یا هش آن را ارسال کنید.\n\n"
         f"{ce('⚠️', '5314302076317081739')} <i>تمامی کارمزد انتقال ارز دیجیتال به عهده واریزکننده می‌باشد</i>"
     )
 
-    rows = []
-    if coin_key == "ton" and comment_code:
-        rows.append([_btn("کپی کد واریز", copy_text=comment_code, emoji_id="5316979637987594548")])
-    if coin_amount_str:
-        rows.append([
-            _btn("کپی آدرس ولت", copy_text=addr, emoji_id="5796280694934085416"),
-            _btn("کپی مبلغ دقیق", copy_text=coin_amount_str, emoji_id="5794002949222964817"),
-        ])
-    else:
-        rows.append([_btn("کپی آدرس ولت", copy_text=addr, emoji_id="5796280694934085416")])
-    rows.append([_btn("بازگشت", callback_data="nav:main", emoji_id="5352759161945867747")])
-    kb = _raw_markup(rows)
+    kb = types.InlineKeyboardMarkup()
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main"))
 
-    # Fallback keyboard without copy_text buttons (standard InlineKeyboardMarkup)
-    # used if Telegram rejects the copy_text button type
-    kb_fallback = types.InlineKeyboardMarkup()
-    kb_fallback.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main"))
-
-    def _send(chat_id, msg_text):
-        """Try sending with copy_text keyboard; fall back to plain keyboard."""
-        try:
-            bot.send_message(chat_id, msg_text, reply_markup=kb,
-                             parse_mode="HTML", disable_web_page_preview=True)
-        except Exception:
-            bot.send_message(chat_id, msg_text, reply_markup=kb_fallback,
-                             parse_mode="HTML", disable_web_page_preview=True)
-
-    if hasattr(target, "message"):
-        chat_id = target.message.chat.id
-        msg_id  = target.message.message_id
-        # Try edit with full keyboard (copy_text buttons)
-        try:
-            bot.edit_message_text(
-                text, chat_id, msg_id,
-                reply_markup=kb,
-                parse_mode="HTML",
-                disable_web_page_preview=True,
-            )
-            return True
-        except Exception:
-            pass
-        # Try edit with fallback keyboard (no copy_text) before deleting
-        try:
-            bot.edit_message_text(
-                text, chat_id, msg_id,
-                reply_markup=kb_fallback,
-                parse_mode="HTML",
-                disable_web_page_preview=True,
-            )
-            return True
-        except Exception:
-            pass
-        # Last resort: delete old message and send fresh
-        try:
-            bot.delete_message(chat_id, msg_id)
-        except Exception:
-            try:
-                bot.edit_message_reply_markup(
-                    chat_id, msg_id,
-                    reply_markup=types.InlineKeyboardMarkup()
-                )
-            except Exception:
-                pass
-        _send(chat_id, text)
-        return True
-    elif hasattr(target, "chat"):
-        _send(target.chat.id, text)
-        return True
-    else:
-        try:
-            send_or_edit(target, text, kb)
-        except Exception:
-            send_or_edit(target, text, kb_fallback)
-        return True
+    send_or_edit(target, text, kb)
+    return True
 
 
 # ── Send payment receipt to admins ─────────────────────────────────────────────
