@@ -5863,10 +5863,8 @@ def _dispatch_callback(call, uid, data):
                 bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
             bot.answer_callback_query(call.id)
             kb = types.InlineKeyboardMarkup()
-            kb.row(
-                types.InlineKeyboardButton("✅ تایید", callback_data=f"mypnlcfg:renewok:{config_id}"),
-                types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"mypnlcfg:d:{config_id}"),
-            )
+            kb.add(types.InlineKeyboardButton("✅ تایید", callback_data=f"mypnlcfg:renewok:{config_id}"))
+            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"mypnlcfg:d:{config_id}", icon_custom_emoji_id="5253997076169115797"))
             send_or_edit(call,
                 "⚡ <b>تمدید فوری سرویس</b>\n\n"
                 "⚠️ با تمدید فوری، <b>زمان و حجم مانده</b> کانفیگ شما <b>ریست می‌شود</b> "
@@ -5884,6 +5882,7 @@ def _dispatch_callback(call, uid, data):
             cfg = get_panel_config(config_id)
             if not cfg or cfg["user_id"] != uid:
                 bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            cfg = dict(cfg)
             if not cfg.get("package_id"):
                 bot.answer_callback_query(call.id, "اطلاعات پکیج ناقص است.", show_alert=True); return
             from ..db import get_package as _get_pkg
@@ -5933,6 +5932,7 @@ def _dispatch_callback(call, uid, data):
             cfg = get_panel_config(config_id)
             if not cfg or cfg["user_id"] != uid:
                 bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            cfg = dict(cfg)
             new_val = 0 if int(cfg["auto_renew"] or 0) else 1
             # When enabling auto-renew, check if user has enough balance
             if new_val == 1 and cfg.get("package_id"):
@@ -11294,10 +11294,14 @@ def _dispatch_callback(call, uid, data):
         if payment["status"] not in ("pending",):
             bot.answer_callback_query(call.id, "این تراکنش قبلاً بررسی شده است.", show_alert=True)
             return
+        # Answer immediately so Telegram stops showing spinner and won't retry
+        bot.answer_callback_query(call.id, "⏳ در حال پردازش...")
         state_clear(uid)
-        finish_card_payment_approval(payment_id, "واریزی شما تأیید شد.", approved=True)
-        bot.answer_callback_query(call.id, "✅ تأیید شد.")
-        send_or_edit(call, "✅ تراکنش با موفقیت تأیید شد.", kb_admin_panel(uid))
+        result = finish_card_payment_approval(payment_id, "واریزی شما تأیید شد.", approved=True)
+        if not result:
+            send_or_edit(call, "⚠️ این تراکنش قبلاً پردازش شده است.", kb_admin_panel(uid))
+        else:
+            send_or_edit(call, "✅ تراکنش با موفقیت تأیید شد.", kb_admin_panel(uid))
         return
 
     if data.startswith("adm:pay:rj:"):
@@ -11359,9 +11363,10 @@ def _dispatch_callback(call, uid, data):
         if payment["status"] not in ("pending",):
             bot.answer_callback_query(call.id, "این تراکنش قبلاً بررسی شده است.", show_alert=True)
             return
+        # Answer immediately so Telegram stops showing spinner and won't retry
+        bot.answer_callback_query(call.id, "⏳ در حال پردازش...")
         state_clear(uid)
         finish_card_payment_approval(payment_id, "رسید شما رد شد.", approved=False)
-        bot.answer_callback_query(call.id, "❌ رد شد.")
 
         payer_id = payment["user_id"]
 
@@ -11486,8 +11491,9 @@ def _dispatch_callback(call, uid, data):
         if payment["status"] != "pending":
             bot.answer_callback_query(call.id, "این تراکنش قبلاً بررسی شده است.", show_alert=True)
             return
-        finish_card_payment_approval(payment_id, "واریزی شما تأیید شد.", approved=True)
-        bot.answer_callback_query(call.id, "✅ تأیید شد.")
+        # Answer immediately so Telegram stops showing spinner and won't retry
+        bot.answer_callback_query(call.id, "⏳ در حال پردازش...")
+        result = finish_card_payment_approval(payment_id, "واریزی شما تأیید شد.", approved=True)
         _render_pending_receipts_page(call, uid, page)
         return
 
@@ -11541,9 +11547,10 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id, "این تراکنش قبلاً بررسی شده است.", show_alert=True)
             return
 
+        # Answer immediately so Telegram stops showing spinner and won't retry
+        bot.answer_callback_query(call.id, "⏳ در حال پردازش...")
         # Reject the payment
         finish_card_payment_approval(payment_id, "رسید شما رد شد.", approved=False)
-        bot.answer_callback_query(call.id, "❌ رد شد.")
 
         payer_id = payment["user_id"]
 

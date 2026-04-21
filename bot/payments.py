@@ -6,6 +6,8 @@ card payment approval and rejection.
 from telebot import types
 import json
 
+import threading as _threading
+
 from .config import ADMIN_IDS, CRYPTO_COINS, CRYPTO_API_SYMBOLS, CRYPTO_EMOJI_IDS
 from .db import (
     get_user, get_payment, get_package, get_agency_price,
@@ -18,6 +20,13 @@ from .db import (
 )
 from .helpers import esc, fmt_price, display_username, back_button, now_str
 import time
+
+# ── In-memory idempotency guard ────────────────────────────────────────────────
+# Prevents concurrent or duplicate processing of the same payment_id when
+# the admin has a weak network and Telegram retries the callback, or two
+# admins tap approve simultaneously.
+_pay_lock   = _threading.Lock()
+_pay_in_fly: set = set()   # payment IDs currently being processed
 from .gateways.base import is_gateway_available, is_card_info_complete, get_gateway_range_text, is_gateway_in_range, build_gateway_range_guide
 from .gateways.crypto import fetch_crypto_prices
 from .bot_instance import bot
@@ -420,6 +429,28 @@ def finish_card_payment_approval(payment_id, admin_note, approved):
 
 
 def _finish_card_payment_approval_inner(payment_id, admin_note, approved):
+    from .ui.notifications import (
+        deliver_purchase_message, admin_purchase_notify,
+        admin_renewal_notify, notify_pending_order_to_admins,
+    )
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+
+    # ── In-memory guard: reject duplicate/concurrent approval of same payment ─
+    with _pay_lock:
+        if payment_id in _pay_in_fly:
+            _log.warning("payment #%s already being processed — duplicate call ignored", payment_id)
+            return False, True
+        _pay_in_fly.add(payment_id)
+
+    try:
+        return _finish_card_payment_approval_core(payment_id, admin_note, approved)
+    finally:
+        with _pay_lock:
+            _pay_in_fly.discard(payment_id)
+
+
+def _finish_card_payment_approval_core(payment_id, admin_note, approved):
     from .ui.notifications import (
         deliver_purchase_message, admin_purchase_notify,
         admin_renewal_notify, notify_pending_order_to_admins,
