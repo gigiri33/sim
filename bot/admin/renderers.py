@@ -907,9 +907,10 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
     else:
         # User view: send QR inline if possible, then show buttons
         ar_label = "♻️ تمدید خودکار: ✅" if auto_renew else "♻️ تمدید خودکار: ❌"
-        kb.add(InlineKeyboardButton(ar_label, callback_data=f"mypnlcfg:autorenew:{config_id}"))
-        if has_sub:
-            kb.add(InlineKeyboardButton("🔄 لینک ساب جدید", callback_data=f"mypnlcfg:rsub:{config_id}"))
+        kb.row(
+            InlineKeyboardButton("⚡ تمدید فوری",  callback_data=f"mypnlcfg:renewconfirm:{config_id}"),
+            InlineKeyboardButton(ar_label,          callback_data=f"mypnlcfg:autorenew:{config_id}"),
+        )
         kb.add(InlineKeyboardButton("بازگشت", callback_data=back_data,
                                     icon_custom_emoji_id="5253997076169115797"))
 

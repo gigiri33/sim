@@ -233,7 +233,10 @@ def send_payment_to_admins(payment_id):
         method_label += f" ({coin_key})"
     package_text = ""
     if package_row:
-        qty = int(payment.get("quantity") or 1)
+        try:
+            qty = int(payment["quantity"]) if "quantity" in payment.keys() else 1
+        except Exception:
+            qty = 1
         qty_line = f"\n🔢 تعداد کانفیگ: <b>{qty} عدد</b>" if qty > 1 else ""
         package_text = (
             f"\n🧩 نوع: {esc(package_row['type_name'])}"
