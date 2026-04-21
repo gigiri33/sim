@@ -648,17 +648,35 @@ def _stamp_invoice(uid: int) -> None:
     new_sd = dict(sd)
     new_sd["invoice_created_at"] = int(time.time())
     state_set(uid, sn, **new_sd)
+    log.debug("_stamp_invoice: uid=%s state=%s ts=%s", uid, sn, new_sd["invoice_created_at"])
 
 
 def _check_invoice_valid(uid: int) -> bool:
     """Return True if the invoice is still within its validity window."""
     if not _invoice_expiry_enabled():
         return True
+    sn = state_name(uid)
+    # Only enforce expiry when in a recognised invoice-bearing state.
+    # If the state is something else (or None), the timestamp may belong to
+    # a completely different flow — allow the payment through.
+    _INVOICE_STATES = {
+        "buy_select_method", "renew_select_method", "wallet_charge_method",
+    }
+    if sn not in _INVOICE_STATES:
+        return True
     sd = state_data(uid)
     created_at = sd.get("invoice_created_at")
     if not created_at:
         return True  # no timestamp yet — backward-compatible, allow
-    return (time.time() - float(created_at)) <= (_invoice_expiry_minutes() * 60)
+    elapsed = time.time() - float(created_at)
+    limit = _invoice_expiry_minutes() * 60
+    valid = elapsed <= limit
+    if not valid:
+        log.warning(
+            "_check_invoice_valid: uid=%s EXPIRED — elapsed=%.0fs limit=%.0fs state=%s",
+            uid, elapsed, limit, sn
+        )
+    return valid
 
 
 _INVOICE_EXPIRED_MSG = (
