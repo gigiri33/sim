@@ -24,6 +24,7 @@ from ..db import (
     assign_config_to_user, reserve_first_config,
     get_payment, create_payment, approve_payment, reject_payment, complete_payment,
     update_payment_receipt,
+    set_payment_crypto_tx_hash,
     get_agency_price, set_agency_price,
     get_agency_price_config, set_agency_price_config,
     get_agency_type_discount, set_agency_type_discount,
@@ -796,6 +797,15 @@ def universal_handler(message):
                 file_id = message.photo[-1].file_id
             elif message.document:
                 file_id = message.document.file_id
+            # TON anti-fraud: reject duplicate tx hash
+            _pay_row = get_payment(payment_id) if payment_id else None
+            if _pay_row and _pay_row["crypto_coin"] == "ton" and text_value:
+                if not set_payment_crypto_tx_hash(payment_id, text_value):
+                    bot.send_message(uid,
+                        "⚠️ این هش تراکنش قبلاً برای پرداخت دیگری ثبت شده است.\n"
+                        "در صورت اشتباه، با پشتیبانی تماس بگیرید.",
+                        reply_markup=kb_main(uid))
+                    return
             update_payment_receipt(payment_id, file_id, text_value.strip())
             state_clear(uid)
             bot.send_message(uid, "✅ رسید شما ارسال شد. لطفاً تا تأیید ادمین صبر کنید.",
@@ -815,6 +825,15 @@ def universal_handler(message):
                 file_id = message.photo[-1].file_id
             elif message.document:
                 file_id = message.document.file_id
+            # TON anti-fraud: reject duplicate tx hash
+            _pay_row = get_payment(payment_id) if payment_id else None
+            if _pay_row and _pay_row["crypto_coin"] == "ton" and text_value:
+                if not set_payment_crypto_tx_hash(payment_id, text_value):
+                    bot.send_message(uid,
+                        "⚠️ این هش تراکنش قبلاً برای پرداخت دیگری ثبت شده است.\n"
+                        "در صورت اشتباه، با پشتیبانی تماس بگیرید.",
+                        reply_markup=kb_main(uid))
+                    return
             update_payment_receipt(payment_id, file_id, text_value.strip())
             state_clear(uid)
             bot.send_message(uid, "✅ رسید شما ارسال شد. لطفاً تا تأیید ادمین صبر کنید.",
@@ -834,6 +853,15 @@ def universal_handler(message):
                 file_id = message.photo[-1].file_id
             elif message.document:
                 file_id = message.document.file_id
+            # TON anti-fraud: reject duplicate tx hash
+            _pay_row = get_payment(payment_id) if payment_id else None
+            if _pay_row and _pay_row["crypto_coin"] == "ton" and text_value:
+                if not set_payment_crypto_tx_hash(payment_id, text_value):
+                    bot.send_message(uid,
+                        "⚠️ این هش تراکنش قبلاً برای پرداخت دیگری ثبت شده است.\n"
+                        "در صورت اشتباه، با پشتیبانی تماس بگیرید.",
+                        reply_markup=kb_main(uid))
+                    return
             update_payment_receipt(payment_id, file_id, text_value.strip())
             state_clear(uid)
             bot.send_message(uid, "✅ رسید تمدید شما ارسال شد. لطفاً تا تأیید ادمین صبر کنید.",

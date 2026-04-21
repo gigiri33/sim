@@ -17,6 +17,7 @@ from .db import (
     assign_config_to_user, get_conn, create_pending_order, get_purchase,
     get_all_admin_users,
     save_payment_admin_message, get_payment_admin_messages, delete_payment_admin_messages,
+    set_payment_crypto_comment,
 )
 from .helpers import esc, fmt_price, display_username, back_button, now_str
 import time
@@ -158,7 +159,7 @@ def show_crypto_selection(target, amount=None):
     send_or_edit(target, f"{ce('💎', '5794002949222964817')} <b>ارز دیجیتال</b>\n\nنوع ارز مورد نظر را انتخاب کنید:", _raw_markup(rows))
 
 
-def show_crypto_payment_info(target, uid, coin_key, amount):
+def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
     from .db import setting_get
     addr   = setting_get(f"crypto_{coin_key}", "")
     label  = next((l for k, l in CRYPTO_COINS if k == coin_key), coin_key)
@@ -178,16 +179,35 @@ def show_crypto_payment_info(target, uid, coin_key, amount):
         if coin_amount_str else ""
     )
 
+    # TON-specific: generate a unique comment/memo code
+    comment_section = ""
+    comment_code = None
+    if coin_key == "ton" and payment_id:
+        comment_code = f"SIM{payment_id:06d}"
+        try:
+            set_payment_crypto_comment(payment_id, comment_code)
+        except Exception:
+            pass
+        comment_section = (
+            f"\n\n{ce('🔑', '5316979637987594548')} <b>کد یکتای واریز (الزامی):</b>\n"
+            f"<code>{comment_code}</code>\n"
+            f"{ce('⚠️', '5314302076317081739')} <b>این کد را حتماً در فیلد <i>Comment</i> تراکنش TON وارد کنید.</b>\n"
+            f"{ce('⚠️', '5314302076317081739')} <i>واریز بدون این کد قابل شناسایی نیست و تأیید نخواهد شد.</i>"
+        )
+
     text = (
         f"{ce('💎', '5794002949222964817')} <b>پرداخت با {label}</b>\n\n"
         f"{ce('💰', '5318912792428814144')} مبلغ: <b>{fmt_price(amount)}</b> تومان"
         f"{equiv_line}\n"
-        f"{ce('👛', '5796280694934085416')} <b>آدرس ولت:</b>\n<code>{esc(addr)}</code>\n\n"
+        f"{ce('👛', '5796280694934085416')} <b>آدرس ولت:</b>\n<code>{esc(addr)}</code>"
+        f"{comment_section}\n\n"
         f"{ce('⬇️', '5314453632828055816')} پس از واریز، تصویر تراکنش یا هش آن را ارسال کنید.\n\n"
         f"{ce('⚠️', '5314302076317081739')} <i>تمامی کارمزد انتقال ارز دیجیتال به عهده واریزکننده می‌باشد</i>"
     )
 
     rows = []
+    if coin_key == "ton" and comment_code:
+        rows.append([_btn("کپی کد واریز", copy_text=comment_code, emoji_id="5316979637987594548")])
     if coin_amount_str:
         rows.append([
             _btn("کپی آدرس ولت", copy_text=addr, emoji_id="5796280694934085416"),
@@ -264,6 +284,17 @@ def send_payment_to_admins(payment_id):
             if symbol in prices and prices[symbol] > 0:
                 coin_amount = payment["amount"] / prices[symbol]
                 crypto_line = f"\n💱 معادل ارزی: <code>{coin_amount:.6f} {symbol}</code>"
+
+    # TON anti-fraud info for admin
+    ton_fraud_line = ""
+    if coin_key == "ton":
+        _pay_dict = dict(payment)
+        _comment = _pay_dict.get("crypto_comment")
+        _tx_hash = _pay_dict.get("crypto_tx_hash")
+        if _comment:
+            ton_fraud_line += f"\n🔑 کد واریز (Comment): <code>{esc(_comment)}</code>"
+        if _tx_hash:
+            ton_fraud_line += f"\n🔗 هش تراکنش: <code>{esc(_tx_hash)}</code>"
     text = (
         f"📥 <b>درخواست جدید برای بررسی</b>\n\n"
         f"🧾 نوع: {kind_label} | {method_label}\n"
@@ -274,6 +305,7 @@ def send_payment_to_admins(payment_id):
         + (f"\n🎲 مبلغ نهایی (رندوم): <b>{fmt_price(payment['final_amount'])}</b> تومان"
            if payment['final_amount'] and payment['final_amount'] != payment['amount'] else "")
         + f"{crypto_line}"
+        + f"{ton_fraud_line}"
         f"{package_text}\n\n"
         f"📝 توضیح کاربر:\n{esc(payment['receipt_text'] or '-')}"
     )

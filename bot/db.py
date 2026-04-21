@@ -223,7 +223,9 @@ def _run_init_db_migrations():
                 created_at      TEXT    NOT NULL,
                 approved_at     TEXT,
                 config_id       INTEGER,
-                crypto_coin     TEXT
+                crypto_coin     TEXT,
+                crypto_comment  TEXT,
+                crypto_tx_hash  TEXT
             )""",
             """CREATE TABLE IF NOT EXISTS purchases (
                 id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -581,6 +583,9 @@ def _run_init_db_migrations():
             # ── Panel configs: auto-renew and temporary-disable flags ─────────
             "ALTER TABLE panel_configs ADD COLUMN auto_renew   INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE panel_configs ADD COLUMN is_disabled  INTEGER NOT NULL DEFAULT 0",
+            # ── Payments: TON anti-fraud fields ──────────────────────────────
+            "ALTER TABLE payments ADD COLUMN crypto_comment TEXT",
+            "ALTER TABLE payments ADD COLUMN crypto_tx_hash TEXT",
         ]
         for sql in migrations:
             try:
@@ -597,6 +602,7 @@ def _run_init_db_migrations():
             "CREATE INDEX IF NOT EXISTS idx_purchases_user       ON purchases(user_id)",
             "CREATE INDEX IF NOT EXISTS idx_referrals_referrer   ON referrals(referrer_id)",
             "CREATE INDEX IF NOT EXISTS idx_users_status         ON users(status)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_crypto_tx_hash ON payments(crypto_tx_hash) WHERE crypto_tx_hash IS NOT NULL",
         ]
         for sql in indexes:
             try:
@@ -1535,6 +1541,31 @@ def update_payment_receipt(payment_id, file_id, text_value):
             "UPDATE payments SET receipt_file_id=?, receipt_text=? WHERE id=?",
             (file_id, text_value, payment_id)
         )
+
+
+def set_payment_crypto_comment(payment_id: int, comment: str) -> None:
+    """Store the unique comment/memo code for a TON payment."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE payments SET crypto_comment=? WHERE id=?",
+            (comment, payment_id)
+        )
+
+
+def set_payment_crypto_tx_hash(payment_id: int, tx_hash: str) -> bool:
+    """Store tx_hash for a payment. Returns False if already used by another payment."""
+    with get_conn() as conn:
+        existing = conn.execute(
+            "SELECT id FROM payments WHERE crypto_tx_hash=? AND id!=?",
+            (tx_hash, payment_id)
+        ).fetchone()
+        if existing:
+            return False
+        conn.execute(
+            "UPDATE payments SET crypto_tx_hash=? WHERE id=?",
+            (tx_hash, payment_id)
+        )
+        return True
 
 
 def approve_payment(payment_id, admin_note):
