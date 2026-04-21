@@ -5477,9 +5477,8 @@ def _dispatch_callback(call, uid, data):
             _show_panel_config_pkg, _show_panel_config_detail,
         )
         from ..db import (
-            get_panel_config, get_panel_config_full, get_panel,
-            get_panel_client_package,
-            update_panel_config_field, update_panel_config_texts,
+            get_panel_config, get_panel_config_full,
+            update_panel_config_field,
             delete_panel_config,
         )
         bot.answer_callback_query(call.id)
@@ -5839,8 +5838,7 @@ def _dispatch_callback(call, uid, data):
     # ── User: My Panel Configs ─────────────────────────────────────────────────
     if data.startswith("mypnlcfg:"):
         from ..db import (
-            get_panel_config, get_panel, update_panel_config_field,
-            update_panel_config_texts, get_panel_client_package,
+            get_panel_config, update_panel_config_field,
         )
         from ..admin.renderers import _show_panel_config_detail
 
