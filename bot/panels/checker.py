@@ -131,7 +131,7 @@ def _check_panel_configs_expiry() -> None:
                                             update_panel_config_field(cfg["id"], "expire_at",  new_exp_str)
                                             update_panel_config_field(cfg["id"], "is_expired",  0)
                                             update_panel_config_field(cfg["id"], "is_disabled", 0)
-                                    if renew_ok:
+                    if renew_ok:
                                         auto_renewed = True
                                         try:
                                             price_text = f"{price:,} تومان" if price > 0 else "رایگان"
@@ -142,6 +142,26 @@ def _check_panel_configs_expiry() -> None:
                                                 f"با موفقیت تمدید شد.\n"
                                                 f"مبلغ {price_text} از کیف پول شما کسر شد.",
                                                 parse_mode="HTML",
+                                            )
+                                        except Exception:
+                                            pass
+                                        try:
+                                            from ..ui.notifications import admin_renewal_notify as _arn
+                                            _tn_pc = ""
+                                            try:
+                                                _tn_pc = pkg["type_name"]
+                                            except Exception:
+                                                pass
+                                            _arn(
+                                                cfg["user_id"],
+                                                {
+                                                    "config_id": cfg["id"],
+                                                    "service_name": cfg.get("client_name") or "",
+                                                    "type_name": _tn_pc,
+                                                },
+                                                pkg,
+                                                price,
+                                                "تمدید خودکار",
                                             )
                                         except Exception:
                                             pass

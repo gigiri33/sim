@@ -1063,6 +1063,10 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
                 check_and_give_referral_purchase_reward(uid)
             except Exception:
                 pass
+            try:
+                admin_purchase_notify(payment_method, get_user(uid), package_row, purchase_id=None)
+            except Exception:
+                pass
         return panel_config_ids, []
 
     # ── Manual / stock-based packages (original logic) ────────────────────────
@@ -3677,7 +3681,17 @@ def _dispatch_callback(call, uid, data):
                 kb.add(types.InlineKeyboardButton("✅ من قوانین را خواندم و پذیرفتم", callback_data="buy:accept_rules"))
                 kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
                 bot.answer_callback_query(call.id)
-                send_or_edit(call, f"📜 <b>قوانین خرید</b>\n\n{rendered_rules}", kb)
+                try:
+                    bot.delete_message(call.message.chat.id, call.message.message_id)
+                except Exception:
+                    pass
+                bot.send_message(
+                    call.message.chat.id,
+                    f"📜 <b>قوانین خرید</b>\n\n{rendered_rules}",
+                    parse_mode="HTML",
+                    reply_markup=kb,
+                    disable_web_page_preview=True,
+                )
                 return
         # Fall through to actual buy
         data = "buy:start_real"
