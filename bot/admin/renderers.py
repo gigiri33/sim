@@ -570,7 +570,7 @@ def _show_panel_client_package_preview(call, cpkg_id):
 def _is_expiring_time(item):
     """Return True if the config is close to expiry (time-based, < 20% remaining)."""
     from datetime import datetime
-    if not item["expire_at"] or not item.get("duration_days"):
+    if not item["expire_at"] or not item["duration_days"]:
         return False
     try:
         expire_dt = datetime.strptime(str(item["expire_at"])[:19], "%Y-%m-%d %H:%M:%S")

@@ -1322,9 +1322,9 @@ def get_user_purchases_paged(user_id, page=0, per_page=10, search=None):
         """
         params = [user_id]
         if search:
-            base += " AND (c.service_name LIKE ? OR c.config_text LIKE ?)"
+            base += " AND (c.service_name LIKE ? OR c.config_text LIKE ? OR p.name LIKE ? OR t.name LIKE ?)"
             s = f"%{search}%"
-            params += [s, s]
+            params += [s, s, s, s]
         count = conn.execute("SELECT COUNT(*) AS n " + base, params).fetchone()["n"]
         rows = conn.execute(
             "SELECT pr.*, p.name AS package_name, p.show_name, p.volume_gb, p.duration_days, p.price,"
