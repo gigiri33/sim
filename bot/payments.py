@@ -20,6 +20,8 @@ from .db import (
 )
 from .helpers import esc, fmt_price, display_username, back_button, now_str
 import time
+import random
+import string
 
 # ── In-memory idempotency guard ────────────────────────────────────────────────
 # Prevents concurrent or duplicate processing of the same payment_id when
@@ -159,13 +161,11 @@ def show_crypto_selection(target, amount=None):
 
 
 def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
-    """Render the crypto payment instruction page (wallet + amount + memo for TON).
+    """Render the crypto payment instruction page.
 
-    Returns True when the full info page was successfully rendered to the user,
-    False when rendering was aborted (e.g. missing admin-configured address).
+    Returns True on success, False when rendering was aborted (missing address).
     Callers MUST only transition the user into an ``await_*_receipt`` state
-    after this function returns True, otherwise the next arbitrary message
-    would incorrectly be treated as a payment receipt.
+    after this function returns True.
     """
     from .db import setting_get
     addr   = setting_get(f"crypto_{coin_key}", "")
@@ -175,30 +175,58 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
         send_or_edit(target, "⚠️ آدرس این ارز هنوز توسط ادمین ثبت نشده است.", back_button("main"))
         return False
 
+    comment_on = setting_get(f"crypto_{coin_key}_comment", "0") == "1"
+    randamt_on = setting_get(f"crypto_{coin_key}_rand_amount", "0") == "1"
+
     coin_amount_str = ""
     prices = _get_prices()
     if symbol and symbol in prices and prices[symbol] > 0:
         coin_amount = amount / prices[symbol]
-        coin_amount_str = f"{coin_amount:.6f}"
+        if randamt_on:
+            base = f"{coin_amount:.2f}"
+            extra = "".join(str(random.randint(0, 9)) for _ in range(random.randint(3, 5)))
+            coin_amount_str = base + extra
+        else:
+            coin_amount_str = f"{coin_amount:.6f}"
 
     equiv_line = (
         f"\n{ce('💱', '5402186569006210455')} <b>معادل ارزی:</b> <code>{coin_amount_str}</code> {symbol}\n"
         if coin_amount_str else ""
     )
 
+    # ── Comment section ──────────────────────────────────────────────────────
+    comment_code = None
+    comment_section = ""
+    if comment_on:
+        chars = string.ascii_uppercase + string.digits
+        comment_code = "".join(random.choices(chars, k=8))
+        comment_section = (
+            f"\n{ce('🔑', '5316979637987594548')} <b>کامنت:</b> <code>{comment_code}</code>\n"
+            f"{ce('⚠️', '5314302076317081739')} <b>هنگام پرداخت حتماً مقدار کامنت را دقیقاً وارد کنید،"
+            f" در غیر این صورت رسید شما تأیید نخواهد شد.</b>"
+        )
+
     text = (
         f"{ce('💎', '5794002949222964817')} <b>پرداخت با {label}</b>\n\n"
         f"{ce('💰', '5318912792428814144')} مبلغ: <b>{fmt_price(amount)}</b> تومان"
         f"{equiv_line}\n"
-        f"{ce('👛', '5796280694934085416')} <b>آدرس ولت:</b>\n<code>{esc(addr)}</code>\n\n"
+        f"{ce('👛', '5796280694934085416')} <b>آدرس ولت:</b>\n<code>{esc(addr)}</code>"
+        f"{comment_section}\n\n"
         f"{ce('⬇️', '5314453632828055816')} پس از واریز، تصویر تراکنش یا هش آن را ارسال کنید.\n\n"
         f"{ce('⚠️', '5314302076317081739')} <i>تمامی کارمزد انتقال ارز دیجیتال به عهده واریزکننده می‌باشد</i>"
     )
 
-    kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main"))
+    # ── Copy buttons ─────────────────────────────────────────────────────────
+    rows = []
+    if coin_amount_str:
+        rows.append([_btn(f"📋 کپی مبلغ ({coin_amount_str} {symbol})", copy_text=coin_amount_str)])
+    row2 = [_btn("📋 کپی آدرس ولت", copy_text=addr)]
+    if comment_code:
+        row2.append(_btn("📋 کپی کامنت", copy_text=comment_code))
+    rows.append(row2)
+    rows.append([_btn("بازگشت", callback_data="nav:main")])
 
-    send_or_edit(target, text, kb)
+    send_or_edit(target, text, _raw_markup(rows))
     return True
 
 

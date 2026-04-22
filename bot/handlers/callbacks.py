@@ -9823,7 +9823,15 @@ def _dispatch_callback(call, uid, data):
         for coin_key, coin_label in CRYPTO_COINS:
             addr = setting_get(f"crypto_{coin_key}", "")
             status_icon = "✅" if addr else "❌"
-            kb.add(types.InlineKeyboardButton(f"{status_icon} {coin_label}", callback_data=f"adm:set:cw:{coin_key}"))
+            comment_on  = setting_get(f"crypto_{coin_key}_comment",    "0") == "1"
+            randamt_on  = setting_get(f"crypto_{coin_key}_rand_amount", "0") == "1"
+            comment_lbl = "کامنت: ✅" if comment_on else "کامنت: 🔴"
+            randamt_lbl = "مبلغ رندم: ✅" if randamt_on else "مبلغ رندم: 🔴"
+            kb.row(
+                types.InlineKeyboardButton(f"{status_icon} {coin_label}", callback_data=f"adm:set:cw:{coin_key}"),
+                types.InlineKeyboardButton(comment_lbl,  callback_data=f"adm:gw:cw:{coin_key}:comment"),
+                types.InlineKeyboardButton(randamt_lbl, callback_data=f"adm:gw:cw:{coin_key}:randamt"),
+            )
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gateways", icon_custom_emoji_id="5253997076169115797"))
         display_name_crypto = setting_get("gw_crypto_display_name", "")
         name_display_crypto = display_name_crypto or "<i>پیش‌فرض: ارز دیجیتال</i>"
@@ -9832,7 +9840,9 @@ def _dispatch_callback(call, uid, data):
             f"وضعیت: {enabled_label}\n"
             f"نمایش: {vis_label}\n"
             f"نام نمایشی: {name_display_crypto}\n\n"
-            "برای ویرایش آدرس ولت روی هر ارز بزنید:"
+            "ℹ️ <i>با فعال‌سازی <b>کامنت</b> یا <b>مبلغ رندم</b> برای هر ارز، "
+            "هنگام نمایش صفحه پرداخت، کد کامنت تصادفی و/یا مبلغ ارزی با ارقام اعشاری رندم به کاربر نشان داده می‌شود.</i>\n\n"
+            "برای ویرایش آدرس ولت روی نام ارز بزنید:"
         )
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
@@ -10237,6 +10247,18 @@ def _dispatch_callback(call, uid, data):
             back_button("adm:set:gw:crypto")
         )
         return
+
+    if data.startswith("adm:gw:cw:"):
+        parts = data.split(":")
+        if len(parts) == 5 and parts[4] in ("comment", "randamt"):
+            coin_key    = parts[3]
+            setting_key = (f"crypto_{coin_key}_comment" if parts[4] == "comment"
+                           else f"crypto_{coin_key}_rand_amount")
+            cur = setting_get(setting_key, "0")
+            setting_set(setting_key, "0" if cur == "1" else "1")
+            bot.answer_callback_query(call.id, "تغییر یافت.")
+            _fake_call(call, "adm:set:gw:crypto")
+            return
 
     if data == "adm:set:channel":
         current = setting_get("channel_id", "")
