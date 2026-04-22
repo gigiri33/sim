@@ -885,6 +885,110 @@ def _show_renewal_gateways(target, uid, purchase_id, package_id, price, package_
     send_or_edit(target, text, kb)
 
 
+def _execute_pnlcfg_renewal(config_id, package_id):
+    """Execute panel config renewal: reset traffic + set new expiry. Returns (ok, error_msg)."""
+    from ..db import get_panel_config as _get_pcfg, update_panel_config_field as _upf
+    from ..db import get_panel as _get_pnl, get_package as _get_pkg3
+    from ..panels.client import PanelClient
+    from datetime import datetime as _dt, timedelta as _td
+
+    cfg = _get_pcfg(config_id)
+    if not cfg:
+        return False, "کانفیگ یافت نشد."
+    cfg = dict(cfg)
+    pkg = _get_pkg3(package_id)
+    if not pkg:
+        return False, "پکیج یافت نشد."
+    panel = _get_pnl(cfg["panel_id"])
+    if not panel:
+        return False, "پنل یافت نشد."
+    pc_api = PanelClient(
+        protocol=panel["protocol"], host=panel["host"], port=panel["port"],
+        path=panel["path"] or "", username=panel["username"], password=panel["password"]
+    )
+    pc_api.reset_client_traffic(cfg["inbound_id"], cfg["client_name"] or "")
+    dur_days = int(pkg["duration_days"] or 0)
+    if dur_days:
+        new_exp_dt  = _dt.utcnow() + _td(days=dur_days)
+        new_exp_str = new_exp_dt.strftime("%Y-%m-%d %H:%M:%S")
+        new_exp_ms  = int(new_exp_dt.timestamp() * 1000)
+    else:
+        new_exp_str = None
+        new_exp_ms  = 0
+    ok_r, err_r = pc_api.enable_client(
+        inbound_id=cfg["inbound_id"], client_uuid=cfg["client_uuid"],
+        email=cfg["client_name"] or "",
+        traffic_bytes=int((pkg["volume_gb"] or 0) * 1073741824),
+        expire_ms=new_exp_ms,
+    )
+    if not ok_r:
+        return False, str(err_r)
+    _upf(config_id, "expire_at",  new_exp_str)
+    _upf(config_id, "is_expired",  0)
+    _upf(config_id, "is_disabled", 0)
+    if int(pkg["id"]) != int(cfg.get("package_id") or 0):
+        _upf(config_id, "package_id", pkg["id"])
+    return True, None
+
+
+def _show_pnlcfg_renewal_gateways(target, uid, config_id, package_id, price, package_row, cfg):
+    """Build and show gateway selection keyboard for panel config renewal."""
+    _gw_labels = []
+    kb = types.InlineKeyboardMarkup()
+    if wallet_pay_enabled_for(uid):
+        kb.add(types.InlineKeyboardButton("💰 پرداخت از موجودی",
+               callback_data=f"mypnlcfgrpay:wallet:{config_id}:{package_id}"))
+    if is_gateway_available("card", uid) and is_card_info_complete():
+        _lbl = setting_get("gw_card_display_name", "").strip() or "💳 کارت به کارت"
+        kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"mypnlcfgrpay:card:{config_id}:{package_id}"))
+        _gw_labels.append(("card", _lbl))
+    if is_gateway_available("crypto", uid):
+        _lbl = setting_get("gw_crypto_display_name", "").strip() or "💎 ارز دیجیتال"
+        kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"mypnlcfgrpay:crypto:{config_id}:{package_id}"))
+        _gw_labels.append(("crypto", _lbl))
+    if is_gateway_available("tetrapay", uid):
+        _lbl = setting_get("gw_tetrapay_display_name", "").strip() or "💳 درگاه کارت به کارت (TetraPay)"
+        kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"mypnlcfgrpay:tetrapay:{config_id}:{package_id}"))
+        _gw_labels.append(("tetrapay", _lbl))
+    if is_gateway_available("swapwallet_crypto", uid):
+        _lbl = setting_get("gw_swapwallet_crypto_display_name", "").strip() or "💳 درگاه کارت به کارت و ارز دیجیتال (SwapWallet)"
+        kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"mypnlcfgrpay:swapwallet_crypto:{config_id}:{package_id}"))
+        _gw_labels.append(("swapwallet_crypto", _lbl))
+    if is_gateway_available("tronpays_rial", uid):
+        _lbl = setting_get("gw_tronpays_rial_display_name", "").strip() or "💳 درگاه کارت به کارت (TronPay)"
+        kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"mypnlcfgrpay:tronpays_rial:{config_id}:{package_id}"))
+        _gw_labels.append(("tronpays_rial", _lbl))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"mypnlcfg:renewconfirm:{config_id}",
+           icon_custom_emoji_id="5253997076169115797"))
+    _range_guide = build_gateway_range_guide(_gw_labels)
+    _pkg_sn_renew = package_row['show_name'] if 'show_name' in package_row.keys() else 1
+    sd = state_data(uid)
+    disc_amount = sd.get("discount_amount", 0)
+    orig_amount = sd.get("original_amount", price)
+    if disc_amount:
+        _price_line = (
+            f"💰 قیمت اصلی: {fmt_price(orig_amount)} تومان\n"
+            f"🎟 تخفیف: {fmt_price(disc_amount)} تومان\n"
+            f"💚 قیمت نهایی: {fmt_price(price)} تومان"
+        )
+    else:
+        _price_line = f"💰 قیمت: {fmt_price(price)} تومان"
+    _stamp_invoice(uid)
+    svc_name = cfg.get("client_name") or ""
+    text = (
+        "♻️ <b>تمدید سرویس</b>\n\n"
+        f"🔮 سرویس: {esc(svc_name)}\n"
+        + (f"📦 پکیج تمدید: {esc(package_row['name'])}\n" if _pkg_sn_renew else "")
+        + f"🔋 حجم: {fmt_vol(package_row['volume_gb'])}\n"
+        f"⏰ مدت: {fmt_dur(package_row['duration_days'])}\n"
+        f"{_price_line}\n\n"
+        + (_range_guide + "\n\n" if _range_guide else "")
+        + "روش پرداخت را انتخاب کنید:"
+        + _invoice_expiry_line()
+    )
+    send_or_edit(target, text, kb)
+
+
 def _show_wallet_gateways(target, uid, amount):
     """Build and show gateway selection keyboard for wallet charge."""
     _gw_labels = []
@@ -2205,7 +2309,8 @@ def _render_pending_receipts_page(call, uid, page):
         send_or_edit(call, "✅ رسید بررسی نشده‌ای وجود ندارد.", kb)
         return
     total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
-    KIND = {"wallet_charge": "شارژ کیف‌پول", "buy": "خرید", "renew": "تمدید"}
+    KIND = {"wallet_charge": "شارژ کیف‌پول", "buy": "خرید", "renew": "تمدید",
+            "renewal": "تمدید", "pnlcfg_renewal": "تمدید (پنل)", "config_purchase": "خرید"}
     header = (
         f"📋 <b>رسیدهای بررسی نشده</b>\n"
         f"صفحه {page + 1} از {total_pages} | تعداد کل: {total}\n"
@@ -2824,6 +2929,39 @@ def _tetrapay_auto_verify(payment_id, authority, uid, chat_id, message_id, kind,
                 if item:
                     admin_renewal_notify(uid, item, pkg_row, payment["amount"], "TetraPay")
 
+            elif kind == "pnlcfg_renewal":
+                cfg_id_tp   = payment["config_id"]
+                pkg_id_tp   = payment["package_id"]
+                if not complete_payment(payment_id):
+                    return
+                state_clear(uid)
+                ok_tp, err_tp = _execute_pnlcfg_renewal(cfg_id_tp, pkg_id_tp)
+                if ok_tp:
+                    try:
+                        from ..admin.renderers import _show_panel_config_detail as _spcd_tp
+                        class _FakeCall_tp:
+                            class message:
+                                chat_id = chat_id
+                                message_id = message_id
+                                class chat:
+                                    id = chat_id
+                                    type = "private"
+                        try:
+                            bot.edit_message_text("✅ پرداخت تأیید و سرویس تمدید شد.", chat_id, message_id,
+                                                  parse_mode="HTML", reply_markup=back_button("my_configs"))
+                        except Exception:
+                            bot.send_message(uid, "✅ پرداخت تأیید و سرویس تمدید شد.",
+                                             parse_mode="HTML", reply_markup=back_button("my_configs"))
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        bot.send_message(uid,
+                            f"✅ پرداخت تأیید شد اما خطا در تمدید سرویس:\n<code>{esc(str(err_tp))}</code>",
+                            parse_mode="HTML", reply_markup=back_button("my_configs"))
+                    except Exception:
+                        pass
+
         except Exception as e:
             print("TETRAPAY_AUTO_VERIFY_ERROR:", e)
         return  # Processed (success or error)
@@ -2832,7 +2970,12 @@ def _tetrapay_auto_verify(payment_id, authority, uid, chat_id, message_id, kind,
     payment = get_payment(payment_id)
     if payment and payment["status"] == "pending":
         state_clear(uid)
-        verify_cb = f"rpay:tetrapay:verify:{payment_id}" if kind == "renewal" else f"pay:tetrapay:verify:{payment_id}"
+        if kind == "pnlcfg_renewal":
+            verify_cb = f"mypnlcfgrpay:tetrapay:verify:{payment_id}"
+        elif kind == "renewal":
+            verify_cb = f"rpay:tetrapay:verify:{payment_id}"
+        else:
+            verify_cb = f"pay:tetrapay:verify:{payment_id}"
         timeout_msg = (
             "⏰ <b>بررسی خودکار پرداخت پایان یافت</b>\n\n"
             "وقتی پرداخت‌تون تو ربات تتراپی تایید شد، دکمه <b>بررسی پرداخت</b> زیر را بزنید "
@@ -2938,6 +3081,27 @@ def _tronpays_rial_auto_verify(payment_id, invoice_id, uid, chat_id, message_id,
                 if item:
                     admin_renewal_notify(uid, item, pkg_row, payment["amount"], "TronPays")
 
+            elif kind == "pnlcfg_renewal":
+                cfg_id_trp  = payment["config_id"]
+                pkg_id_trp  = payment["package_id"]
+                if not complete_payment(payment_id):
+                    return
+                state_clear(uid)
+                ok_trp, err_trp = _execute_pnlcfg_renewal(cfg_id_trp, pkg_id_trp)
+                if ok_trp:
+                    try:
+                        bot.send_message(uid, "✅ پرداخت تأیید و سرویس تمدید شد.",
+                                         parse_mode="HTML", reply_markup=back_button("my_configs"))
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        bot.send_message(uid,
+                            f"✅ پرداخت تأیید شد اما خطا در تمدید سرویس:\n<code>{esc(str(err_trp))}</code>",
+                            parse_mode="HTML", reply_markup=back_button("my_configs"))
+                    except Exception:
+                        pass
+
         except Exception as e:
             print("TRONPAYS_RIAL_AUTO_VERIFY_ERROR:", e)
         return
@@ -2946,7 +3110,12 @@ def _tronpays_rial_auto_verify(payment_id, invoice_id, uid, chat_id, message_id,
     payment = get_payment(payment_id)
     if payment and payment["status"] == "pending":
         state_clear(uid)
-        verify_cb = f"rpay:tronpays_rial:verify:{payment_id}" if kind == "renewal" else f"pay:tronpays_rial:verify:{payment_id}"
+        if kind == "pnlcfg_renewal":
+            verify_cb = f"mypnlcfgrpay:tronpays_rial:verify:{payment_id}"
+        elif kind == "renewal":
+            verify_cb = f"rpay:tronpays_rial:verify:{payment_id}"
+        else:
+            verify_cb = f"pay:tronpays_rial:verify:{payment_id}"
         timeout_msg = (
             "⏰ <b>بررسی خودکار پرداخت پایان یافت</b>\n\n"
             "وقتی پرداخت‌تون تو TronPays تایید شد، دکمه <b>بررسی پرداخت</b> زیر را بزنید "
@@ -4249,6 +4418,15 @@ def _dispatch_callback(call, uid, data):
                 bot.answer_callback_query(call.id)
                 if show_crypto_payment_info(call, uid, coin_key, amount, payment_id=payment_id):
                     state_set(uid, "await_renewal_receipt", payment_id=payment_id, purchase_id=purchase_id)
+            elif sn == "pnlcfg_renew_crypto_select_coin":
+                package_id  = sd.get("package_id")
+                amount      = sd.get("amount")
+                config_id_r = sd.get("config_id")
+                payment_id = create_payment("pnlcfg_renewal", uid, package_id, amount, "crypto",
+                                            status="pending", crypto_coin=coin_key, config_id=config_id_r)
+                bot.answer_callback_query(call.id)
+                if show_crypto_payment_info(call, uid, coin_key, amount, payment_id=payment_id):
+                    state_set(uid, "await_renewal_receipt", payment_id=payment_id, config_id=config_id_r)
             else:
                 bot.answer_callback_query(call.id)
         except Exception as _ex:
@@ -5070,6 +5248,12 @@ def _dispatch_callback(call, uid, data):
             payment_id  = create_payment("renewal", uid, package_id, amount, "swapwallet_crypto",
                                           status="pending", config_id=config_id_r)
             verify_cb   = f"rpay:swapwallet_crypto:verify:{payment_id}"
+        elif kind == "pnlcfg_renewal":
+            package_id  = sd.get("package_id")
+            config_id_r = sd.get("config_id")
+            payment_id  = create_payment("pnlcfg_renewal", uid, package_id, amount, "swapwallet_crypto",
+                                          status="pending", config_id=config_id_r)
+            verify_cb   = f"mypnlcfgrpay:swapwallet_crypto:verify:{payment_id}"
         else:
             bot.answer_callback_query(call.id, "خطا در نوع پرداخت.", show_alert=True)
             return
@@ -6130,75 +6314,401 @@ def _dispatch_callback(call, uid, data):
                                       is_user_view=True)
             return
 
-        # mypnlcfg:renewconfirm:{config_id}  — show confirmation before instant renew
-        if data.startswith("mypnlcfg:renewconfirm:") and not data.startswith("mypnlcfg:renewok:"):
-            config_id = int(data.split(":")[-1])
-            cfg = get_panel_config(config_id)
-            if not cfg or cfg["user_id"] != uid:
-                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
-            bot.answer_callback_query(call.id)
-            kb = types.InlineKeyboardMarkup()
-            kb.add(types.InlineKeyboardButton("✅ تایید", callback_data=f"mypnlcfg:renewok:{config_id}"))
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"mypnlcfg:d:{config_id}", icon_custom_emoji_id="5253997076169115797"))
-            send_or_edit(call,
-                "⚡ <b>تمدید فوری سرویس</b>\n\n"
-                "⚠️ با تمدید فوری، <b>زمان و حجم مانده</b> کانفیگ شما <b>ریست می‌شود</b> "
-                "و کانفیگ با اطلاعات جدید مجدداً فعال خواهد شد.\n\n"
-                "اگر می‌خواهید تا آخرین حجم و زمان کانفیگ فعال بماند و پس از اتمام به‌صورت خودکار "
-                "تمدید شود، کیف پول خود را به اندازه هزینه سرویس شارژ کنید و گزینه "
-                "<b>تمدید خودکار</b> را فعال کنید تا کانفیگ پس از اتمام تمدید شود.\n\n"
-                "آیا از تمدید فوری مطمئن هستید؟",
-                kb)
-            return
-
-        # mypnlcfg:renewok:{config_id}  — execute instant renew
-        if data.startswith("mypnlcfg:renewok:"):
+        # mypnlcfg:renewconfirm:{config_id}  — show package list for panel config renewal
+        if data.startswith("mypnlcfg:renewconfirm:"):
             config_id = int(data.split(":")[-1])
             cfg = get_panel_config(config_id)
             if not cfg or cfg["user_id"] != uid:
                 bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
             cfg = dict(cfg)
-            if not cfg.get("package_id"):
-                bot.answer_callback_query(call.id, "اطلاعات پکیج ناقص است.", show_alert=True); return
-            from ..db import get_package as _get_pkg
-            pkg = _get_pkg(cfg["package_id"])
-            if not pkg:
-                bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True); return
-            panel = get_panel(cfg["panel_id"])
-            if not panel:
-                bot.answer_callback_query(call.id, "پنل یافت نشد.", show_alert=True); return
+            # Find packages of same type
+            with get_conn() as conn:
+                type_row = conn.execute(
+                    "SELECT type_id FROM packages WHERE id=?", (cfg.get("package_id") or 0,)
+                ).fetchone()
+            type_id = type_row["type_id"] if type_row else None
+            packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0] if type_id else []
+            kb = types.InlineKeyboardMarkup()
+            user = get_user(uid)
+            for p in packages:
+                price = get_effective_price(uid, p)
+                _sn = p['show_name'] if 'show_name' in p.keys() else 1
+                _name_part = f"{p['name']} | " if _sn else ""
+                title = f"{_name_part}{fmt_vol(p['volume_gb'])} | {fmt_dur(p['duration_days'])} | {fmt_price(price)} ت"
+                kb.add(types.InlineKeyboardButton(title, callback_data=f"mypnlcfg:renewp:{config_id}:{p['id']}"))
+            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"mypnlcfg:d:{config_id}",
+                   icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
-            send_or_edit(call, "⏳ در حال تمدید سرویس…")
-            from ..panels.client import PanelClient
-            from datetime import datetime as _dt, timedelta as _td
-            pc_api = PanelClient(
-                protocol=panel["protocol"], host=panel["host"], port=panel["port"],
-                path=panel["path"] or "", username=panel["username"], password=panel["password"]
-            )
-            pc_api.reset_client_traffic(cfg["inbound_id"], cfg["client_name"] or "")
-            dur_days = int(pkg["duration_days"] or 0)
-            if dur_days:
-                new_exp_dt  = _dt.utcnow() + _td(days=dur_days)
-                new_exp_str = new_exp_dt.strftime("%Y-%m-%d %H:%M:%S")
-                new_exp_ms  = int(new_exp_dt.timestamp() * 1000)
+            agent_note = "\n\n🤝 <i>این قیمت‌ها مخصوص همکاری شماست</i>" if user and user["is_agent"] else ""
+            if not packages:
+                send_or_edit(call, "📭 در حال حاضر پکیجی برای تمدید موجود نیست.", kb)
             else:
-                new_exp_str = None
-                new_exp_ms  = 0
-            ok_r, err_r = pc_api.enable_client(
-                inbound_id=cfg["inbound_id"], client_uuid=cfg["client_uuid"],
-                email=cfg["client_name"] or "",
-                traffic_bytes=int((pkg["volume_gb"] or 0) * 1073741824),
-                expire_ms=new_exp_ms,
-            )
-            if not ok_r:
                 send_or_edit(call,
-                    f"❌ خطا در تمدید سرویس:\n<code>{esc(str(err_r))}</code>",
-                    back_button(f"mypnlcfg:d:{config_id}"))
+                    "⚡ <b>تمدید سرویس</b>\n\n"
+                    "پکیج مورد نظر برای تمدید را انتخاب کنید:"
+                    f"{agent_note}", kb)
+            return
+
+        # mypnlcfg:renewp:{config_id}:{package_id}  — show payment gateways for selected package
+        if data.startswith("mypnlcfg:renewp:"):
+            parts = data.split(":")
+            config_id  = int(parts[2])
+            package_id = int(parts[3])
+            cfg = get_panel_config(config_id)
+            if not cfg or cfg["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            cfg = dict(cfg)
+            package_row = get_package(package_id)
+            if not package_row:
+                bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True); return
+            price = get_effective_price(uid, package_row)
+            state_set(uid, "pnlcfg_renew_select_method",
+                      config_id=config_id, package_id=package_id,
+                      amount=price, original_amount=price, kind="pnlcfg_renewal")
+            bot.answer_callback_query(call.id)
+            _show_pnlcfg_renewal_gateways(call, uid, config_id, package_id, price, package_row, cfg)
+            return
+
+        # ── Panel config renewal payment handlers ─────────────────────────────
+
+        # mypnlcfgrpay:wallet:{config_id}:{package_id}
+        if data.startswith("mypnlcfgrpay:wallet:"):
+            parts = data.split(":")
+            config_id  = int(parts[2])
+            package_id = int(parts[3])
+            cfg = get_panel_config(config_id)
+            if not cfg or cfg["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            package_row = get_package(package_id)
+            if not package_row:
+                bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True); return
+            user = get_user(uid)
+            sd = state_data(uid)
+            price = sd.get("amount") or get_effective_price(uid, package_row)
+            if user["balance"] < price:
+                bot.answer_callback_query(call.id, "موجودی کیف پول کافی نیست.", show_alert=True); return
+            update_balance(uid, -price)
+            create_payment("pnlcfg_renewal", uid, package_id, price, "wallet",
+                           status="completed", config_id=config_id)
+            bot.answer_callback_query(call.id, "⏳ در حال تمدید…")
+            ok_r, err_r = _execute_pnlcfg_renewal(config_id, package_id)
+            state_clear(uid)
+            if not ok_r:
+                send_or_edit(call, f"❌ خطا در تمدید سرویس:\n<code>{esc(str(err_r))}</code>",
+                             back_button("my_configs"))
                 return
-            update_panel_config_field(config_id, "expire_at",  new_exp_str)
-            update_panel_config_field(config_id, "is_expired",  0)
-            update_panel_config_field(config_id, "is_disabled", 0)
             _show_panel_config_detail(call, config_id, back_data="my_configs", is_user_view=True)
+            return
+
+        # mypnlcfgrpay:card:{config_id}:{package_id}
+        if data.startswith("mypnlcfgrpay:card:"):
+            if not _check_invoice_valid(uid):
+                _show_invoice_expired(call); return
+            parts = data.split(":")
+            config_id  = int(parts[2])
+            package_id = int(parts[3])
+            cfg = get_panel_config(config_id)
+            if not cfg or cfg["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            package_row = get_package(package_id)
+            if not package_row:
+                bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True); return
+            card  = setting_get("payment_card", "")
+            bank  = setting_get("payment_bank", "")
+            owner = setting_get("payment_owner", "")
+            if not card:
+                bot.answer_callback_query(call.id, "اطلاعات پرداخت هنوز ثبت نشده است.", show_alert=True); return
+            sd = state_data(uid)
+            price = sd.get("amount") or get_effective_price(uid, package_row)
+            if not is_gateway_in_range("card", price):
+                _rng = get_gateway_range_text("card")
+                bot.answer_callback_query(call.id,
+                    f"⛔️ مبلغ {fmt_price(price)} تومان برای این درگاه مجاز نیست.\n"
+                    f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
+                    show_alert=True); return
+            payment_id = create_payment("pnlcfg_renewal", uid, package_id, price, "card",
+                                        status="pending", config_id=config_id)
+            final_amount = None
+            if setting_get("gw_card_random_amount", "0") == "1":
+                final_amount = _generate_card_final_amount(price, payment_id)
+                update_payment_final_amount(payment_id, final_amount)
+            state_set(uid, "await_renewal_receipt", payment_id=payment_id, config_id=config_id)
+            text, kb = _build_card_payment_page(card, bank, owner, price, final_amount)
+            bot.answer_callback_query(call.id)
+            send_or_edit(call, text, kb)
+            return
+
+        # mypnlcfgrpay:crypto:{config_id}:{package_id}
+        if data.startswith("mypnlcfgrpay:crypto:"):
+            if not _check_invoice_valid(uid):
+                _show_invoice_expired(call); return
+            parts = data.split(":")
+            config_id  = int(parts[2])
+            package_id = int(parts[3])
+            cfg = get_panel_config(config_id)
+            if not cfg or cfg["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            package_row = get_package(package_id)
+            if not package_row:
+                bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True); return
+            sd = state_data(uid)
+            price = sd.get("amount") or get_effective_price(uid, package_row)
+            if not is_gateway_in_range("crypto", price):
+                _rng = get_gateway_range_text("crypto")
+                bot.answer_callback_query(call.id,
+                    f"⛔️ مبلغ {fmt_price(price)} تومان برای این درگاه مجاز نیست.\n"
+                    f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
+                    show_alert=True); return
+            state_set(uid, "pnlcfg_renew_crypto_select_coin",
+                      config_id=config_id, package_id=package_id, amount=price)
+            bot.answer_callback_query(call.id)
+            show_crypto_selection(call, amount=price)
+            return
+
+        # mypnlcfgrpay:tetrapay:{config_id}:{package_id}
+        if data.startswith("mypnlcfgrpay:tetrapay:"):
+            if not _check_invoice_valid(uid):
+                _show_invoice_expired(call); return
+            parts = data.split(":")
+            config_id  = int(parts[2])
+            package_id = int(parts[3])
+            cfg = get_panel_config(config_id)
+            if not cfg or cfg["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            package_row = get_package(package_id)
+            if not package_row:
+                bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True); return
+            sd = state_data(uid)
+            price = sd.get("amount") or get_effective_price(uid, package_row)
+            if not is_gateway_in_range("tetrapay", price):
+                _rng = get_gateway_range_text("tetrapay")
+                bot.answer_callback_query(call.id,
+                    f"⛔️ مبلغ {fmt_price(price)} تومان برای درگاه TetraPay مجاز نیست.\n"
+                    f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
+                    show_alert=True); return
+            order_id_tp = f"pnlr-{uid}-{config_id}-{int(datetime.now().timestamp())}"
+            order_label_tp = (
+                f"تمدید {package_row['name']}"
+                if ('show_name' not in package_row.keys() or package_row['show_name'])
+                else f"تمدید {fmt_vol(package_row['volume_gb'])} | {fmt_dur(package_row['duration_days'])}"
+            )
+            success_tp, result_tp = create_tetrapay_order(price, order_id_tp, order_label_tp)
+            if not success_tp:
+                err_msg_tp = result_tp.get("error", "خطای ناشناخته") if isinstance(result_tp, dict) else str(result_tp)
+                bot.answer_callback_query(call.id)
+                send_or_edit(call,
+                    f"⚠️ <b>خطا در ایجاد درگاه TetraPay</b>\n\n<code>{esc(err_msg_tp[:400])}</code>",
+                    back_button(f"mypnlcfg:renewconfirm:{config_id}")); return
+            authority_tp = result_tp.get("Authority", "")
+            pay_url_bot_tp = result_tp.get("payment_url_bot", "")
+            pay_url_web_tp = result_tp.get("payment_url_web", "")
+            payment_id = create_payment("pnlcfg_renewal", uid, package_id, price, "tetrapay",
+                                        status="pending", config_id=config_id)
+            with get_conn() as conn:
+                conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (authority_tp, payment_id))
+            state_set(uid, "await_pnlcfg_renewal_tetrapay_verify",
+                      payment_id=payment_id, authority=authority_tp, config_id=config_id)
+            text_tp = (
+                "🏦 <b>پرداخت آنلاین (تمدید)</b>\n\n"
+                f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n\n"
+                "لطفاً از یکی از لینک‌های زیر پرداخت را انجام دهید.\n\n"
+                "⏳ <b>تا یک ساعت</b> اگر پرداخت‌تون تایید بشه به صورت خودکار عملیات انجام می‌شود.\n"
+                "در غیر این صورت دکمه <b>بررسی پرداخت</b> را بزنید."
+            )
+            kb_tp = types.InlineKeyboardMarkup()
+            if pay_url_bot_tp and setting_get("tetrapay_mode_bot", "1") == "1":
+                kb_tp.add(types.InlineKeyboardButton("💳 پرداخت در تلگرام", url=pay_url_bot_tp))
+            if pay_url_web_tp and setting_get("tetrapay_mode_web", "1") == "1":
+                kb_tp.add(types.InlineKeyboardButton("🌐 پرداخت در مرورگر", url=pay_url_web_tp))
+            kb_tp.add(types.InlineKeyboardButton("🔍 بررسی پرداخت",
+                       callback_data=f"mypnlcfgrpay:tetrapay:verify:{payment_id}"))
+            bot.answer_callback_query(call.id)
+            send_or_edit(call, text_tp, kb_tp)
+            _start_tetrapay_auto_verify(
+                payment_id, authority_tp, uid,
+                call.message.chat.id, call.message.message_id,
+                "pnlcfg_renewal", package_id=package_id)
+            return
+
+        # mypnlcfgrpay:tetrapay:verify:{payment_id}
+        if data.startswith("mypnlcfgrpay:tetrapay:verify:"):
+            bot.answer_callback_query(call.id)
+            return
+
+        # mypnlcfgrpay:tronpays_rial:{config_id}:{package_id}
+        if data.startswith("mypnlcfgrpay:tronpays_rial:") and not data.startswith("mypnlcfgrpay:tronpays_rial:verify:"):
+            if not _check_invoice_valid(uid):
+                _show_invoice_expired(call); return
+            parts = data.split(":")
+            config_id  = int(parts[2])
+            package_id = int(parts[3])
+            cfg = get_panel_config(config_id)
+            if not cfg or cfg["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            package_row = get_package(package_id)
+            if not package_row:
+                bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True); return
+            sd = state_data(uid)
+            price = sd.get("amount") or get_effective_price(uid, package_row)
+            if not is_gateway_in_range("tronpays_rial", price):
+                _rng = get_gateway_range_text("tronpays_rial")
+                bot.answer_callback_query(call.id,
+                    f"⛔️ مبلغ {fmt_price(price)} تومان برای درگاه TronPay مجاز نیست.\n"
+                    f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
+                    show_alert=True); return
+            hash_id_trp = f"pnlr-{uid}-{config_id}-{int(datetime.now().timestamp())}"
+            order_label_trp = (
+                f"تمدید {package_row['name']}"
+                if ('show_name' not in package_row.keys() or package_row['show_name'])
+                else f"تمدید {fmt_vol(package_row['volume_gb'])} | {fmt_dur(package_row['duration_days'])}"
+            )
+            success_trp, result_trp = create_tronpays_rial_invoice(price, hash_id_trp, order_label_trp)
+            if not success_trp:
+                err_msg_trp = result_trp.get("error", "خطای ناشناخته") if isinstance(result_trp, dict) else str(result_trp)
+                bot.answer_callback_query(call.id)
+                send_or_edit(call,
+                    f"⚠️ <b>خطا در ایجاد فاکتور TronPays</b>\n\n<code>{esc(err_msg_trp[:400])}</code>",
+                    back_button(f"mypnlcfg:renewconfirm:{config_id}")); return
+            invoice_id_trp = result_trp.get("invoice_id")
+            invoice_url_trp = result_trp.get("invoice_url")
+            if not invoice_id_trp or not invoice_url_trp:
+                bot.answer_callback_query(call.id)
+                send_or_edit(call, "⚠️ خطا در ایجاد فاکتور TronPays. لطفاً دوباره تلاش کنید.",
+                             back_button(f"mypnlcfg:renewconfirm:{config_id}")); return
+            payment_id = create_payment("pnlcfg_renewal", uid, package_id, price, "tronpays_rial",
+                                        status="pending", config_id=config_id)
+            with get_conn() as conn:
+                conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id_trp, payment_id))
+            state_set(uid, "await_pnlcfg_renewal_tronpays_verify",
+                      payment_id=payment_id, invoice_id=invoice_id_trp, config_id=config_id)
+            kb_trp = types.InlineKeyboardMarkup()
+            kb_trp.add(types.InlineKeyboardButton("💳 پرداخت", url=invoice_url_trp))
+            kb_trp.add(types.InlineKeyboardButton("🔍 بررسی پرداخت",
+                        callback_data=f"mypnlcfgrpay:tronpays_rial:verify:{payment_id}"))
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                "🏦 <b>پرداخت آنلاین TronPays (تمدید)</b>\n\n"
+                f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n\n"
+                "⏳ پس از پرداخت، دکمه <b>بررسی پرداخت</b> را بزنید.",
+                kb_trp)
+            _start_tronpays_rial_auto_verify(
+                payment_id, invoice_id_trp, uid,
+                call.message.chat.id, call.message.message_id,
+                "pnlcfg_renewal", package_id=package_id)
+            return
+
+        # mypnlcfgrpay:tronpays_rial:verify:{payment_id}
+        if data.startswith("mypnlcfgrpay:tronpays_rial:verify:"):
+            payment_id = int(data.split(":")[-1])
+            payment = get_payment(payment_id)
+            if not payment or payment["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            if payment["status"] != "pending":
+                bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True); return
+            invoice_id_v = payment["receipt_text"]
+            ok_v, status_v = check_tronpays_rial_invoice(invoice_id_v)
+            if not ok_v:
+                bot.answer_callback_query(call.id, "خطا در بررسی وضعیت فاکتور.", show_alert=True); return
+            if is_tronpays_paid(status_v):
+                if not complete_payment(payment_id):
+                    bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True); return
+                config_id_v  = payment["config_id"]
+                package_id_v = payment["package_id"]
+                bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد! در حال تمدید…")
+                ok_r, err_r = _execute_pnlcfg_renewal(config_id_v, package_id_v)
+                state_clear(uid)
+                if not ok_r:
+                    send_or_edit(call, f"❌ پرداخت انجام شد اما خطا در تمدید:\n<code>{esc(str(err_r))}</code>",
+                                 back_button("my_configs"))
+                    return
+                _show_panel_config_detail(call, config_id_v, back_data="my_configs", is_user_view=True)
+            else:
+                bot.answer_callback_query(call.id, "❌ پرداخت هنوز تأیید نشده. لطفاً ابتدا پرداخت را انجام دهید.", show_alert=True)
+            return
+
+        # mypnlcfgrpay:swapwallet_crypto:{config_id}:{package_id}
+        if data.startswith("mypnlcfgrpay:swapwallet_crypto:") and not data.startswith("mypnlcfgrpay:swapwallet_crypto:verify:"):
+            if not _check_invoice_valid(uid):
+                _show_invoice_expired(call); return
+            parts = data.split(":")
+            config_id  = int(parts[2])
+            package_id = int(parts[3])
+            cfg = get_panel_config(config_id)
+            if not cfg or cfg["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            package_row = get_package(package_id)
+            if not package_row:
+                bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True); return
+            sd = state_data(uid)
+            price = sd.get("amount") or get_effective_price(uid, package_row)
+            if not is_gateway_in_range("swapwallet_crypto", price):
+                _rng = get_gateway_range_text("swapwallet_crypto")
+                bot.answer_callback_query(call.id,
+                    f"⛔️ مبلغ {fmt_price(price)} تومان برای درگاه SwapWallet مجاز نیست.\n"
+                    f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
+                    show_alert=True); return
+            from ..gateways.swapwallet_crypto import get_active_swapwallet_networks, NETWORK_LABELS as SW_NET_LABELS2
+            _active_nets_pnl = get_active_swapwallet_networks()
+            if not _active_nets_pnl:
+                bot.answer_callback_query(call.id, "هیچ ارزی برای SwapWallet فعال نشده است.", show_alert=True); return
+            state_set(uid, "swcrypto_network_select", kind="pnlcfg_renewal",
+                      config_id=config_id, package_id=package_id, amount=price)
+            kb_sw = types.InlineKeyboardMarkup()
+            if len(_active_nets_pnl) == 1:
+                net_pnl = _active_nets_pnl[0][0]
+                order_id_sw = f"pnlswc-{uid}-{int(datetime.now().timestamp())}"
+                success_sw, result_sw = create_swapwallet_crypto_invoice(price, order_id_sw, net_pnl, "تمدید سرویس")
+                if not success_sw:
+                    err_sw = result_sw.get("error", "خطای ناشناخته") if isinstance(result_sw, dict) else str(result_sw)
+                    _swapwallet_error_inline(call, err_sw); return
+                invoice_id_sw = result_sw.get("id", "")
+                payment_id = create_payment("pnlcfg_renewal", uid, package_id, price, "swapwallet_crypto",
+                                            status="pending", config_id=config_id)
+                with get_conn() as conn:
+                    conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id_sw, payment_id))
+                state_set(uid, "await_swapwallet_crypto_verify", payment_id=payment_id,
+                          invoice_id=invoice_id_sw, config_id=config_id)
+                verify_cb_sw = f"mypnlcfgrpay:swapwallet_crypto:verify:{payment_id}"
+                bot.answer_callback_query(call.id)
+                show_swapwallet_crypto_page(call, amount_toman=price, invoice_id=invoice_id_sw,
+                                            result=result_sw, payment_id=payment_id, verify_cb=verify_cb_sw)
+            else:
+                for net_sw, _ in _active_nets_pnl:
+                    kb_sw.add(types.InlineKeyboardButton(SW_NET_LABELS2.get(net_sw, net_sw),
+                               callback_data=f"swcrypto:net:{net_sw}"))
+                kb_sw.add(types.InlineKeyboardButton("بازگشت", callback_data=f"mypnlcfg:renewconfirm:{config_id}",
+                           icon_custom_emoji_id="5253997076169115797"))
+                bot.answer_callback_query(call.id)
+                send_or_edit(call, "💎 <b>پرداخت کریپتو (SwapWallet)</b>\n\nشبکه مورد نظر را انتخاب کنید:", kb_sw)
+            return
+
+        # mypnlcfgrpay:swapwallet_crypto:verify:{payment_id}
+        if data.startswith("mypnlcfgrpay:swapwallet_crypto:verify:"):
+            payment_id = int(data.split(":")[-1])
+            payment = get_payment(payment_id)
+            if not payment or payment["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            if payment["status"] != "pending":
+                bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True); return
+            invoice_id_sv = payment["receipt_text"]
+            success_sv, inv_sv = check_swapwallet_crypto_invoice(invoice_id_sv)
+            if not success_sv:
+                bot.answer_callback_query(call.id, "خطا در بررسی وضعیت فاکتور.", show_alert=True); return
+            if inv_sv.get("status") in ("PAID", "COMPLETED") or inv_sv.get("paidAt"):
+                if not complete_payment(payment_id):
+                    bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True); return
+                config_id_sv  = payment["config_id"]
+                package_id_sv = payment["package_id"]
+                bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد! در حال تمدید…")
+                ok_r, err_r = _execute_pnlcfg_renewal(config_id_sv, package_id_sv)
+                state_clear(uid)
+                if not ok_r:
+                    send_or_edit(call, f"❌ پرداخت انجام شد اما خطا در تمدید:\n<code>{esc(str(err_r))}</code>",
+                                 back_button("my_configs"))
+                    return
+                _show_panel_config_detail(call, config_id_sv, back_data="my_configs", is_user_view=True)
+            else:
+                bot.answer_callback_query(call.id, "❌ پرداخت هنوز تأیید نشده.", show_alert=True)
             return
 
         # mypnlcfg:autorenew:{config_id}
@@ -9805,9 +10315,11 @@ def _dispatch_callback(call, uid, data):
 
     if data == "adm:ops:wallet_pay_exc" or data.startswith("adm:wpe:list:"):
         if not admin_has_perm(uid, "settings"):
-            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            if call.id:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
             return
-        bot.answer_callback_query(call.id)
+        if call.id:
+            bot.answer_callback_query(call.id)
         page = _wpe_page_from_data(data)
         sd = state_data(uid) if state_name(uid) == "admin_wallet_exc_search_active" else {}
         search = sd.get("query")
@@ -11782,7 +12294,13 @@ def _dispatch_callback(call, uid, data):
             return
         user_row    = get_user(payment["user_id"])
         package_row = get_package(payment["package_id"]) if payment["package_id"] else None
-        kind_label  = "شارژ کیف پول" if payment["kind"] == "wallet_charge" else "خرید کانفیگ"
+        _k_pay = payment["kind"]
+        if _k_pay == "wallet_charge":
+            kind_label  = "شارژ کیف‌پول"
+        elif _k_pay in ("renewal", "pnlcfg_renewal"):
+            kind_label  = "تمدید سرویس"
+        else:
+            kind_label  = "خرید کانفیگ"
         pkg_text    = ""
         if package_row:
             pkg_text = (
@@ -11843,7 +12361,13 @@ def _dispatch_callback(call, uid, data):
             return
         user_row   = get_user(payment["user_id"])
         package_row = get_package(payment["package_id"]) if payment["package_id"] else None
-        kind_label = "شارژ کیف پول" if payment["kind"] == "wallet_charge" else "خرید کانفیگ"
+        _k_rj = payment["kind"]
+        if _k_rj == "wallet_charge":
+            kind_label = "شارژ کیف‌پول"
+        elif _k_rj in ("renewal", "pnlcfg_renewal"):
+            kind_label = "تمدید سرویس"
+        else:
+            kind_label = "خرید کانفیگ"
         pkg_text   = ""
         if package_row:
             pkg_text = (

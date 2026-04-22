@@ -274,7 +274,13 @@ def send_payment_to_admins(payment_id):
     payment     = get_payment(payment_id)
     user        = get_user(payment["user_id"])
     package_row = get_package(payment["package_id"]) if payment["package_id"] else None
-    kind_label  = "شارژ کیف پول" if payment["kind"] == "wallet_charge" else "خرید کانفیگ"
+    _pk = payment["kind"]
+    if _pk == "wallet_charge":
+        kind_label = "شارژ کیف پول"
+    elif _pk in ("renewal", "pnlcfg_renewal"):
+        kind_label = "تمدید سرویس" + (" (پنل)" if _pk == "pnlcfg_renewal" else "")
+    else:
+        kind_label = "خرید کانفیگ"
     method_label = payment["payment_method"]
     coin_key = payment["crypto_coin"]
     if coin_key:
@@ -442,7 +448,13 @@ def finish_card_payment_approval(payment_id, admin_note, approved):
             user = get_user(payment["user_id"]) if payment else None
             package_row = get_package(payment["package_id"]) if payment and payment["package_id"] else None
             if payment and user:
-                kind_label = "شارژ کیف پول" if payment["kind"] == "wallet_charge" else "خرید کانفیگ"
+                _k = payment["kind"]
+                if _k == "wallet_charge":
+                    kind_label = "شارژ کیف پول"
+                elif _k in ("renewal", "pnlcfg_renewal"):
+                    kind_label = "تمدید سرویس"
+                else:
+                    kind_label = "خرید کانفیگ"
                 method_label = payment["payment_method"]
                 coin_key = payment["crypto_coin"]
                 if coin_key:
@@ -589,10 +601,37 @@ def _finish_card_payment_approval_core(payment_id, admin_note, approved):
             if item and package_row:
                 admin_renewal_notify(user_id, item, package_row, payment["amount"], payment["payment_method"])
             return True, notified
+
+        elif payment["kind"] == "pnlcfg_renewal":
+            # Panel config renewal — execute automatically after payment approval
+            from .handlers.callbacks import _execute_pnlcfg_renewal as _exec_pnlr
+            panel_config_id = payment["config_id"]
+            package_id      = payment["package_id"]
+            if not complete_payment(payment_id):
+                return True, True  # already processed
+            ok_r, err_r = _exec_pnlr(panel_config_id, package_id)
+            if ok_r:
+                notified = _safe_send(
+                    user_id,
+                    "✅ <b>تمدید سرویس انجام شد!</b>\n\n"
+                    "🔄 پرداخت شما تأیید و سرویس با موفقیت تمدید شد.\n\n"
+                    "🙏 از اعتماد شما سپاسگزاریم.",
+                    parse_mode="HTML",
+                )
+            else:
+                notified = _safe_send(
+                    user_id,
+                    f"✅ پرداخت تأیید شد اما خطا در تمدید سرویس رخ داد.\n"
+                    f"لطفاً با پشتیبانی تماس بگیرید.\n\n"
+                    f"<code>{esc(str(err_r))}</code>",
+                    parse_mode="HTML",
+                )
+            return True, notified
+
         return True, True
     else:
         reject_payment(payment_id, admin_note)
-        if payment["config_id"]:
+        if payment["config_id"] and payment["kind"] != "pnlcfg_renewal":
             release_reserved_config(payment["config_id"])
         notified = _safe_send(user_id, f"{ce('❌', '5215539470849288572')} رسید شما رد شد.\n\n{esc(admin_note)}")
         return True, notified
