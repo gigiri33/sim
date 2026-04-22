@@ -2418,7 +2418,11 @@ def _show_admin_user_configs(call, admin_uid, target_id, page=0, search=None):
         "بازگشت", callback_data=f"adm:usr:v:{target_id}",
         icon_custom_emoji_id="5253997076169115797"
     ))
-    bot.answer_callback_query(call.id)
+    if hasattr(call, "message"):
+        try:
+            bot.answer_callback_query(call.id)
+        except Exception:
+            pass
     send_or_edit(call, f"📦 کانفیگ‌های کاربر ({total} عدد):", kb)
 
 
