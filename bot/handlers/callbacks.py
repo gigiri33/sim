@@ -55,6 +55,7 @@ from ..db import (
     get_phone_number,
     has_pending_rewards, get_unclaimed_rewards, mark_rewards_claimed, mark_reward_claimed_by_id,
     get_locked_channels, add_locked_channel, remove_locked_channel_by_id,
+    wallet_pay_enabled_for, get_wallet_pay_exceptions, add_wallet_pay_exception, remove_wallet_pay_exception,
 )
 from ..gateways.base import is_gateway_available, is_card_info_complete, get_gateway_range_text, is_gateway_in_range, build_gateway_range_guide
 from ..gateways.crypto import fetch_crypto_prices
@@ -763,7 +764,8 @@ def _show_purchase_gateways(target, uid, package_id, price, package_row):
     """Build and show gateway selection keyboard for config purchase."""
     _gw_labels = []
     kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton("💰 پرداخت از موجودی", callback_data=f"pay:wallet:{package_id}"))
+    if wallet_pay_enabled_for(uid):
+        kb.add(types.InlineKeyboardButton("💰 پرداخت از موجودی", callback_data=f"pay:wallet:{package_id}"))
     if is_gateway_available("card", uid) and is_card_info_complete():
         _lbl = setting_get("gw_card_display_name", "").strip() or "💳 کارت به کارت"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:card:{package_id}"))
@@ -832,7 +834,8 @@ def _show_renewal_gateways(target, uid, purchase_id, package_id, price, package_
     """Build and show gateway selection keyboard for renewal."""
     _gw_labels = []
     kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton("💰 پرداخت از موجودی", callback_data=f"rpay:wallet:{purchase_id}:{package_id}"))
+    if wallet_pay_enabled_for(uid):
+        kb.add(types.InlineKeyboardButton("💰 پرداخت از موجودی", callback_data=f"rpay:wallet:{purchase_id}:{package_id}"))
     if is_gateway_available("card", uid) and is_card_info_complete():
         _lbl = setting_get("gw_card_display_name", "").strip() or "💳 کارت به کارت"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:card:{purchase_id}:{package_id}"))
@@ -4522,6 +4525,12 @@ def _dispatch_callback(call, uid, data):
             kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call, "🔴 <b>فروشگاه موقتاً تعطیل است.</b>\n\nشارژ کیف پول در حال حاضر امکان‌پذیر نیست.", kb)
+            return
+        if not wallet_pay_enabled_for(uid):
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
+            bot.answer_callback_query(call.id)
+            send_or_edit(call, "❌ <b>شارژ کیف پول</b>\n\nامکان استفاده از کیف پول در حال حاضر برای شما فعال نیست.", kb)
             return
         state_set(uid, "await_wallet_amount")
         kb = types.InlineKeyboardMarkup()
@@ -9394,6 +9403,12 @@ def _dispatch_callback(call, uid, data):
             types.InlineKeyboardButton(_inv_label, callback_data="adm:ops:invoice_expiry"),
             types.InlineKeyboardButton("📄 اعتبار فاکتور پرداخت", callback_data="adm:ops:noop"),
         )
+        _wp_enabled = setting_get("wallet_pay_enabled", "1")
+        _wp_label   = "✅ فعال" if _wp_enabled == "1" else "❌ غیرفعال"
+        ops_kb.row(
+            types.InlineKeyboardButton(_wp_label, callback_data="adm:ops:wallet_pay_toggle"),
+            types.InlineKeyboardButton("💰 پرداخت با موجودی  ⚙️ استثناها", callback_data="adm:ops:wallet_pay_exc"),
+        )
         ops_kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
         return ops_kb
 
@@ -9415,6 +9430,8 @@ def _dispatch_callback(call, uid, data):
             if _inv_exp_enabled == "1"
             else "❌ غیرفعال — فاکتورها محدودیت زمانی ندارند."
         )
+        _wp_enabled = setting_get("wallet_pay_enabled", "1")
+        _wp_fa = "✅ فعال" if _wp_enabled == "1" else "❌ غیرفعال"
         return (
             "🤖 <b>مدیریت عملیات ربات</b>\n\n"
             f"🔹 <b>وضعیت ربات:</b> {status_fa}\n"
@@ -9422,7 +9439,8 @@ def _dispatch_callback(call, uid, data):
             f"🔹 <b>زیرمجموعه‌گیری:</b> {referral_fa}\n"
             f"🔹 <b>فروش عمده:</b> {bulk_fa}\n"
             f"   ↳ حداقل تعداد: <b>{min_qty}</b> | حداکثر تعداد: <b>{max_label}</b>\n"
-            f"🔹 <b>اعتبار فاکتور پرداخت:</b> {_inv_fa}\n\n"
+            f"🔹 <b>اعتبار فاکتور پرداخت:</b> {_inv_fa}\n"
+            f"🔹 <b>پرداخت با موجودی:</b> {_wp_fa}\n\n"
             "برای تغییر هر مورد، دکمه وضعیت فعلی آن را لمس کنید."
         )
 
@@ -9638,6 +9656,153 @@ def _dispatch_callback(call, uid, data):
             f"📌 مقدار فعلی: <b>{cur_mins} دقیقه</b>\n\n"
             "📝 <i>یک عدد صحیح مثبت وارد کنید (مثلاً ۱۰، ۳۰، ۶۰)</i>",
             back_button("adm:ops:invoice_expiry"))
+        return
+
+    # ── Wallet Pay Toggle ─────────────────────────────────────────────────────
+    if data == "adm:ops:wallet_pay_toggle":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        cur = setting_get("wallet_pay_enabled", "1")
+        new_val = "0" if cur == "1" else "1"
+        setting_set("wallet_pay_enabled", new_val)
+        label = "فعال" if new_val == "1" else "غیرفعال"
+        log_admin_action(uid, f"پرداخت با موجودی {label} شد")
+        bot.answer_callback_query(call.id, f"پرداخت با موجودی: {label}")
+        send_or_edit(call, _ops_menu_text(), _build_ops_kb())
+        return
+
+    # ── Wallet Pay Exceptions Sub-menu ────────────────────────────────────────
+    def _wpe_page_from_data(d):
+        """Extract page number from adm:wpe:list:{page}"""
+        parts = d.split(":")
+        try:
+            return int(parts[3]) if len(parts) > 3 else 0
+        except (ValueError, IndexError):
+            return 0
+
+    def _wpe_kb(page=0, search=None):
+        PER_PAGE = 8
+        rows, total = get_wallet_pay_exceptions(page=page, per_page=PER_PAGE, search=search)
+        total_pages = max(1, (total + PER_PAGE - 1) // PER_PAGE)
+        kb = types.InlineKeyboardMarkup(row_width=1)
+        # Search / clear
+        if search:
+            kb.add(types.InlineKeyboardButton(f"🔍 جستجو: {search}  ❌ پاک کردن", callback_data="adm:wpe:clr"))
+        else:
+            kb.add(types.InlineKeyboardButton("🔍 جستجوی کاربر", callback_data="adm:wpe:srch"))
+        kb.add(types.InlineKeyboardButton("➕ افزودن استثنا", callback_data="adm:wpe:add"))
+        # User rows
+        for r in rows:
+            name = r["full_name"] or r["username"] or str(r["user_id"])
+            kb.row(
+                types.InlineKeyboardButton(f"👤 {name}", callback_data=f"adm:wpe:noop"),
+                types.InlineKeyboardButton("❌ حذف", callback_data=f"adm:wpe:rm:{r['id']}"),
+            )
+        # Pagination
+        nav_btns = []
+        if page > 0:
+            nav_btns.append(types.InlineKeyboardButton("◀️ قبلی", callback_data=f"adm:wpe:list:{page - 1}"))
+        nav_btns.append(types.InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data="adm:wpe:noop"))
+        if page + 1 < total_pages:
+            nav_btns.append(types.InlineKeyboardButton("بعدی ▶️", callback_data=f"adm:wpe:list:{page + 1}"))
+        if nav_btns:
+            kb.row(*nav_btns)
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:ops", icon_custom_emoji_id="5253997076169115797"))
+        return kb
+
+    def _wpe_text(page=0, search=None):
+        PER_PAGE = 8
+        _rows, total = get_wallet_pay_exceptions(page=page, per_page=PER_PAGE, search=search)
+        wp_fa = "✅ فعال" if setting_get("wallet_pay_enabled", "1") == "1" else "❌ غیرفعال"
+        return (
+            "💰 <b>پرداخت با موجودی — استثناها</b>\n\n"
+            f"🔹 وضعیت کلی: {wp_fa}\n"
+            f"🔹 تعداد استثناها: <b>{total}</b> کاربر\n\n"
+            "کاربران موجود در این لیست حتی وقتی پرداخت با موجودی <b>غیرفعال</b> باشد، "
+            "می‌توانند از کیف پول استفاده کنند."
+        )
+
+    if data == "adm:ops:wallet_pay_exc" or data.startswith("adm:wpe:list:"):
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        page = _wpe_page_from_data(data)
+        sd = state_data(uid) if state_name(uid) == "admin_wallet_exc_search_active" else {}
+        search = sd.get("query")
+        send_or_edit(call, _wpe_text(page, search), _wpe_kb(page, search))
+        return
+
+    if data == "adm:wpe:noop":
+        bot.answer_callback_query(call.id)
+        return
+
+    if data == "adm:wpe:srch":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        state_set(uid, "admin_wallet_exc_search", back_cb="adm:ops:wallet_pay_exc")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "🔍 <b>جستجوی استثناها</b>\n\n"
+            "نام کاربری، نام کامل یا شناسه کاربری را وارد کنید:",
+            back_button("adm:ops:wallet_pay_exc"))
+        return
+
+    if data == "adm:wpe:clr":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        state_clear(uid)
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, _wpe_text(0, None), _wpe_kb(0, None))
+        return
+
+    if data == "adm:wpe:add":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        state_set(uid, "admin_wallet_exc_add", back_cb="adm:ops:wallet_pay_exc")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "➕ <b>افزودن استثنا</b>\n\n"
+            "نام کاربری، نام کامل یا شناسه عددی کاربر را وارد کنید:",
+            back_button("adm:ops:wallet_pay_exc"))
+        return
+
+    if data.startswith("adm:wpe:rm:"):
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        try:
+            row_id = int(data.split(":")[-1])
+        except ValueError:
+            bot.answer_callback_query(call.id, "خطا")
+            return
+        remove_wallet_pay_exception(row_id)
+        log_admin_action(uid, f"استثنا پرداخت موجودی حذف شد (id={row_id})")
+        bot.answer_callback_query(call.id, "حذف شد ✅")
+        send_or_edit(call, _wpe_text(0, None), _wpe_kb(0, None))
+        return
+
+    if data.startswith("adm:wpe:pick:"):
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        try:
+            target_uid = int(data.split(":")[-1])
+        except ValueError:
+            bot.answer_callback_query(call.id, "خطا")
+            return
+        added = add_wallet_pay_exception(target_uid)
+        state_clear(uid)
+        if added:
+            log_admin_action(uid, f"استثنا پرداخت موجودی اضافه شد (user_id={target_uid})")
+            bot.answer_callback_query(call.id, "اضافه شد ✅")
+        else:
+            bot.answer_callback_query(call.id, "این کاربر قبلاً در لیست است.", show_alert=True)
+        send_or_edit(call, _wpe_text(0, None), _wpe_kb(0, None))
         return
 
     # ── Referral Settings ─────────────────────────────────────────────────────

@@ -6,7 +6,7 @@ import json
 from telebot import types
 
 from ..config import ADMIN_IDS, PERM_USER_FULL
-from ..db import setting_get
+from ..db import setting_get, wallet_pay_enabled_for
 from ..helpers import is_admin, admin_has_perm
 
 
@@ -49,7 +49,7 @@ def kb_main(user_id):
         rows.append([_btn("تست رایگان", callback_data="test:start", emoji_id="6283073379184415506")])
     rows.append([
         _btn("حساب کاربری",  callback_data="profile",        emoji_id="5373012449597335010"),
-        _btn("شارژ کیف پول", callback_data="wallet:charge",  emoji_id="5931368295545443065"),
+        *([_btn("شارژ کیف پول", callback_data="wallet:charge",  emoji_id="5931368295545443065")] if wallet_pay_enabled_for(user_id) else []),
     ])
     ref_on     = setting_get("referral_enabled", "1") == "1"
     voucher_on = setting_get("vouchers_enabled", "1") == "1"

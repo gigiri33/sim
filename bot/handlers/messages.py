@@ -42,6 +42,7 @@ from ..db import (
     update_panel_client_package_field,
     bulk_add_balance, bulk_zero_balance, bulk_set_status, count_users_by_filter,
     set_user_restricted, check_and_release_restriction,
+    get_wallet_pay_exceptions, add_wallet_pay_exception,
 )
 from ..gateways.base import is_gateway_available, is_card_info_complete, get_global_amount_range, get_gateway_range_text, is_gateway_in_range, build_gateway_range_guide
 from ..gateways.tetrapay import create_tetrapay_order, verify_tetrapay_order
@@ -1371,6 +1372,44 @@ def universal_handler(message):
             if target_user_id:
                 from ..handlers.callbacks import _show_admin_user_configs
                 _show_admin_user_configs(message, uid, target_user_id, page=0, search=search_text if search_text else "")
+            return
+
+        # ── Admin: wallet pay exceptions — search ─────────────────────────────
+        if sn == "admin_wallet_exc_search" and is_admin(uid):
+            query = (message.text or "").strip()
+            state_clear(uid)
+            if query:
+                state_set(uid, "admin_wallet_exc_search_active", query=query)
+            from types import SimpleNamespace as _SN
+            fake = _SN(id=None, from_user=message.from_user, message=message, data="adm:ops:wallet_pay_exc")
+            from ..handlers.callbacks import _dispatch_callback
+            _dispatch_callback(fake, uid, "adm:ops:wallet_pay_exc")
+            return
+
+        # ── Admin: wallet pay exceptions — add user ───────────────────────────
+        if sn == "admin_wallet_exc_add" and is_admin(uid):
+            query = (message.text or "").strip()
+            if not query:
+                bot.send_message(uid, "⚠️ لطفاً یک مقدار وارد کنید.", parse_mode="HTML",
+                                 reply_markup=back_button("adm:ops:wallet_pay_exc"))
+                return
+            found = search_users(query)[:10]
+            if not found:
+                bot.send_message(uid, "❌ کاربری یافت نشد.", parse_mode="HTML",
+                                 reply_markup=back_button("adm:ops:wallet_pay_exc"))
+                return
+            kb = types.InlineKeyboardMarkup(row_width=1)
+            for u in found:
+                name = u["full_name"] or u["username"] or str(u["user_id"])
+                kb.add(types.InlineKeyboardButton(
+                    f"👤 {name}",
+                    callback_data=f"adm:wpe:pick:{u['user_id']}"
+                ))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:ops:wallet_pay_exc",
+                                              icon_custom_emoji_id="5253997076169115797"))
+            state_clear(uid)
+            bot.send_message(uid, "👤 <b>کاربر مورد نظر را انتخاب کنید:</b>",
+                             parse_mode="HTML", reply_markup=kb)
             return
 
         # ── Admin: Client Package — sample config step ────────────────────────

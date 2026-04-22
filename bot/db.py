@@ -494,6 +494,13 @@ def _run_init_db_migrations():
                 "added_at   TEXT    NOT NULL"
                 ")"
             ),
+            (
+                "CREATE TABLE IF NOT EXISTS wallet_pay_exceptions ("
+                "id       INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "user_id  INTEGER NOT NULL UNIQUE,"
+                "added_at TEXT    NOT NULL"
+                ")"
+            ),
             # ── Panels (3x-ui / Sanaei) ───────────────────────────────────────
             (
                 "CREATE TABLE IF NOT EXISTS panels ("
@@ -2664,3 +2671,59 @@ def remove_locked_channel_by_id(row_id: int) -> None:
     """Remove a locked channel row by primary key."""
     with get_conn() as conn:
         conn.execute("DELETE FROM locked_channels WHERE id=?", (row_id,))
+
+
+# ── Wallet Payment Exceptions ──────────────────────────────────────────────────
+
+def wallet_pay_enabled_for(user_id: int) -> bool:
+    """Return True if wallet payment is allowed for this user."""
+    enabled = setting_get("wallet_pay_enabled", "1")
+    if enabled == "1":
+        return True
+    # Globally disabled — check exceptions list
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id FROM wallet_pay_exceptions WHERE user_id=?", (user_id,)
+        ).fetchone()
+    return row is not None
+
+
+def get_wallet_pay_exceptions(page=0, per_page=10, search=None):
+    """Return (rows, total) of wallet payment exception users."""
+    with get_conn() as conn:
+        base = (
+            "FROM wallet_pay_exceptions e "
+            "LEFT JOIN users u ON u.user_id = e.user_id"
+        )
+        params: list = []
+        where = ""
+        if search:
+            s = f"%{search}%"
+            where = " WHERE (CAST(e.user_id AS TEXT) LIKE ? OR u.username LIKE ? OR u.full_name LIKE ?)"
+            params = [s, s, s]
+        total = conn.execute(f"SELECT COUNT(*) AS n {base}{where}", params).fetchone()["n"]
+        rows  = conn.execute(
+            f"SELECT e.id, e.user_id, e.added_at, u.full_name, u.username "
+            f"{base}{where} ORDER BY e.id DESC LIMIT ? OFFSET ?",
+            params + [per_page, page * per_page]
+        ).fetchall()
+    return rows, total
+
+
+def add_wallet_pay_exception(user_id: int) -> bool:
+    """Add user to wallet pay exceptions. Returns True if added, False if already exists."""
+    with get_conn() as conn:
+        try:
+            conn.execute(
+                "INSERT INTO wallet_pay_exceptions(user_id, added_at) VALUES(?,?)",
+                (user_id, now_str())
+            )
+            return True
+        except Exception:
+            return False
+
+
+def remove_wallet_pay_exception(row_id: int) -> None:
+    """Remove a wallet pay exception row by primary key."""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM wallet_pay_exceptions WHERE id=?", (row_id,))
