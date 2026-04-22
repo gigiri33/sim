@@ -1065,7 +1065,7 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
         panel_config_ids = []
         failed_count = 0
         for _ in range(quantity):
-            ok, result, pc_id = _create_panel_config(uid, package_id, payment_id)
+            ok, result, pc_id = _create_panel_config(uid, package_id, payment_id, chat_id=chat_id)
             if ok:
                 panel_config_ids.append(pc_id)
             else:
@@ -1417,7 +1417,7 @@ def _build_config_from_inbound(inbound, client_uuid, client_name, panel, real_po
     return None
 
 
-def _create_panel_config(uid, package_id, payment_id):
+def _create_panel_config(uid, package_id, payment_id, chat_id=None):
     """
     Create a config in the panel for uid/package_id.
     If the package has a client_package_id, the sample config/sub URL from that
@@ -1468,39 +1468,110 @@ def _create_panel_config(uid, package_id, payment_id):
         sub_url_base=panel["sub_url_base"] if panel["sub_url_base"] else "",
     )
 
-    RETRY_TIMEOUT = 180  # seconds — keep trying for up to 3 minutes
-    RETRY_DELAY   = 15   # seconds between attempts
+    # ── Connection-error detector ─────────────────────────────────────────────
+    def _is_conn_err(e):
+        s = str(e).lower()
+        return any(x in s for x in [
+            "connection refused", "max retries exceeded", "failed to establish",
+            "newconnectionerror", "httpsconnectionpool", "remotedisconnected",
+            "connection timed out", "read timed out", "timeout",
+        ])
 
-    # ── Step 1: login (retry for up to 3 minutes) ────────────────────────────
+    CONN_RETRY_DELAY   = 30    # seconds between retries when server is down
+    FUNC_RETRY_TIMEOUT = 180   # 3 min timeout for non-connection errors
+    FUNC_RETRY_DELAY   = 15
+    MAX_WAIT           = 28800 # 8-hour absolute hard cap
+
+    _t_start           = time.time()
+    _waiting_notified  = False
+    _last_periodic     = 0.0
+    PERIODIC_INTERVAL  = 300   # notify user every 5 minutes while waiting
+
+    def _maybe_notify_waiting():
+        nonlocal _waiting_notified, _last_periodic
+        if not chat_id:
+            return
+        now = time.time()
+        if not _waiting_notified:
+            try:
+                bot.send_message(
+                    chat_id,
+                    "⏳ <b>سرور پنل در حال حاضر در دسترس نیست</b>\n\n"
+                    "سفارش شما در صف انتظار قرار گرفت. "
+                    "به محض بازگشت اتصال، سرویس شما ساخته و تحویل داده می‌شود.",
+                    parse_mode="HTML",
+                )
+                _waiting_notified = True
+                _last_periodic = now
+            except Exception:
+                pass
+        elif now - _last_periodic >= PERIODIC_INTERVAL:
+            try:
+                bot.send_message(chat_id, "⏳ هنوز در حال تلاش برای اتصال به پنل...",
+                                 parse_mode="HTML")
+                _last_periodic = now
+            except Exception:
+                pass
+
+    def _notify_reconnected():
+        if _waiting_notified and chat_id:
+            try:
+                bot.send_message(chat_id, "✅ اتصال به پنل برقرار شد، در حال ساخت سرویس...",
+                                 parse_mode="HTML")
+            except Exception:
+                pass
+
+    # ── Step 1: login ─────────────────────────────────────────────────────────
     login_err = None
     _t0 = time.time()
     while True:
+        if time.time() - _t_start > MAX_WAIT:
+            login_err = "حداکثر زمان انتظار (8 ساعت) تمام شد"
+            break
         ok, login_err = client.login()
         if ok:
             login_err = None
+            _notify_reconnected()
             break
         elapsed = time.time() - _t0
-        log.warning("_create_panel_config: login failed (%.0fs elapsed): %s", elapsed, login_err)
-        if elapsed + RETRY_DELAY >= RETRY_TIMEOUT:
-            break
-        time.sleep(RETRY_DELAY)
+        if _is_conn_err(login_err):
+            _maybe_notify_waiting()
+            log.warning("_create_panel_config: login CONN_ERR (%.0fs elapsed), retry in %ds: %s",
+                        elapsed, CONN_RETRY_DELAY, login_err)
+            time.sleep(CONN_RETRY_DELAY)
+        else:
+            log.warning("_create_panel_config: login failed (%.0fs elapsed): %s", elapsed, login_err)
+            if elapsed + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:
+                break
+            time.sleep(FUNC_RETRY_DELAY)
     if login_err is not None:
         return False, f"اتصال به پنل ناموفق: {login_err}", None
 
-    # ── Step 2: fetch inbound (retry for up to 3 minutes) ──────────────────
+    # ── Step 2: fetch inbound ─────────────────────────────────────────────────
     inbound_remark = ""
     real_port    = 0
     inbound = None
+    _last_inb_err = None
     _t0 = time.time()
     while True:
+        if time.time() - _t_start > MAX_WAIT:
+            break
         inbound = client.find_inbound_by_id(panel_inbound)
         if inbound:
             break
         elapsed = time.time() - _t0
-        log.warning("_create_panel_config: find_inbound failed (%.0fs elapsed)", elapsed)
-        if elapsed + RETRY_DELAY >= RETRY_TIMEOUT:
-            break
-        time.sleep(RETRY_DELAY)
+        # find_inbound doesn't return an error string — re-login to check connectivity
+        _ok_chk, _chk_err = client.login()
+        if not _ok_chk and _is_conn_err(_chk_err):
+            _maybe_notify_waiting()
+            log.warning("_create_panel_config: find_inbound CONN_ERR (%.0fs elapsed), retry in %ds",
+                        elapsed, CONN_RETRY_DELAY)
+            time.sleep(CONN_RETRY_DELAY)
+        else:
+            log.warning("_create_panel_config: find_inbound failed (%.0fs elapsed)", elapsed)
+            if elapsed + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:
+                break
+            time.sleep(FUNC_RETRY_DELAY)
     if not inbound:
         return False, f"اینباند با شماره {panel_inbound} در پنل یافت نشد", None
 
@@ -1525,24 +1596,33 @@ def _create_panel_config(uid, package_id, payment_id):
         expire_ms  = 0
         expire_str = None
 
-    # ── Step 3: create client (retry for up to 3 minutes) ──────────────────
+    # ── Step 3: create client ─────────────────────────────────────────────────
     result = None
     create_err = None
     _t0 = time.time()
     while True:
+        if time.time() - _t_start > MAX_WAIT:
+            create_err = "حداکثر زمان انتظار (8 ساعت) تمام شد"
+            break
         ok, result = client.create_client(inbound_id, client_name, traffic_bytes, expire_ms)
         if ok:
             create_err = None
             break
         create_err = result
         elapsed = time.time() - _t0
-        log.warning("_create_panel_config: create_client failed (%.0fs elapsed): %s", elapsed, create_err)
-        if elapsed + RETRY_DELAY >= RETRY_TIMEOUT:
-            break
-        # rotate client name to avoid duplicate key conflicts on retry
-        rand_str    = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
-        client_name = f"{uid}_{rand_str}"
-        time.sleep(RETRY_DELAY)
+        if _is_conn_err(create_err):
+            _maybe_notify_waiting()
+            log.warning("_create_panel_config: create_client CONN_ERR (%.0fs elapsed), retry in %ds: %s",
+                        elapsed, CONN_RETRY_DELAY, create_err)
+            time.sleep(CONN_RETRY_DELAY)
+        else:
+            log.warning("_create_panel_config: create_client failed (%.0fs elapsed): %s", elapsed, create_err)
+            if elapsed + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:
+                break
+            # rotate client name to avoid duplicate key conflicts on retry
+            rand_str    = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
+            client_name = f"{uid}_{rand_str}"
+            time.sleep(FUNC_RETRY_DELAY)
     if create_err is not None:
         return False, f"خطا در ساخت کلاینت: {create_err}", None
 
