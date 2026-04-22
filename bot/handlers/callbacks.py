@@ -985,13 +985,12 @@ def _qty_order_summary_text(package_row, unit_price, quantity):
     )
 
 
-def _notify_panel_error(uid, package_row, stage: str, detail: str = "", panel_config_id=None):
+def _notify_panel_error(uid, package_row, stage: str, detail: str = "", panel_config_id=None, panel_id=None):
     """
     Alert owner admins (ADMIN_IDS) and the error_log group topic
     when a panel config creation or delivery fails.
     """
     try:
-        import traceback as _tb
         def _row_get(row, key, default="؟"):
             if row is None:
                 return default
@@ -1002,8 +1001,21 @@ def _notify_panel_error(uid, package_row, stage: str, detail: str = "", panel_co
         pkg_name  = _row_get(package_row, "name")
         type_name = _row_get(package_row, "type_name")
         cfg_line  = f"\n🗂 panel_config_id: <code>{panel_config_id}</code>" if panel_config_id else ""
+
+        # Try to get panel name
+        panel_name = "نامشخص"
+        pid = panel_id or _row_get(package_row, "panel_id", None)
+        if pid:
+            try:
+                _panel = get_panel(pid)
+                if _panel:
+                    panel_name = _panel["name"] or str(pid)
+            except Exception:
+                panel_name = str(pid)
+
         text = (
-            "🚨 <b>خطای پنل — تحویل کانفیگ</b>\n\n"
+            "🚨 <b>اتصال ربات با پنل قطع شد</b>\n\n"
+            f"🖥 پنل: <b>{esc(str(panel_name))}</b>\n"
             f"👤 کاربر: <code>{uid}</code>\n"
             f"🧩 نوع: {esc(str(type_name))}\n"
             f"📦 پکیج: {esc(str(pkg_name))}\n"
@@ -1011,6 +1023,7 @@ def _notify_panel_error(uid, package_row, stage: str, detail: str = "", panel_co
             f"{cfg_line}\n\n"
             f"⚠️ جزئیات:\n<code>{esc(str(detail)[:600])}</code>"
         )
+        log.error("[PANEL_ERROR] panel=%s uid=%s stage=%s detail=%s", panel_name, uid, stage, detail)
         # Send to owner admin IDs
         for admin_id in ADMIN_IDS:
             try:
@@ -1047,23 +1060,40 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
 
     if config_source == "panel":
         panel_config_ids = []
+        failed_count = 0
         for _ in range(quantity):
             ok, result, pc_id = _create_panel_config(uid, package_id, payment_id)
             if ok:
                 panel_config_ids.append(pc_id)
             else:
+                failed_count += 1
+                # Refund the unit price to wallet regardless of original payment method
+                try:
+                    refund_amount = unit_price
+                    update_balance(uid, refund_amount)
+                    log.warning("[PANEL_DELIVERY] refunded %s to uid=%s after create failure", refund_amount, uid)
+                except Exception as _rf_exc:
+                    log.error("[PANEL_DELIVERY] refund failed for uid=%s: %s", uid, _rf_exc)
+                # Send only the simple error message to user (no technical details)
                 try:
                     bot.send_message(
                         chat_id,
-                        f"⚠️ خطا در ساخت کانفیگ پنل: {result}\n"
+                        "⚠️ <b>خطا در تحویل سرویس</b>\n\n"
+                        "متأسفانه در تحویل سرویس مشکلی پیش آمد و مبلغ به کیف پول شما بازگردانده شد.\n"
                         "لطفاً با پشتیبانی تماس بگیرید.",
                         parse_mode="HTML",
                     )
                 except Exception:
                     pass
+                # Notify admins with full technical details
+                try:
+                    _pid = package_row["panel_id"] if "panel_id" in (package_row.keys() if hasattr(package_row, "keys") else {}) else None
+                except Exception:
+                    _pid = None
                 _notify_panel_error(
                     uid=uid, package_row=package_row,
-                    stage="ساخت کلاینت در پنل", detail=result
+                    stage="ساخت کلاینت در پنل", detail=result,
+                    panel_id=_pid,
                 )
         # Deliver each panel config
         for pc_id in panel_config_ids:
@@ -1397,9 +1427,6 @@ def _create_panel_config(uid, package_id, payment_id):
     import re as _re
     from ..panels.client import PanelClient
 
-    MAX_RETRIES  = 3
-    RETRY_DELAY  = 4   # seconds between attempts
-
     package_row = get_package(package_id)
     if not package_row:
         return False, "پکیج یافت نشد", None
@@ -1438,31 +1465,39 @@ def _create_panel_config(uid, package_id, payment_id):
         sub_url_base=panel["sub_url_base"] if panel["sub_url_base"] else "",
     )
 
-    # ── Step 1: login with retry ──────────────────────────────────────────────
+    RETRY_TIMEOUT = 180  # seconds — keep trying for up to 3 minutes
+    RETRY_DELAY   = 15   # seconds between attempts
+
+    # ── Step 1: login (retry for up to 3 minutes) ────────────────────────────
     login_err = None
-    for attempt in range(1, MAX_RETRIES + 1):
+    _t0 = time.time()
+    while True:
         ok, login_err = client.login()
         if ok:
             login_err = None
             break
-        log.warning("_create_panel_config: login attempt %d/%d failed: %s",
-                    attempt, MAX_RETRIES, login_err)
-        if attempt < MAX_RETRIES:
-            time.sleep(RETRY_DELAY)
+        elapsed = time.time() - _t0
+        log.warning("_create_panel_config: login failed (%.0fs elapsed): %s", elapsed, login_err)
+        if elapsed + RETRY_DELAY >= RETRY_TIMEOUT:
+            break
+        time.sleep(RETRY_DELAY)
     if login_err is not None:
-        return False, f"اتصال به پنل ناموفق (بعد از {MAX_RETRIES} تلاش): {login_err}", None
+        return False, f"اتصال به پنل ناموفق: {login_err}", None
 
-    # ── Step 2: fetch inbound (for remark/tag — not needed if template exists) ─
-    inbound      = None
+    # ── Step 2: fetch inbound (retry for up to 3 minutes) ──────────────────
     inbound_remark = ""
     real_port    = 0
-    for attempt in range(1, MAX_RETRIES + 1):
+    inbound = None
+    _t0 = time.time()
+    while True:
         inbound = client.find_inbound_by_id(panel_inbound)
         if inbound:
             break
-        log.warning("_create_panel_config: find_inbound attempt %d/%d failed", attempt, MAX_RETRIES)
-        if attempt < MAX_RETRIES:
-            time.sleep(RETRY_DELAY)
+        elapsed = time.time() - _t0
+        log.warning("_create_panel_config: find_inbound failed (%.0fs elapsed)", elapsed)
+        if elapsed + RETRY_DELAY >= RETRY_TIMEOUT:
+            break
+        time.sleep(RETRY_DELAY)
     if not inbound:
         return False, f"اینباند با شماره {panel_inbound} در پنل یافت نشد", None
 
@@ -1487,23 +1522,26 @@ def _create_panel_config(uid, package_id, payment_id):
         expire_ms  = 0
         expire_str = None
 
-    # ── Step 3: create client with retry ─────────────────────────────────────
+    # ── Step 3: create client (retry for up to 3 minutes) ──────────────────
+    result = None
     create_err = None
-    result     = None
-    for attempt in range(1, MAX_RETRIES + 1):
+    _t0 = time.time()
+    while True:
         ok, result = client.create_client(inbound_id, client_name, traffic_bytes, expire_ms)
         if ok:
             create_err = None
             break
         create_err = result
-        log.warning("_create_panel_config: create_client attempt %d/%d failed: %s",
-                    attempt, MAX_RETRIES, create_err)
-        if attempt < MAX_RETRIES:
-            rand_str    = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
-            client_name = f"{uid}_{rand_str}"
-            time.sleep(RETRY_DELAY)
+        elapsed = time.time() - _t0
+        log.warning("_create_panel_config: create_client failed (%.0fs elapsed): %s", elapsed, create_err)
+        if elapsed + RETRY_DELAY >= RETRY_TIMEOUT:
+            break
+        # rotate client name to avoid duplicate key conflicts on retry
+        rand_str    = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        client_name = f"{uid}_{rand_str}"
+        time.sleep(RETRY_DELAY)
     if create_err is not None:
-        return False, f"خطا در ساخت کلاینت (بعد از {MAX_RETRIES} تلاش): {create_err}", None
+        return False, f"خطا در ساخت کلاینت: {create_err}", None
 
     client_uuid, sub_id = result
     # Default sub URL from panel — may be overridden by template below
@@ -1587,7 +1625,8 @@ def _deliver_panel_config_to_user(chat_id, panel_config_id, package_row):
         )
         try:
             bot.send_message(chat_id,
-                "⚠️ خطا در دریافت اطلاعات سرویس شما.\n"
+                "⚠️ <b>خطا در تحویل سرویس</b>\n\n"
+                "متأسفانه در تحویل سرویس مشکلی پیش آمد.\n"
                 "لطفاً با پشتیبانی تماس بگیرید.",
                 parse_mode="HTML")
         except Exception:
@@ -1609,19 +1648,18 @@ def _deliver_panel_config_to_user(chat_id, panel_config_id, package_row):
             detail=str(_inner_exc),
             panel_config_id=panel_config_id,
         )
-        # Emergency plain-text fallback — always try to get something to the user
+        # Emergency plain-text fallback — send the config to user without formatting
         try:
             fallback_lines = ["🎉 <b>سرویس شما آماده است!</b>\n"]
             if raw_config_text.strip():
                 fallback_lines.append(f"📄 <b>Config:</b>\n<code>{esc(raw_config_text)}</code>")
             if raw_sub_url.strip():
                 fallback_lines.append(f"🔗 <b>لینک ساب:</b>\n{esc(raw_sub_url)}")
-            if not raw_config_text.strip() and not raw_sub_url.strip():
-                fallback_lines.append("⚠️ کانفیگ در دسترس نیست — با پشتیبانی تماس بگیرید.")
-            kb_back = types.InlineKeyboardMarkup()
-            kb_back.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
-            bot.send_message(chat_id, "\n\n".join(fallback_lines),
-                             parse_mode="HTML", reply_markup=kb_back)
+            if raw_config_text.strip() or raw_sub_url.strip():
+                kb_back = types.InlineKeyboardMarkup()
+                kb_back.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+                bot.send_message(chat_id, "\n\n".join(fallback_lines),
+                                 parse_mode="HTML", reply_markup=kb_back)
         except Exception as _fb_exc:
             log.error("[PANEL_DELIVERY] even fallback failed for pc=%s: %s", panel_config_id, _fb_exc)
 
