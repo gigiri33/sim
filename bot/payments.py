@@ -194,7 +194,7 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
                     coin_amount_str = f"{coin_amount:.6f}"
 
         equiv_line = (
-            f"\n💱 <b>معادل ارزی:</b> <code>{coin_amount_str}</code> {esc(symbol)}\n"
+            f"\n{ce('💱', '5402186569006210455')} <b>معادل ارزی:</b> <code>{coin_amount_str}</code> {esc(symbol)}\n"
             if coin_amount_str else ""
         )
 
@@ -204,21 +204,44 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
             chars = string.ascii_uppercase + string.digits
             comment_code = "".join(random.choices(chars, k=8))
             comment_section = (
-                f"\n🔑 <b>کامنت:</b> <code>{comment_code}</code>\n"
-                f"⚠️ <b>هنگام پرداخت حتماً مقدار کامنت را دقیقاً وارد کنید، در غیر این صورت رسید شما تأیید نخواهد شد.</b>"
+                f"\n\n{ce('🔑', '5330115548900501467')} <b>کامنت:</b> <code>{comment_code}</code>\n\n"
+                f"{ce('⚠️', '5314346928660554905')} <b>هنگام پرداخت حتماً مقدار کامنت را دقیقاً وارد کنید، در غیر این صورت رسید شما تأیید نخواهد شد.</b>"
             )
 
         text = (
-            f"💎 <b>پرداخت با {esc(label)}</b>\n\n"
-            f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان"
+            f"{ce('💎', '5471952986970267163')} <b>پرداخت با {esc(label)}</b>\n\n"
+            f"{ce('💰', '5375296873982604963')} مبلغ: <b>{fmt_price(amount)}</b> تومان"
             f"{equiv_line}\n"
-            f"👛 <b>آدرس ولت:</b>\n<code>{esc(addr)}</code>"
+            f"{ce('👛', '5796280694934085416')} <b>آدرس ولت:</b>\n<code>{esc(addr)}</code>"
             f"{comment_section}\n\n"
-            f"⬇️ پس از واریز، تصویر تراکنش یا هش آن را ارسال کنید.\n\n"
-            f"⚠️ <i>تمامی کارمزد انتقال ارز دیجیتال به عهده واریزکننده می‌باشد</i>"
+            f"{ce('⬇️', '5314453632828055816')} پس از واریز، تصویر تراکنش یا هش آن را ارسال کنید.\n\n"
+            f"{ce('⚠️', '5314346928660554905')} <i>تمامی کارمزد انتقال ارز دیجیتال به عهده واریزکننده می‌باشد</i>"
         )
 
+        # ── Crypto copy buttons use CopyTextButton (Bot API 7.0) ─────────────
+        # No callback handlers needed — buttons copy directly to clipboard.
         kb = types.InlineKeyboardMarkup()
+        _copy_row = [
+            types.InlineKeyboardButton(
+                "📋 کپی آدرس کیف پول",
+                copy_text=types.CopyTextButton(text=addr)
+            ),
+        ]
+        if coin_amount_str:
+            _copy_row.append(
+                types.InlineKeyboardButton(
+                    "📋 کپی مبلغ",
+                    copy_text=types.CopyTextButton(text=coin_amount_str)
+                )
+            )
+        if comment_on and comment_code:
+            _copy_row.append(
+                types.InlineKeyboardButton(
+                    "📋 کپی کامنت",
+                    copy_text=types.CopyTextButton(text=comment_code)
+                )
+            )
+        kb.row(*_copy_row)
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main"))
         send_or_edit(target, text, kb)
         return True
@@ -234,10 +257,10 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
             _chat = (target.message.chat.id if hasattr(target, "message") else target.chat.id)
             bot.send_message(
                 _chat,
-                f"💎 <b>پرداخت با {_label}</b>\n\n"
-                f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان\n"
-                f"👛 آدرس ولت:\n<code>{esc(_addr)}</code>\n\n"
-                "⬇️ پس از واریز، تصویر تراکنش یا هش آن را ارسال کنید.",
+                f"{ce('💎', '5471952986970267163')} <b>پرداخت با {_label}</b>\n\n"
+                f"{ce('💰', '5375296873982604963')} مبلغ: <b>{fmt_price(amount)}</b> تومان\n"
+                f"{ce('👛', '5796280694934085416')} آدرس ولت:\n<code>{esc(_addr)}</code>\n\n"
+                f"{ce('⬇️', '5314453632828055816')} پس از واریز، تصویر تراکنش یا هش آن را ارسال کنید.",
                 parse_mode="HTML",
                 reply_markup=_kb,
             )
