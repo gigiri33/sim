@@ -38,6 +38,8 @@ def set_bot_commands():
 # ── Message send/edit ──────────────────────────────────────────────────────────
 def send_or_edit(call_or_msg, text, reply_markup=None, disable_preview=True):
     """Edit an existing message (from a callback) or send a new one."""
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
     try:
         if hasattr(call_or_msg, "message"):
             bot.edit_message_text(
@@ -55,7 +57,8 @@ def send_or_edit(call_or_msg, text, reply_markup=None, disable_preview=True):
                 reply_markup=reply_markup,
                 disable_web_page_preview=disable_preview
             )
-    except Exception:
+    except Exception as _e1:
+        _log.warning("send_or_edit primary failed: %s", _e1)
         try:
             chat_id = (
                 call_or_msg.message.chat.id
@@ -66,8 +69,22 @@ def send_or_edit(call_or_msg, text, reply_markup=None, disable_preview=True):
                              parse_mode="HTML",
                              reply_markup=reply_markup,
                              disable_web_page_preview=disable_preview)
-        except Exception:
-            pass
+        except Exception as _e2:
+            _log.warning("send_or_edit fallback-HTML failed: %s", _e2)
+            # Last-resort: send without HTML parse mode (strip HTML tags)
+            try:
+                import re as _re
+                chat_id = (
+                    call_or_msg.message.chat.id
+                    if hasattr(call_or_msg, "message")
+                    else call_or_msg.chat.id
+                )
+                plain = _re.sub(r"<[^>]+>", "", text)
+                bot.send_message(chat_id, plain,
+                                 reply_markup=reply_markup,
+                                 disable_web_page_preview=disable_preview)
+            except Exception as _e3:
+                _log.error("send_or_edit last-resort plain failed: %s", _e3)
 
 
 def _get_all_locked_channels() -> list:

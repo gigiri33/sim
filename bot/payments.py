@@ -194,7 +194,7 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
                     coin_amount_str = f"{coin_amount:.6f}"
 
         equiv_line = (
-            f"\n{ce('💱', '5402186569006210455')} <b>معادل ارزی:</b> <code>{coin_amount_str}</code> {symbol}\n"
+            f"\n💱 <b>معادل ارزی:</b> <code>{coin_amount_str}</code> {esc(symbol)}\n"
             if coin_amount_str else ""
         )
 
@@ -204,19 +204,18 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
             chars = string.ascii_uppercase + string.digits
             comment_code = "".join(random.choices(chars, k=8))
             comment_section = (
-                f"\n{ce('🔑', '5316979637987594548')} <b>کامنت:</b> <code>{comment_code}</code>\n"
-                f"{ce('⚠️', '5314302076317081739')} <b>هنگام پرداخت حتماً مقدار کامنت را دقیقاً وارد کنید،"
-                f" در غیر این صورت رسید شما تأیید نخواهد شد.</b>"
+                f"\n🔑 <b>کامنت:</b> <code>{comment_code}</code>\n"
+                f"⚠️ <b>هنگام پرداخت حتماً مقدار کامنت را دقیقاً وارد کنید، در غیر این صورت رسید شما تأیید نخواهد شد.</b>"
             )
 
         text = (
-            f"{ce('💎', '5794002949222964817')} <b>پرداخت با {label}</b>\n\n"
-            f"{ce('💰', '5318912792428814144')} مبلغ: <b>{fmt_price(amount)}</b> تومان"
+            f"💎 <b>پرداخت با {esc(label)}</b>\n\n"
+            f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان"
             f"{equiv_line}\n"
-            f"{ce('👛', '5796280694934085416')} <b>آدرس ولت:</b>\n<code>{esc(addr)}</code>"
+            f"👛 <b>آدرس ولت:</b>\n<code>{esc(addr)}</code>"
             f"{comment_section}\n\n"
-            f"{ce('⬇️', '5314453632828055816')} پس از واریز، تصویر تراکنش یا هش آن را ارسال کنید.\n\n"
-            f"{ce('⚠️', '5314302076317081739')} <i>تمامی کارمزد انتقال ارز دیجیتال به عهده واریزکننده می‌باشد</i>"
+            f"⬇️ پس از واریز، تصویر تراکنش یا هش آن را ارسال کنید.\n\n"
+            f"⚠️ <i>تمامی کارمزد انتقال ارز دیجیتال به عهده واریزکننده می‌باشد</i>"
         )
 
         kb = types.InlineKeyboardMarkup()
