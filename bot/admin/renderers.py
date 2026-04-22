@@ -236,7 +236,8 @@ def _show_admin_user_detail(call, user_id):
         f"� تعداد تمدیدها: <b>{row['renewal_count']}</b>\n"
         f"💵 مجموع خرید: <b>{fmt_price(row['total_spent'])}</b> تومان\n"
         f"💳 مجموع تمدیدها: <b>{fmt_price(row['total_renewals'])}</b> تومان\n"
-        f"💰 مجموع تمامی پرداخت‌ها: <b>{fmt_price(row['total_spent'] + row['total_renewals'])}</b> تومان\n"
+        f"💰 مجموع خرید‌ها: <b>{fmt_price(row['total_spent'] + row['total_renewals'])}</b> تومان\n"
+        f"💳 مجموع پرداخت: <b>{fmt_price(row['total_direct_payments'])}</b> تومان\n"
         f"🕒 عضویت: {esc(row['joined_at'])}\n"
         f"وضعیت: {status_label}\n"
         f"نمایندگی: {agent_label}"
@@ -249,6 +250,7 @@ def _show_admin_user_detail(call, user_id):
     )
     kb.add(types.InlineKeyboardButton("💰 موجودی",           callback_data=f"adm:usr:bal:{uid_t}"))
     kb.add(types.InlineKeyboardButton("📦 کانفیگ‌ها",         callback_data=f"adm:usr:cfgs:{uid_t}"))
+    kb.add(types.InlineKeyboardButton("👥 زیرمجموعه‌ها",      callback_data=f"adm:usr:refs:{uid_t}:0"))
     kb.add(types.InlineKeyboardButton("💰 قیمت نمایندگی کاربر", callback_data=f"adm:agcfg:{uid_t}"))
     kb.add(types.InlineKeyboardButton("✉️ پیام خصوصی به کاربر", callback_data=f"adm:usr:dm:{uid_t}"))
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:users", icon_custom_emoji_id="5253997076169115797"))
@@ -276,7 +278,8 @@ def _show_admin_user_detail_msg(chat_id, user_id):
         f"� تعداد تمدیدها: <b>{row['renewal_count']}</b>\n"
         f"💵 مجموع خرید: <b>{fmt_price(row['total_spent'])}</b> تومان\n"
         f"💳 مجموع تمدیدها: <b>{fmt_price(row['total_renewals'])}</b> تومان\n"
-        f"💰 مجموع تمامی پرداخت‌ها: <b>{fmt_price(row['total_spent'] + row['total_renewals'])}</b> تومان\n"
+        f"💰 مجموع خرید‌ها: <b>{fmt_price(row['total_spent'] + row['total_renewals'])}</b> تومان\n"
+        f"💳 مجموع پرداخت: <b>{fmt_price(row['total_direct_payments'])}</b> تومان\n"
         f"🕒 عضویت: {esc(row['joined_at'])}\n"
         f"وضعیت: {status_label}\n"
         f"نمایندگی: {agent_label}"
@@ -289,6 +292,7 @@ def _show_admin_user_detail_msg(chat_id, user_id):
     )
     kb.add(types.InlineKeyboardButton("💰 موجودی",           callback_data=f"adm:usr:bal:{uid_t}"))
     kb.add(types.InlineKeyboardButton("📦 کانفیگ‌ها",         callback_data=f"adm:usr:cfgs:{uid_t}"))
+    kb.add(types.InlineKeyboardButton("👥 زیرمجموعه‌ها",      callback_data=f"adm:usr:refs:{uid_t}:0"))
     kb.add(types.InlineKeyboardButton("💰 قیمت نمایندگی کاربر", callback_data=f"adm:agcfg:{uid_t}"))
     kb.add(types.InlineKeyboardButton("✉️ پیام خصوصی به کاربر", callback_data=f"adm:usr:dm:{uid_t}"))
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:users", icon_custom_emoji_id="5253997076169115797"))

@@ -1363,6 +1363,16 @@ def universal_handler(message):
             _show_panel_config_list(message, filter_type="all", search=search_text if search_text else None)
             return
 
+        # ── Admin: User config list search ────────────────────────────────────
+        if sn == "admin_usr_cfg_search" and is_admin(uid):
+            search_text = (message.text or "").strip()
+            target_user_id = sd.get("target_user_id")
+            state_clear(uid)
+            if target_user_id:
+                from ..handlers.callbacks import _show_admin_user_configs
+                _show_admin_user_configs(message, uid, target_user_id, page=0, search=search_text if search_text else "")
+            return
+
         # ── Admin: Client Package — sample config step ────────────────────────
         if sn == "cpkg_sample_config" and is_admin(uid):
             sample_config = (message.text or "").strip()

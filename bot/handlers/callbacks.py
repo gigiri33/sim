@@ -103,6 +103,8 @@ from ..db import (
     update_panel_client_package_samples, update_panel_client_package_field,
     get_panel_configs_by_cpkg, update_panel_config_texts,
     bulk_add_balance, bulk_zero_balance, bulk_set_status, count_users_by_filter,
+    get_user_purchases_paged, get_user_panel_configs_paged,
+    get_referrals_paged, count_referrals,
 )
 
 
@@ -2312,6 +2314,112 @@ def _pkg_edit_text_kb(package_row):
         f"وضعیت: {pkg_status_line}"
     )
     return text, kb
+
+
+# ── Per-admin search cache for user config list ────────────────────────────────
+_admin_usr_cfg_search: dict = {}
+
+
+def _show_admin_user_configs(call, admin_uid, target_id, page=0, search=None):
+    """Paginated config list (manual + panel) for admin viewing a user."""
+    PER_PAGE = 10
+    if search is not None:
+        if search:
+            _admin_usr_cfg_search[admin_uid] = {"target_id": target_id, "query": search}
+        else:
+            _admin_usr_cfg_search.pop(admin_uid, None)
+    cached = _admin_usr_cfg_search.get(admin_uid)
+    active_search = cached["query"] if cached and cached.get("target_id") == target_id else None
+
+    _, items_total = get_user_purchases_paged(target_id, page=0, per_page=1, search=active_search)
+    _, panel_total = get_user_panel_configs_paged(target_id, page=0, per_page=1, search=active_search)
+    total = items_total + panel_total
+
+    total_pages = max(1, (total + PER_PAGE - 1) // PER_PAGE)
+    page = max(0, min(page, total_pages - 1))
+    offset = page * PER_PAGE
+
+    if offset < items_total:
+        buy_count = min(PER_PAGE, items_total - offset)
+        buy_start = offset
+    else:
+        buy_count = 0
+        buy_start = 0
+
+    panel_start = max(0, offset - items_total)
+    panel_count = PER_PAGE - buy_count
+
+    if buy_count > 0:
+        all_items, _ = get_user_purchases_paged(
+            target_id, page=0, per_page=buy_start + buy_count, search=active_search
+        )
+        items = list(all_items)[buy_start:]
+    else:
+        items = []
+
+    if panel_count > 0 and panel_start < panel_total:
+        actual_panel = min(panel_count, panel_total - panel_start)
+        all_panel, _ = get_user_panel_configs_paged(
+            target_id, page=0, per_page=panel_start + actual_panel, search=active_search
+        )
+        panel_items = list(all_panel)[panel_start:]
+    else:
+        panel_items = []
+
+    kb = types.InlineKeyboardMarkup()
+    kb.add(types.InlineKeyboardButton("➕ افزودن کانفیگ", callback_data=f"adm:usr:acfg:{target_id}"))
+
+    if active_search:
+        q_display = active_search[:18] + ("…" if len(active_search) > 18 else "")
+        kb.row(
+            types.InlineKeyboardButton(f"🔍 {q_display}", callback_data=f"adm:usr:cfgsrch:{target_id}"),
+            types.InlineKeyboardButton("❌ پاک کردن", callback_data=f"adm:usr:cfgclr:{target_id}"),
+        )
+    else:
+        kb.add(types.InlineKeyboardButton("🔍 جست‌وجو", callback_data=f"adm:usr:cfgsrch:{target_id}"))
+
+    for item in items:
+        expired_mark = " ❌" if item["is_expired"] else ""
+        svc = urllib.parse.unquote(item["service_name"] or "")
+        kb.add(types.InlineKeyboardButton(
+            f"{svc}{expired_mark}",
+            callback_data=f"adm:usrcfg:{target_id}:{item['config_id']}"
+        ))
+
+    for pc in panel_items:
+        if pc["is_expired"]:
+            marker = " ⌛"
+        elif int(pc["is_disabled"] or 0):
+            marker = " ⛔"
+        else:
+            marker = ""
+        name = pc.get("client_name") or pc.get("package_name") or f"#{pc['id']}"
+        kb.add(types.InlineKeyboardButton(
+            f"🔮 {name}{marker}",
+            callback_data=f"adm:usrpcfg:{target_id}:{pc['id']}"
+        ))
+
+    if total_pages > 1:
+        nav_row = []
+        if page > 0:
+            nav_row.append(types.InlineKeyboardButton(
+                "◀️ قبلی", callback_data=f"adm:usr:cfgp:{target_id}:{page - 1}"
+            ))
+        nav_row.append(types.InlineKeyboardButton(
+            f"صفحه {page + 1}/{total_pages}", callback_data="noop"
+        ))
+        if page < total_pages - 1:
+            nav_row.append(types.InlineKeyboardButton(
+                "بعدی ▶️", callback_data=f"adm:usr:cfgp:{target_id}:{page + 1}"
+            ))
+        kb.row(*nav_row)
+
+    kb.add(types.InlineKeyboardButton(
+        "بازگشت", callback_data=f"adm:usr:v:{target_id}",
+        icon_custom_emoji_id="5253997076169115797"
+    ))
+    bot.answer_callback_query(call.id)
+    send_or_edit(call, f"📦 کانفیگ‌های کاربر ({total} عدد):", kb)
 
 
 @bot.callback_query_handler(func=lambda c: True)
@@ -8203,21 +8311,59 @@ def _dispatch_callback(call, uid, data):
                          back_button(f"adm:usr:v:{target_id}"))
             return
 
-        if sub == "cfgs":  # user configs
-            purchases = get_user_purchases(target_id)
-            kb = types.InlineKeyboardMarkup()
-            kb.add(types.InlineKeyboardButton("➕ افزودن کانفیگ", callback_data=f"adm:usr:acfg:{target_id}"))
-            if purchases:
-                for p in purchases:
-                    expired_mark = " ❌" if p["is_expired"] else ""
-                    svc = urllib.parse.unquote(p["service_name"] or "")
-                    kb.add(types.InlineKeyboardButton(
-                        f"{svc}{expired_mark}",
-                        callback_data=f"adm:usrcfg:{target_id}:{p['config_id']}"
-                    ))
-            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:usr:v:{target_id}", icon_custom_emoji_id="5253997076169115797"))
+        if sub == "cfgs":  # user configs (paginated + search)
+            _show_admin_user_configs(call, uid, target_id, page=0)
+            return
+
+        if sub == "cfgp":  # config list: paginate
+            page = int(parts[4]) if len(parts) > 4 else 0
+            _show_admin_user_configs(call, uid, target_id, page=page)
+            return
+
+        if sub == "cfgsrch":  # config list: start search
+            state_set(uid, "admin_usr_cfg_search", target_user_id=target_id)
             bot.answer_callback_query(call.id)
-            send_or_edit(call, f"📦 کانفیگ‌های کاربر:", kb)
+            send_or_edit(call, "🔍 عبارت جست‌وجو را ارسال کنید:", back_button(f"adm:usr:cfgs:{target_id}"))
+            return
+
+        if sub == "cfgclr":  # config list: clear search
+            _show_admin_user_configs(call, uid, target_id, page=0, search="")
+            return
+
+        if sub == "refs":  # referrals list
+            page = int(parts[4]) if len(parts) > 4 else 0
+            PER_PAGE = 10
+            refs, total = get_referrals_paged(target_id, page=page, per_page=PER_PAGE)
+            total_pages = max(1, (total + PER_PAGE - 1) // PER_PAGE)
+            page = max(0, min(page, total_pages - 1))
+            kb = types.InlineKeyboardMarkup()
+            for r in refs:
+                name = r["full_name"] or str(r["referee_id"])
+                username = f" (@{r['username']})" if r["username"] else ""
+                kb.add(types.InlineKeyboardButton(
+                    f"👤 {name}{username}",
+                    callback_data=f"adm:usr:v:{r['referee_id']}"
+                ))
+            if total_pages > 1:
+                nav_row = []
+                if page > 0:
+                    nav_row.append(types.InlineKeyboardButton(
+                        "◀️ قبلی", callback_data=f"adm:usr:refs:{target_id}:{page - 1}"
+                    ))
+                nav_row.append(types.InlineKeyboardButton(
+                    f"{page + 1}/{total_pages}", callback_data="noop"
+                ))
+                if page < total_pages - 1:
+                    nav_row.append(types.InlineKeyboardButton(
+                        "بعدی ▶️", callback_data=f"adm:usr:refs:{target_id}:{page + 1}"
+                    ))
+                kb.row(*nav_row)
+            kb.add(types.InlineKeyboardButton(
+                "بازگشت", callback_data=f"adm:usr:v:{target_id}",
+                icon_custom_emoji_id="5253997076169115797"
+            ))
+            bot.answer_callback_query(call.id)
+            send_or_edit(call, f"👥 <b>زیرمجموعه‌ها</b>\n\nتعداد کل: <b>{total}</b>", kb)
             return
 
         if sub == "acfg":  # assign config to user
@@ -8268,7 +8414,30 @@ def _dispatch_callback(call, uid, data):
         return
 
     # Admin user config detail (with unassign/delete)
+    if data.startswith("adm:usrcfg:unassign_sold:"):
+        parts     = data.split(":")
+        target_id = int(parts[3])
+        config_id = int(parts[4])
+        with get_conn() as conn:
+            conn.execute("DELETE FROM purchases WHERE config_id=? AND user_id=?", (config_id, target_id))
+            conn.execute("UPDATE configs SET purchase_id=NULL WHERE id=?", (config_id,))
+        bot.answer_callback_query(call.id, "کانفیگ از کاربر حذف شد (فروخته شده).")
+        send_or_edit(call, "✅ کانفیگ از کاربر حذف شد و در وضعیت فروخته شده باقی ماند.", back_button(f"adm:usr:v:{target_id}"))
+        return
+
+    if data.startswith("adm:usrcfg:unassign_exp:"):
+        parts     = data.split(":")
+        target_id = int(parts[3])
+        config_id = int(parts[4])
+        with get_conn() as conn:
+            conn.execute("DELETE FROM purchases WHERE config_id=? AND user_id=?", (config_id, target_id))
+            conn.execute("UPDATE configs SET sold_to=NULL, purchase_id=NULL, sold_at=NULL, reserved_payment_id=NULL, is_expired=1 WHERE id=?", (config_id,))
+        bot.answer_callback_query(call.id, "کانفیگ از کاربر حذف شد (منقضی).")
+        send_or_edit(call, "✅ کانفیگ از کاربر حذف شد و در وضعیت منقضی قرار گرفت.", back_button(f"adm:usr:v:{target_id}"))
+        return
+
     if data.startswith("adm:usrcfg:unassign:"):
+
         parts     = data.split(":")
         target_id = int(parts[3])
         config_id = int(parts[4])
@@ -8299,11 +8468,22 @@ def _dispatch_callback(call, uid, data):
         )
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("🔄 حذف از کاربر (برگشت به مانده‌ها)", callback_data=f"adm:usrcfg:unassign:{target_id}:{config_id}"))
+        kb.add(types.InlineKeyboardButton("🔄 حذف از کاربر (برگشت به فروخته شده‌ها)", callback_data=f"adm:usrcfg:unassign_sold:{target_id}:{config_id}"))
+        kb.add(types.InlineKeyboardButton("🔄 حذف از کاربر (برگشت به منقضی‌ها)", callback_data=f"adm:usrcfg:unassign_exp:{target_id}:{config_id}"))
         if not row["is_expired"]:
             kb.add(types.InlineKeyboardButton("🔴 منقضی کردن", callback_data=f"adm:stk:exp:{config_id}"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:usr:cfgs:{target_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
+        return
+
+    if data.startswith("adm:usrpcfg:"):  # panel config detail for user (admin view)
+        parts     = data.split(":")
+        target_id = int(parts[2])
+        pc_id     = int(parts[3])
+        from ..admin.renderers import _show_panel_config_detail
+        _show_panel_config_detail(call, pc_id, back_data=f"adm:usr:cfgs:{target_id}")
+        bot.answer_callback_query(call.id)
         return
 
     if data.startswith("adm:acfg:t:"):  # assign config: type selected

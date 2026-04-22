@@ -766,7 +766,8 @@ def get_user_detail(user_id):
                    (SELECT COUNT(*) FROM purchases p WHERE p.user_id=u.user_id) AS purchase_count,
                    (SELECT COALESCE(SUM(amount),0) FROM purchases p WHERE p.user_id=u.user_id) AS total_spent,
                    (SELECT COUNT(*) FROM payments py WHERE py.user_id=u.user_id AND py.kind='renewal' AND py.status='completed') AS renewal_count,
-                   (SELECT COALESCE(SUM(amount),0) FROM payments py WHERE py.user_id=u.user_id AND py.kind='renewal' AND py.status='completed') AS total_renewals
+                   (SELECT COALESCE(SUM(amount),0) FROM payments py WHERE py.user_id=u.user_id AND py.kind='renewal' AND py.status='completed') AS total_renewals,
+                   (SELECT COALESCE(SUM(py2.amount),0) FROM payments py2 WHERE py2.user_id=u.user_id AND py2.status='completed' AND py2.payment_method != 'wallet') AS total_direct_payments
             FROM users u WHERE u.user_id=?
             """,
             (user_id,)
@@ -1936,6 +1937,22 @@ def count_referrals(referrer_id):
         return conn.execute(
             "SELECT COUNT(*) AS n FROM referrals WHERE referrer_id=?", (referrer_id,)
         ).fetchone()["n"]
+
+
+def get_referrals_paged(referrer_id, page=0, per_page=10):
+    """Return paginated list of referrals with basic user info."""
+    with get_conn() as conn:
+        total = conn.execute(
+            "SELECT COUNT(*) AS n FROM referrals WHERE referrer_id=?", (referrer_id,)
+        ).fetchone()["n"]
+        rows = conn.execute(
+            "SELECT r.referee_id, u.full_name, u.username "
+            "FROM referrals r "
+            "LEFT JOIN users u ON u.user_id = r.referee_id "
+            "WHERE r.referrer_id=? ORDER BY r.id DESC LIMIT ? OFFSET ?",
+            (referrer_id, per_page, page * per_page)
+        ).fetchall()
+    return rows, total
 
 
 # ── Agency request message tracking ───────────────────────────────────────────────
