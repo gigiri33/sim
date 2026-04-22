@@ -2393,7 +2393,7 @@ def _show_admin_user_configs(call, admin_uid, target_id, page=0, search=None):
             marker = " ⛔"
         else:
             marker = ""
-        name = pc.get("client_name") or pc.get("package_name") or f"#{pc['id']}"
+        name = pc["client_name"] or pc["package_name"] or f"#{pc['id']}"
         kb.add(types.InlineKeyboardButton(
             f"🔮 {name}{marker}",
             callback_data=f"adm:usrpcfg:{target_id}:{pc['id']}"
