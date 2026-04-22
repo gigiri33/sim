@@ -216,40 +216,11 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
         f"{ce('⚠️', '5314302076317081739')} <i>تمامی کارمزد انتقال ارز دیجیتال به عهده واریزکننده می‌باشد</i>"
     )
 
-    # ── Copy buttons ─────────────────────────────────────────────────────────
-    rows = []
-    if coin_amount_str:
-        rows.append([_btn(f"📋 کپی مبلغ ({coin_amount_str} {symbol})", copy_text=coin_amount_str)])
-    row2 = [_btn("📋 کپی آدرس ولت", copy_text=addr)]
-    if comment_code:
-        row2.append(_btn("📋 کپی کامنت", copy_text=comment_code))
-    rows.append(row2)
-    rows.append([_btn("بازگشت", callback_data="nav:main")])
+    # ── Keyboard ─────────────────────────────────────────────────────────────
+    kb = types.InlineKeyboardMarkup()
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main"))
 
-    # Fallback: plain keyboard without copy_text buttons
-    kb_fallback = types.InlineKeyboardMarkup()
-    kb_fallback.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main"))
-
-    chat_id = (target.message.chat.id if hasattr(target, "message") else target.chat.id)
-    msg_id  = (target.message.message_id if hasattr(target, "message") else None)
-
-    def _try_send(markup):
-        if msg_id:
-            try:
-                bot.edit_message_text(text, chat_id, msg_id, parse_mode="HTML",
-                                      reply_markup=markup, disable_web_page_preview=True)
-                return True
-            except Exception:
-                pass
-        try:
-            bot.send_message(chat_id, text, parse_mode="HTML",
-                             reply_markup=markup, disable_web_page_preview=True)
-            return True
-        except Exception:
-            return False
-
-    if not _try_send(_raw_markup(rows)):
-        _try_send(kb_fallback)
+    send_or_edit(target, text, kb)
     return True
 
 
