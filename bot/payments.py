@@ -167,61 +167,84 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
     Callers MUST only transition the user into an ``await_*_receipt`` state
     after this function returns True.
     """
-    from .db import setting_get
-    addr   = setting_get(f"crypto_{coin_key}", "")
-    label  = next((l for k, l in CRYPTO_COINS if k == coin_key), coin_key)
-    symbol = CRYPTO_API_SYMBOLS.get(coin_key, "")
-    if not addr:
-        send_or_edit(target, "⚠️ آدرس این ارز هنوز توسط ادمین ثبت نشده است.", back_button("main"))
-        return False
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+    try:
+        from .db import setting_get
+        addr   = setting_get(f"crypto_{coin_key}", "")
+        label  = next((l for k, l in CRYPTO_COINS if k == coin_key), coin_key)
+        symbol = CRYPTO_API_SYMBOLS.get(coin_key, "")
+        if not addr:
+            send_or_edit(target, "⚠️ آدرس این ارز هنوز توسط ادمین ثبت نشده است.", back_button("main"))
+            return False
 
-    comment_on = setting_get(f"crypto_{coin_key}_comment", "0") == "1"
-    randamt_on = setting_get(f"crypto_{coin_key}_rand_amount", "0") == "1"
+        comment_on = setting_get(f"crypto_{coin_key}_comment", "0") == "1"
+        randamt_on = setting_get(f"crypto_{coin_key}_rand_amount", "0") == "1"
 
-    coin_amount_str = ""
-    prices = _get_prices()
-    if symbol and symbol in prices and prices[symbol] > 0:
-        coin_amount = amount / prices[symbol]
-        if randamt_on:
-            base = f"{coin_amount:.2f}"
-            extra = "".join(str(random.randint(0, 9)) for _ in range(random.randint(3, 5)))
-            coin_amount_str = base + extra
-        else:
-            coin_amount_str = f"{coin_amount:.6f}"
+        coin_amount_str = ""
+        if amount:
+            prices = _get_prices()
+            if symbol and symbol in prices and prices[symbol] > 0:
+                coin_amount = float(amount) / prices[symbol]
+                if randamt_on:
+                    base  = f"{coin_amount:.2f}"
+                    extra = "".join(str(random.randint(0, 9)) for _ in range(random.randint(3, 5)))
+                    coin_amount_str = base + extra
+                else:
+                    coin_amount_str = f"{coin_amount:.6f}"
 
-    equiv_line = (
-        f"\n{ce('💱', '5402186569006210455')} <b>معادل ارزی:</b> <code>{coin_amount_str}</code> {symbol}\n"
-        if coin_amount_str else ""
-    )
-
-    # ── Comment section ──────────────────────────────────────────────────────
-    comment_code = None
-    comment_section = ""
-    if comment_on:
-        chars = string.ascii_uppercase + string.digits
-        comment_code = "".join(random.choices(chars, k=8))
-        comment_section = (
-            f"\n{ce('🔑', '5316979637987594548')} <b>کامنت:</b> <code>{comment_code}</code>\n"
-            f"{ce('⚠️', '5314302076317081739')} <b>هنگام پرداخت حتماً مقدار کامنت را دقیقاً وارد کنید،"
-            f" در غیر این صورت رسید شما تأیید نخواهد شد.</b>"
+        equiv_line = (
+            f"\n{ce('💱', '5402186569006210455')} <b>معادل ارزی:</b> <code>{coin_amount_str}</code> {symbol}\n"
+            if coin_amount_str else ""
         )
 
-    text = (
-        f"{ce('💎', '5794002949222964817')} <b>پرداخت با {label}</b>\n\n"
-        f"{ce('💰', '5318912792428814144')} مبلغ: <b>{fmt_price(amount)}</b> تومان"
-        f"{equiv_line}\n"
-        f"{ce('👛', '5796280694934085416')} <b>آدرس ولت:</b>\n<code>{esc(addr)}</code>"
-        f"{comment_section}\n\n"
-        f"{ce('⬇️', '5314453632828055816')} پس از واریز، تصویر تراکنش یا هش آن را ارسال کنید.\n\n"
-        f"{ce('⚠️', '5314302076317081739')} <i>تمامی کارمزد انتقال ارز دیجیتال به عهده واریزکننده می‌باشد</i>"
-    )
+        comment_code = None
+        comment_section = ""
+        if comment_on:
+            chars = string.ascii_uppercase + string.digits
+            comment_code = "".join(random.choices(chars, k=8))
+            comment_section = (
+                f"\n{ce('🔑', '5316979637987594548')} <b>کامنت:</b> <code>{comment_code}</code>\n"
+                f"{ce('⚠️', '5314302076317081739')} <b>هنگام پرداخت حتماً مقدار کامنت را دقیقاً وارد کنید،"
+                f" در غیر این صورت رسید شما تأیید نخواهد شد.</b>"
+            )
 
-    # ── Keyboard ─────────────────────────────────────────────────────────────
-    kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main"))
+        text = (
+            f"{ce('💎', '5794002949222964817')} <b>پرداخت با {label}</b>\n\n"
+            f"{ce('💰', '5318912792428814144')} مبلغ: <b>{fmt_price(amount)}</b> تومان"
+            f"{equiv_line}\n"
+            f"{ce('👛', '5796280694934085416')} <b>آدرس ولت:</b>\n<code>{esc(addr)}</code>"
+            f"{comment_section}\n\n"
+            f"{ce('⬇️', '5314453632828055816')} پس از واریز، تصویر تراکنش یا هش آن را ارسال کنید.\n\n"
+            f"{ce('⚠️', '5314302076317081739')} <i>تمامی کارمزد انتقال ارز دیجیتال به عهده واریزکننده می‌باشد</i>"
+        )
 
-    send_or_edit(target, text, kb)
-    return True
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main"))
+        send_or_edit(target, text, kb)
+        return True
+
+    except Exception as _ex:
+        _log.exception("show_crypto_payment_info error coin=%s uid=%s: %s", coin_key, uid, _ex)
+        try:
+            from .db import setting_get as _sg
+            _addr  = _sg(f"crypto_{coin_key}", "")
+            _label = next((l for k, l in CRYPTO_COINS if k == coin_key), coin_key)
+            _kb = types.InlineKeyboardMarkup()
+            _kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main"))
+            _chat = (target.message.chat.id if hasattr(target, "message") else target.chat.id)
+            bot.send_message(
+                _chat,
+                f"💎 <b>پرداخت با {_label}</b>\n\n"
+                f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان\n"
+                f"👛 آدرس ولت:\n<code>{esc(_addr)}</code>\n\n"
+                "⬇️ پس از واریز، تصویر تراکنش یا هش آن را ارسال کنید.",
+                parse_mode="HTML",
+                reply_markup=_kb,
+            )
+            return True
+        except Exception:
+            return False
 
 
 # ── Send payment receipt to admins ─────────────────────────────────────────────
