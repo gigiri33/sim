@@ -922,6 +922,8 @@ def _execute_pnlcfg_renewal(config_id, package_id, chat_id=None, uid=None):
             "connection refused", "max retries exceeded", "failed to establish",
             "newconnectionerror", "httpsconnectionpool", "remotedisconnected",
             "connection timed out", "read timed out", "timeout",
+            "connection reset", "connection aborted", "connectionreseterror",
+            "econnreset", "broken pipe", "reset by peer",
         ])
 
     CONN_RETRY_DELAY   = 30
@@ -1309,6 +1311,8 @@ def _panel_connect_with_retry(uid, protocol, host, port, path, username, passwor
             "newconnectionerror", "httpsconnectionpool", "remotedisconnected",
             "connection timed out", "read timed out", "timeout",
             "name or service not known", "nameresolutionerror", "failed to resolve",
+            "connection reset", "connection aborted", "connectionreseterror",
+            "econnreset", "broken pipe", "reset by peer",
         ])
 
     cl = _PC(protocol=protocol, host=host, port=int(port),
@@ -1799,6 +1803,8 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None):
             "connection refused", "max retries exceeded", "failed to establish",
             "newconnectionerror", "httpsconnectionpool", "remotedisconnected",
             "connection timed out", "read timed out", "timeout",
+            "connection reset", "connection aborted", "connectionreseterror",
+            "econnreset", "broken pipe", "reset by peer",
         ])
 
     CONN_RETRY_DELAY   = 30    # seconds between retries when server is down
