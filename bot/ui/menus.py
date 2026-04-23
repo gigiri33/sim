@@ -6,7 +6,7 @@ import urllib.parse
 from telebot import types
 
 from ..config import BRAND_TITLE, DEFAULT_ADMIN_HANDLE
-from ..db import setting_get, get_user, get_user_purchases, get_referral_stats, has_pending_rewards, get_pending_rewards_summary, get_user_panel_configs, get_user_purchases_paged, get_user_panel_configs_paged
+from ..db import setting_get, get_user, get_user_purchases, get_referral_stats, has_pending_rewards, get_pending_rewards_summary, get_user_panel_configs, get_user_purchases_paged, get_user_panel_configs_paged, get_referral_restriction
 from ..helpers import esc, fmt_price, display_username, back_button, move_leading_emoji
 from ..bot_instance import bot
 from .helpers import send_or_edit
@@ -254,6 +254,18 @@ def show_referral_menu(target, user_id):
             "در حال حاضر سیستم زیرمجموعه‌گیری برای این ربات فعال نشده است.\n"
             "لطفاً بعداً مراجعه کنید یا با پشتیبانی تماس بگیرید.",
             back_button("main"))
+        return
+
+    # ── Referral restriction check ─────────────────────────────────────────────
+    restriction = get_referral_restriction(user_id)
+    if restriction:
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+        send_or_edit(target,
+            "⛔️ <b>دسترسی محدود شده</b>\n\n"
+            "شما به دلیل مشکوک بودن به تقلب در زیرمجموعه‌گیری، فعلاً از این بخش محدود شده‌اید.\n\n"
+            "در صورت نیاز با پشتیبانی در ارتباط باشید.",
+            kb)
         return
 
     stats = get_referral_stats(user_id)

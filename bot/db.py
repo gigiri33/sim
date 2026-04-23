@@ -419,6 +419,11 @@ def _run_init_db_migrations():
             "bulk_sale_mode":                     "everyone",
             "bulk_min_qty":                       "1",
             "bulk_max_qty":                       "0",
+            # ── Referral Anti-Spam ─────────────────────────────────────────────
+            "referral_antispam_enabled":    "0",
+            "referral_antispam_window":     "15",
+            "referral_antispam_threshold":  "10",
+            "referral_antispam_action":     "report_only",
         }
         for coin, _ in CRYPTO_COINS:
             defaults[f"crypto_{coin}"] = ""
@@ -588,7 +593,25 @@ def _run_init_db_migrations():
             # ── Panel configs: auto-renew and temporary-disable flags ─────────
             "ALTER TABLE panel_configs ADD COLUMN auto_renew   INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE panel_configs ADD COLUMN is_disabled  INTEGER NOT NULL DEFAULT 0",
-
+            # ── Referral Anti-Spam Tables ──────────────────────────────────────
+            (
+                "CREATE TABLE IF NOT EXISTS referral_restrictions ("
+                "id              INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "user_id         INTEGER NOT NULL UNIQUE,"
+                "restriction_type TEXT NOT NULL DEFAULT 'referral_only',"
+                "reason          TEXT NOT NULL DEFAULT '',"
+                "added_by        INTEGER NOT NULL DEFAULT 0,"
+                "added_at        TEXT NOT NULL"
+                ")"
+            ),
+            (
+                "CREATE TABLE IF NOT EXISTS referral_spam_events ("
+                "id           INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "user_id      INTEGER NOT NULL UNIQUE,"
+                "notified_at  TEXT NOT NULL,"
+                "action_taken TEXT NOT NULL DEFAULT ''"
+                ")"
+            ),
         ]
         for sql in migrations:
             try:
@@ -2727,3 +2750,134 @@ def remove_wallet_pay_exception(row_id: int) -> None:
     """Remove a wallet pay exception row by primary key."""
     with get_conn() as conn:
         conn.execute("DELETE FROM wallet_pay_exceptions WHERE id=?", (row_id,))
+
+
+# ── Referral Anti-Spam & Restrictions ─────────────────────────────────────────
+
+def get_referral_restriction(user_id: int):
+    """Return the referral restriction row for a user, or None."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM referral_restrictions WHERE user_id=?", (user_id,)
+        ).fetchone()
+
+
+def add_referral_restriction(user_id: int, restriction_type: str,
+                              reason: str = "", added_by: int = 0) -> bool:
+    """
+    Insert or replace referral restriction.
+    Returns True if a new row was created, False if an existing row was updated.
+    """
+    with get_conn() as conn:
+        existing = conn.execute(
+            "SELECT id FROM referral_restrictions WHERE user_id=?", (user_id,)
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE referral_restrictions SET restriction_type=?, reason=?, added_by=?, added_at=? "
+                "WHERE user_id=?",
+                (restriction_type, reason, added_by, now_str(), user_id),
+            )
+            return False
+        conn.execute(
+            "INSERT INTO referral_restrictions(user_id, restriction_type, reason, added_by, added_at) "
+            "VALUES(?,?,?,?,?)",
+            (user_id, restriction_type, reason, added_by, now_str()),
+        )
+        return True
+
+
+def remove_referral_restriction_by_id(row_id: int) -> "tuple[int, str]|None":
+    """Remove restriction by primary key. Returns (user_id, restriction_type) or None."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT user_id, restriction_type FROM referral_restrictions WHERE id=?", (row_id,)
+        ).fetchone()
+        if not row:
+            return None
+        conn.execute("DELETE FROM referral_restrictions WHERE id=?", (row_id,))
+        return (row["user_id"], row["restriction_type"])
+
+
+def remove_referral_restriction_by_user(user_id: int) -> "str|None":
+    """Remove restriction by user_id. Returns old restriction_type or None."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT restriction_type FROM referral_restrictions WHERE user_id=?", (user_id,)
+        ).fetchone()
+        if not row:
+            return None
+        conn.execute("DELETE FROM referral_restrictions WHERE user_id=?", (user_id,))
+        return row["restriction_type"]
+
+
+def toggle_referral_restriction_type(user_id: int) -> "str|None":
+    """Toggle restriction_type between 'referral_only' and 'full'. Returns new type or None."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT restriction_type FROM referral_restrictions WHERE user_id=?", (user_id,)
+        ).fetchone()
+        if not row:
+            return None
+        new_type = "full" if row["restriction_type"] == "referral_only" else "referral_only"
+        conn.execute(
+            "UPDATE referral_restrictions SET restriction_type=? WHERE user_id=?",
+            (new_type, user_id),
+        )
+        return new_type
+
+
+def get_referral_restrictions_paged(page: int = 0, per_page: int = 10, search=None):
+    """Return (rows, total) of referral restrictions joined with user info."""
+    with get_conn() as conn:
+        base = (
+            "FROM referral_restrictions rr "
+            "LEFT JOIN users u ON u.user_id = rr.user_id"
+        )
+        params: list = []
+        where = ""
+        if search:
+            s = f"%{search}%"
+            where = " WHERE (CAST(rr.user_id AS TEXT) LIKE ? OR u.username LIKE ? OR u.full_name LIKE ?)"
+            params = [s, s, s]
+        total = conn.execute(f"SELECT COUNT(*) AS n {base}{where}", params).fetchone()["n"]
+        rows = conn.execute(
+            f"SELECT rr.id, rr.user_id, rr.restriction_type, rr.reason, rr.added_at, "
+            f"u.full_name, u.username "
+            f"{base}{where} ORDER BY rr.id DESC LIMIT ? OFFSET ?",
+            params + [per_page, page * per_page],
+        ).fetchall()
+        return rows, total
+
+
+def has_referral_spam_event(user_id: int) -> bool:
+    """Return True if this user was already flagged (avoid duplicate alerts)."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id FROM referral_spam_events WHERE user_id=?", (user_id,)
+        ).fetchone()
+        return row is not None
+
+
+def record_referral_spam_event(user_id: int, action_taken: str) -> None:
+    """Record that this user was flagged for spam (idempotent)."""
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO referral_spam_events(user_id, notified_at, action_taken) "
+            "VALUES(?,?,?)",
+            (user_id, now_str(), action_taken),
+        )
+
+
+def count_recent_referrals(referrer_id: int, window_seconds: int) -> int:
+    """Count referrals created by referrer_id within the last window_seconds seconds."""
+    import time as _time
+    cutoff_ts = _time.time() - window_seconds
+    # created_at is stored as ISO string; compare via unixepoch()
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM referrals "
+            "WHERE referrer_id=? AND UNIXEPOCH(created_at) >= ?",
+            (referrer_id, int(cutoff_ts)),
+        ).fetchone()
+        return row["n"] if row else 0

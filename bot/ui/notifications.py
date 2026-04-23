@@ -23,6 +23,12 @@ from ..db import (
     try_claim_purchase_reward_batch,
     add_pending_reward,
     get_locked_channels,
+    get_referral_restriction,
+    add_referral_restriction,
+    has_referral_spam_event,
+    record_referral_spam_event,
+    count_recent_referrals,
+    set_user_restricted,
 )
 from ..helpers import esc, fmt_price, now_str, move_leading_emoji
 from ..bot_instance import bot
@@ -619,6 +625,12 @@ def notify_referral_join(referrer_id, referee_id):
                 pass
     send_to_topic("referral_log", text, reply_markup=kb)
 
+    # Anti-spam check — runs after join notification is sent
+    try:
+        check_referral_antispam(referrer_id)
+    except Exception:
+        pass
+
 
 def notify_referral_first_purchase(referee_id):
     """Called after a purchase. If buyer was referred AND this is their first purchase, log the event to referral_log."""
@@ -695,6 +707,9 @@ def check_and_give_referral_start_reward(referrer_id):
     """
     if setting_get("referral_start_reward_enabled", "0") != "1":
         return
+    # Skip reward for referral-restricted or fully-restricted users
+    if get_referral_restriction(referrer_id):
+        return
     required_count = int(setting_get("referral_start_reward_count", "1") or "1")
     if required_count <= 0:
         return
@@ -762,9 +777,144 @@ def check_and_give_referral_purchase_reward(buyer_user_id):
     if not ref:
         return
     referrer_id = ref["referrer_id"]
+    # Skip reward for referral-restricted or fully-restricted users
+    if get_referral_restriction(referrer_id):
+        return
     required_count = int(setting_get("referral_purchase_reward_count", "1") or "1")
     if required_count <= 0:
         return
     # Loop: give one reward per complete batch claimed atomically
     while try_claim_purchase_reward_batch(referrer_id, required_count):
         _give_referral_reward(referrer_id, "referral_purchase_reward")
+
+
+# ── Referral Anti-Spam Detection ───────────────────────────────────────────────
+
+def _notify_admins_antispam(referrer_id: int, user, detected_count: int,
+                             threshold: int, window: int, action: str) -> None:
+    """Send anti-spam alert to all admins (owner + sub-admins)."""
+    action_labels = {
+        "referral_ban": "محدود کامل از زیرمجموعه‌گیری",
+        "full_ban":     "محدود شدن از کل ربات",
+        "report_only":  "فقط گزارش به ادمین (بدون محدودیت خودکار)",
+    }
+    action_fa = action_labels.get(action, action)
+    name_fa   = esc(user["full_name"]) if user else f"<code>{referrer_id}</code>"
+    uname_fa  = f"@{esc(user['username'])}" if user and user["username"] else "ندارد"
+    text = (
+        f"⚠️ <b>هشدار ضد اسپم زیرمجموعه‌گیری</b>\n\n"
+        f"👤 <b>کاربر مشکوک:</b>\n"
+        f"▫️ نام: {name_fa}\n"
+        f"⚡️ نام کاربری: {uname_fa}\n"
+        f"🆔 آیدی: <code>{referrer_id}</code>\n\n"
+        f"📊 <b>جزئیات تشخیص:</b>\n"
+        f"🔢 دعوت‌های تشخیص داده‌شده: <b>{detected_count}</b>\n"
+        f"⏱ در بازه زمانی: <b>{window} ثانیه</b>\n"
+        f"🎯 آستانه تنظیم‌شده: <b>{threshold} دعوت</b>\n\n"
+        f"🛡 <b>اقدام انجام‌شده:</b> {action_fa}\n\n"
+    )
+    if action == "referral_ban":
+        text += (
+            "این کاربر به دلیل مشکوک بودن به تقلب در زیرمجموعه‌گیری، "
+            "به‌صورت کامل از زیرمجموعه‌گیری محدود شد. "
+            "تا زمان حذف از لیست محدودیت، جایزه‌ای به او تعلق نخواهد گرفت."
+        )
+    elif action == "full_ban":
+        text += (
+            "این کاربر به دلیل مشکوک بودن به تقلب در زیرمجموعه‌گیری، "
+            "به‌صورت کامل از ربات محدود شد."
+        )
+    else:
+        text += (
+            "این شخص مشکوک به تقلب در زیرمجموعه‌گیری است. "
+            "لطفاً بررسی کنید و در صورت نیاز او را به لیست محدودیت‌ها اضافه کنید."
+        )
+
+    kb = types.InlineKeyboardMarkup()
+    kb.add(types.InlineKeyboardButton(
+        "👤 مشاهده کاربر", url=f"tg://user?id={referrer_id}"
+    ))
+
+    for admin_id in ADMIN_IDS:
+        try:
+            bot.send_message(admin_id, text, parse_mode="HTML", reply_markup=kb)
+        except Exception:
+            pass
+    for row in get_all_admin_users():
+        sub_id = row["user_id"]
+        if sub_id in ADMIN_IDS:
+            continue
+        try:
+            bot.send_message(sub_id, text, parse_mode="HTML", reply_markup=kb)
+        except Exception:
+            pass
+    send_to_topic("referral_log", text, reply_markup=kb)
+
+
+def check_referral_antispam(referrer_id: int) -> None:
+    """
+    Check if referrer is doing burst invites and act according to configured action.
+    Called after every successful referral registration (from notify_referral_join).
+    Safe to call repeatedly — deduplicates via referral_spam_events table.
+    """
+    if setting_get("referral_antispam_enabled", "0") != "1":
+        return
+
+    # Already restricted → no need to re-evaluate
+    if get_referral_restriction(referrer_id):
+        return
+
+    # Already flagged for spam → avoid duplicate admin notifications
+    if has_referral_spam_event(referrer_id):
+        return
+
+    try:
+        window    = max(1, int(setting_get("referral_antispam_window", "15") or "15"))
+        threshold = max(1, int(setting_get("referral_antispam_threshold", "10") or "10"))
+    except (ValueError, TypeError):
+        return
+
+    action = setting_get("referral_antispam_action", "report_only")
+
+    recent_count = count_recent_referrals(referrer_id, window)
+    if recent_count < threshold:
+        return
+
+    # ── Suspicious! Apply configured action ──────────────────────────────────
+    user = get_user(referrer_id)
+
+    if action == "referral_ban":
+        add_referral_restriction(
+            referrer_id, "referral_only",
+            reason="auto_antispam", added_by=0,
+        )
+        record_referral_spam_event(referrer_id, "referral_ban")
+        # Inform the user
+        try:
+            bot.send_message(
+                referrer_id,
+                "⛔️ <b>محدودیت موقت</b>\n\n"
+                "به دلیل رفتار مشکوک در زیرمجموعه‌گیری، دسترسی شما به بخش دعوت دوستان "
+                "به‌صورت موقت محدود شده است.\n\n"
+                "در صورت نیاز با پشتیبانی تماس بگیرید.",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+
+    elif action == "full_ban":
+        add_referral_restriction(
+            referrer_id, "full",
+            reason="auto_antispam", added_by=0,
+        )
+        set_user_restricted(referrer_id, 0)   # permanent full bot ban
+        record_referral_spam_event(referrer_id, "full_ban")
+
+    elif action == "report_only":
+        record_referral_spam_event(referrer_id, "report_only")
+
+    # Notify admins regardless of action
+    try:
+        _notify_admins_antispam(referrer_id, user, recent_count, threshold, window, action)
+    except Exception:
+        pass

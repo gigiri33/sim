@@ -56,6 +56,10 @@ from ..db import (
     has_pending_rewards, get_unclaimed_rewards, mark_rewards_claimed, mark_reward_claimed_by_id,
     get_locked_channels, add_locked_channel, remove_locked_channel_by_id,
     wallet_pay_enabled_for, get_wallet_pay_exceptions, add_wallet_pay_exception, remove_wallet_pay_exception,
+    get_referral_restriction, add_referral_restriction,
+    remove_referral_restriction_by_id, remove_referral_restriction_by_user,
+    toggle_referral_restriction_type, get_referral_restrictions_paged,
+    set_user_restricted as _set_user_restricted_db,
 )
 from ..gateways.base import is_gateway_available, is_card_info_complete, get_gateway_range_text, is_gateway_in_range, build_gateway_range_guide
 from ..gateways.crypto import fetch_crypto_prices
@@ -10688,6 +10692,12 @@ def _dispatch_callback(call, uid, data):
                     pkg_name = _p["name"]
             kb.add(types.InlineKeyboardButton(f"📦 پکیج: {pkg_name}", callback_data="adm:ref:pr:pkg"))
 
+        # Anti-spam section
+        kb.add(types.InlineKeyboardButton("── 🛡 سیستم ضد اسپم ──", callback_data="adm:ops:noop"))
+        as_enabled = setting_get("referral_antispam_enabled", "0")
+        as_label = "✅ فعال" if as_enabled == "1" else "❌ غیرفعال"
+        kb.add(types.InlineKeyboardButton(f"🛡 ضد اسپم: {as_label}", callback_data="adm:ref:antispam"))
+
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:ops", icon_custom_emoji_id="5253997076169115797"))
         return kb
 
@@ -10917,6 +10927,318 @@ def _dispatch_callback(call, uid, data):
         log_admin_action(uid, f"پکیج هدیه خرید به #{pkg_id} تنظیم شد")
         bot.answer_callback_query(call.id, "پکیج هدیه خرید تنظیم شد.")
         send_or_edit(call, _ref_settings_text(), _ref_settings_kb())
+        return
+
+    # ── Anti-Spam Settings ────────────────────────────────────────────────────
+
+    _ANTISPAM_ACTION_LABELS = {
+        "report_only":  "فقط گزارش به ادمین",
+        "referral_ban": "محدود کامل از زیرمجموعه‌گیری",
+        "full_ban":     "محدود شدن از کل ربات",
+    }
+    _RESTRICTIONS_PER_PAGE = 8
+
+    def _antispam_text():
+        enabled   = setting_get("referral_antispam_enabled", "0")
+        window    = setting_get("referral_antispam_window", "15")
+        threshold = setting_get("referral_antispam_threshold", "10")
+        action    = setting_get("referral_antispam_action", "report_only")
+        status_fa = "✅ فعال" if enabled == "1" else "❌ غیرفعال"
+        action_fa = _ANTISPAM_ACTION_LABELS.get(action, action)
+        return (
+            "🛡 <b>سیستم ضد اسپم زیرمجموعه‌گیری</b>\n\n"
+            f"📌 وضعیت: <b>{status_fa}</b>\n"
+            f"⏱ مدت زمان بازه: <b>{window} ثانیه</b>\n"
+            f"🔢 آستانه دعوت: <b>{threshold} دعوت</b>\n"
+            f"🎯 نتیجه در صورت تشخیص: <b>{action_fa}</b>\n\n"
+            "اگر یک کاربر در بازه زمانی تنظیم‌شده، به اندازه آستانه یا بیشتر دعوت انجام دهد، "
+            "به‌عنوان مشکوک شناسایی می‌شود و اقدام تنظیم‌شده اعمال خواهد شد."
+        )
+
+    def _antispam_kb():
+        enabled   = setting_get("referral_antispam_enabled", "0")
+        window    = setting_get("referral_antispam_window", "15")
+        threshold = setting_get("referral_antispam_threshold", "10")
+        action    = setting_get("referral_antispam_action", "report_only")
+        action_fa = _ANTISPAM_ACTION_LABELS.get(action, action)
+        en_label  = "✅ فعال" if enabled == "1" else "❌ غیرفعال"
+        kb2 = types.InlineKeyboardMarkup()
+        kb2.row(
+            types.InlineKeyboardButton("✅ فعال کردن",    callback_data="adm:ref:as:enable"),
+            types.InlineKeyboardButton("❌ غیرفعال کردن", callback_data="adm:ref:as:disable"),
+        )
+        kb2.add(types.InlineKeyboardButton(f"⏱ مدت زمان: {window} ثانیه", callback_data="adm:ref:as:window"))
+        kb2.add(types.InlineKeyboardButton(f"🔢 تعداد: {threshold} دعوت",  callback_data="adm:ref:as:threshold"))
+        kb2.add(types.InlineKeyboardButton(f"🎯 تنظیم نتیجه: {action_fa}", callback_data="adm:ref:as:action"))
+        kb2.add(types.InlineKeyboardButton("👥 مدیریت اشخاص محدود شده",   callback_data="adm:ref:restrictions:0"))
+        kb2.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:ref:settings",
+                                            icon_custom_emoji_id="5253997076169115797"))
+        return kb2
+
+    def _restrictions_text(page):
+        rows, total = get_referral_restrictions_paged(page, _RESTRICTIONS_PER_PAGE)
+        total_pages = max(1, (total + _RESTRICTIONS_PER_PAGE - 1) // _RESTRICTIONS_PER_PAGE)
+        t = (
+            "👥 <b>مدیریت اشخاص محدود شده</b>\n\n"
+            f"تعداد کل محدودیت‌ها: <b>{total}</b>\n"
+            f"صفحه <b>{page + 1}</b> از <b>{total_pages}</b>\n\n"
+        )
+        if not rows:
+            t += "هیچ کاربری در لیست محدودیت نیست."
+        return t
+
+    def _restrictions_kb(page):
+        rows, total = get_referral_restrictions_paged(page, _RESTRICTIONS_PER_PAGE)
+        total_pages = max(1, (total + _RESTRICTIONS_PER_PAGE - 1) // _RESTRICTIONS_PER_PAGE)
+        kb2 = types.InlineKeyboardMarkup()
+        kb2.add(types.InlineKeyboardButton("➕ اضافه کردن", callback_data="adm:ref:restrictions:add"))
+        for row in rows:
+            rtype_fa = "🚫 محدود کامل" if row["restriction_type"] == "full" else "⛔ محدود از زیرمجموعه‌گیری"
+            name = row["username"] and f"@{row['username']}" or row["full_name"] or str(row["user_id"])
+            kb2.row(
+                types.InlineKeyboardButton(f"{name[:18]}", callback_data="adm:ops:noop"),
+                types.InlineKeyboardButton(rtype_fa, callback_data=f"adm:ref:restrictions:toggle:{row['user_id']}"),
+                types.InlineKeyboardButton("🗑 حذف", callback_data=f"adm:ref:restrictions:rm:{row['id']}"),
+            )
+        nav = []
+        if page > 0:
+            nav.append(types.InlineKeyboardButton("◀️ قبلی", callback_data=f"adm:ref:restrictions:{page - 1}"))
+        nav.append(types.InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data="adm:ops:noop"))
+        if page < total_pages - 1:
+            nav.append(types.InlineKeyboardButton("▶️ بعدی", callback_data=f"adm:ref:restrictions:{page + 1}"))
+        if nav:
+            kb2.row(*nav)
+        kb2.add(types.InlineKeyboardButton("بازگشت به ضد اسپم", callback_data="adm:ref:antispam",
+                                            icon_custom_emoji_id="5253997076169115797"))
+        return kb2
+
+    if data == "adm:ref:antispam":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, _antispam_text(), _antispam_kb())
+        return
+
+    if data == "adm:ref:as:enable":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        setting_set("referral_antispam_enabled", "1")
+        log_admin_action(uid, "سیستم ضد اسپم زیرمجموعه‌گیری فعال شد")
+        bot.answer_callback_query(call.id, "✅ سیستم ضد اسپم فعال شد.")
+        send_or_edit(call, _antispam_text(), _antispam_kb())
+        return
+
+    if data == "adm:ref:as:disable":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        setting_set("referral_antispam_enabled", "0")
+        log_admin_action(uid, "سیستم ضد اسپم زیرمجموعه‌گیری غیرفعال شد")
+        bot.answer_callback_query(call.id, "❌ سیستم ضد اسپم غیرفعال شد.")
+        send_or_edit(call, _antispam_text(), _antispam_kb())
+        return
+
+    if data == "adm:ref:as:window":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        state_set(uid, "admin_ref_as_window")
+        bot.answer_callback_query(call.id)
+        cur = setting_get("referral_antispam_window", "15")
+        send_or_edit(call,
+            "⏱ <b>تنظیم مدت زمان بازه (ثانیه)</b>\n\n"
+            "تعداد ثانیه‌ای که سیستم برای شمارش دعوت‌ها در نظر می‌گیرد را وارد کنید.\n\n"
+            f"مقدار فعلی: <b>{cur} ثانیه</b>",
+            back_button("adm:ref:antispam"))
+        return
+
+    if data == "adm:ref:as:threshold":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        state_set(uid, "admin_ref_as_threshold")
+        bot.answer_callback_query(call.id)
+        cur = setting_get("referral_antispam_threshold", "10")
+        send_or_edit(call,
+            "🔢 <b>تنظیم آستانه تعداد دعوت</b>\n\n"
+            "تعداد دعوت در بازه زمانی را وارد کنید که باعث تشخیص مشکوک می‌شود.\n\n"
+            f"مقدار فعلی: <b>{cur} دعوت</b>",
+            back_button("adm:ref:antispam"))
+        return
+
+    if data == "adm:ref:as:action":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        cur_action = setting_get("referral_antispam_action", "report_only")
+        kb2 = types.InlineKeyboardMarkup()
+        for act_key, act_fa in _ANTISPAM_ACTION_LABELS.items():
+            tick = "✅ " if act_key == cur_action else ""
+            kb2.add(types.InlineKeyboardButton(f"{tick}{act_fa}", callback_data=f"adm:ref:as:setaction:{act_key}"))
+        kb2.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:ref:antispam",
+                                            icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "🎯 <b>تنظیم نتیجه در صورت تشخیص اسپم</b>\n\n"
+            "یکی از گزینه‌های زیر را انتخاب کنید:\n\n"
+            "▫️ <b>محدود کامل از زیرمجموعه‌گیری</b> — فقط بخش دعوت مسدود می‌شود\n"
+            "▫️ <b>محدود شدن از کل ربات</b> — دسترسی کامل کاربر قطع می‌شود\n"
+            "▫️ <b>فقط گزارش به ادمین</b> — محدودیتی اعمال نمی‌شود، فقط ادمین مطلع می‌شود",
+            kb2)
+        return
+
+    if data.startswith("adm:ref:as:setaction:"):
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        parts = data.split(":")
+        new_action = parts[4] if len(parts) > 4 else ""
+        if new_action not in _ANTISPAM_ACTION_LABELS:
+            bot.answer_callback_query(call.id, "گزینه نامعتبر است.", show_alert=True)
+            return
+        setting_set("referral_antispam_action", new_action)
+        log_admin_action(uid, f"نتیجه ضد اسپم به «{_ANTISPAM_ACTION_LABELS[new_action]}» تغییر کرد")
+        bot.answer_callback_query(call.id, f"✅ نتیجه: {_ANTISPAM_ACTION_LABELS[new_action]}")
+        send_or_edit(call, _antispam_text(), _antispam_kb())
+        return
+
+    if data.startswith("adm:ref:restrictions:"):
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        parts = data.split(":")  # adm:ref:restrictions:<page|add|rm|toggle>[:extra]
+
+        # Pagination: adm:ref:restrictions:<page_number>
+        if len(parts) == 4 and parts[3].isdigit():
+            page = int(parts[3])
+            bot.answer_callback_query(call.id)
+            send_or_edit(call, _restrictions_text(page), _restrictions_kb(page))
+            return
+
+        sub = parts[3] if len(parts) > 3 else ""
+
+        if sub == "add":
+            state_set(uid, "admin_ref_restriction_add_uid", back_cb="adm:ref:restrictions:0")
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                "➕ <b>افزودن کاربر به لیست محدودیت</b>\n\n"
+                "شناسه عددی کاربر (User ID) یا نام کاربری (@username) را وارد کنید:",
+                back_button("adm:ref:restrictions:0"))
+            return
+
+        if sub == "rm" and len(parts) > 4:
+            try:
+                row_id = int(parts[4])
+            except ValueError:
+                bot.answer_callback_query(call.id, "خطا در شناسه.")
+                return
+            result = remove_referral_restriction_by_id(row_id)
+            if result:
+                removed_uid, removed_type = result
+                # If it was a full ban, restore user status if their restriction was auto
+                if removed_type == "full":
+                    from ..db import set_user_status as _sus
+                    try:
+                        _sus(removed_uid, "unsafe")
+                    except Exception:
+                        pass
+                log_admin_action(uid, f"محدودیت زیرمجموعه‌گیری کاربر {removed_uid} حذف شد")
+                bot.answer_callback_query(call.id, "✅ محدودیت حذف شد.")
+            else:
+                bot.answer_callback_query(call.id, "⚠️ محدودیت یافت نشد.")
+            send_or_edit(call, _restrictions_text(0), _restrictions_kb(0))
+            return
+
+        if sub == "toggle" and len(parts) > 4:
+            try:
+                target_uid = int(parts[4])
+            except ValueError:
+                bot.answer_callback_query(call.id, "خطا در شناسه.")
+                return
+            new_type = toggle_referral_restriction_type(target_uid)
+            if new_type is None:
+                bot.answer_callback_query(call.id, "⚠️ کاربر در لیست یافت نشد.", show_alert=True)
+                send_or_edit(call, _restrictions_text(0), _restrictions_kb(0))
+                return
+            # Sync user status with restriction type
+            if new_type == "full":
+                _set_user_restricted_db(target_uid, 0)
+            else:
+                from ..db import set_user_status as _sus
+                try:
+                    _sus(target_uid, "unsafe")
+                except Exception:
+                    pass
+            type_fa = "محدود کامل" if new_type == "full" else "محدود از زیرمجموعه‌گیری"
+            log_admin_action(uid, f"نوع محدودیت کاربر {target_uid} به «{type_fa}» تغییر کرد")
+            bot.answer_callback_query(call.id, f"✅ تغییر به: {type_fa}")
+            send_or_edit(call, _restrictions_text(0), _restrictions_kb(0))
+            return
+
+        if sub == "pick" and len(parts) > 4:
+            # adm:ref:restrictions:pick:<user_id>
+            try:
+                target_uid = int(parts[4])
+            except ValueError:
+                bot.answer_callback_query(call.id, "خطا در شناسه.")
+                return
+            # Show type selection
+            kb2 = types.InlineKeyboardMarkup()
+            kb2.add(types.InlineKeyboardButton(
+                "⛔ محدود از زیرمجموعه‌گیری",
+                callback_data=f"adm:ref:restrictions:settype:{target_uid}:referral_only"
+            ))
+            kb2.add(types.InlineKeyboardButton(
+                "🚫 محدود کامل از ربات",
+                callback_data=f"adm:ref:restrictions:settype:{target_uid}:full"
+            ))
+            kb2.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:ref:restrictions:0",
+                                                icon_custom_emoji_id="5253997076169115797"))
+            bot.answer_callback_query(call.id)
+            tgt_user = get_user(target_uid)
+            name_fa = (tgt_user["full_name"] if tgt_user else "") or str(target_uid)
+            send_or_edit(call,
+                f"👤 <b>انتخاب نوع محدودیت</b>\n\n"
+                f"کاربر: <b>{esc(name_fa)}</b> (<code>{target_uid}</code>)\n\n"
+                "نوع محدودیت را انتخاب کنید:",
+                kb2)
+            return
+
+        if sub == "settype" and len(parts) > 5:
+            # adm:ref:restrictions:settype:<user_id>:<type>
+            try:
+                target_uid = int(parts[4])
+            except ValueError:
+                bot.answer_callback_query(call.id, "خطا در شناسه.")
+                return
+            rtype = parts[5]
+            if rtype not in ("referral_only", "full"):
+                bot.answer_callback_query(call.id, "نوع نامعتبر است.", show_alert=True)
+                return
+            is_new = add_referral_restriction(target_uid, rtype, reason="manual_admin", added_by=uid)
+            if rtype == "full":
+                _set_user_restricted_db(target_uid, 0)
+            else:
+                # If previously fully banned due to referral, lift it
+                from ..db import get_referral_restriction as _grr, set_user_status as _sus
+                existing = _grr(target_uid)
+                if not is_new and existing and existing["restriction_type"] == "full":
+                    try:
+                        _sus(target_uid, "unsafe")
+                    except Exception:
+                        pass
+            state_clear(uid)
+            type_fa = "محدود از زیرمجموعه‌گیری" if rtype == "referral_only" else "محدود کامل از ربات"
+            log_admin_action(uid, f"محدودیت «{type_fa}» برای کاربر {target_uid} اعمال شد")
+            bot.answer_callback_query(call.id, f"✅ محدودیت اعمال شد: {type_fa}")
+            send_or_edit(call, _restrictions_text(0), _restrictions_kb(0))
+            return
+
+        # Fallback — unknown sub-command
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, _restrictions_text(0), _restrictions_kb(0))
         return
 
     # ── Gateway settings ─────────────────────────────────────────────────────

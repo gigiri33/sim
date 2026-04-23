@@ -43,6 +43,7 @@ from ..db import (
     bulk_add_balance, bulk_zero_balance, bulk_set_status, count_users_by_filter,
     set_user_restricted, check_and_release_restriction,
     get_wallet_pay_exceptions, add_wallet_pay_exception,
+    add_referral_restriction,
 )
 from ..gateways.base import is_gateway_available, is_card_info_complete, get_global_amount_range, get_gateway_range_text, is_gateway_in_range, build_gateway_range_guide
 from ..gateways.tetrapay import create_tetrapay_order, verify_tetrapay_order
@@ -2516,6 +2517,88 @@ def universal_handler(message):
             log_admin_action(uid, f"مبلغ هدیه خرید: {amount} تومان")
             state_clear(uid)
             bot.send_message(uid, f"✅ مبلغ هدیه خرید: {fmt_price(amount)} تومان", reply_markup=back_button("adm:ref:settings"))
+            return
+
+        # ── Anti-Spam Settings ────────────────────────────────────────────────
+        if sn == "admin_ref_as_window" and is_admin(uid):
+            val = parse_int(normalize_text_number(message.text or ""))
+            if not val or val <= 0:
+                bot.send_message(uid,
+                    "⚠️ <b>مقدار نامعتبر است.</b>\n\nیک عدد مثبت (ثانیه) وارد کنید. مثال: ۱۵",
+                    parse_mode="HTML",
+                    reply_markup=back_button("adm:ref:antispam"))
+                return
+            setting_set("referral_antispam_window", str(val))
+            log_admin_action(uid, f"بازه زمانی ضد اسپم: {val} ثانیه")
+            state_clear(uid)
+            bot.send_message(uid,
+                f"✅ بازه زمانی ضد اسپم به <b>{val} ثانیه</b> تنظیم شد.",
+                parse_mode="HTML",
+                reply_markup=back_button("adm:ref:antispam"))
+            return
+
+        if sn == "admin_ref_as_threshold" and is_admin(uid):
+            val = parse_int(normalize_text_number(message.text or ""))
+            if not val or val <= 0:
+                bot.send_message(uid,
+                    "⚠️ <b>مقدار نامعتبر است.</b>\n\nتعداد دعوت مثبت وارد کنید. مثال: ۱۰",
+                    parse_mode="HTML",
+                    reply_markup=back_button("adm:ref:antispam"))
+                return
+            setting_set("referral_antispam_threshold", str(val))
+            log_admin_action(uid, f"آستانه ضد اسپم: {val} دعوت")
+            state_clear(uid)
+            bot.send_message(uid,
+                f"✅ آستانه ضد اسپم به <b>{val} دعوت</b> تنظیم شد.",
+                parse_mode="HTML",
+                reply_markup=back_button("adm:ref:antispam"))
+            return
+
+        if sn == "admin_ref_restriction_add_uid" and is_admin(uid):
+            raw = (message.text or "").strip()
+            # Try to resolve user from ID or username
+            target_user = None
+            if raw.isdigit():
+                target_user = get_user(int(raw))
+                if target_user:
+                    target_uid = int(raw)
+                else:
+                    target_uid = int(raw)  # unknown user, still allow
+            else:
+                uname = raw.lstrip("@")
+                results = search_users(uname) if uname else []
+                if results:
+                    target_user = results[0]
+                    target_uid = target_user["user_id"]
+                else:
+                    bot.send_message(uid,
+                        "⚠️ <b>کاربری با این مشخصات یافت نشد.</b>\n\n"
+                        "لطفاً شناسه عددی (User ID) یا نام کاربری را دقیق وارد کنید.",
+                        parse_mode="HTML",
+                        reply_markup=back_button("adm:ref:restrictions:0"))
+                    return
+            # Ask for restriction type via inline buttons
+            from telebot import types as _t
+            kb2 = _t.InlineKeyboardMarkup()
+            kb2.add(_t.InlineKeyboardButton(
+                "⛔ محدود از زیرمجموعه‌گیری",
+                callback_data=f"adm:ref:restrictions:settype:{target_uid}:referral_only"
+            ))
+            kb2.add(_t.InlineKeyboardButton(
+                "🚫 محدود کامل از ربات",
+                callback_data=f"adm:ref:restrictions:settype:{target_uid}:full"
+            ))
+            kb2.add(_t.InlineKeyboardButton(
+                "بازگشت", callback_data="adm:ref:restrictions:0",
+                icon_custom_emoji_id="5253997076169115797"
+            ))
+            name_fa = (target_user["full_name"] if target_user else "") or str(target_uid)
+            state_clear(uid)
+            bot.send_message(uid,
+                f"👤 <b>کاربر پیدا شد:</b> {esc(name_fa)} (<code>{target_uid}</code>)\n\n"
+                "نوع محدودیت را انتخاب کنید:",
+                parse_mode="HTML",
+                reply_markup=kb2)
             return
 
         # ── Bulk sale qty limits ──────────────────────────────────────────────
