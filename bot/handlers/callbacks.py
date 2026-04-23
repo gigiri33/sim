@@ -885,8 +885,15 @@ def _show_renewal_gateways(target, uid, purchase_id, package_id, price, package_
     send_or_edit(target, text, kb)
 
 
-def _execute_pnlcfg_renewal(config_id, package_id):
-    """Execute panel config renewal: reset traffic + set new expiry. Returns (ok, error_msg)."""
+def _execute_pnlcfg_renewal(config_id, package_id, chat_id=None, uid=None):
+    """
+    Execute panel config renewal: reset traffic + enable_client with new expiry.
+    Retries indefinitely on connection errors (up to 8 hours).
+    On non-connection failures retries up to 3 minutes then gives up.
+    Returns (True, None) on success or (False, user_friendly_msg) on fatal failure.
+    Admins are notified via _notify_panel_error on any fatal failure.
+    """
+    import time as _time
     from ..db import get_panel_config as _get_pcfg, update_panel_config_field as _upf
     from ..db import get_panel as _get_pnl, get_package as _get_pkg3
     from ..panels.client import PanelClient
@@ -896,17 +903,124 @@ def _execute_pnlcfg_renewal(config_id, package_id):
     if not cfg:
         return False, "کانفیگ یافت نشد."
     cfg = dict(cfg)
+    _uid = uid or cfg["user_id"]
     pkg = _get_pkg3(package_id)
     if not pkg:
         return False, "پکیج یافت نشد."
     panel = _get_pnl(cfg["panel_id"])
     if not panel:
         return False, "پنل یافت نشد."
+
     pc_api = PanelClient(
         protocol=panel["protocol"], host=panel["host"], port=panel["port"],
         path=panel["path"] or "", username=panel["username"], password=panel["password"]
     )
-    pc_api.reset_client_traffic(cfg["inbound_id"], cfg["client_name"] or "")
+
+    def _is_conn_err(e):
+        s = str(e).lower()
+        return any(x in s for x in [
+            "connection refused", "max retries exceeded", "failed to establish",
+            "newconnectionerror", "httpsconnectionpool", "remotedisconnected",
+            "connection timed out", "read timed out", "timeout",
+        ])
+
+    CONN_RETRY_DELAY   = 30
+    FUNC_RETRY_TIMEOUT = 180
+    FUNC_RETRY_DELAY   = 15
+    MAX_WAIT           = 28800  # 8-hour hard cap
+    PERIODIC_INTERVAL  = 300
+
+    _t_start          = _time.time()
+    _waiting_notified = False
+    _last_periodic    = 0.0
+
+    def _maybe_notify_waiting():
+        nonlocal _waiting_notified, _last_periodic
+        if not chat_id:
+            return
+        now = _time.time()
+        if not _waiting_notified:
+            try:
+                bot.send_message(
+                    chat_id,
+                    "⏳ <b>سرور پنل در حال حاضر در دسترس نیست</b>\n\n"
+                    "تمدید سرویس در صف انتظار قرار گرفت. "
+                    "به محض بازگشت اتصال، سرویس شما تمدید خواهد شد.",
+                    parse_mode="HTML",
+                )
+                _waiting_notified = True
+                _last_periodic = now
+            except Exception:
+                pass
+        elif now - _last_periodic >= PERIODIC_INTERVAL:
+            try:
+                bot.send_message(chat_id, "⏳ هنوز در حال تلاش برای اتصال به پنل...", parse_mode="HTML")
+                _last_periodic = now
+            except Exception:
+                pass
+
+    def _notify_reconnected():
+        if _waiting_notified and chat_id:
+            try:
+                bot.send_message(chat_id, "✅ اتصال به پنل برقرار شد، در حال تمدید سرویس...", parse_mode="HTML")
+            except Exception:
+                pass
+
+    # ── Step 1: login ─────────────────────────────────────────────────────────
+    login_err = None
+    _t0 = _time.time()
+    while True:
+        if _time.time() - _t_start > MAX_WAIT:
+            login_err = "حداکثر زمان انتظار (8 ساعت) تمام شد"
+            break
+        ok, login_err = pc_api.login()
+        if ok:
+            login_err = None
+            _notify_reconnected()
+            break
+        elapsed = _time.time() - _t0
+        if _is_conn_err(login_err):
+            _maybe_notify_waiting()
+            log.warning("_execute_pnlcfg_renewal: login CONN_ERR (%.0fs elapsed), retry in %ds: %s",
+                        elapsed, CONN_RETRY_DELAY, login_err)
+            _time.sleep(CONN_RETRY_DELAY)
+        else:
+            log.warning("_execute_pnlcfg_renewal: login failed (%.0fs elapsed): %s", elapsed, login_err)
+            if elapsed + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:
+                break
+            _time.sleep(FUNC_RETRY_DELAY)
+    if login_err is not None:
+        _notify_panel_error(_uid, pkg, "login (تمدید)", login_err, config_id, cfg["panel_id"])
+        return False, "تمدید سرویس با خطا مواجه شد. لطفاً با پشتیبانی ارتباط بگیرید."
+
+    # ── Step 2: reset traffic ──────────────────────────────────────────────────
+    reset_err = None
+    _t0 = _time.time()
+    while True:
+        if _time.time() - _t_start > MAX_WAIT:
+            reset_err = "حداکثر زمان انتظار تمام شد"
+            break
+        ok_rt, err_rt = pc_api.reset_client_traffic(cfg["inbound_id"], cfg["client_name"] or "")
+        if ok_rt:
+            reset_err = None
+            break
+        reset_err = str(err_rt)
+        elapsed = _time.time() - _t0
+        if _is_conn_err(reset_err):
+            _maybe_notify_waiting()
+            log.warning("_execute_pnlcfg_renewal: reset_traffic CONN_ERR (%.0fs elapsed), retry in %ds: %s",
+                        elapsed, CONN_RETRY_DELAY, reset_err)
+            _time.sleep(CONN_RETRY_DELAY)
+        else:
+            log.warning("_execute_pnlcfg_renewal: reset_traffic failed (%.0fs elapsed): %s", elapsed, reset_err)
+            if elapsed + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:
+                break
+            _time.sleep(FUNC_RETRY_DELAY)
+    if reset_err is not None:
+        _notify_panel_error(_uid, pkg, "reset_traffic (تمدید)", reset_err, config_id, cfg["panel_id"])
+        return False, "تمدید سرویس با خطا مواجه شد. لطفاً با پشتیبانی ارتباط بگیرید."
+
+    # ── Step 3: enable_client with new expiry ─────────────────────────────────
     dur_days = int(pkg["duration_days"] or 0)
     if dur_days:
         new_exp_dt  = _dt.utcnow() + _td(days=dur_days)
@@ -915,14 +1029,39 @@ def _execute_pnlcfg_renewal(config_id, package_id):
     else:
         new_exp_str = None
         new_exp_ms  = 0
-    ok_r, err_r = pc_api.enable_client(
-        inbound_id=cfg["inbound_id"], client_uuid=cfg["client_uuid"],
-        email=cfg["client_name"] or "",
-        traffic_bytes=int((pkg["volume_gb"] or 0) * 1073741824),
-        expire_ms=new_exp_ms,
-    )
-    if not ok_r:
-        return False, str(err_r)
+
+    enable_err = None
+    _t0 = _time.time()
+    while True:
+        if _time.time() - _t_start > MAX_WAIT:
+            enable_err = "حداکثر زمان انتظار تمام شد"
+            break
+        ok_e, res_e = pc_api.enable_client(
+            inbound_id=cfg["inbound_id"], client_uuid=cfg["client_uuid"],
+            email=cfg["client_name"] or "",
+            traffic_bytes=int((pkg["volume_gb"] or 0) * 1073741824),
+            expire_ms=new_exp_ms,
+        )
+        if ok_e:
+            enable_err = None
+            break
+        enable_err = str(res_e)
+        elapsed = _time.time() - _t0
+        if _is_conn_err(enable_err):
+            _maybe_notify_waiting()
+            log.warning("_execute_pnlcfg_renewal: enable_client CONN_ERR (%.0fs elapsed), retry in %ds: %s",
+                        elapsed, CONN_RETRY_DELAY, enable_err)
+            _time.sleep(CONN_RETRY_DELAY)
+        else:
+            log.warning("_execute_pnlcfg_renewal: enable_client failed (%.0fs elapsed): %s", elapsed, enable_err)
+            if elapsed + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:
+                break
+            _time.sleep(FUNC_RETRY_DELAY)
+    if enable_err is not None:
+        _notify_panel_error(_uid, pkg, "enable_client (تمدید)", enable_err, config_id, cfg["panel_id"])
+        return False, "تمدید سرویس با خطا مواجه شد. لطفاً با پشتیبانی ارتباط بگیرید."
+
+    # ── Step 4: update DB ──────────────────────────────────────────────────────
     _upf(config_id, "expire_at",  new_exp_str)
     _upf(config_id, "is_expired",  0)
     _upf(config_id, "is_disabled", 0)
@@ -2935,7 +3074,7 @@ def _tetrapay_auto_verify(payment_id, authority, uid, chat_id, message_id, kind,
                 if not complete_payment(payment_id):
                     return
                 state_clear(uid)
-                ok_tp, err_tp = _execute_pnlcfg_renewal(cfg_id_tp, pkg_id_tp)
+                ok_tp, err_tp = _execute_pnlcfg_renewal(cfg_id_tp, pkg_id_tp, chat_id=uid, uid=uid)
                 if ok_tp:
                     try:
                         from ..admin.renderers import _show_panel_config_detail as _spcd_tp
@@ -2957,7 +3096,7 @@ def _tetrapay_auto_verify(payment_id, authority, uid, chat_id, message_id, kind,
                 else:
                     try:
                         bot.send_message(uid,
-                            f"✅ پرداخت تأیید شد اما خطا در تمدید سرویس:\n<code>{esc(str(err_tp))}</code>",
+                            "✅ پرداخت تأیید شد اما تمدید سرویس با خطا مواجه شد.\nلطفاً با پشتیبانی ارتباط بگیرید.",
                             parse_mode="HTML", reply_markup=back_button("my_configs"))
                     except Exception:
                         pass
@@ -3087,7 +3226,7 @@ def _tronpays_rial_auto_verify(payment_id, invoice_id, uid, chat_id, message_id,
                 if not complete_payment(payment_id):
                     return
                 state_clear(uid)
-                ok_trp, err_trp = _execute_pnlcfg_renewal(cfg_id_trp, pkg_id_trp)
+                ok_trp, err_trp = _execute_pnlcfg_renewal(cfg_id_trp, pkg_id_trp, chat_id=uid, uid=uid)
                 if ok_trp:
                     try:
                         bot.send_message(uid, "✅ پرداخت تأیید و سرویس تمدید شد.",
@@ -3097,7 +3236,7 @@ def _tronpays_rial_auto_verify(payment_id, invoice_id, uid, chat_id, message_id,
                 else:
                     try:
                         bot.send_message(uid,
-                            f"✅ پرداخت تأیید شد اما خطا در تمدید سرویس:\n<code>{esc(str(err_trp))}</code>",
+                            "✅ پرداخت تأیید شد اما تمدید سرویس با خطا مواجه شد.\nلطفاً با پشتیبانی ارتباط بگیرید.",
                             parse_mode="HTML", reply_markup=back_button("my_configs"))
                     except Exception:
                         pass
@@ -6391,10 +6530,10 @@ def _dispatch_callback(call, uid, data):
             create_payment("pnlcfg_renewal", uid, package_id, price, "wallet",
                            status="completed", config_id=config_id)
             bot.answer_callback_query(call.id, "⏳ در حال تمدید…")
-            ok_r, err_r = _execute_pnlcfg_renewal(config_id, package_id)
+            ok_r, err_r = _execute_pnlcfg_renewal(config_id, package_id, chat_id=uid, uid=uid)
             state_clear(uid)
             if not ok_r:
-                send_or_edit(call, f"❌ خطا در تمدید سرویس:\n<code>{esc(str(err_r))}</code>",
+                send_or_edit(call, "❌ تمدید سرویس با خطا مواجه شد.\nلطفاً با پشتیبانی ارتباط بگیرید.",
                              back_button("my_configs"))
                 return
             _show_panel_config_detail(call, config_id, back_data="my_configs", is_user_view=True)
@@ -6615,10 +6754,10 @@ def _dispatch_callback(call, uid, data):
                 config_id_v  = payment["config_id"]
                 package_id_v = payment["package_id"]
                 bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد! در حال تمدید…")
-                ok_r, err_r = _execute_pnlcfg_renewal(config_id_v, package_id_v)
+                ok_r, err_r = _execute_pnlcfg_renewal(config_id_v, package_id_v, chat_id=uid, uid=uid)
                 state_clear(uid)
                 if not ok_r:
-                    send_or_edit(call, f"❌ پرداخت انجام شد اما خطا در تمدید:\n<code>{esc(str(err_r))}</code>",
+                    send_or_edit(call, "❌ پرداخت انجام شد اما تمدید سرویس با خطا مواجه شد.\nلطفاً با پشتیبانی ارتباط بگیرید.",
                                  back_button("my_configs"))
                     return
                 _show_panel_config_detail(call, config_id_v, back_data="my_configs", is_user_view=True)
@@ -6700,10 +6839,10 @@ def _dispatch_callback(call, uid, data):
                 config_id_sv  = payment["config_id"]
                 package_id_sv = payment["package_id"]
                 bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد! در حال تمدید…")
-                ok_r, err_r = _execute_pnlcfg_renewal(config_id_sv, package_id_sv)
+                ok_r, err_r = _execute_pnlcfg_renewal(config_id_sv, package_id_sv, chat_id=uid, uid=uid)
                 state_clear(uid)
                 if not ok_r:
-                    send_or_edit(call, f"❌ پرداخت انجام شد اما خطا در تمدید:\n<code>{esc(str(err_r))}</code>",
+                    send_or_edit(call, "❌ پرداخت انجام شد اما تمدید سرویس با خطا مواجه شد.\nلطفاً با پشتیبانی ارتباط بگیرید.",
                                  back_button("my_configs"))
                     return
                 _show_panel_config_detail(call, config_id_sv, back_data="my_configs", is_user_view=True)

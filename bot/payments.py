@@ -609,7 +609,7 @@ def _finish_card_payment_approval_core(payment_id, admin_note, approved):
             package_id      = payment["package_id"]
             if not complete_payment(payment_id):
                 return True, True  # already processed
-            ok_r, err_r = _exec_pnlr(panel_config_id, package_id)
+            ok_r, err_r = _exec_pnlr(panel_config_id, package_id, uid=user_id)
             if ok_r:
                 notified = _safe_send(
                     user_id,
@@ -621,9 +621,8 @@ def _finish_card_payment_approval_core(payment_id, admin_note, approved):
             else:
                 notified = _safe_send(
                     user_id,
-                    f"✅ پرداخت تأیید شد اما خطا در تمدید سرویس رخ داد.\n"
-                    f"لطفاً با پشتیبانی تماس بگیرید.\n\n"
-                    f"<code>{esc(str(err_r))}</code>",
+                    "✅ پرداخت تأیید شد اما تمدید سرویس با خطا مواجه شد.\n"
+                    "لطفاً با پشتیبانی ارتباط بگیرید.",
                     parse_mode="HTML",
                 )
             return True, notified
