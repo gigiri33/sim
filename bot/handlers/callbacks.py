@@ -2509,6 +2509,9 @@ def _do_reject_all(call, uid, note):
     with _get_conn() as _c:
         _pending_snap = _c.execute(
             "SELECT id, user_id FROM payments WHERE status='pending'"
+            " AND gateway IN ('card', 'crypto')"
+            " AND (receipt_file_id IS NOT NULL"
+            " OR (receipt_text IS NOT NULL AND receipt_text != ''))"
         ).fetchall()
 
     rejected_count = _reject_all()
@@ -13399,6 +13402,10 @@ def _dispatch_callback(call, uid, data):
             )
         receipt_note = esc(payment["receipt_text"] or "—")
         uname = "@" + esc(user_row["username"]) if (user_row and user_row["username"]) else "—"
+        _pay_dict = dict(payment)
+        crypto_comment_line = ""
+        if _pay_dict.get("crypto_comment"):
+            crypto_comment_line = f"\n🔑 کد کامنت: <code>{esc(_pay_dict['crypto_comment'])}</code>"
         text = (
             f"📋 <b>جزئیات رسید #{payment_id}</b>\n\n"
             f"🧾 نوع: <b>{kind_label}</b>\n"
@@ -13407,6 +13414,7 @@ def _dispatch_callback(call, uid, data):
             f"📞 یوزرنیم: {uname}\n"
             f"💰 مبلغ: <b>{fmt_price(payment['amount'])}</b> تومان\n"
             f"💳 روش پرداخت: {esc(payment['payment_method'])}"
+            f"{crypto_comment_line}"
             f"{pkg_text}\n\n"
             f"📝 توضیحات مشتری: {receipt_note}\n"
             f"🕐 ثبت شده: {payment['created_at']}"

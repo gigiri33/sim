@@ -246,6 +246,13 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
                 f"\n\n{ce('🔑', '5330115548900501467')} <b>کامنت:</b> <code>{comment_code}</code>\n\n"
                 f"{ce('⚠️', '5314346928660554905')} <b>هنگام پرداخت حتماً مقدار کامنت را دقیقاً وارد کنید، در غیر این صورت رسید شما تأیید نخواهد شد.</b>"
             )
+            # Save the comment code to the DB so admins can see it
+            if payment_id:
+                try:
+                    from .db import update_payment_crypto_comment
+                    update_payment_crypto_comment(payment_id, comment_code)
+                except Exception:
+                    pass
 
         text = (
             f"{ce('💎', '5471952986970267163')} <b>پرداخت با {esc(label)}</b>\n\n"
@@ -349,14 +356,14 @@ def send_payment_to_admins(payment_id):
                 coin_amount = payment["amount"] / prices[symbol]
                 crypto_line = f"\n💱 معادل ارزی: <code>{coin_amount:.6f} {symbol}</code>"
 
-    # TON anti-fraud info for admin
+    # Crypto comment code shown to admin (for verification)
     ton_fraud_line = ""
-    if coin_key == "ton":
+    if coin_key:
         _pay_dict = dict(payment)
         _comment = _pay_dict.get("crypto_comment")
         _tx_hash = _pay_dict.get("crypto_tx_hash")
         if _comment:
-            ton_fraud_line += f"\n🔑 کد واریز (Comment): <code>{esc(_comment)}</code>"
+            ton_fraud_line += f"\n🔑 کد کامنت: <code>{esc(_comment)}</code>"
         if _tx_hash:
             ton_fraud_line += f"\n🔗 هش تراکنش: <code>{esc(_tx_hash)}</code>"
     text = (

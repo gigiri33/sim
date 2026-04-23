@@ -656,6 +656,8 @@ def _run_init_db_migrations():
                 "created_at  TEXT    NOT NULL"
                 ")"
             ),
+            # ── Crypto comment code shown to user during payment ──────────────
+            "ALTER TABLE payments ADD COLUMN crypto_comment TEXT",
         ]
         for sql in migrations:
             try:
@@ -1592,6 +1594,14 @@ def update_payment_final_amount(payment_id, final_amount):
         )
 
 
+def update_payment_crypto_comment(payment_id, comment_code):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE payments SET crypto_comment=? WHERE id=?",
+            (comment_code, payment_id)
+        )
+
+
 def get_payment(payment_id):
     with get_conn() as conn:
         return conn.execute(
@@ -1602,12 +1612,15 @@ def get_payment(payment_id):
 def get_pending_payments_page(page=0, page_size=10):
     """Return (total_count, list_of_dicts) for pending payments with submitted receipts.
 
-    Only payments where the user has actually submitted a receipt
+    Only card/crypto payments where the user has actually submitted a receipt
     (receipt_file_id IS NOT NULL or receipt_text is non-empty) are included.
-    Payments that only reached 'pending' by opening the payment page without
-    submitting a receipt are excluded.
+    - Automated gateways (tetrapay, tronpays_rial, swapwallet_crypto) are excluded
+      because they pre-set receipt_text to an auth/invoice ID and self-verify.
+    - Payments that only reached 'pending' by opening the card/wallet copy page
+      without submitting a receipt are also excluded.
     """
-    _RECEIPT_FILTER = (
+    _PENDING_FILTER = (
+        " AND p.gateway IN ('card', 'crypto')"
         " AND (p.receipt_file_id IS NOT NULL"
         " OR (p.receipt_text IS NOT NULL AND p.receipt_text != ''))"
     )
@@ -1615,7 +1628,7 @@ def get_pending_payments_page(page=0, page_size=10):
     with get_conn() as conn:
         total = conn.execute(
             "SELECT COUNT(*) AS c FROM payments p"
-            " WHERE p.status='pending'" + _RECEIPT_FILTER
+            " WHERE p.status='pending'" + _PENDING_FILTER
         ).fetchone()["c"]
         rows = conn.execute(
             "SELECT p.*, u.full_name, u.username,"
@@ -1624,7 +1637,7 @@ def get_pending_payments_page(page=0, page_size=10):
             " LEFT JOIN users u ON u.user_id = p.user_id"
             " LEFT JOIN packages pk ON pk.id = p.package_id"
             " LEFT JOIN config_types t ON t.id = pk.type_id"
-            " WHERE p.status = 'pending'" + _RECEIPT_FILTER +
+            " WHERE p.status = 'pending'" + _PENDING_FILTER +
             " ORDER BY p.created_at ASC"
             " LIMIT ? OFFSET ?",
             (page_size, offset)
@@ -1897,16 +1910,28 @@ def set_discount_code_targets(code_id, target_type, target_ids):
 
 
 def reject_all_pending_payments():
-    """Reject all pending payments. Returns count of rejected payments."""
+    """Reject all pending card/crypto payments that have a submitted receipt.
+
+    Automated gateways (tetrapay, tronpays_rial, swapwallet_crypto) are excluded
+    because they self-verify and should not be bulk-rejected.
+    Payments without a submitted receipt (user only opened the card page) are
+    also excluded to avoid wrongly rejecting in-progress sessions.
+    Returns count of rejected payments.
+    """
+    _REJECT_FILTER = (
+        " AND gateway IN ('card', 'crypto')"
+        " AND (receipt_file_id IS NOT NULL"
+        " OR (receipt_text IS NOT NULL AND receipt_text != ''))"
+    )
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT id FROM payments WHERE status='pending'"
+            "SELECT id FROM payments WHERE status='pending'" + _REJECT_FILTER
         ).fetchall()
         ids = [r["id"] for r in rows]
         if ids:
             conn.execute(
                 "UPDATE payments SET status='rejected', admin_note=?, approved_at=? "
-                "WHERE status='pending'",
+                "WHERE status='pending'" + _REJECT_FILTER,
                 ("رد شد توسط ادمین (رد همه)", now_str())
             )
         return len(ids)
