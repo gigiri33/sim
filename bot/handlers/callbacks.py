@@ -1286,6 +1286,87 @@ def _notify_panel_error(uid, package_row, stage: str, detail: str = "", panel_co
         log.error("_notify_panel_error itself failed: %s", _ne)
 
 
+def _panel_connect_with_retry(uid, protocol, host, port, path, username, password,
+                               panel_name="", panel_id=None, notify_chat_id=None):
+    """
+    Try to connect (login) to a panel, retrying on connection errors indefinitely.
+    If the panel is still unreachable after ADMIN_NOTIFY_AFTER seconds,
+    notifies all ADMIN_IDS and the error_log topic once.
+    Returns (ok: bool, err: str|None).
+    """
+    import time as _t
+    from ..panels.client import PanelClient as _PC
+
+    CONN_RETRY_DELAY   = 15    # seconds between retries on connection error
+    FUNC_RETRY_TIMEOUT = 120   # 2 min cap for non-connection errors before giving up
+    FUNC_RETRY_DELAY   = 10
+    ADMIN_NOTIFY_AFTER = 300   # 5 minutes before alerting admin
+
+    def _is_conn_err(e):
+        s = str(e).lower()
+        return any(x in s for x in [
+            "connection refused", "max retries exceeded", "failed to establish",
+            "newconnectionerror", "httpsconnectionpool", "remotedisconnected",
+            "connection timed out", "read timed out", "timeout",
+            "name or service not known", "nameresolutionerror", "failed to resolve",
+        ])
+
+    cl = _PC(protocol=protocol, host=host, port=int(port),
+             path=path, username=username, password=password)
+
+    _t_start         = _t.time()
+    _admin_notified  = False
+    _t0              = _t.time()
+
+    while True:
+        elapsed_total = _t.time() - _t_start
+        # Admin notification after 5 minutes of continuous failure
+        if not _admin_notified and elapsed_total >= ADMIN_NOTIFY_AFTER:
+            _admin_notified = True
+            _label = f"<b>{esc(str(panel_name))}</b>" if panel_name else f"<code>{esc(str(host))}:{port}</code>"
+            _text  = (
+                "⚠️ <b>پنل در دسترس نیست — بررسی اتصال ادامه دارد</b>\n\n"
+                f"🖥 پنل: {_label}\n"
+                f"👤 ادمین: <code>{uid}</code>\n\n"
+                "ربات به‌طور خودکار در حال تلاش مجدد است."
+            )
+            for _a in ADMIN_IDS:
+                try:
+                    bot.send_message(_a, _text, parse_mode="HTML")
+                except Exception:
+                    pass
+            try:
+                from ..group_manager import send_to_topic as _stt
+                _stt("error_log", _text)
+            except Exception:
+                pass
+            if notify_chat_id:
+                try:
+                    bot.send_message(notify_chat_id,
+                        "⏳ پنل بیش از ۵ دقیقه در دسترس نیست. در صورت رفع مشکل ادامه می‌دهیم…",
+                        parse_mode="HTML")
+                except Exception:
+                    pass
+
+        try:
+            ok, err = cl.login()
+        except Exception as exc:
+            ok, err = False, str(exc)
+
+        if ok:
+            return True, None
+
+        elapsed_step = _t.time() - _t0
+        if _is_conn_err(err):
+            log.warning("_panel_connect_with_retry: CONN_ERR (%.0fs total): %s", elapsed_total, err)
+            _t.sleep(CONN_RETRY_DELAY)
+        else:
+            log.warning("_panel_connect_with_retry: non-conn err (%.0fs step): %s", elapsed_step, err)
+            if elapsed_step + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:
+                return False, err
+            _t.sleep(FUNC_RETRY_DELAY)
+
+
 def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method,
                           quantity, payment_id):
     """
@@ -3786,9 +3867,10 @@ def _dispatch_callback(call, uid, data):
         # Show packages of same type for renewal
         with get_conn() as conn:
             type_id = conn.execute("SELECT type_id FROM packages WHERE id=?", (item["package_id"],)).fetchone()["type_id"]
-        packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0]
-        kb = types.InlineKeyboardMarkup()
         user = get_user(uid)
+        _is_agent = bool(user and user["is_agent"])
+        packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and _br_ok(p, _is_agent)]
+        kb = types.InlineKeyboardMarkup()
         for p in packages:
             price = get_effective_price(uid, p)
             _sn = p['show_name'] if 'show_name' in p.keys() else 1
@@ -6466,9 +6548,10 @@ def _dispatch_callback(call, uid, data):
                     "SELECT type_id FROM packages WHERE id=?", (cfg.get("package_id") or 0,)
                 ).fetchone()
             type_id = type_row["type_id"] if type_row else None
-            packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0] if type_id else []
-            kb = types.InlineKeyboardMarkup()
             user = get_user(uid)
+            _is_agent = bool(user and user["is_agent"])
+            packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and _br_ok(p, _is_agent)] if type_id else []
+            kb = types.InlineKeyboardMarkup()
             for p in packages:
                 price = get_effective_price(uid, p)
                 _sn = p['show_name'] if 'show_name' in p.keys() else 1
@@ -13620,15 +13703,11 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id, "در حال بررسی…")
         try:
             from ..panels.client import PanelClient
-            client = PanelClient(
-                protocol=p["protocol"],
-                host=p["host"],
-                port=p["port"],
-                path=p["path"] or "",
-                username=p["username"],
-                password=p["password"],
+            ok, err = _panel_connect_with_retry(
+                uid=uid, protocol=p["protocol"], host=p["host"], port=p["port"],
+                path=p["path"] or "", username=p["username"], password=p["password"],
+                panel_name=p.get("name", ""), panel_id=panel_id, notify_chat_id=uid,
             )
-            ok, err = client.health_check()
             status = "connected" if ok else "disconnected"
             update_panel_status(panel_id, status, err or "")
         except Exception as exc:
@@ -13677,13 +13756,11 @@ def _dispatch_callback(call, uid, data):
         password = sd.get("password", "")
         bot.answer_callback_query(call.id)
         bot.send_message(uid, "⏳ در حال بررسی اتصال به پنل…")
-        try:
-            from ..panels.client import PanelClient as _PC
-            _cl = _PC(protocol=protocol, host=host, port=int(port),
-                      path=path, username=username, password=password)
-            ok, err = _cl.health_check()
-        except Exception as exc:
-            ok, err = False, str(exc)
+        ok, err = _panel_connect_with_retry(
+            uid=uid, protocol=protocol, host=host, port=int(port),
+            path=path, username=username, password=password,
+            panel_name=pnl_name, notify_chat_id=uid,
+        )
         if ok:
             state_clear(uid)
             panel_id = add_panel(name=pnl_name or "بدون نام", protocol=protocol,
@@ -13704,8 +13781,8 @@ def _dispatch_callback(call, uid, data):
                 InlineKeyboardButton("❌ لغو", callback_data="adm:pnl:add_cancel"),
             )
             bot.send_message(uid,
-                f"❌ <b>اتصال ناموفق</b>\n\nخطا: <code>{esc((err or '')[:300])}</code>\n\n"
-                "می‌توانید پنل را به‌صورت غیرفعال ذخیره کنید.",
+                "❌ <b>اتصال ناموفق</b>\n\n"
+                "می‌توانید پنل را به‌صورت غیرفعال ذخیره کنید تا بعداً ویرایش شود.",
                 parse_mode="HTML", reply_markup=kb_fail)
         return
 
