@@ -30,12 +30,47 @@ import string
 _pay_lock   = _threading.Lock()
 _pay_in_fly: set = set()   # payment IDs currently being processed
 from .gateways.base import is_gateway_available, is_card_info_complete, get_gateway_range_text, is_gateway_in_range, build_gateway_range_guide
+from .gateways.base import get_gateway_bonus_amount as _gw_bonus_amt
 from .gateways.crypto import fetch_crypto_prices
 from .bot_instance import bot
 from .ui.helpers import send_or_edit
 from .ui.keyboards import _btn, _raw_markup
 from .ui.premium_emoji import ce
 from .group_manager import send_to_topic, send_photo_to_topic
+
+# ── Gateway label display for bonus text ──────────────────────────────────────
+_GW_DISPLAY_NAMES = {
+    "card":              "کارت به کارت",
+    "crypto":            "ارز دیجیتال",
+    "tetrapay":          "TetraPay",
+    "swapwallet_crypto": "SwapWallet",
+    "tronpays_rial":     "TronPays",
+}
+
+
+def apply_gateway_bonus_if_needed(user_id: int, gw_name: str, payment_amount: int) -> int:
+    """Credit wallet bonus and notify user if this gateway has a bonus configured.
+
+    Returns the bonus amount credited (0 if none).
+    This function is intentionally side-effect-free when bonus is not enabled.
+    """
+    from .db import get_gateway_bonus_amount, update_balance
+    bonus = get_gateway_bonus_amount(gw_name, payment_amount)
+    if bonus <= 0:
+        return 0
+    update_balance(user_id, bonus)
+    gw_display = _GW_DISPLAY_NAMES.get(gw_name, gw_name)
+    try:
+        bot.send_message(
+            user_id,
+            f"🎁 <b>هدیه پرداخت</b>\n\n"
+            f"به دلیل پرداخت از طریق درگاه <b>{gw_display}</b>، "
+            f"مبلغ <b>{fmt_price(bonus)} تومان</b> به عنوان هدیه به کیف پول شما اضافه شد. 🎉",
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+    return bonus
 
 # ── Price cache (60 s TTL) — both selection and payment info share the same data
 _PRICES_CACHE: dict = {}
@@ -111,6 +146,10 @@ def show_payment_method_selection(target, uid, context_data):
         default_lbl, eid = _GW_DEFAULTS[key]
         custom_lbl = _sg(f"gw_{key}_display_name", "").strip()
         lbl = custom_lbl or default_lbl
+        # Show bonus hint if this gateway has a bonus configured
+        bonus = _gw_bonus_amt(key, amount)
+        if bonus > 0:
+            lbl += f" ({fmt_price(bonus)} هدیه 🎁)"
         rows.append([_btn(lbl, callback_data=cb, emoji_id=eid)])
         _gw_labels.append((key, lbl))
 
@@ -542,6 +581,11 @@ def _finish_card_payment_approval_core(payment_id, admin_note, approved):
                 return False, True  # already processed
             update_balance(user_id, payment["amount"])
             notified = _safe_send(user_id, f"{ce('✅', '5900157489759916320')} واریزی شما تأیید شد.\n\n{esc(admin_note)}")
+            # Apply gateway bonus if configured
+            try:
+                apply_gateway_bonus_if_needed(user_id, payment["payment_method"] or "card", payment["amount"])
+            except Exception:
+                pass
             user_row = get_user(user_id)
             receipt_note = payment["receipt_text"] if payment["receipt_text"] else ""
             pay_method   = payment["payment_method"] if payment["payment_method"] else "—"
@@ -569,6 +613,11 @@ def _finish_card_payment_approval_core(payment_id, admin_note, approved):
             notified = _safe_send(user_id,
                 f"{ce('✅', '5900157489759916320')} واریزی شما تأیید شد.\n\n{esc(admin_note)}\n\n"
                 "⏳ کانفیگ‌های شما در حال آماده‌سازی هستند...")
+            # Apply gateway bonus if configured
+            try:
+                apply_gateway_bonus_if_needed(user_id, payment["payment_method"] or "card", payment["amount"])
+            except Exception:
+                pass
             purchase_ids, pending_ids = _deliver_bulk_configs(
                 user_id, user_id, package_id,
                 payment["amount"], payment["payment_method"], _qty_card, payment_id

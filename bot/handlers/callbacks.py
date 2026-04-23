@@ -60,6 +60,11 @@ from ..db import (
     remove_referral_restriction_by_id, remove_referral_restriction_by_user,
     toggle_referral_restriction_type, get_referral_restrictions_paged,
     set_user_restricted as _set_user_restricted_db,
+    # Card management
+    get_payment_cards, get_payment_card, add_payment_card, update_payment_card,
+    toggle_payment_card_active, delete_payment_card, pick_card_for_payment,
+    # Fee / Bonus
+    get_gateway_fee_amount, get_gateway_bonus_amount, apply_gateway_fee,
 )
 from ..gateways.base import is_gateway_available, is_card_info_complete, get_gateway_range_text, is_gateway_in_range, build_gateway_range_guide
 from ..gateways.crypto import fetch_crypto_prices
@@ -87,6 +92,7 @@ from ..payments import (
     get_effective_price, show_payment_method_selection,
     show_crypto_selection, show_crypto_payment_info,
     send_payment_to_admins, finish_card_payment_approval,
+    apply_gateway_bonus_if_needed,
 )
 from ..admin.renderers import (
     _show_admin_types, _show_admin_stock, _show_admin_admins_panel,
@@ -3104,6 +3110,10 @@ def _tetrapay_auto_verify(payment_id, authority, uid, chat_id, message_id, kind,
                 update_balance(uid, payment["amount"])
                 state_clear(uid)
                 try:
+                    apply_gateway_bonus_if_needed(uid, "tetrapay", payment["amount"])
+                except Exception:
+                    pass
+                try:
                     bot.edit_message_text(
                         f"✅ پرداخت شما تأیید شد و کیف پول شارژ شد.\n\n💰 مبلغ: {fmt_price(payment['amount'])} تومان",
                         chat_id, message_id, parse_mode="HTML",
@@ -3132,6 +3142,10 @@ def _tetrapay_auto_verify(payment_id, authority, uid, chat_id, message_id, kind,
                     chat_id, uid, package_id,
                     payment["amount"], "tetrapay", _qty_tp_auto, payment_id
                 )
+                try:
+                    apply_gateway_bonus_if_needed(uid, "tetrapay", payment["amount"])
+                except Exception:
+                    pass
                 _send_bulk_delivery_result(chat_id, uid, pkg_row,
                                            purchase_ids, pending_ids, "TetraPay")
 
@@ -3158,6 +3172,10 @@ def _tetrapay_auto_verify(payment_id, authority, uid, chat_id, message_id, kind,
                     bot.send_message(uid, msg_text, parse_mode="HTML", reply_markup=back_button("main"))
                 if item:
                     admin_renewal_notify(uid, item, pkg_row, payment["amount"], "TetraPay")
+                try:
+                    apply_gateway_bonus_if_needed(uid, "tetrapay", payment["amount"])
+                except Exception:
+                    pass
 
             elif kind == "pnlcfg_renewal":
                 cfg_id_tp   = payment["config_id"]
@@ -3256,6 +3274,10 @@ def _tronpays_rial_auto_verify(payment_id, invoice_id, uid, chat_id, message_id,
                 update_balance(uid, payment["amount"])
                 state_clear(uid)
                 try:
+                    apply_gateway_bonus_if_needed(uid, "tronpays_rial", payment["amount"])
+                except Exception:
+                    pass
+                try:
                     bot.edit_message_text(
                         f"✅ پرداخت شما تأیید شد و کیف پول شارژ شد.\n\n💰 مبلغ: {fmt_price(payment['amount'])} تومان",
                         chat_id, message_id, parse_mode="HTML",
@@ -3284,6 +3306,10 @@ def _tronpays_rial_auto_verify(payment_id, invoice_id, uid, chat_id, message_id,
                     chat_id, uid, package_id,
                     payment["amount"], "tronpays_rial", _qty_trp_auto, payment_id
                 )
+                try:
+                    apply_gateway_bonus_if_needed(uid, "tronpays_rial", payment["amount"])
+                except Exception:
+                    pass
                 _send_bulk_delivery_result(chat_id, uid, pkg_row,
                                            purchase_ids, pending_ids, "TronPays")
 
@@ -3310,6 +3336,10 @@ def _tronpays_rial_auto_verify(payment_id, invoice_id, uid, chat_id, message_id,
                     bot.send_message(uid, msg_text, parse_mode="HTML", reply_markup=back_button("main"))
                 if item:
                     admin_renewal_notify(uid, item, pkg_row, payment["amount"], "TronPays")
+                try:
+                    apply_gateway_bonus_if_needed(uid, "tronpays_rial", payment["amount"])
+                except Exception:
+                    pass
 
             elif kind == "pnlcfg_renewal":
                 cfg_id_trp  = payment["config_id"]
@@ -3968,13 +3998,13 @@ def _dispatch_callback(call, uid, data):
         if not package_row:
             bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
             return
-        card  = setting_get("payment_card", "")
-        bank  = setting_get("payment_bank", "")
-        owner = setting_get("payment_owner", "")
-        if not card:
+        _ci = pick_card_for_payment()
+        if not _ci:
             bot.answer_callback_query(call.id, "اطلاعات پرداخت هنوز ثبت نشده است.", show_alert=True)
             return
+        card, bank, owner = _ci["card_number"], _ci["bank_name"], _ci["holder_name"]
         price = _get_state_price(uid, package_row, "renew_select_method")
+        price = apply_gateway_fee("card", price)
         if not is_gateway_in_range("card", price):
             _rng = get_gateway_range_text("card")
             bot.answer_callback_query(call.id,
@@ -4056,6 +4086,10 @@ def _dispatch_callback(call, uid, data):
                 back_button("main"))
             if item:
                 admin_renewal_notify(uid, item, package_row, payment["amount"], "TetraPay")
+            try:
+                apply_gateway_bonus_if_needed(uid, "tetrapay", payment["amount"])
+            except Exception:
+                pass
             state_clear(uid)
         else:
             _st = result.get("status", "") if isinstance(result, dict) else ""
@@ -4167,6 +4201,10 @@ def _dispatch_callback(call, uid, data):
                 back_button("main"))
             if item:
                 admin_renewal_notify(uid, item, package_row, payment["amount"], "TronPays")
+            try:
+                apply_gateway_bonus_if_needed(uid, "tronpays_rial", payment["amount"])
+            except Exception:
+                pass
             state_clear(uid)
         else:
             bot.answer_callback_query(call.id, "❌ پرداخت هنوز تأیید نشده. لطفاً ابتدا پرداخت را انجام دهید.", show_alert=True)
@@ -4560,13 +4598,13 @@ def _dispatch_callback(call, uid, data):
                 "با دکمه زیر شماره خود را ارسال کنید:",
                 parse_mode="HTML", reply_markup=kb_phone)
             return
-        card  = setting_get("payment_card", "")
-        bank  = setting_get("payment_bank", "")
-        owner = setting_get("payment_owner", "")
-        if not card:
+        _ci = pick_card_for_payment()
+        if not _ci:
             bot.answer_callback_query(call.id, "اطلاعات پرداخت هنوز ثبت نشده است.", show_alert=True)
             return
+        card, bank, owner = _ci["card_number"], _ci["bank_name"], _ci["holder_name"]
         price      = _get_state_price(uid, package_row, "buy_select_method")
+        price = apply_gateway_fee("card", price)
         if not is_gateway_in_range("card", price):
             _rng = get_gateway_range_text("card")
             bot.answer_callback_query(call.id,
@@ -4713,6 +4751,10 @@ def _dispatch_callback(call, uid, data):
                     bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
                     return
                 update_balance(uid, payment["amount"])
+                try:
+                    apply_gateway_bonus_if_needed(uid, "tetrapay", payment["amount"])
+                except Exception:
+                    pass
                 bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد!")
                 send_or_edit(call, f"✅ پرداخت شما تأیید و کیف پول شارژ شد.\n\n💰 مبلغ: {fmt_price(payment['amount'])} تومان", back_button("main"))
                 state_clear(uid)
@@ -4731,6 +4773,10 @@ def _dispatch_callback(call, uid, data):
                     call.message.chat.id, uid, package_id,
                     payment["amount"], "tetrapay", _qty_tp, payment_id
                 )
+                try:
+                    apply_gateway_bonus_if_needed(uid, "tetrapay", payment["amount"])
+                except Exception:
+                    pass
                 _send_bulk_delivery_result(call.message.chat.id, uid, package_row,
                                            purchase_ids, pending_ids, "TetraPay")
                 state_clear(uid)
@@ -4823,6 +4869,10 @@ def _dispatch_callback(call, uid, data):
                 bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد!")
                 send_or_edit(call, f"✅ پرداخت شما تأیید و کیف پول شارژ شد.\n\n💰 مبلغ: {fmt_price(payment['amount'])} تومان",
                              back_button("main"))
+                try:
+                    apply_gateway_bonus_if_needed(uid, "tronpays_rial", payment["amount"])
+                except Exception:
+                    pass
                 state_clear(uid)
             else:
                 config_id  = payment["config_id"]
@@ -4839,10 +4889,12 @@ def _dispatch_callback(call, uid, data):
                     call.message.chat.id, uid, package_id,
                     payment["amount"], "tronpays_rial", _qty_tron, payment_id
                 )
+                try:
+                    apply_gateway_bonus_if_needed(uid, "tronpays_rial", payment["amount"])
+                except Exception:
+                    pass
                 _send_bulk_delivery_result(call.message.chat.id, uid, package_row,
                                            purchase_ids, pending_ids, "TronPays")
-                state_clear(uid)
-                admin_purchase_notify("TronPays", get_user(uid), package_row, purchase_id=purchase_id)
                 state_clear(uid)
         else:
             bot.answer_callback_query(call.id, "❌ پرداخت هنوز تأیید نشده. لطفاً ابتدا پرداخت را انجام دهید.", show_alert=True)
@@ -5045,12 +5097,12 @@ def _dispatch_callback(call, uid, data):
                 "لطفاً درگاه دیگری متناسب با این مبلغ انتخاب کنید.",
                 show_alert=True)
             return
-        card  = setting_get("payment_card", "")
-        bank  = setting_get("payment_bank", "")
-        owner = setting_get("payment_owner", "")
-        if not card:
+        _ci = pick_card_for_payment()
+        if not _ci:
             bot.answer_callback_query(call.id, "اطلاعات پرداخت هنوز ثبت نشده است.", show_alert=True)
             return
+        card, bank, owner = _ci["card_number"], _ci["bank_name"], _ci["holder_name"]
+        amount = apply_gateway_fee("card", amount)
         payment_id = create_payment("wallet_charge", uid, None, amount, "card", status="pending")
         # Generate random amount if enabled
         final_amount = None
@@ -5288,6 +5340,10 @@ def _dispatch_callback(call, uid, data):
                     call.message.chat.id, uid, package_id,
                     payment["amount"], "swapwallet_crypto", _qty_sw, payment_id
                 )
+                try:
+                    apply_gateway_bonus_if_needed(uid, "swapwallet_crypto", payment["amount"])
+                except Exception:
+                    pass
                 _send_bulk_delivery_result(call.message.chat.id, uid, package_row,
                                            purchase_ids, pending_ids, "SwapWallet Crypto")
                 state_clear(uid)
@@ -5382,6 +5438,10 @@ def _dispatch_callback(call, uid, data):
                 back_button("main"))
             if item:
                 admin_renewal_notify(uid, item, package_row, payment["amount"], "SwapWallet Crypto")
+            try:
+                apply_gateway_bonus_if_needed(uid, "swapwallet_crypto", payment["amount"])
+            except Exception:
+                pass
             state_clear(uid)
         else:
             bot.answer_callback_query(call.id, "❌ پرداخت هنوز تأیید نشده. لطفاً ابتدا واریز را انجام دهید.", show_alert=True)
@@ -6645,13 +6705,13 @@ def _dispatch_callback(call, uid, data):
             package_row = get_package(package_id)
             if not package_row:
                 bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True); return
-            card  = setting_get("payment_card", "")
-            bank  = setting_get("payment_bank", "")
-            owner = setting_get("payment_owner", "")
-            if not card:
+            _ci = pick_card_for_payment()
+            if not _ci:
                 bot.answer_callback_query(call.id, "اطلاعات پرداخت هنوز ثبت نشده است.", show_alert=True); return
+            card, bank, owner = _ci["card_number"], _ci["bank_name"], _ci["holder_name"]
             sd = state_data(uid)
             price = sd.get("amount") or get_effective_price(uid, package_row)
+            price = apply_gateway_fee("card", price)
             if not is_gateway_in_range("card", price):
                 _rng = get_gateway_range_text("card")
                 bot.answer_callback_query(call.id,
@@ -11263,39 +11323,41 @@ def _dispatch_callback(call, uid, data):
     if data == "adm:set:gw:card":
         enabled = setting_get("gw_card_enabled", "0")
         vis = setting_get("gw_card_visibility", "public")
-        card = setting_get("payment_card", "")
-        bank = setting_get("payment_bank", "")
-        owner = setting_get("payment_owner", "")
         range_enabled = setting_get("gw_card_range_enabled", "0")
         display_name = setting_get("gw_card_display_name", "")
         random_amount = setting_get("gw_card_random_amount", "0")
+        rotation_on = setting_get("gw_card_rotation_enabled", "0")
         enabled_label = "🟢 فعال" if enabled == "1" else "🔴 غیرفعال"
         vis_label = "👥 عمومی" if vis == "public" else "🔒 کاربران امن"
         range_label = "🟢 فعال" if range_enabled == "1" else "🔴 غیرفعال"
         random_label = "🟢 فعال" if random_amount == "1" else "🔴 غیرفعال"
+        rotation_label = "🟢 فعال" if rotation_on == "1" else "🔴 غیرفعال"
+        active_cards = get_payment_cards(active_only=True)
+        cards_count = len(get_payment_cards())
+        fee_on = setting_get("gw_card_fee_enabled", "0") == "1"
+        bonus_on = setting_get("gw_card_bonus_enabled", "0") == "1"
         kb = types.InlineKeyboardMarkup()
         kb.row(
             types.InlineKeyboardButton(f"وضعیت: {enabled_label}", callback_data="adm:gw:card:toggle"),
             types.InlineKeyboardButton(f"نمایش: {vis_label}", callback_data="adm:gw:card:vis"),
         )
         kb.add(types.InlineKeyboardButton(f"📊 بازه پرداختی: {range_label}", callback_data="adm:gw:card:range"))
-        kb.add(types.InlineKeyboardButton(f"🎲 قیمت رندوم برای بررسی سریعتر رسیدها: {random_label}",
-                                          callback_data="adm:gw:card:randamt"))
+        kb.add(types.InlineKeyboardButton(f"🎲 قیمت رندوم: {random_label}", callback_data="adm:gw:card:randamt"))
         kb.add(types.InlineKeyboardButton("🏷 نام نمایشی درگاه", callback_data="adm:gw:card:set_name"))
-        kb.add(types.InlineKeyboardButton("💳 شماره کارت", callback_data="adm:set:card"))
-        kb.add(types.InlineKeyboardButton("🏦 نام بانک", callback_data="adm:set:bank"))
-        kb.add(types.InlineKeyboardButton("👤 نام صاحب کارت", callback_data="adm:set:owner"))
+        kb.add(types.InlineKeyboardButton(f"💳 مدیریت کارت‌ها ({cards_count} کارت)", callback_data="adm:gw:card:cards"))
+        fee_bonus_lbl = ("🟢 کارمزد" if fee_on else "🔴 کارمزد") + " | " + ("🟢 بونس" if bonus_on else "🔴 بونس")
+        kb.add(types.InlineKeyboardButton(f"🎁 بونس و کارمزد — {fee_bonus_lbl}", callback_data="adm:gw:card:feebonus"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gateways", icon_custom_emoji_id="5253997076169115797"))
         name_display = display_name or "<i>پیش‌فرض: کارت به کارت</i>"
+        cards_status = f"{len(active_cards)} کارت فعال از {cards_count}" if cards_count else "⚠️ هیچ کارتی ثبت نشده"
         text = (
             "💳 <b>درگاه کارت به کارت</b>\n\n"
             f"وضعیت: {enabled_label}\n"
             f"نمایش: {vis_label}\n"
             f"نام نمایشی: {name_display}\n"
-            f"🎲 قیمت رندوم: {random_label}\n\n"
-            f"کارت: <code>{esc(card or 'ثبت نشده')}</code>\n"
-            f"بانک: {esc(bank or 'ثبت نشده')}\n"
-            f"صاحب: {esc(owner or 'ثبت نشده')}"
+            f"🎲 قیمت رندوم: {random_label}\n"
+            f"🔄 چرخش کارت: {rotation_label}\n"
+            f"💳 کارت‌ها: {cards_status}"
         )
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
@@ -11340,6 +11402,311 @@ def _dispatch_callback(call, uid, data):
         _fake_call(call, "adm:set:gw:card")
         return
 
+    # ── Card management ───────────────────────────────────────────────────────
+    if data == "adm:gw:card:cards":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        cards = get_payment_cards()
+        rotation_on = setting_get("gw_card_rotation_enabled", "0") == "1"
+        rotation_lbl = "🟢 فعال" if rotation_on else "🔴 غیرفعال"
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("➕ اضافه کردن کارت جدید", callback_data="adm:gw:card:cards:add"))
+        kb.add(types.InlineKeyboardButton(f"🔀 رندم کارت‌ها: {rotation_lbl}", callback_data="adm:gw:card:cards:rotation"))
+        for c in cards:
+            status = "✅" if c["is_active"] else "⛔"
+            kb.add(types.InlineKeyboardButton(
+                f"{status} {c['card_number']} — {c['bank_name'] or 'بدون نام بانک'}",
+                callback_data=f"adm:gw:card:cards:cfg:{c['id']}"
+            ))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gw:card", icon_custom_emoji_id="5253997076169115797"))
+        cards_count = len(cards)
+        active_count = sum(1 for c in cards if c["is_active"])
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"💳 <b>مدیریت کارت‌ها</b>\n\n"
+            f"تعداد کارت‌ها: <b>{cards_count}</b>\n"
+            f"کارت‌های فعال: <b>{active_count}</b>\n"
+            f"🔀 رندم: {rotation_lbl}\n\n"
+            "برای مدیریت هر کارت روی آن بزنید:",
+            kb)
+        return
+
+    if data == "adm:gw:card:cards:rotation":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        cur = setting_get("gw_card_rotation_enabled", "0")
+        setting_set("gw_card_rotation_enabled", "0" if cur == "1" else "1")
+        log_admin_action(uid, f"چرخش رندم کارت {'غیرفعال' if cur == '1' else 'فعال'} شد")
+        bot.answer_callback_query(call.id, "تغییر یافت.")
+        _fake_call(call, "adm:gw:card:cards")
+        return
+
+    if data == "adm:gw:card:cards:add":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        state_set(uid, "admin_card_add_number")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "💳 <b>اضافه کردن کارت جدید</b>\n\n"
+            "شماره کارت را ارسال کنید (فقط اعداد):",
+            back_button("adm:gw:card:cards"))
+        return
+
+    if data.startswith("adm:gw:card:cards:cfg:"):
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        card_id = int(data.split(":")[-1])
+        card = get_payment_card(card_id)
+        if not card:
+            bot.answer_callback_query(call.id, "کارت یافت نشد.", show_alert=True)
+            return
+        status_lbl = "✅ فعال" if card["is_active"] else "⛔ غیرفعال"
+        toggle_lbl = "⛔ غیرفعال کردن" if card["is_active"] else "✅ فعال کردن"
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("✏️ ویرایش مشخصات کارت", callback_data=f"adm:gw:card:cards:edit:{card_id}"))
+        kb.add(types.InlineKeyboardButton(toggle_lbl, callback_data=f"adm:gw:card:cards:toggle:{card_id}"))
+        kb.add(types.InlineKeyboardButton("🗑 حذف کارت", callback_data=f"adm:gw:card:cards:del:{card_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:gw:card:cards", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"💳 <b>تنظیمات کارت</b>\n\n"
+            f"شماره: <code>{esc(card['card_number'])}</code>\n"
+            f"بانک: {esc(card['bank_name'] or '—')}\n"
+            f"صاحب کارت: {esc(card['holder_name'] or '—')}\n"
+            f"وضعیت: {status_lbl}",
+            kb)
+        return
+
+    if data.startswith("adm:gw:card:cards:toggle:"):
+        card_id = int(data.split(":")[-1])
+        new_state = toggle_payment_card_active(card_id)
+        log_admin_action(uid, f"کارت {card_id} {'فعال' if new_state else 'غیرفعال'} شد")
+        bot.answer_callback_query(call.id, "✅ وضعیت کارت تغییر یافت.")
+        _fake_call(call, f"adm:gw:card:cards:cfg:{card_id}")
+        return
+
+    if data.startswith("adm:gw:card:cards:del:"):
+        card_id = int(data.split(":")[-1])
+        delete_payment_card(card_id)
+        log_admin_action(uid, f"کارت {card_id} حذف شد")
+        bot.answer_callback_query(call.id, "🗑 کارت حذف شد.")
+        _fake_call(call, "adm:gw:card:cards")
+        return
+
+    if data.startswith("adm:gw:card:cards:edit:"):
+        card_id = int(data.split(":")[-1])
+        card = get_payment_card(card_id)
+        if not card:
+            bot.answer_callback_query(call.id, "کارت یافت نشد.", show_alert=True)
+            return
+        state_set(uid, "admin_card_edit_number", card_id=card_id)
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"✏️ <b>ویرایش کارت</b>\n\n"
+            f"شماره فعلی: <code>{esc(card['card_number'])}</code>\n\n"
+            "شماره کارت جدید را ارسال کنید:",
+            back_button(f"adm:gw:card:cards:cfg:{card_id}"))
+        return
+
+    # ── Fee / Bonus admin for all gateways ────────────────────────────────────
+    _GW_NAMES_FEEBONUS = {
+        "card":              "💳 کارت به کارت",
+        "crypto":            "💎 ارز دیجیتال",
+        "tetrapay":          "🏦 TetraPay",
+        "swapwallet_crypto": "💎 SwapWallet",
+        "tronpays_rial":     "💳 TronPays",
+    }
+
+    def _feebonus_text(gw):
+        fee_on    = setting_get(f"gw_{gw}_fee_enabled",    "0") == "1"
+        fee_type  = setting_get(f"gw_{gw}_fee_type",   "fixed")
+        fee_val   = setting_get(f"gw_{gw}_fee_value",      "0")
+        bonus_on  = setting_get(f"gw_{gw}_bonus_enabled",  "0") == "1"
+        bonus_type= setting_get(f"gw_{gw}_bonus_type",  "fixed")
+        bonus_val = setting_get(f"gw_{gw}_bonus_value",    "0")
+        type_lbl  = lambda t: "درصد (%)" if t == "pct" else "مبلغ ثابت (تومان)"
+        fee_txt   = (f"{'✅' if fee_on else '❌'} کارمزد: {type_lbl(fee_type)} — مقدار: {fee_val}")
+        bonus_txt = (f"{'✅' if bonus_on else '❌'} بونس: {type_lbl(bonus_type)} — مقدار: {bonus_val}")
+        return f"{fee_txt}\n{bonus_txt}"
+
+    def _feebonus_kb(gw):
+        kb2 = types.InlineKeyboardMarkup()
+        fee_on   = setting_get(f"gw_{gw}_fee_enabled",   "0") == "1"
+        bonus_on = setting_get(f"gw_{gw}_bonus_enabled", "0") == "1"
+        kb2.add(types.InlineKeyboardButton(
+            f"💸 کارمزد: {'✅ فعال' if fee_on else '❌ غیرفعال'}",
+            callback_data=f"adm:gw:{gw}:fee"
+        ))
+        kb2.add(types.InlineKeyboardButton(
+            f"🎁 بونس: {'✅ فعال' if bonus_on else '❌ غیرفعال'}",
+            callback_data=f"adm:gw:{gw}:bonus"
+        ))
+        kb2.add(types.InlineKeyboardButton(
+            "بازگشت", callback_data=f"adm:set:gw:{gw}",
+            icon_custom_emoji_id="5253997076169115797"
+        ))
+        return kb2
+
+    def _fee_setting_kb(gw):
+        fee_on   = setting_get(f"gw_{gw}_fee_enabled",   "0") == "1"
+        fee_type = setting_get(f"gw_{gw}_fee_type",   "fixed")
+        kb2 = types.InlineKeyboardMarkup()
+        kb2.add(types.InlineKeyboardButton(
+            f"وضعیت: {'✅ فعال' if fee_on else '❌ غیرفعال'}",
+            callback_data=f"adm:gw:{gw}:fee:toggle"
+        ))
+        kb2.row(
+            types.InlineKeyboardButton(
+                f"{'✅ ' if fee_type == 'fixed' else ''}مبلغ ثابت",
+                callback_data=f"adm:gw:{gw}:fee:settype:fixed"
+            ),
+            types.InlineKeyboardButton(
+                f"{'✅ ' if fee_type == 'pct' else ''}درصد",
+                callback_data=f"adm:gw:{gw}:fee:settype:pct"
+            ),
+        )
+        kb2.add(types.InlineKeyboardButton("✏️ تنظیم مقدار", callback_data=f"adm:gw:{gw}:fee:setval"))
+        kb2.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:gw:{gw}:feebonus",
+                                           icon_custom_emoji_id="5253997076169115797"))
+        return kb2
+
+    def _bonus_setting_kb(gw):
+        bonus_on   = setting_get(f"gw_{gw}_bonus_enabled",   "0") == "1"
+        bonus_type = setting_get(f"gw_{gw}_bonus_type",   "fixed")
+        kb2 = types.InlineKeyboardMarkup()
+        kb2.add(types.InlineKeyboardButton(
+            f"وضعیت: {'✅ فعال' if bonus_on else '❌ غیرفعال'}",
+            callback_data=f"adm:gw:{gw}:bonus:toggle"
+        ))
+        kb2.row(
+            types.InlineKeyboardButton(
+                f"{'✅ ' if bonus_type == 'fixed' else ''}مبلغ ثابت",
+                callback_data=f"adm:gw:{gw}:bonus:settype:fixed"
+            ),
+            types.InlineKeyboardButton(
+                f"{'✅ ' if bonus_type == 'pct' else ''}درصد",
+                callback_data=f"adm:gw:{gw}:bonus:settype:pct"
+            ),
+        )
+        kb2.add(types.InlineKeyboardButton("✏️ تنظیم مقدار", callback_data=f"adm:gw:{gw}:bonus:setval"))
+        kb2.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:gw:{gw}:feebonus",
+                                           icon_custom_emoji_id="5253997076169115797"))
+        return kb2
+
+    # feebonus entry for each gateway (adm:gw:<gw>:feebonus or adm:gw:card:feebonus)
+    for _gw_fb in ("card", "crypto", "tetrapay", "swapwallet_crypto", "tronpays_rial"):
+        if data == f"adm:gw:{_gw_fb}:feebonus":
+            if not admin_has_perm(uid, "settings"):
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+                return
+            gw_lbl = _GW_NAMES_FEEBONUS.get(_gw_fb, _gw_fb)
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                f"🎁 <b>بونس و کارمزد — {gw_lbl}</b>\n\n"
+                f"{_feebonus_text(_gw_fb)}\n\n"
+                "کارمزد: مبلغ یا درصد اضافه به مبلغ فاکتور کاربر.\n"
+                "بونس: مبلغ یا درصد به کیف پول کاربر پس از پرداخت موفق.",
+                _feebonus_kb(_gw_fb))
+            return
+        if data == f"adm:gw:{_gw_fb}:fee":
+            if not admin_has_perm(uid, "settings"):
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+                return
+            fee_val  = setting_get(f"gw_{_gw_fb}_fee_value", "0")
+            fee_type = setting_get(f"gw_{_gw_fb}_fee_type",  "fixed")
+            type_lbl = "درصد" if fee_type == "pct" else "تومان ثابت"
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                f"💸 <b>کارمزد — {_GW_NAMES_FEEBONUS.get(_gw_fb, _gw_fb)}</b>\n\n"
+                f"مقدار فعلی: <b>{fee_val}</b> {type_lbl}\n\n"
+                "<i>کارمزد به مبلغ فاکتور کاربر اضافه می‌شود و مبلغ نهایی قابل پرداخت را تغییر می‌دهد.</i>",
+                _fee_setting_kb(_gw_fb))
+            return
+        if data == f"adm:gw:{_gw_fb}:fee:toggle":
+            if not admin_has_perm(uid, "settings"):
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+                return
+            cur = setting_get(f"gw_{_gw_fb}_fee_enabled", "0")
+            setting_set(f"gw_{_gw_fb}_fee_enabled", "0" if cur == "1" else "1")
+            bot.answer_callback_query(call.id, "تغییر یافت.")
+            _fake_call(call, f"adm:gw:{_gw_fb}:fee")
+            return
+        if data.startswith(f"adm:gw:{_gw_fb}:fee:settype:"):
+            if not admin_has_perm(uid, "settings"):
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+                return
+            new_type = data.split(":")[-1]
+            if new_type in ("fixed", "pct"):
+                setting_set(f"gw_{_gw_fb}_fee_type", new_type)
+                bot.answer_callback_query(call.id, "تغییر یافت.")
+            _fake_call(call, f"adm:gw:{_gw_fb}:fee")
+            return
+        if data == f"adm:gw:{_gw_fb}:fee:setval":
+            if not admin_has_perm(uid, "settings"):
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+                return
+            fee_type = setting_get(f"gw_{_gw_fb}_fee_type", "fixed")
+            hint = "درصد (عدد بین ۱ تا ۱۰۰)" if fee_type == "pct" else "مبلغ به تومان (عدد مثبت)"
+            state_set(uid, "admin_gw_set_fee_val", gw=_gw_fb)
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                f"💸 <b>تنظیم کارمزد — {_GW_NAMES_FEEBONUS.get(_gw_fb, _gw_fb)}</b>\n\n"
+                f"نوع: {hint}\n\n"
+                "مقدار را ارسال کنید:",
+                back_button(f"adm:gw:{_gw_fb}:fee"))
+            return
+        if data == f"adm:gw:{_gw_fb}:bonus":
+            if not admin_has_perm(uid, "settings"):
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+                return
+            bonus_val  = setting_get(f"gw_{_gw_fb}_bonus_value", "0")
+            bonus_type = setting_get(f"gw_{_gw_fb}_bonus_type",  "fixed")
+            type_lbl   = "درصد" if bonus_type == "pct" else "تومان ثابت"
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                f"🎁 <b>بونس — {_GW_NAMES_FEEBONUS.get(_gw_fb, _gw_fb)}</b>\n\n"
+                f"مقدار فعلی: <b>{bonus_val}</b> {type_lbl}\n\n"
+                "<i>پس از پرداخت موفق از این درگاه، این مقدار به کیف پول کاربر اضافه می‌شود.</i>",
+                _bonus_setting_kb(_gw_fb))
+            return
+        if data == f"adm:gw:{_gw_fb}:bonus:toggle":
+            if not admin_has_perm(uid, "settings"):
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+                return
+            cur = setting_get(f"gw_{_gw_fb}_bonus_enabled", "0")
+            setting_set(f"gw_{_gw_fb}_bonus_enabled", "0" if cur == "1" else "1")
+            bot.answer_callback_query(call.id, "تغییر یافت.")
+            _fake_call(call, f"adm:gw:{_gw_fb}:bonus")
+            return
+        if data.startswith(f"adm:gw:{_gw_fb}:bonus:settype:"):
+            if not admin_has_perm(uid, "settings"):
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+                return
+            new_type = data.split(":")[-1]
+            if new_type in ("fixed", "pct"):
+                setting_set(f"gw_{_gw_fb}_bonus_type", new_type)
+                bot.answer_callback_query(call.id, "تغییر یافت.")
+            _fake_call(call, f"adm:gw:{_gw_fb}:bonus")
+            return
+        if data == f"adm:gw:{_gw_fb}:bonus:setval":
+            if not admin_has_perm(uid, "settings"):
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+                return
+            bonus_type = setting_get(f"gw_{_gw_fb}_bonus_type", "fixed")
+            hint = "درصد (عدد بین ۱ تا ۱۰۰)" if bonus_type == "pct" else "مبلغ به تومان (عدد مثبت)"
+            state_set(uid, "admin_gw_set_bonus_val", gw=_gw_fb)
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                f"🎁 <b>تنظیم بونس — {_GW_NAMES_FEEBONUS.get(_gw_fb, _gw_fb)}</b>\n\n"
+                f"نوع: {hint}\n\n"
+                "مقدار را ارسال کنید:",
+                back_button(f"adm:gw:{_gw_fb}:bonus"))
+            return
+
     if data == "adm:set:gw:crypto":
         enabled = setting_get("gw_crypto_enabled", "0")
         vis = setting_get("gw_crypto_visibility", "public")
@@ -11354,6 +11721,7 @@ def _dispatch_callback(call, uid, data):
         )
         kb.add(types.InlineKeyboardButton(f"📊 بازه پرداختی: {range_label}", callback_data="adm:gw:crypto:range"))
         kb.add(types.InlineKeyboardButton("🏷 نام نمایشی درگاه", callback_data="adm:gw:crypto:set_name"))
+        kb.add(types.InlineKeyboardButton("🎁 بونس و کارمزد", callback_data="adm:gw:crypto:feebonus"))
         for coin_key, coin_label in CRYPTO_COINS:
             addr = setting_get(f"crypto_{coin_key}", "")
             status_icon = "✅" if addr else "❌"
@@ -11433,6 +11801,7 @@ def _dispatch_callback(call, uid, data):
         range_label_tp = "🟢 فعال" if range_enabled_tp == "1" else "🔴 غیرفعال"
         kb.add(types.InlineKeyboardButton(f"📊 بازه پرداختی: {range_label_tp}", callback_data="adm:gw:tetrapay:range"))
         kb.add(types.InlineKeyboardButton("🏷 نام نمایشی درگاه", callback_data="adm:gw:tetrapay:set_name"))
+        kb.add(types.InlineKeyboardButton("🎁 بونس و کارمزد", callback_data="adm:gw:tetrapay:feebonus"))
         kb.add(types.InlineKeyboardButton("🔑 تنظیم کلید API", callback_data="adm:set:tetrapay_key"))
         if not api_key:
             kb.add(types.InlineKeyboardButton("🌐 دریافت کلید API از سایت TetraPay", url="https://tetra98.com"))
@@ -11525,6 +11894,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("🔑 تنظیم کلید API",        callback_data="adm:set:swapwallet_crypto_key"))
         kb.add(types.InlineKeyboardButton("👤 نام کاربری فروشگاه",     callback_data="adm:set:swapwallet_crypto_username"))
         kb.add(types.InlineKeyboardButton("🏷 نام نمایشی درگاه", callback_data="adm:gw:swapwallet_crypto:set_name"))
+        kb.add(types.InlineKeyboardButton("🎁 بونس و کارمزد", callback_data="adm:gw:swapwallet_crypto:feebonus"))
         kb.add(types.InlineKeyboardButton("💎 ارزهای فعال", callback_data="adm:set:swc_currencies"))
         if not api_key:
             kb.add(types.InlineKeyboardButton("🌐 دریافت کلید API از سواپ ولت", url="https://swapwallet.app"))
@@ -11621,6 +11991,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("🔑 تنظیم کلید API", callback_data="adm:set:tronpays_rial_key"))
         kb.add(types.InlineKeyboardButton("🔗 تنظیم Callback URL", callback_data="adm:set:tronpays_rial_cb_url"))
         kb.add(types.InlineKeyboardButton("🏷 نام نمایشی درگاه", callback_data="adm:gw:tronpays_rial:set_name"))
+        kb.add(types.InlineKeyboardButton("🎁 بونس و کارمزد", callback_data="adm:gw:tronpays_rial:feebonus"))
         if not api_key:
             kb.add(types.InlineKeyboardButton("🤖 دریافت API Key از @TronPaysBot", url="https://t.me/TronPaysBot"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gateways", icon_custom_emoji_id="5253997076169115797"))

@@ -424,6 +424,39 @@ def _run_init_db_migrations():
             "referral_antispam_window":     "15",
             "referral_antispam_threshold":  "10",
             "referral_antispam_action":     "report_only",
+            # ── Payment Card Management ────────────────────────────────────────
+            "gw_card_rotation_enabled":     "0",
+            # ── Gateway Fee / Bonus ────────────────────────────────────────────
+            "gw_card_fee_enabled":               "0",
+            "gw_card_fee_type":                  "fixed",
+            "gw_card_fee_value":                 "0",
+            "gw_card_bonus_enabled":             "0",
+            "gw_card_bonus_type":                "fixed",
+            "gw_card_bonus_value":               "0",
+            "gw_crypto_fee_enabled":             "0",
+            "gw_crypto_fee_type":                "fixed",
+            "gw_crypto_fee_value":               "0",
+            "gw_crypto_bonus_enabled":           "0",
+            "gw_crypto_bonus_type":              "fixed",
+            "gw_crypto_bonus_value":             "0",
+            "gw_tetrapay_fee_enabled":           "0",
+            "gw_tetrapay_fee_type":              "fixed",
+            "gw_tetrapay_fee_value":             "0",
+            "gw_tetrapay_bonus_enabled":         "0",
+            "gw_tetrapay_bonus_type":            "fixed",
+            "gw_tetrapay_bonus_value":           "0",
+            "gw_swapwallet_crypto_fee_enabled":  "0",
+            "gw_swapwallet_crypto_fee_type":     "fixed",
+            "gw_swapwallet_crypto_fee_value":    "0",
+            "gw_swapwallet_crypto_bonus_enabled":"0",
+            "gw_swapwallet_crypto_bonus_type":   "fixed",
+            "gw_swapwallet_crypto_bonus_value":  "0",
+            "gw_tronpays_rial_fee_enabled":      "0",
+            "gw_tronpays_rial_fee_type":         "fixed",
+            "gw_tronpays_rial_fee_value":        "0",
+            "gw_tronpays_rial_bonus_enabled":    "0",
+            "gw_tronpays_rial_bonus_type":       "fixed",
+            "gw_tronpays_rial_bonus_value":      "0",
         }
         for coin, _ in CRYPTO_COINS:
             defaults[f"crypto_{coin}"] = ""
@@ -610,6 +643,17 @@ def _run_init_db_migrations():
                 "user_id      INTEGER NOT NULL UNIQUE,"
                 "notified_at  TEXT NOT NULL,"
                 "action_taken TEXT NOT NULL DEFAULT ''"
+                ")"
+            ),
+            # ── Payment Cards (multi-card management) ─────────────────────────
+            (
+                "CREATE TABLE IF NOT EXISTS payment_cards ("
+                "id          INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "card_number TEXT    NOT NULL,"
+                "bank_name   TEXT    NOT NULL DEFAULT '',"
+                "holder_name TEXT    NOT NULL DEFAULT '',"
+                "is_active   INTEGER NOT NULL DEFAULT 1,"
+                "created_at  TEXT    NOT NULL"
                 ")"
             ),
         ]
@@ -2881,3 +2925,136 @@ def count_recent_referrals(referrer_id: int, window_seconds: int) -> int:
             (referrer_id, int(cutoff_ts)),
         ).fetchone()
         return row["n"] if row else 0
+
+
+# ── Payment Cards (multi-card management) ─────────────────────────────────────
+
+def get_payment_cards(active_only: bool = False) -> list:
+    """Return list of payment cards. Pass active_only=True to get only enabled cards."""
+    with get_conn() as conn:
+        if active_only:
+            rows = conn.execute(
+                "SELECT * FROM payment_cards WHERE is_active=1 ORDER BY id ASC"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM payment_cards ORDER BY id ASC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_payment_card(card_id: int):
+    """Return a single payment card row by id, or None."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM payment_cards WHERE id=?", (card_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def add_payment_card(card_number: str, bank_name: str, holder_name: str) -> int:
+    """Insert a new card. Returns the new row id."""
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO payment_cards (card_number, bank_name, holder_name, is_active, created_at) "
+            "VALUES (?, ?, ?, 1, ?)",
+            (card_number.strip(), bank_name.strip(), holder_name.strip(), now_str()),
+        )
+        return cur.lastrowid
+
+
+def update_payment_card(card_id: int, card_number: str, bank_name: str, holder_name: str) -> None:
+    """Update card details."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE payment_cards SET card_number=?, bank_name=?, holder_name=? WHERE id=?",
+            (card_number.strip(), bank_name.strip(), holder_name.strip(), card_id),
+        )
+
+
+def toggle_payment_card_active(card_id: int) -> bool:
+    """Toggle card active state. Returns the new is_active bool."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT is_active FROM payment_cards WHERE id=?", (card_id,)
+        ).fetchone()
+        if not row:
+            return False
+        new_state = 0 if row["is_active"] else 1
+        conn.execute(
+            "UPDATE payment_cards SET is_active=? WHERE id=?", (new_state, card_id)
+        )
+        return bool(new_state)
+
+
+def delete_payment_card(card_id: int) -> None:
+    """Delete a card permanently."""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM payment_cards WHERE id=?", (card_id,))
+
+
+def pick_card_for_payment():
+    """Return one active card dict for the next payment.
+
+    Uses round-robin rotation when gw_card_rotation_enabled=1 and multiple
+    active cards exist. Falls back to the legacy payment_card/bank/owner
+    settings when no rows exist in payment_cards. Returns None when nothing
+    is configured.
+    """
+    cards = get_payment_cards(active_only=True)
+    if cards:
+        if len(cards) == 1 or setting_get("gw_card_rotation_enabled", "0") != "1":
+            return cards[0]
+        try:
+            idx = int(setting_get("gw_card_rotation_index", "0") or "0") % len(cards)
+        except (ValueError, ZeroDivisionError):
+            idx = 0
+        card = cards[idx]
+        setting_set("gw_card_rotation_index", str((idx + 1) % len(cards)))
+        return card
+    # Legacy single-card fallback
+    card_num = setting_get("payment_card", "")
+    if not card_num:
+        return None
+    return {
+        "id": 0,
+        "card_number": card_num,
+        "bank_name":   setting_get("payment_bank", ""),
+        "holder_name": setting_get("payment_owner", ""),
+        "is_active":   1,
+    }
+
+
+# ── Gateway Fee / Bonus ────────────────────────────────────────────────────────
+
+def get_gateway_fee_amount(gw_name: str, base_amount: int) -> int:
+    """Return the fee to add on top of base_amount for this gateway (0 if disabled)."""
+    if setting_get(f"gw_{gw_name}_fee_enabled", "0") != "1":
+        return 0
+    fee_type = setting_get(f"gw_{gw_name}_fee_type", "fixed")
+    try:
+        fee_value = int(setting_get(f"gw_{gw_name}_fee_value", "0") or "0")
+    except ValueError:
+        return 0
+    if fee_type == "pct":
+        return round(base_amount * fee_value / 100)
+    return fee_value
+
+
+def get_gateway_bonus_amount(gw_name: str, base_amount: int) -> int:
+    """Return wallet bonus to credit after successful payment through this gateway (0 if disabled)."""
+    if setting_get(f"gw_{gw_name}_bonus_enabled", "0") != "1":
+        return 0
+    bonus_type = setting_get(f"gw_{gw_name}_bonus_type", "fixed")
+    try:
+        bonus_value = int(setting_get(f"gw_{gw_name}_bonus_value", "0") or "0")
+    except ValueError:
+        return 0
+    if bonus_type == "pct":
+        return round(base_amount * bonus_value / 100)
+    return bonus_value
+
+
+def apply_gateway_fee(gw_name: str, base_amount: int) -> int:
+    """Return base_amount + fee for this gateway (fee-adjusted payable amount)."""
+    return base_amount + get_gateway_fee_amount(gw_name, base_amount)

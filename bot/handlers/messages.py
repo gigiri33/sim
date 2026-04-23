@@ -44,6 +44,7 @@ from ..db import (
     set_user_restricted, check_and_release_restriction,
     get_wallet_pay_exceptions, add_wallet_pay_exception,
     add_referral_restriction,
+    add_payment_card, update_payment_card,
 )
 from ..gateways.base import is_gateway_available, is_card_info_complete, get_global_amount_range, get_gateway_range_text, is_gateway_in_range, build_gateway_range_guide
 from ..gateways.tetrapay import create_tetrapay_order, verify_tetrapay_order
@@ -2693,6 +2694,85 @@ def universal_handler(message):
             log_admin_action(uid, "نام صاحب کارت تغییر کرد")
             state_clear(uid)
             bot.send_message(uid, "✅ نام صاحب کارت ذخیره شد.", reply_markup=back_button("adm:set:gw:card"))
+            return
+
+        if sn == "admin_card_add_number" and is_admin(uid):
+            raw = normalize_text_number((message.text or "").strip())
+            if not raw or len(raw) < 16:
+                bot.send_message(uid, "⚠️ شماره کارت معتبر وارد کنید (حداقل ۱۶ رقم).",
+                                 reply_markup=back_button("adm:gw:card:cards"))
+                return
+            state_set(uid, "admin_card_add_bank", card_number=raw)
+            bot.send_message(uid, "🏦 نام بانک را ارسال کنید:", reply_markup=back_button("adm:gw:card:cards"))
+            return
+
+        if sn == "admin_card_add_bank" and is_admin(uid):
+            bank = (message.text or "").strip()
+            state_set(uid, "admin_card_add_holder", card_number=sd["card_number"], bank_name=bank)
+            bot.send_message(uid, "👤 نام صاحب کارت را ارسال کنید:", reply_markup=back_button("adm:gw:card:cards"))
+            return
+
+        if sn == "admin_card_add_holder" and is_admin(uid):
+            holder = (message.text or "").strip()
+            add_payment_card(sd["card_number"], sd.get("bank_name", ""), holder)
+            log_admin_action(uid, f"کارت جدید اضافه شد: {sd['card_number']}")
+            state_clear(uid)
+            bot.send_message(uid, "✅ کارت با موفقیت اضافه شد.", reply_markup=back_button("adm:gw:card:cards"))
+            return
+
+        if sn == "admin_card_edit_number" and is_admin(uid):
+            card_id = sd["card_id"]
+            raw = normalize_text_number((message.text or "").strip())
+            if not raw or len(raw) < 16:
+                bot.send_message(uid, "⚠️ شماره کارت معتبر وارد کنید.",
+                                 reply_markup=back_button(f"adm:gw:card:cards:cfg:{card_id}"))
+                return
+            state_set(uid, "admin_card_edit_bank", card_id=card_id, card_number=raw)
+            bot.send_message(uid, "🏦 نام بانک جدید را ارسال کنید:",
+                             reply_markup=back_button(f"adm:gw:card:cards:cfg:{card_id}"))
+            return
+
+        if sn == "admin_card_edit_bank" and is_admin(uid):
+            bank = (message.text or "").strip()
+            state_set(uid, "admin_card_edit_holder", card_id=sd["card_id"],
+                      card_number=sd["card_number"], bank_name=bank)
+            bot.send_message(uid, "👤 نام صاحب کارت جدید را ارسال کنید:",
+                             reply_markup=back_button(f"adm:gw:card:cards:cfg:{sd['card_id']}"))
+            return
+
+        if sn == "admin_card_edit_holder" and is_admin(uid):
+            holder = (message.text or "").strip()
+            update_payment_card(sd["card_id"], sd["card_number"], sd.get("bank_name", ""), holder)
+            log_admin_action(uid, f"کارت {sd['card_id']} ویرایش شد")
+            state_clear(uid)
+            bot.send_message(uid, "✅ مشخصات کارت به‌روزرسانی شد.",
+                             reply_markup=back_button(f"adm:gw:card:cards:cfg:{sd['card_id']}"))
+            return
+
+        if sn == "admin_gw_set_fee_val" and is_admin(uid):
+            gw = sd.get("gw", "")
+            val = parse_int(normalize_text_number(message.text or ""))
+            fee_type = setting_get(f"gw_{gw}_fee_type", "fixed")
+            if not val or val <= 0 or (fee_type == "pct" and val > 100):
+                bot.send_message(uid, "⚠️ مقدار نامعتبر است.", reply_markup=back_button(f"adm:gw:{gw}:fee"))
+                return
+            setting_set(f"gw_{gw}_fee_value", str(val))
+            log_admin_action(uid, f"کارمزد درگاه {gw}: {val}")
+            state_clear(uid)
+            bot.send_message(uid, f"✅ مقدار کارمزد تنظیم شد: {val}", reply_markup=back_button(f"adm:gw:{gw}:fee"))
+            return
+
+        if sn == "admin_gw_set_bonus_val" and is_admin(uid):
+            gw = sd.get("gw", "")
+            val = parse_int(normalize_text_number(message.text or ""))
+            bonus_type = setting_get(f"gw_{gw}_bonus_type", "fixed")
+            if not val or val <= 0 or (bonus_type == "pct" and val > 100):
+                bot.send_message(uid, "⚠️ مقدار نامعتبر است.", reply_markup=back_button(f"adm:gw:{gw}:bonus"))
+                return
+            setting_set(f"gw_{gw}_bonus_value", str(val))
+            log_admin_action(uid, f"بونس درگاه {gw}: {val}")
+            state_clear(uid)
+            bot.send_message(uid, f"✅ مقدار بونس تنظیم شد: {val}", reply_markup=back_button(f"adm:gw:{gw}:bonus"))
             return
 
         if sn == "admin_set_crypto_wallet" and is_admin(uid):

@@ -2,7 +2,11 @@
 """
 Gateway availability checks shared across all payment gateways.
 """
-from ..db import setting_get, get_user
+from ..db import (
+    setting_get, get_user,
+    pick_card_for_payment,
+    get_gateway_fee_amount, get_gateway_bonus_amount, apply_gateway_fee,
+)
 
 _ALL_GATEWAYS = ("card", "crypto", "tetrapay", "swapwallet_crypto", "tronpays_rial")
 
@@ -88,7 +92,10 @@ def get_gateway_range_text(gw_name):
 
 
 def is_card_info_complete():
-    """Return True if all card-to-card payment details have been configured."""
+    """Return True if at least one active card is configured (new table or legacy settings)."""
+    from ..db import get_payment_cards
+    if get_payment_cards(active_only=True):
+        return True
     return all([
         setting_get("payment_card", ""),
         setting_get("payment_bank", ""),
