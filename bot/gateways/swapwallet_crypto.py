@@ -150,13 +150,10 @@ def show_swapwallet_crypto_page(call, *, amount_toman, invoice_id, result, payme
         f"💰 مبلغ: <b>{fmt_price(amount_toman)}</b> تومان"
         f"{usd_text}\n\n"
     )
-    if wallet_address:
-        text += f"📋 آدرس کیف پول:\n<code>{esc(wallet_address)}</code>\n\n"
     text += (
         "ℹ️ <i>در صورت موجود بودن آن ارز در کیف پول سواپ ولت شما، مبلغ از کیف پول کسر می‌شود؛ در غیر این صورت پرداخت به‌صورت ریالی انجام خواهد شد.</i>\n\n"
         "❌ این فاکتور <b>۱ ساعت</b> اعتبار دارد\n"
-        "پس از واریز، دکمه «✅ بررسی پرداخت» را بزنید.\n\n"
-        "⚠️ <i>تمامی کارمزد انتقال ارز دیجیتال به عهده واریزکننده می‌باشد</i>"
+        "پس از واریز، دکمه «✅ بررسی پرداخت» را بزنید."
     )
 
     kb = types.InlineKeyboardMarkup()
