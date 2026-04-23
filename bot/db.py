@@ -1167,6 +1167,17 @@ def delete_package(package_id):
 
 
 # ── Configs / Stock ────────────────────────────────────────────────────────────
+def count_available_manual_configs(package_id: int) -> int:
+    """Count configs available for delivery (unsold, unreserved, not expired)."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) AS n FROM configs"
+            " WHERE package_id=? AND sold_to IS NULL"
+            " AND reserved_payment_id IS NULL AND is_expired=0",
+            (package_id,),
+        ).fetchone()["n"]
+
+
 def add_config(type_id, package_id, service_name, config_text, inquiry_link):
     with get_conn() as conn:
         conn.execute(
@@ -1175,6 +1186,10 @@ def add_config(type_id, package_id, service_name, config_text, inquiry_link):
             (type_id, package_id, service_name.strip(),
              config_text.strip(), inquiry_link.strip(), now_str())
         )
+    # Reset low-stock / empty-stock notification flags so they fire again
+    # if stock later drops below threshold after being replenished.
+    setting_set(f"stock_low_notif_{package_id}", "0")
+    setting_set(f"stock_empty_notif_{package_id}", "0")
 
 
 def get_registered_packages_stock():
@@ -1585,11 +1600,22 @@ def get_payment(payment_id):
 
 
 def get_pending_payments_page(page=0, page_size=10):
-    """Return (total_count, list_of_dicts) for pending payments, oldest first."""
+    """Return (total_count, list_of_dicts) for pending payments with submitted receipts.
+
+    Only payments where the user has actually submitted a receipt
+    (receipt_file_id IS NOT NULL or receipt_text is non-empty) are included.
+    Payments that only reached 'pending' by opening the payment page without
+    submitting a receipt are excluded.
+    """
+    _RECEIPT_FILTER = (
+        " AND (p.receipt_file_id IS NOT NULL"
+        " OR (p.receipt_text IS NOT NULL AND p.receipt_text != ''))"
+    )
     offset = page * page_size
     with get_conn() as conn:
         total = conn.execute(
-            "SELECT COUNT(*) AS c FROM payments WHERE status='pending'"
+            "SELECT COUNT(*) AS c FROM payments p"
+            " WHERE p.status='pending'" + _RECEIPT_FILTER
         ).fetchone()["c"]
         rows = conn.execute(
             "SELECT p.*, u.full_name, u.username,"
@@ -1598,7 +1624,7 @@ def get_pending_payments_page(page=0, page_size=10):
             " LEFT JOIN users u ON u.user_id = p.user_id"
             " LEFT JOIN packages pk ON pk.id = p.package_id"
             " LEFT JOIN config_types t ON t.id = pk.type_id"
-            " WHERE p.status = 'pending'"
+            " WHERE p.status = 'pending'" + _RECEIPT_FILTER +
             " ORDER BY p.created_at ASC"
             " LIMIT ? OFFSET ?",
             (page_size, offset)

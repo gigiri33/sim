@@ -375,41 +375,53 @@ def send_payment_to_admins(payment_id):
     )
     kb = types.InlineKeyboardMarkup()
     kb.row(
-        types.InlineKeyboardButton("✅ تأیید", callback_data=f"adm:pay:ap:{payment_id}"),
-        types.InlineKeyboardButton("❌ رد",    callback_data=f"adm:pay:rj:{payment_id}"),
+        types.InlineKeyboardButton("✅ تأیید", callback_data=f"adm:pay:apc:{payment_id}"),
+        types.InlineKeyboardButton("❌ رد",    callback_data=f"adm:pay:rjc:plain:{payment_id}"),
+    )
+    kb.row(
+        types.InlineKeyboardButton("✅💬 تأیید با توضیح", callback_data=f"adm:pay:ap:{payment_id}"),
+        types.InlineKeyboardButton("❌💬 رد با توضیح",    callback_data=f"adm:pay:rj:{payment_id}"),
     )
 
     file_id = payment["receipt_file_id"]
 
     def _send_to_one(target_id):
         """Send payment notification to a single admin/sub-admin.
-        
-        Strategy:
-        - If there is a receipt photo/document: send it FIRST, then the text
-          with approve/reject buttons (so admin sees photo before the approval request).
-        - If no media: send the text+buttons as a single message.
-        
+
+        Sends ONE unified message:
+        - If there is a receipt photo/document: send_photo/send_document with the
+          full info text as caption (max 1024 chars). All approve/reject buttons
+          are attached to that single message so admin can act without scrolling.
+        - If no media: send text+buttons as a single message.
+
         Returns the tracked Message (the one that holds the approve/reject buttons).
         """
         try:
-            # If there's a receipt image/document, send it FIRST (photo before approval text)
             if file_id:
+                # Telegram caption max is 1024 chars
+                caption = text if len(text) <= 1024 else text[:1021] + "..."
                 try:
-                    bot.send_photo(target_id, file_id,
-                                   caption="🖼 رسید کاربر",
-                                   parse_mode="HTML")
+                    tracked_msg = bot.send_photo(
+                        target_id, file_id,
+                        caption=caption, reply_markup=kb, parse_mode="HTML",
+                    )
                 except Exception:
                     try:
-                        bot.send_document(target_id, file_id,
-                                          caption="📎 رسید کاربر",
-                                          parse_mode="HTML")
+                        tracked_msg = bot.send_document(
+                            target_id, file_id,
+                            caption=caption, reply_markup=kb, parse_mode="HTML",
+                        )
                     except Exception:
-                        pass  # Media forward failure is non-critical
-            # Then send the full info text with the approve/reject buttons
-            tracked_msg = bot.send_message(
-                target_id, text, reply_markup=kb, parse_mode="HTML",
-                disable_web_page_preview=True,
-            )
+                        # Media send failed — fall back to text-only message
+                        tracked_msg = bot.send_message(
+                            target_id, text, reply_markup=kb, parse_mode="HTML",
+                            disable_web_page_preview=True,
+                        )
+            else:
+                tracked_msg = bot.send_message(
+                    target_id, text, reply_markup=kb, parse_mode="HTML",
+                    disable_web_page_preview=True,
+                )
             return tracked_msg
         except Exception as e:
             print(f"[send_payment_to_admins] FAILED target={target_id} payment={payment_id} error={e}")
@@ -432,12 +444,12 @@ def send_payment_to_admins(payment_id):
         if msg:
             save_payment_admin_message(payment_id, sub_id, msg.message_id)
 
-    # Group topic: send text first, then photo separately if present
-    grp_msg = send_to_topic("payment_approval", text, reply_markup=kb)
-    if file_id and grp_msg:
-        send_photo_to_topic("payment_approval", file_id, caption="🖼 رسید کاربر")
-    elif file_id:
-        send_photo_to_topic("payment_approval", file_id, caption=text[:1024])
+    # Group topic: unified message (photo+caption+buttons or text+buttons)
+    if file_id:
+        caption = text if len(text) <= 1024 else text[:1021] + "..."
+        send_photo_to_topic("payment_approval", file_id, caption=caption, reply_markup=kb)
+    else:
+        send_to_topic("payment_approval", text, reply_markup=kb)
 
 
 # ── Card payment approval / rejection ─────────────────────────────────────────

@@ -1482,6 +1482,14 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
             p_id = create_pending_order(uid, package_id, payment_id, unit_price, payment_method, quantity=1)
             pending_ids.append(p_id)
 
+    # Check stock level and notify admins if thresholds crossed
+    try:
+        from ..ui.notifications import check_and_notify_stock
+        _pkg_name = package_row["name"] if package_row else str(package_id)
+        check_and_notify_stock(package_id, _pkg_name)
+    except Exception:
+        pass
+
     return purchase_ids, pending_ids
 
 
@@ -5054,6 +5062,12 @@ def _dispatch_callback(call, uid, data):
             release_reserved_config(config_id)
             bot.answer_callback_query(call.id, "⚠️ خطایی رخ داد، لطفاً دوباره تلاش کنید.", show_alert=True)
             return
+        # Check stock level and notify admins if thresholds crossed (free test delivery)
+        try:
+            from ..ui.notifications import check_and_notify_stock
+            check_and_notify_stock(package_row["id"], package_row["name"])
+        except Exception:
+            pass
         bot.answer_callback_query(call.id, "تست رایگان ارسال شد.")
         send_or_edit(call, f"✅ تست رایگان نوع <b>{esc(type_row['name'])}</b> آماده شد.", back_button("main"))
         deliver_purchase_message(call.message.chat.id, purchase_id)
@@ -13221,33 +13235,13 @@ def _dispatch_callback(call, uid, data):
         if payment["status"] not in ("pending",):
             bot.answer_callback_query(call.id, "این تراکنش قبلاً بررسی شده است.", show_alert=True)
             return
-        user_row    = get_user(payment["user_id"])
-        package_row = get_package(payment["package_id"]) if payment["package_id"] else None
-        _k_pay = payment["kind"]
-        if _k_pay == "wallet_charge":
-            kind_label  = "شارژ کیف‌پول"
-        elif _k_pay in ("renewal", "pnlcfg_renewal"):
-            kind_label  = "تمدید سرویس"
-        else:
-            kind_label  = "خرید کانفیگ"
-        pkg_text    = ""
-        if package_row:
-            pkg_text = (
-                f"\n🧩 نوع: {esc(package_row['type_name'])}"
-                f"\n📦 پکیج: {esc(package_row['name'])}"
-                f"\n🔋 حجم: {fmt_vol(package_row['volume_gb'])} | ⏰ {fmt_dur(package_row['duration_days'])}"
-            )
         text = (
-            f"✅ <b>تأیید تراکنش</b>\n\n"
-            f"🧾 نوع: {kind_label}\n"
-            f"👤 کاربر: {esc(user_row['full_name'] if user_row else '-')}\n"
-            f"🆔 آیدی: <code>{payment['user_id']}</code>\n"
-            f"💰 مبلغ: <b>{fmt_price(payment['amount'])}</b> تومان"
-            f"{pkg_text}\n\n"
-            f"📝 پیام برای کاربر را تایپ کنید، یا دکمه‌ی زیر را بزنید:"
+            f"✅💬 <b>تأیید با توضیحات</b>\n\n"
+            f"💰 مبلغ: <b>{fmt_price(payment['amount'])}</b> تومان\n"
+            f"🆔 کاربر: <code>{payment['user_id']}</code>\n\n"
+            f"📝 پیام تأیید برای کاربر را تایپ کنید و ارسال کنید:"
         )
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("✅ تأیید بدون توضیحات", callback_data=f"adm:pay:apc:{payment_id}"))
         kb.add(types.InlineKeyboardButton("🔙 انصراف", callback_data="nav:admin:panel"))
         state_set(uid, "admin_payment_approve_note", payment_id=payment_id)
         bot.answer_callback_query(call.id)
@@ -13288,33 +13282,13 @@ def _dispatch_callback(call, uid, data):
         if payment["status"] not in ("pending",):
             bot.answer_callback_query(call.id, "این تراکنش قبلاً بررسی شده است.", show_alert=True)
             return
-        user_row   = get_user(payment["user_id"])
-        package_row = get_package(payment["package_id"]) if payment["package_id"] else None
-        _k_rj = payment["kind"]
-        if _k_rj == "wallet_charge":
-            kind_label = "شارژ کیف‌پول"
-        elif _k_rj in ("renewal", "pnlcfg_renewal"):
-            kind_label = "تمدید سرویس"
-        else:
-            kind_label = "خرید کانفیگ"
-        pkg_text   = ""
-        if package_row:
-            pkg_text = (
-                f"\n🧩 نوع: {esc(package_row['type_name'])}"
-                f"\n📦 پکیج: {esc(package_row['name'])}"
-                f"\n🔋 حجم: {fmt_vol(package_row['volume_gb'])} | ⏰ {fmt_dur(package_row['duration_days'])}"
-            )
         text = (
-            f"❌ <b>رد تراکنش</b>\n\n"
-            f"🧾 نوع: {kind_label}\n"
-            f"👤 کاربر: {esc(user_row['full_name'] if user_row else '-')}\n"
-            f"🆔 آیدی: <code>{payment['user_id']}</code>\n"
-            f"💰 مبلغ: <b>{fmt_price(payment['amount'])}</b> تومان"
-            f"{pkg_text}\n\n"
-            f"📝 دلیل رد را تایپ کنید، یا دکمه‌ی زیر را بزنید:"
+            f"❌💬 <b>رد با توضیحات</b>\n\n"
+            f"💰 مبلغ: <b>{fmt_price(payment['amount'])}</b> تومان\n"
+            f"🆔 کاربر: <code>{payment['user_id']}</code>\n\n"
+            f"📝 دلیل رد را تایپ کنید و ارسال کنید:"
         )
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("❌ رد بدون توضیحات", callback_data=f"adm:pay:rjc:plain:{payment_id}"))
         kb.add(types.InlineKeyboardButton(
             "⛔ رسید فیک — محدود ۲۴ ساعت",
             callback_data=f"adm:pay:rjc:fake24:{payment_id}"))
@@ -13439,8 +13413,12 @@ def _dispatch_callback(call, uid, data):
         )
         kb = types.InlineKeyboardMarkup()
         kb.row(
-            types.InlineKeyboardButton("✅ تأیید رسید", callback_data=f"admin:pr:ap:{payment_id}:{page}"),
-            types.InlineKeyboardButton("❌ رد رسید",    callback_data=f"admin:pr:rj:{payment_id}:{page}"),
+            types.InlineKeyboardButton("✅ تأیید", callback_data=f"admin:pr:ap:{payment_id}:{page}"),
+            types.InlineKeyboardButton("❌ رد",    callback_data=f"admin:pr:rj:{payment_id}:{page}"),
+        )
+        kb.row(
+            types.InlineKeyboardButton("✅💬 تأیید با توضیح", callback_data=f"adm:pay:ap:{payment_id}"),
+            types.InlineKeyboardButton("❌💬 رد با توضیح",    callback_data=f"adm:pay:rj:{payment_id}"),
         )
         kb.add(types.InlineKeyboardButton("🔙 بازگشت به لیست", callback_data=f"admin:pr:list:{page}"))
         file_id = payment["receipt_file_id"]

@@ -256,6 +256,68 @@ def deliver_purchase_message(chat_id, purchase_id):
             pass
 
 
+# ── Stock notifications ───────────────────────────────────────────────────────
+def _notify_all_admins(text: str):
+    """Send a text message to all owner admins and sub-admins."""
+    if _own_notif_on("stock"):
+        for admin_id in ADMIN_IDS:
+            try:
+                bot.send_message(admin_id, text, parse_mode="HTML")
+            except Exception:
+                pass
+    if _bot_notif_on("stock"):
+        import json as _json
+        for row in get_all_admin_users():
+            sub_id = row["user_id"]
+            if sub_id in ADMIN_IDS:
+                continue
+            perms = _json.loads(row["permissions"] or "{}")
+            if not (perms.get("full") or perms.get("settings") or perms.get("approve_payments")):
+                continue
+            try:
+                bot.send_message(sub_id, text, parse_mode="HTML")
+            except Exception:
+                pass
+    send_to_topic("stock_alert", text)
+
+
+def check_and_notify_stock(package_id: int, package_name: str):
+    """Check remaining manual config stock for a package and notify admins if thresholds crossed.
+
+    Thresholds:
+      - < 3 remaining → low-stock warning (once per crossing)
+      - == 0 remaining → empty-stock alert (once)
+
+    Flags are reset when admin replenishes stock (add_config resets them via setting_set).
+    """
+    from ..db import count_available_manual_configs, setting_get, setting_set
+    remaining = count_available_manual_configs(package_id)
+
+    if remaining == 0:
+        # Empty-stock alert (higher priority — send even if low-stock was skipped)
+        if setting_get(f"stock_empty_notif_{package_id}", "0") != "1":
+            setting_set(f"stock_empty_notif_{package_id}", "1")
+            # Also mark low-stock as sent so we don't send a spurious low-stock after
+            setting_set(f"stock_low_notif_{package_id}", "1")
+            text = (
+                f"🚨 <b>موجودی به پایان رسید</b>\n\n"
+                f"📦 پکیج: <b>{esc(package_name)}</b>\n\n"
+                "موجودی مخزن کانفیگ این پکیج به صفر رسیده است.\n"
+                "تا بارگذاری مجدد، سفارش‌ها به صف انتظار می‌روند."
+            )
+            _notify_all_admins(text)
+    elif remaining < 3:
+        if setting_get(f"stock_low_notif_{package_id}", "0") != "1":
+            setting_set(f"stock_low_notif_{package_id}", "1")
+            text = (
+                f"⚠️ <b>موجودی در حال اتمام</b>\n\n"
+                f"📦 پکیج: <b>{esc(package_name)}</b>\n"
+                f"🔢 تعداد باقی‌مانده: <b>{remaining}</b>\n\n"
+                "لطفاً موجودی مخزن کانفیگ را افزایش دهید."
+            )
+            _notify_all_admins(text)
+
+
 # ── Admin notifications ────────────────────────────────────────────────────────
 def admin_purchase_notify(method_label, user_row, package_row, purchase_id=None):
     svc_name = None
