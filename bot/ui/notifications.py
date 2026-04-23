@@ -22,6 +22,7 @@ from ..db import (
     set_referral_channel_joined, try_claim_start_reward_batch,
     try_claim_purchase_reward_batch,
     add_pending_reward,
+    get_locked_channels,
 )
 from ..helpers import esc, fmt_price, now_str, move_leading_emoji
 from ..bot_instance import bot
@@ -673,10 +674,16 @@ def notify_referral_first_purchase(referee_id):
 
 def _channel_reward_required() -> bool:
     """Return True if channel membership is required before giving the start reward."""
-    return (
-        setting_get("referral_reward_condition", "channel") == "channel"
-        and bool(setting_get("channel_id", "").strip())
-    )
+    if setting_get("referral_reward_condition", "channel") != "channel":
+        return False
+    # Check legacy setting first
+    if setting_get("channel_id", "").strip():
+        return True
+    # Check new locked_channels table
+    try:
+        return bool(get_locked_channels())
+    except Exception:
+        return False
 
 
 def check_and_give_referral_start_reward(referrer_id):
