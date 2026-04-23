@@ -11407,6 +11407,14 @@ def _dispatch_callback(call, uid, data):
         if not admin_has_perm(uid, "settings"):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
             return
+        # Auto-migrate legacy card from settings if not already in table
+        _legacy_card = setting_get("payment_card", "").strip()
+        if _legacy_card:
+            _existing = get_payment_cards()
+            if not any(c["card_number"] == _legacy_card for c in _existing):
+                _legacy_bank  = setting_get("payment_bank",  "").strip()
+                _legacy_owner = setting_get("payment_owner", "").strip()
+                add_payment_card(_legacy_card, _legacy_bank, _legacy_owner)
         cards = get_payment_cards()
         rotation_on = setting_get("gw_card_rotation_enabled", "0") == "1"
         rotation_lbl = "🟢 فعال" if rotation_on else "🔴 غیرفعال"
