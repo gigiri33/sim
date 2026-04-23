@@ -1620,7 +1620,7 @@ def get_pending_payments_page(page=0, page_size=10):
       without submitting a receipt are also excluded.
     """
     _PENDING_FILTER = (
-        " AND p.gateway IN ('card', 'crypto')"
+        " AND p.payment_method IN ('card', 'crypto')"
         " AND (p.receipt_file_id IS NOT NULL"
         " OR (p.receipt_text IS NOT NULL AND p.receipt_text != ''))"
     )
@@ -1919,7 +1919,7 @@ def reject_all_pending_payments():
     Returns count of rejected payments.
     """
     _REJECT_FILTER = (
-        " AND gateway IN ('card', 'crypto')"
+        " AND payment_method IN ('card', 'crypto')"
         " AND (receipt_file_id IS NOT NULL"
         " OR (receipt_text IS NOT NULL AND receipt_text != ''))"
     )

@@ -2509,7 +2509,7 @@ def _do_reject_all(call, uid, note):
     with _get_conn() as _c:
         _pending_snap = _c.execute(
             "SELECT id, user_id FROM payments WHERE status='pending'"
-            " AND gateway IN ('card', 'crypto')"
+            " AND payment_method IN ('card', 'crypto')"
             " AND (receipt_file_id IS NOT NULL"
             " OR (receipt_text IS NOT NULL AND receipt_text != ''))"
         ).fetchall()
