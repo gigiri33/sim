@@ -321,20 +321,36 @@ def check_and_notify_stock(package_id: int, package_name: str):
 # ── Admin notifications ────────────────────────────────────────────────────────
 def admin_purchase_notify(method_label, user_row, package_row, purchase_id=None):
     svc_name = None
+    paid_amount = None
     if purchase_id:
         try:
             _p = get_purchase(purchase_id)
-            svc_name = urllib.parse.unquote(_p["service_name"]) if _p and _p["service_name"] else None
+            if _p:
+                svc_name = urllib.parse.unquote(_p["service_name"]) if _p["service_name"] else None
+                paid_amount = _p["amount"]
         except Exception:
             pass
     svc_line = f"🏷 نام سرویس: {esc(svc_name)}\n" if svc_name else ""
+    orig_price = package_row['price']
+    is_agent = user_row['is_agent'] if 'is_agent' in user_row.keys() else 0
+    if paid_amount is not None and not is_agent and paid_amount < orig_price:
+        disc_amount = orig_price - paid_amount
+        price_line = (
+            f"💰 مبلغ اصلی: {fmt_price(orig_price)} تومان\n"
+            f"🎟 کد تخفیف: {fmt_price(disc_amount)} تومان\n"
+            f"💚 مبلغ نهایی: {fmt_price(paid_amount)} تومان\n"
+        )
+    elif paid_amount is not None:
+        price_line = f"💰 مبلغ: {fmt_price(paid_amount)} تومان\n"
+    else:
+        price_line = f"💰 مبلغ: {fmt_price(orig_price)} تومان\n"
     text = (
         f"❗️ | خرید جدید ({method_label})\n\n"
         f"🕐 زمان: {now_str()}\n"
         f"▫️ آیدی کاربر: <code>{user_row['user_id']}</code>\n"
         f"👨‍💼 نام: {esc(user_row['full_name'])}\n"
         f"⚡️ نام کاربری: {esc(user_row['username'] or 'ندارد')}\n"
-        f"💰 مبلغ: {fmt_price(package_row['price'])} تومان\n"
+        f"{price_line}"
         f"🚦 سرور: {esc(package_row['type_name'])}\n"
         f"✏️ پکیج: {esc(package_row['name'])}\n"
         f"{svc_line}"
@@ -369,13 +385,24 @@ def admin_purchase_notify(method_label, user_row, package_row, purchase_id=None)
 def admin_renewal_notify(user_id, purchase_item, package_row, amount, method_label):
     user_row  = get_user(user_id)
     config_id = purchase_item["config_id"]
+    orig_price = package_row['price'] if package_row and 'price' in package_row.keys() else amount
+    is_agent = user_row['is_agent'] if user_row and 'is_agent' in user_row.keys() else 0
+    if not is_agent and amount < orig_price:
+        disc_amount = orig_price - amount
+        price_block = (
+            f"💰 مبلغ اصلی: {fmt_price(orig_price)} تومان\n"
+            f"🎟 کد تخفیف: {fmt_price(disc_amount)} تومان\n"
+            f"💚 مبلغ نهایی: <b>{fmt_price(amount)}</b> تومان\n"
+        )
+    else:
+        price_block = f"💰 مبلغ پرداختی: <b>{fmt_price(amount)}</b> تومان\n"
     text = (
         f"♻️ | <b>درخواست تمدید</b> ({method_label})\n\n"
-        f"� زمان: {now_str()}\n"
+        f"\U0001f552 زمان: {now_str()}\n"
         f"👤 کاربر: {esc(user_row['full_name'])}\n"
         f"⚡️ نام کاربری: {esc(user_row['username'] or 'ندارد')}\n"
         f"🆔 آیدی: <code>{user_row['user_id']}</code>\n"
-        f"💰 مبلغ پرداختی: <b>{fmt_price(amount)}</b> تومان\n\n"
+        f"{price_block}\n"
         f"📌 <b>سرویس فعلی:</b>\n"
         f"🏷 نام سرویس: {esc(urllib.parse.unquote(purchase_item['service_name'] or ''))}\n"
         f"🧩 نوع: {esc(purchase_item['type_name'])}\n\n"
