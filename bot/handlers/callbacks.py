@@ -2214,16 +2214,37 @@ def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
 
     def _send_with_qr(qr_source, text):
+        # Telegram caption limit is 1024 chars. For configs with both
+        # config+sub the text easily exceeds this, so we send the QR image
+        # without a caption and deliver the full text as a separate message.
+        CAPTION_LIMIT = 1000
         try:
             qr_img = _qrcode.make(qr_source)
             bio    = _io.BytesIO()
             qr_img.save(bio, format="PNG")
             bio.seek(0)
             bio.name = "qrcode.png"
-            bot.send_photo(chat_id, bio, caption=text, parse_mode="HTML", reply_markup=kb)
+            if len(text) > CAPTION_LIMIT:
+                try:
+                    bot.send_photo(chat_id, bio)
+                except Exception as _ph_exc:
+                    log.warning("_deliver_panel_config QR photo send failed: %s", _ph_exc)
+                bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
+            else:
+                bot.send_photo(chat_id, bio, caption=text, parse_mode="HTML", reply_markup=kb)
         except Exception as _qr_exc:
             log.warning("_deliver_panel_config QR generation failed: %s", _qr_exc)
-            bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
+            try:
+                bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
+            except Exception as _msg_exc:
+                log.error("_deliver_panel_config text send also failed: %s", _msg_exc)
+                # Last resort: strip HTML and try without parse_mode
+                try:
+                    import re as _re
+                    _plain = _re.sub(r"<[^>]+>", "", text)
+                    bot.send_message(chat_id, _plain, reply_markup=kb)
+                except Exception as _plain_exc:
+                    log.error("_deliver_panel_config plain send failed: %s", _plain_exc)
 
     def _fail_no_content(reason: str):
         """Notify user and alert admins when config content is missing."""

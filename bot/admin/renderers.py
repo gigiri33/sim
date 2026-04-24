@@ -890,6 +890,7 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
         qr_source = cfg.get("client_config_text") or ""
         if not qr_source and has_sub:
             qr_source = cfg.get("client_sub_url") or ""
+        CAPTION_LIMIT = 1000
         if qr_source:
             try:
                 import qrcode as _qr
@@ -903,7 +904,14 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
                     bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
                 except Exception:
                     pass
-                bot.send_photo(chat_id, bio, caption=text, parse_mode="HTML", reply_markup=kb)
+                if len(text) > CAPTION_LIMIT:
+                    try:
+                        bot.send_photo(chat_id, bio)
+                    except Exception:
+                        pass
+                    bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
+                else:
+                    bot.send_photo(chat_id, bio, caption=text, parse_mode="HTML", reply_markup=kb)
                 return
             except Exception:
                 pass
@@ -923,6 +931,12 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
         if has_sub and not has_config:
             qr_source = cfg["client_sub_url"]
 
+        # Telegram caption limit is 1024 chars. With both config+sub the text
+        # usually exceeds this, so send the QR image without a caption and
+        # deliver the full text as a separate (editable) message.
+        CAPTION_LIMIT = 1000
+        chat_id = call.message.chat.id if hasattr(call, "message") else call.chat.id
+
         if qr_source:
             try:
                 import qrcode as _qr
@@ -931,12 +945,20 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
                 _qr.make(qr_source).save(bio, format="PNG")
                 bio.seek(0)
                 bio.name = "qr.png"
-                chat_id = call.message.chat.id if hasattr(call, "message") else call.chat.id
                 try:
                     bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
                 except Exception:
                     pass
-                bot.send_photo(chat_id, bio, caption=text, parse_mode="HTML", reply_markup=kb)
+                if len(text) > CAPTION_LIMIT:
+                    try:
+                        bot.send_photo(chat_id, bio)
+                    except Exception as _ph_exc:
+                        import logging as _lg
+                        _lg.getLogger(__name__).warning(
+                            "_show_panel_config_detail QR send failed: %s", _ph_exc)
+                    bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
+                else:
+                    bot.send_photo(chat_id, bio, caption=text, parse_mode="HTML", reply_markup=kb)
             except Exception:
                 send_or_edit(call, text, kb)
         else:
