@@ -2912,11 +2912,20 @@ def on_callback(call):
             if check_channel_membership(uid):
                 bot.answer_callback_query(call.id, "✅ عضویت تأیید شد!")
                 # If this user came via a referral link, trigger their referrer's start reward
+                # (or show captcha if captcha is enabled — in that case, skip menu).
+                has_referral_captcha = False
                 try:
-                    from ..ui.notifications import try_give_referral_start_reward_for_channel_join
+                    from ..ui.notifications import (
+                        try_give_referral_start_reward_for_channel_join,
+                        has_pending_captcha,
+                    )
                     try_give_referral_start_reward_for_channel_join(uid)
+                    has_referral_captcha = has_pending_captcha(uid)
                 except Exception:
                     pass
+                if has_referral_captcha:
+                    # Captcha prompt was just sent — do NOT show menu yet.
+                    return
                 # Phone gate check
                 from ..handlers.start import _phone_required_for_user, _send_phone_request
                 if not is_admin(uid) and _phone_required_for_user(uid):

@@ -66,13 +66,15 @@ def send_captcha_prompt(referee_id: int) -> None:
     """Generate a captcha, store the answer and send the prompt to the referee."""
     question, answer = generate_referral_captcha()
     _PENDING_CAPTCHAS[referee_id] = answer
+    # \u200e = Left-to-Right Mark — forces the math expression to render LTR
+    # even in RTL contexts (Telegram renders lines with mixed numbers/symbols RTL).
     try:
         bot.send_message(
             referee_id,
-            "🤖 <b>تأیید هویت (کپچا)</b>\n\n"
-            "برای تایید حساب و ثبت زیرمجموعه، لطفاً کپچا را حل کنید:\n\n"
-            f"<b>{question} = ؟</b>\n\n"
-            "پاسخ را به صورت عدد ارسال کنید.",
+            "\U0001f916 <b>\u062a\u0623\u06cc\u06cc\u062f \u0647\u0648\u06cc\u062a (\u06a9\u067e\u0686\u0627)</b>\n\n"
+            "\u0628\u0631\u0627\u06cc \u062a\u0627\u06cc\u06cc\u062f \u062d\u0633\u0627\u0628 \u0648 \u062b\u0628\u062a \u0632\u06cc\u0631\u0645\u062c\u0645\u0648\u0639\u0647\u060c \u0644\u0637\u0641\u0627\u064b \u06a9\u067e\u0686\u0627 \u0631\u0627 \u062d\u0644 \u06a9\u0646\u06cc\u062f:\n\n"
+            f"<code>\u200e{question} = ?</code>\n\n"
+            "\u067e\u0627\u0633\u062e \u0631\u0627 \u0628\u0647 \u0635\u0648\u0631\u062a \u0639\u062f\u062f \u0627\u0631\u0633\u0627\u0644 \u06a9\u0646\u06cc\u062f.",
             parse_mode="HTML",
         )
     except Exception:

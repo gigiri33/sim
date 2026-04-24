@@ -2066,7 +2066,8 @@ def get_referral_stats(referrer_id):
 def count_referrals(referrer_id):
     with get_conn() as conn:
         return conn.execute(
-            "SELECT COUNT(*) AS n FROM referrals WHERE referrer_id=?", (referrer_id,)
+            "SELECT COUNT(*) AS n FROM referrals WHERE referrer_id=? AND captcha_failed=0",
+            (referrer_id,)
         ).fetchone()["n"]
 
 
@@ -2074,13 +2075,14 @@ def get_referrals_paged(referrer_id, page=0, per_page=10):
     """Return paginated list of referrals with basic user info."""
     with get_conn() as conn:
         total = conn.execute(
-            "SELECT COUNT(*) AS n FROM referrals WHERE referrer_id=?", (referrer_id,)
+            "SELECT COUNT(*) AS n FROM referrals WHERE referrer_id=? AND captcha_failed=0",
+            (referrer_id,)
         ).fetchone()["n"]
         rows = conn.execute(
             "SELECT r.referee_id, u.full_name, u.username "
             "FROM referrals r "
             "LEFT JOIN users u ON u.user_id = r.referee_id "
-            "WHERE r.referrer_id=? ORDER BY r.id DESC LIMIT ? OFFSET ?",
+            "WHERE r.referrer_id=? AND r.captcha_failed=0 ORDER BY r.id DESC LIMIT ? OFFSET ?",
             (referrer_id, per_page, page * per_page)
         ).fetchall()
     return rows, total
