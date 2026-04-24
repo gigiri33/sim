@@ -2329,9 +2329,34 @@ def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
     else:  # both
         from ..helpers import build_full_config_message
         if has_cfg and has_sub:
-            text = build_full_config_message(info_block, config_text, sub_url)
-            # QR is built from config_text when both are present
-            _send_with_qr(config_text, text)
+            # ── CRITICAL branch (was regressed) — guaranteed delivery ──────
+            try:
+                text = build_full_config_message(info_block, config_text, sub_url)
+                if not text or not text.strip():
+                    raise ValueError("Empty message")
+                # QR is built from config_text when both are present
+                _send_with_qr(config_text, text)
+            except Exception as _both_exc:
+                log.error("[PANEL_DELIVERY] both-mode primary send failed: %s",
+                          _both_exc, exc_info=True)
+                # Hard fallback — plain text, no HTML, cannot fail due to formatting
+                fallback_text = (
+                    f"{info_block}\n"
+                    f"🔗 کانفیگ:\n{config_text or '❌ ندارد'}\n\n"
+                    f"📊 ساب:\n{sub_url or '❌ ندارد'}"
+                )
+                try:
+                    bot.send_message(chat_id, fallback_text, reply_markup=kb,
+                                     disable_web_page_preview=True)
+                except Exception as _fb_exc:
+                    log.error("[PANEL_DELIVERY] both-mode fallback failed: %s",
+                              _fb_exc, exc_info=True)
+                    # last-ditch: no keyboard, no preview flag
+                    try:
+                        bot.send_message(chat_id, fallback_text)
+                    except Exception as _last_exc:
+                        log.error("[PANEL_DELIVERY] both-mode last-ditch failed: %s",
+                                  _last_exc, exc_info=True)
         elif has_cfg:
             text = build_full_config_message(info_block, config_text, "")
             _send_with_qr(config_text, text)
