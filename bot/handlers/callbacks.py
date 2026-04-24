@@ -1441,8 +1441,8 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
 
     # ── Panel-based packages ──────────────────────────────────────────────────
     try:
-        config_source = package_row["config_source"] or "manual"
-    except (IndexError, KeyError):
+        config_source = (package_row["config_source"] or "manual") if package_row else "manual"
+    except (IndexError, KeyError, TypeError, AttributeError):
         config_source = "manual"
 
     if config_source == "panel":
@@ -2296,8 +2296,8 @@ def _send_bulk_delivery_result(chat_id, uid, package_row, purchase_ids, pending_
 
     # Panel packages already delivered their configs; just show a summary
     try:
-        config_source = package_row["config_source"] or "manual"
-    except (IndexError, KeyError):
+        config_source = (package_row["config_source"] or "manual") if package_row else "manual"
+    except (IndexError, KeyError, TypeError, AttributeError):
         config_source = "manual"
 
     if config_source == "panel":
@@ -4707,9 +4707,14 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id, "خرید با موفقیت انجام شد.")
         send_or_edit(call, "✅ پرداخت از کیف پول انجام شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
                      back_button("main"))
-        purchase_ids, pending_ids = _deliver_bulk_configs(
-            call.message.chat.id, uid, package_id, price, "wallet", quantity, payment_id
-        )
+        try:
+            purchase_ids, pending_ids = _deliver_bulk_configs(
+                call.message.chat.id, uid, package_id, price, "wallet", quantity, payment_id
+            )
+        except Exception as _deliv_exc:
+            log.error("[pay:wallet] _deliver_bulk_configs crashed for uid=%s pkg=%s: %s",
+                      uid, package_id, _deliv_exc, exc_info=True)
+            purchase_ids, pending_ids = [], []
         if not purchase_ids and not pending_ids:
             # Exceptional: refund and abort
             update_balance(uid, price)
@@ -4720,8 +4725,12 @@ def _dispatch_callback(call, uid, data):
                 parse_mode="HTML", reply_markup=back_button("main"))
             state_clear(uid)
             return
-        _send_bulk_delivery_result(call.message.chat.id, uid, package_row,
-                                   purchase_ids, pending_ids, "کیف پول")
+        try:
+            _send_bulk_delivery_result(call.message.chat.id, uid, package_row,
+                                       purchase_ids, pending_ids, "کیف پول")
+        except Exception as _sdr_exc:
+            log.error("[pay:wallet] _send_bulk_delivery_result crashed for uid=%s: %s",
+                      uid, _sdr_exc, exc_info=True)
         state_clear(uid)
         return
 
