@@ -13275,6 +13275,7 @@ def _dispatch_callback(call, uid, data):
             f"📝 پیام تأیید برای کاربر را تایپ کنید و ارسال کنید:"
         )
         kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("✅ تأیید بدون توضیحات", callback_data=f"adm:pay:apc:{payment_id}"))
         kb.add(types.InlineKeyboardButton("🔙 انصراف", callback_data="nav:admin:panel"))
         state_set(uid, "admin_payment_approve_note", payment_id=payment_id)
         bot.answer_callback_query(call.id)
