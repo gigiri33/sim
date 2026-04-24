@@ -31,6 +31,7 @@ from ..db import (
     count_recent_referrals,
     set_user_restricted,
     set_referral_captcha_verified,
+    set_referral_captcha_failed,
 )
 from ..helpers import esc, fmt_price, now_str, move_leading_emoji
 from ..bot_instance import bot
@@ -43,16 +44,21 @@ _PENDING_CAPTCHAS: dict = {}
 
 
 def generate_referral_captcha() -> tuple:
-    """Return (question_str, correct_answer) — simple 2-digit ± 1-digit math."""
-    a = random.randint(10, 99)
-    b = random.randint(1, 9)
+    """Return (question_str, correct_answer) — simple 2-digit ± 1-digit math.
+    First operand: 10-99 (2 digits), second: 1-9 (1 digit).
+    Answer is always positive and at most 2 digits (≤ 99).
+    """
     op = random.choice(["+", "-"])
+    b = random.randint(1, 9)
     if op == "+":
+        # a + b ≤ 99  →  a ≤ 99 - b
+        a = random.randint(10, 99 - b)
         answer = a + b
-        question = f"{a} + {b}"
     else:
+        # a - b ≥ 1  →  a ≥ b + 1, also a - b ≤ 99 (always true)
+        a = random.randint(b + 10, 99)   # at least b+10 so a is 2-digit and a-b >= 10+1=11
         answer = a - b
-        question = f"{a} - {b}"
+    question = f"{a} {op} {b}"
     return question, answer
 
 
@@ -102,6 +108,32 @@ def complete_referral_after_captcha(referee_id: int) -> None:
         return
     referrer_id = ref["referrer_id"]
     check_and_give_referral_start_reward(referrer_id)
+
+
+def notify_referrer_captcha_failed(referee_id: int) -> None:
+    """Mark the referee's captcha as failed and notify the referrer."""
+    set_referral_captcha_failed(referee_id)
+    ref = get_referral_by_referee(referee_id)
+    if not ref:
+        return
+    referrer_id = ref["referrer_id"]
+    referee = get_user(referee_id)
+    if not referee:
+        return
+    ref_username = referee["username"]
+    if ref_username:
+        referee_link = f"@{esc(ref_username)}"
+    else:
+        referee_link = f"<a href=\"tg://user?id={referee_id}\">{esc(referee['full_name'] or 'کاربر جدید')}</a>"
+    try:
+        bot.send_message(
+            referrer_id,
+            f"⚠️ کاربر {referee_link} از طریق لینک دعوت شما وارد ربات شد، "
+            f"اما کپچا را اشتباه حل کرد و به عنوان زیرمجموعه برای شما <b>حساب نشد</b>.",
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
 
 
 def _bot_notif_on(key: str) -> bool:
@@ -724,11 +756,13 @@ def notify_referral_join(referrer_id, referee_id):
 
         start_enabled = setting_get("referral_start_reward_enabled", "0") == "1"
         required_count = int(setting_get("referral_start_reward_count", "1") or "1")
-        channel_required = _channel_reward_required()
-        ch = "AND channel_joined=1" if channel_required else ""
         with get_conn() as conn:
+            # Count all unrewarded referrals that have NOT failed captcha.
+            # No channel/captcha filter here — we want raw "people who came via your link"
+            # count (excluding those who explicitly failed captcha).
             unrewarded = conn.execute(
-                f"SELECT COUNT(*) AS n FROM referrals WHERE referrer_id=? AND start_reward_given=0 {ch}",
+                "SELECT COUNT(*) AS n FROM referrals "
+                "WHERE referrer_id=? AND start_reward_given=0 AND captcha_failed=0",
                 (referrer_id,)
             ).fetchone()["n"]
         progress = unrewarded if unrewarded <= required_count else unrewarded % required_count or required_count

@@ -662,6 +662,8 @@ def _run_init_db_migrations():
             "ALTER TABLE payments ADD COLUMN crypto_comment TEXT",
             # ── Referral captcha verification tracking ────────────────────────
             "ALTER TABLE referrals ADD COLUMN captcha_verified INTEGER NOT NULL DEFAULT 0",
+            # ── Referral captcha failure tracking ─────────────────────────────
+            "ALTER TABLE referrals ADD COLUMN captcha_failed INTEGER NOT NULL DEFAULT 0",
         ]
         for sql in migrations:
             try:
@@ -2153,6 +2155,19 @@ def set_referral_captcha_verified(referee_id: int) -> bool:
     with get_conn() as conn:
         cur = conn.execute(
             "UPDATE referrals SET captcha_verified=1 WHERE referee_id=? AND captcha_verified=0",
+            (referee_id,)
+        )
+        return cur.rowcount > 0
+
+
+def set_referral_captcha_failed(referee_id: int) -> bool:
+    """
+    Mark that a referee failed captcha (idempotent).
+    Returns True if the row was updated (first failure record).
+    """
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE referrals SET captcha_failed=1 WHERE referee_id=? AND captcha_failed=0 AND captcha_verified=0",
             (referee_id,)
         )
         return cur.rowcount > 0

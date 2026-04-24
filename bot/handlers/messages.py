@@ -301,6 +301,7 @@ def universal_handler(message):
     if message.text and not message.text.startswith("/"):
         from ..ui.notifications import (
             has_pending_captcha, verify_and_process_captcha, complete_referral_after_captcha,
+            notify_referrer_captcha_failed,
         )
         if has_pending_captcha(uid):
             answer_text = message.text.strip()
@@ -326,6 +327,10 @@ def universal_handler(message):
                         "زیرمجموعه برای دعوت‌کننده ثبت نشد، اما می‌توانید از ربات استفاده کنید.",
                         parse_mode="HTML",
                     )
+                    try:
+                        notify_referrer_captcha_failed(uid)
+                    except Exception:
+                        pass
                 # Either way, let execution continue so the main menu is available
                 return
 
