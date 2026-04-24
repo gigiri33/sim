@@ -19,7 +19,7 @@ def show_main_menu(target):
     custom_raw  = setting_get("start_text", "")
     if custom_raw:
         parsed = deserialize_premium_text(custom_raw)
-        if parsed.get("entities"):  # has formatting or custom emoji entities
+        if parsed.get("entities"):
             # Has premium/custom emoji → send via entities (no parse_mode, no HTML issues)
             text, entities = render_premium_text_entities(custom_raw)
             chat_id = (

@@ -1488,11 +1488,7 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
             except Exception:
                 pass
             try:
-                admin_purchase_notify(
-                    payment_method, get_user(uid), package_row, purchase_id=None,
-                    panel_config_id=panel_config_ids[0] if panel_config_ids else None,
-                    paid_amount=total_amount,
-                )
+                admin_purchase_notify(payment_method, get_user(uid), package_row, purchase_id=None)
             except Exception:
                 pass
         return panel_config_ids, []
@@ -2128,11 +2124,11 @@ def _deliver_panel_config_to_user(chat_id, panel_config_id, package_row):
         )
         # Emergency plain-text fallback — send the config to user without formatting
         try:
-            fallback_lines = []
+            fallback_lines = ["🎉 <b>سرویس شما آماده است!</b>\n"]
             if raw_config_text.strip():
-                fallback_lines.append(f"🔗 <b>کانفیگ اتصال:</b>\n<code>{esc(raw_config_text)}</code>")
+                fallback_lines.append(f"📄 <b>Config:</b>\n<code>{esc(raw_config_text)}</code>")
             if raw_sub_url.strip():
-                fallback_lines.append(f"📊 <b>پنل مدیریت مصرف:</b>\n{esc(raw_sub_url)}")
+                fallback_lines.append(f"🔗 <b>لینک ساب:</b>\n{esc(raw_sub_url)}")
             if raw_config_text.strip() or raw_sub_url.strip():
                 kb_back = types.InlineKeyboardMarkup()
                 kb_back.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
@@ -2174,27 +2170,22 @@ def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
     else:
         service_name = ""
 
-    type_label    = (package_row["type_name"] if "type_name" in (package_row.keys() if hasattr(package_row, "keys") else {}) else "")
+    inbound_remark = pc["inbound_remark"] if "inbound_remark" in (pc.keys() if hasattr(pc, "keys") else {}) else ""
+    type_label    = inbound_remark or (package_row["type_name"] if "type_name" in (package_row.keys() if hasattr(package_row, "keys") else {}) else "")
     show_pkg      = int(package_row["show_name"]) if "show_name" in package_row.keys() else 1
-    pkg_line      = f"{ce('📌', '5397782960512444700')} پکیج: <b>{esc(package_row['name'])}</b>\n" if show_pkg else ""
-    # Jalali expiry date
+    pkg_line      = f"{ce('📦', '5258134813302332906')} پکیج: <b>{esc(package_row['name'])}</b>\n" if show_pkg else ""
     _expire_at    = pc["expire_at"] if "expire_at" in pc.keys() else ""
-    expire_line   = ""
-    if _expire_at:
-        try:
-            import jdatetime as _jdt
-            _exp_jdt = _jdt.datetime.strptime(str(_expire_at)[:19], "%Y-%m-%d %H:%M:%S")
-            expire_line = f"{ce('📅', '5373026167086121198')} تاریخ انقضا: <b>{_exp_jdt.strftime('%Y/%m/%d')}</b>\n"
-        except Exception:
-            expire_line = f"{ce('📅', '5373026167086121198')} تاریخ انقضا: <b>{_expire_at[:10]}</b>\n"
+    expire_line   = f"{ce('📅', '5379748062124056162')} انقضا: <b>{_expire_at[:10]}</b>\n" if _expire_at else ""
+
+    header = f"{ce('✅', '5260463209562776385')} <b>سرویس شما آماده است!</b>"
 
     info_block = (
-        f"{ce('✏️', '5395444784611480792')} نام سرویس: <b>{esc(service_name)}</b>\n"
-        f"{ce('💡', '5422439311196834318')} نوع سرویس: <b>{esc(type_label)}</b>\n"
+        f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(service_name)}</b>\n"
+        f"{ce('🧩', '5463224921935082813')} نوع سرویس: <b>{esc(type_label)}</b>\n"
         f"{pkg_line}"
-        f"{ce('🕯', '5451882707875276247')} حجم: <b>{esc(vol_label)}</b>\n"
-        f"{ce('⌛', '5386367538735104399')} مدت زمان: <b>{esc(dur_label)}</b>\n"
-        f"{ce('📇', '5332724926216428039')} تعداد کاربر: <b>{esc(users_label)}</b>\n"
+        f"{ce('🔋', '5924538142198600679')} حجم: <b>{esc(vol_label)}</b>\n"
+        f"{ce('⏰', '5343724178547691280')} مدت: <b>{esc(dur_label)}</b>\n"
+        f"{ce('👥', '5372926953978341366')} تعداد کاربر: <b>{esc(users_label)}</b>\n"
         f"{expire_line}"
     )
 
@@ -2219,7 +2210,7 @@ def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
     def _fail_no_content(reason: str):
         """Notify user and alert admins when config content is missing."""
         bot.send_message(chat_id,
-            f"{info_block}\n"
+            f"{header}\n\n{info_block}\n"
             f"⚠️ <b>خطا در تحویل سرویس:</b> {esc(reason)}\n"
             "لطفاً با پشتیبانی تماس بگیرید.",
             parse_mode="HTML", reply_markup=kb)
@@ -2234,8 +2225,8 @@ def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
     if delivery_mode == "config_only":
         if has_cfg:
             text = (
-                f"{info_block}\n"
-                f"{ce('🔗', '5271604874419647061')} <b>کانفیگ اتصال:</b>\n<code>{esc(config_text)}</code>"
+                f"{header}\n\n{info_block}\n"
+                f"{ce('💝', '5900197669178970457')} <b>Config:</b>\n<code>{esc(config_text)}</code>"
             )
             _send_with_qr(config_text, text)
         else:
@@ -2244,8 +2235,8 @@ def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
     elif delivery_mode == "sub_only":
         if has_sub:
             text = (
-                f"{info_block}\n"
-                f"{ce('📊', '5231200819986047254')} <b>پنل مدیریت مصرف:</b>\n{esc(sub_url)}"
+                f"{header}\n\n{info_block}\n"
+                f"{ce('🔗', '5271604874419647061')} <b>لینک ساب:</b>\n{esc(sub_url)}"
             )
             _send_with_qr(sub_url, text)
         else:
@@ -2254,21 +2245,21 @@ def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
     else:  # both
         if has_cfg and has_sub:
             text = (
-                f"{info_block}\n"
-                f"{ce('🔗', '5271604874419647061')} <b>کانفیگ اتصال:</b>\n<code>{esc(config_text)}</code>\n\n"
-                f"{ce('📊', '5231200819986047254')} <b>پنل مدیریت مصرف:</b>\n{esc(sub_url)}"
+                f"{header}\n\n{info_block}\n"
+                f"{ce('💝', '5900197669178970457')} <b>Config:</b>\n<code>{esc(config_text)}</code>\n\n"
+                f"{ce('🔗', '5271604874419647061')} <b>لینک ساب:</b>\n{esc(sub_url)}"
             )
             _send_with_qr(config_text, text)  # QR for config when both present
         elif has_cfg:
             text = (
-                f"{info_block}\n"
-                f"{ce('🔗', '5271604874419647061')} <b>کانفیگ اتصال:</b>\n<code>{esc(config_text)}</code>"
+                f"{header}\n\n{info_block}\n"
+                f"{ce('💝', '5900197669178970457')} <b>Config:</b>\n<code>{esc(config_text)}</code>"
             )
             _send_with_qr(config_text, text)
         elif has_sub:
             text = (
-                f"{info_block}\n"
-                f"{ce('📊', '5231200819986047254')} <b>پنل مدیریت مصرف:</b>\n{esc(sub_url)}"
+                f"{header}\n\n{info_block}\n"
+                f"{ce('🔗', '5271604874419647061')} <b>لینک ساب:</b>\n{esc(sub_url)}"
             )
             _send_with_qr(sub_url, text)
         else:
@@ -2399,7 +2390,7 @@ def _build_card_payment_page(card, bank, owner, price, final_amount):
             f"<b>{fmt_price(display_amount)} تومان</b>\n\n"
             "⚠️ <b>حتما مبلغ را دقیقا به همین مقدار واریز نمایید.\n"
             "در صورت واریز مبلغ غیر دقیق، مسئولیت تایید نشدن رسید بر عهده خود شما خواهد بود.</b>\n\n"
-            "📸 پس از واریز، تصویر رسید را ارسال کنید."
+            "📸 پس از واریز، تصویر رسید یا شماره پیگیری را ارسال کنید."
         )
         kb = types.InlineKeyboardMarkup()
         kb.row(
@@ -2416,7 +2407,7 @@ def _build_card_payment_page(card, bank, owner, price, final_amount):
             "💳 <b>کارت به کارت</b>\n\n"
             f"لطفاً مبلغ <b>{fmt_price(price)}</b> تومان را به کارت زیر واریز کنید:\n\n"
             f"{card_info}"
-            "📸 پس از واریز، تصویر رسید را ارسال کنید."
+            "📸 پس از واریز، تصویر رسید یا شماره پیگیری را ارسال کنید."
         )
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
@@ -13416,7 +13407,6 @@ def _dispatch_callback(call, uid, data):
             f"📝 پیام تأیید برای کاربر را تایپ کنید و ارسال کنید:"
         )
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("✅ تأیید بدون توضیحات", callback_data=f"adm:pay:apc:{payment_id}"))
         kb.add(types.InlineKeyboardButton("🔙 انصراف", callback_data="nav:admin:panel"))
         state_set(uid, "admin_payment_approve_note", payment_id=payment_id)
         bot.answer_callback_query(call.id)
