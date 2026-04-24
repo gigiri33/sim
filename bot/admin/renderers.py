@@ -917,7 +917,7 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
                 pass
         send_or_edit(call, text, kb)
     else:
-        # User view: send QR inline if possible, then show buttons
+        # User view: GUARANTEED plain delivery first, then fancy.
         ar_label = "♻️ تمدید خودکار: ✅" if auto_renew else "♻️ تمدید خودکار: ❌"
         kb.row(
             InlineKeyboardButton("⚡ تمدید فوری",  callback_data=f"mypnlcfg:renewconfirm:{config_id}"),
@@ -926,58 +926,40 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
         kb.add(InlineKeyboardButton("بازگشت", callback_data=back_data,
                                     icon_custom_emoji_id="5253997076169115797"))
 
-        # Determine QR source
-        qr_source = cfg.get("client_config_text") or cfg.get("client_sub_url") or ""
-        if has_sub and not has_config:
-            qr_source = cfg["client_sub_url"]
-
-        # Strategy: TEXT must reach the user. QR is best-effort.
-        # Send the full info/config/sub as a text message (with back+renew buttons)
-        # then attach the QR as a separate photo without caption.
         chat_id = call.message.chat.id if hasattr(call, "message") else call.chat.id
 
-        # Try to strip the inline keyboard from the list message (ignore errors)
+        # ── Try to hide the keyboard on the list message (best-effort) ───────
         try:
             bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
         except Exception:
             pass
 
-        # ── Step 1: send the text message (multiple fallbacks) ────────────────
-        import logging as _lg_rn
-        _log_rn = _lg_rn.getLogger(__name__)
-        text_sent = False
-        try:
-            bot.send_message(chat_id, text, parse_mode="HTML",
-                             reply_markup=kb, disable_web_page_preview=True)
-            text_sent = True
-        except Exception as _exc_html:
-            _log_rn.warning("[MY_CFG_DETAIL] HTML send failed for cfg=%s: %s",
-                            config_id, _exc_html)
-            try:
-                import re as _re2
-                _plain = _re2.sub(r"<[^>]+>", "", text)
-                bot.send_message(chat_id, _plain, reply_markup=kb,
-                                 disable_web_page_preview=True)
-                text_sent = True
-            except Exception as _exc_plain:
-                _log_rn.warning("[MY_CFG_DETAIL] plain send failed for cfg=%s: %s",
-                                config_id, _exc_plain)
-                try:
-                    pieces = []
-                    if cfg.get("client_config_text"):
-                        pieces.append(f"کانفیگ اتصال:\n{cfg['client_config_text']}")
-                    if cfg.get("client_sub_url"):
-                        pieces.append(f"پنل مدیریت مصرف:\n{cfg['client_sub_url']}")
-                    if pieces:
-                        bot.send_message(chat_id, "\n\n".join(pieces), reply_markup=kb,
-                                         disable_web_page_preview=True)
-                        text_sent = True
-                except Exception as _exc_raw:
-                    _log_rn.error("[MY_CFG_DETAIL] raw send failed for cfg=%s: %s",
-                                  config_id, _exc_raw)
+        # ── STEP 1: GUARANTEED plain-text delivery ───────────────────────────
+        # Zero HTML, zero custom emoji. This MUST reach the user.
+        raw_cfg_text = cfg.get("client_config_text") or ""
+        raw_sub_url  = cfg.get("client_sub_url") or ""
+        client_name  = cfg.get("client_name") or "—"
 
-        # ── Step 2: best-effort QR ───────────────────────────────────────────
-        if text_sent and qr_source:
+        try:
+            _plain_lines = [f"🔮 نام سرویس: {client_name}", ""]
+            if raw_cfg_text.strip():
+                _plain_lines.append("🔗 کانفیگ اتصال:")
+                _plain_lines.append(raw_cfg_text.strip())
+                _plain_lines.append("")
+            if raw_sub_url.strip():
+                _plain_lines.append("📊 پنل مدیریت مصرف:")
+                _plain_lines.append(raw_sub_url.strip())
+            bot.send_message(chat_id, "\n".join(_plain_lines),
+                             reply_markup=kb, disable_web_page_preview=True)
+        except Exception as _plain_exc:
+            import logging as _lg_rn0
+            _lg_rn0.getLogger(__name__).error(
+                "[MY_CFG_DETAIL] plain delivery failed for cfg=%s: %s",
+                config_id, _plain_exc, exc_info=True)
+
+        # ── STEP 2: best-effort QR (no caption) ──────────────────────────────
+        qr_source = raw_cfg_text or raw_sub_url
+        if qr_source:
             try:
                 import qrcode as _qr
                 import io as _io
@@ -988,7 +970,4 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
                 bot.send_photo(chat_id, bio)
             except Exception:
                 pass
-        if not text_sent:
-            # Last resort — try send_or_edit
-            send_or_edit(call, text, kb)
 
