@@ -254,14 +254,6 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
                 except Exception:
                     pass
 
-        # Save the coin amount to the DB so admin notification always shows it
-        if payment_id and coin_amount_str and symbol:
-            try:
-                from .db import update_payment_crypto_amount
-                update_payment_crypto_amount(payment_id, f"{coin_amount_str} {symbol}")
-            except Exception:
-                pass
-
         text = (
             f"{ce('💎', '5471952986970267163')} <b>پرداخت با {esc(label)}</b>\n\n"
             f"{ce('💰', '5375296873982604963')} مبلغ: <b>{fmt_price(amount)}</b> تومان"
@@ -355,20 +347,14 @@ def send_payment_to_admins(payment_id):
             f"\n👥 تعداد کاربر: {'نامحدود' if not (package_row['max_users'] if 'max_users' in package_row.keys() else 0) else str(package_row['max_users']) + ' کاربره'}"
         )
     # Crypto equivalent line (shown only for crypto payments)
-    # Prefer the value stored in DB at payment time; fall back to live price
     crypto_line = ""
     if coin_key:
-        _pay_dict = dict(payment)
-        _stored_amt = _pay_dict.get("crypto_amount")
-        if _stored_amt:
-            crypto_line = f"\n💱 معادل ارزی: <code>{esc(_stored_amt)}</code>"
-        else:
-            symbol = CRYPTO_API_SYMBOLS.get(coin_key, "")
-            if symbol:
-                prices = _get_prices()
-                if symbol in prices and prices[symbol] > 0:
-                    coin_amount = payment["amount"] / prices[symbol]
-                    crypto_line = f"\n💱 معادل ارزی: <code>{coin_amount:.6f} {symbol}</code>"
+        symbol = CRYPTO_API_SYMBOLS.get(coin_key, "")
+        if symbol:
+            prices = _get_prices()
+            if symbol in prices and prices[symbol] > 0:
+                coin_amount = payment["amount"] / prices[symbol]
+                crypto_line = f"\n💱 معادل ارزی: <code>{coin_amount:.6f} {symbol}</code>"
 
     # Crypto comment code shown to admin (for verification)
     ton_fraud_line = ""
@@ -380,58 +366,18 @@ def send_payment_to_admins(payment_id):
             ton_fraud_line += f"\n🔑 کد کامنت: <code>{esc(_comment)}</code>"
         if _tx_hash:
             ton_fraud_line += f"\n🔗 هش تراکنش: <code>{esc(_tx_hash)}</code>"
-    # Service name (for renewal types that already have a config assigned)
-    svc_name_str = ""
-    if _pk in ("renewal", "pnlcfg_renewal"):
-        try:
-            _cfg_id_sn = dict(payment).get("config_id")
-            if _cfg_id_sn:
-                if _pk == "pnlcfg_renewal":
-                    from .db import get_panel_config as _gpc_sp
-                    _pc_sp = _gpc_sp(_cfg_id_sn)
-                    if _pc_sp and _pc_sp["client_name"]:
-                        svc_name_str = f"\n🏷 نام سرویس: {esc(_pc_sp['client_name'])}"
-                else:
-                    with get_conn() as _conn_sp:
-                        _row_sp = _conn_sp.execute(
-                            "SELECT purchase_id FROM configs WHERE id=?", (_cfg_id_sn,)
-                        ).fetchone()
-                    if _row_sp:
-                        import urllib.parse as _urlp_sp
-                        _purch_sp = get_purchase(_row_sp["purchase_id"])
-                        if _purch_sp and _purch_sp["service_name"]:
-                            svc_name_str = f"\n🏷 نام سرویس: {esc(_urlp_sp.unquote(_purch_sp['service_name']))}"
-        except Exception:
-            pass
-
-    # Amount block with discount awareness
-    _is_agent_sp = user["is_agent"] if "is_agent" in user.keys() else 0
-    _orig_sp = package_row["price"] if package_row and "price" in package_row.keys() else None
-    _paid_sp = payment["amount"]
-    _final_sp = payment["final_amount"] if "final_amount" in payment.keys() else None
-    if _orig_sp and not _is_agent_sp and _paid_sp < _orig_sp:
-        _disc_sp = _orig_sp - _paid_sp
-        amount_block = (
-            f"\n💰 مبلغ اصلی: <b>{fmt_price(_orig_sp)}</b> تومان"
-            f"\n🎟 تخفیف: <b>{fmt_price(_disc_sp)}</b> تومان"
-            f"\n💚 مبلغ نهایی: <b>{fmt_price(_paid_sp)}</b> تومان"
-        )
-    else:
-        amount_block = f"\n💰 مبلغ: <b>{fmt_price(_paid_sp)}</b> تومان"
-    if _final_sp and _final_sp != _paid_sp:
-        amount_block += f"\n🎲 مبلغ نهایی (رندوم): <b>{fmt_price(_final_sp)}</b> تومان"
-
     text = (
         f"📥 <b>درخواست جدید برای بررسی</b>\n\n"
         f"🧾 نوع: {kind_label} | {method_label}\n"
         f"👤 کاربر: {esc(user['full_name'])}\n"
         f"🆔 نام کاربری: {esc(display_username(user['username']))}\n"
-        f"🔢 آیدی: <code>{user['user_id']}</code>"
-        + amount_block
-        + svc_name_str
+        f"🔢 آیدی: <code>{user['user_id']}</code>\n"
+        f"💰 مبلغ: <b>{fmt_price(payment['amount'])}</b> تومان"
+        + (f"\n🎲 مبلغ نهایی (رندوم): <b>{fmt_price(payment['final_amount'])}</b> تومان"
+           if payment['final_amount'] and payment['final_amount'] != payment['amount'] else "")
         + f"{crypto_line}"
         + f"{ton_fraud_line}"
-        + f"{package_text}\n\n"
+        f"{package_text}\n\n"
         f"📝 توضیح کاربر:\n{esc(payment['receipt_text'] or '-')}"
     )
     kb = types.InlineKeyboardMarkup()
@@ -580,52 +526,14 @@ def finish_card_payment_approval(payment_id, admin_note, approved):
                         f"\n⏰ مدت: {package_row['duration_days']} روز"
                         f"\n👥 تعداد کاربر: {'نامحدود' if not (package_row['max_users'] if 'max_users' in package_row.keys() else 0) else str(package_row['max_users']) + ' کاربره'}"
                     )
-                # Service name for renewals
-                _svc_fa = ""
-                _k2 = payment["kind"]
-                if _k2 in ("renewal", "pnlcfg_renewal"):
-                    try:
-                        _cfg_fa = dict(payment).get("config_id")
-                        if _cfg_fa:
-                            if _k2 == "pnlcfg_renewal":
-                                from .db import get_panel_config as _gpc_fa
-                                _pc_fa = _gpc_fa(_cfg_fa)
-                                if _pc_fa and _pc_fa["client_name"]:
-                                    _svc_fa = f"\n🏷 نام سرویس: {esc(_pc_fa['client_name'])}"
-                            else:
-                                with get_conn() as _conn_fa:
-                                    _row_fa = _conn_fa.execute(
-                                        "SELECT purchase_id FROM configs WHERE id=?", (_cfg_fa,)
-                                    ).fetchone()
-                                if _row_fa:
-                                    import urllib.parse as _urlp_fa
-                                    _purch_fa = get_purchase(_row_fa["purchase_id"])
-                                    if _purch_fa and _purch_fa["service_name"]:
-                                        _svc_fa = f"\n🏷 نام سرویس: {esc(_urlp_fa.unquote(_purch_fa['service_name']))}"
-                    except Exception:
-                        pass
-                # Amount block with discount
-                _is_ag_fa = user["is_agent"] if "is_agent" in user.keys() else 0
-                _orig_fa = package_row["price"] if package_row and "price" in package_row.keys() else None
-                _paid_fa = payment["amount"]
-                if _orig_fa and not _is_ag_fa and _paid_fa < _orig_fa:
-                    _disc_fa = _orig_fa - _paid_fa
-                    _amt_block_fa = (
-                        f"\n{ce('💰', '5794002949222964817')} مبلغ اصلی: <b>{fmt_price(_orig_fa)}</b> تومان"
-                        f"\n🎟 تخفیف: <b>{fmt_price(_disc_fa)}</b> تومان"
-                        f"\n💚 مبلغ نهایی: <b>{fmt_price(_paid_fa)}</b> تومان"
-                    )
-                else:
-                    _amt_block_fa = f"\n{ce('💰', '5794002949222964817')} مبلغ: <b>{fmt_price(_paid_fa)}</b> تومان"
                 status_text = (
                     f"{header}\n\n"
                     f"🧾 نوع: {kind_label} | {method_label}\n"
                     f"{ce('👤', '5373012449597335010')} کاربر: {esc(user['full_name'])}\n"
                     f"🆔 نام کاربری: {esc(display_username(user['username']))}\n"
-                    f"🔢 آیدی: <code>{user['user_id']}</code>"
-                    + _amt_block_fa
-                    + _svc_fa
-                    + f"{package_text}\n\n"
+                    f"🔢 آیدی: <code>{user['user_id']}</code>\n"
+                    f"{ce('💰', '5794002949222964817')} مبلغ: <b>{fmt_price(payment['amount'])}</b> تومان"
+                    f"{package_text}\n\n"
                     f"📝 توضیح کاربر:\n{esc(payment['receipt_text'] or '-')}"
                     f"{not_notified_note}"
                 )
