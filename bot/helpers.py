@@ -134,6 +134,46 @@ def esc(t):
     return html.escape(str(t or ""))
 
 
+# ── Panel config message builder ───────────────────────────────────────────────
+def build_full_config_message(info_block: str = "",
+                              config_text: str = "",
+                              sub_url: str = "") -> str:
+    """
+    Build the HTML message body for a delivered panel config.
+
+    Returns a safe, non-empty, HTML-valid string with:
+      {info_block}
+      🔗 کانفیگ اتصال:  <code>{config_text}</code>       (only if present)
+      📊 پنل مدیریت مصرف: {sub_url}                     (only if present)
+
+    All substitutions are HTML-escaped. Never raises.
+    """
+    # Normalise inputs
+    info_block  = info_block  or ""
+    config_text = (config_text or "").strip()
+    sub_url     = (sub_url     or "").strip()
+
+    parts: list[str] = []
+    if info_block:
+        parts.append(info_block.rstrip("\n"))
+
+    if config_text:
+        parts.append(
+            f"🔗 <b>کانفیگ اتصال:</b>\n<code>{esc(config_text)}</code>"
+        )
+
+    if sub_url:
+        parts.append(
+            f"📊 <b>پنل مدیریت مصرف:</b>\n{esc(sub_url)}"
+        )
+
+    # Guarantee non-empty output
+    if not parts:
+        return "⚠️ محتوای کانفیگ در دسترس نیست."
+
+    return "\n\n".join(parts)
+
+
 # ── Service name display helper ────────────────────────────────────────────────
 _LEADING_EMOJI_RE = re.compile(
     r'^((?:[\U00002600-\U000027BF'

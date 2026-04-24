@@ -2302,45 +2302,41 @@ def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
             panel_config_id=panel_config_id,
         )
 
+    # ── DEBUG log BEFORE any delivery attempt ────────────────────────────────
+    log.info(
+        "[PANEL_DELIVERY] pc=%s mode=%s has_cfg=%s has_sub=%s cfg_len=%d sub=%r",
+        panel_config_id, delivery_mode,
+        has_cfg, has_sub,
+        len(config_text), sub_url,
+    )
+
     if delivery_mode == "config_only":
         if has_cfg:
-            text = (
-                f"{info_block}\n"
-                f"{ce('🔗', '5271604874419647061')} <b>کانفیگ اتصال:</b>\n<code>{esc(config_text)}</code>"
-            )
+            from ..helpers import build_full_config_message
+            text = build_full_config_message(info_block, config_text, "")
             _send_with_qr(config_text, text)
         else:
             _fail_no_content("کانفیگ در دسترس نیست")
 
     elif delivery_mode == "sub_only":
         if has_sub:
-            text = (
-                f"{info_block}\n"
-                f"{ce('📊', '5231200819986047254')} <b>پنل مدیریت مصرف:</b>\n{esc(sub_url)}"
-            )
+            from ..helpers import build_full_config_message
+            text = build_full_config_message(info_block, "", sub_url)
             _send_with_qr(sub_url, text)
         else:
             _fail_no_content("لینک ساب در دسترس نیست")
 
     else:  # both
+        from ..helpers import build_full_config_message
         if has_cfg and has_sub:
-            text = (
-                f"{info_block}\n"
-                f"{ce('🔗', '5271604874419647061')} <b>کانفیگ اتصال:</b>\n<code>{esc(config_text)}</code>\n\n"
-                f"{ce('📊', '5231200819986047254')} <b>پنل مدیریت مصرف:</b>\n{esc(sub_url)}"
-            )
-            _send_with_qr(config_text, text)  # QR for config when both present
+            text = build_full_config_message(info_block, config_text, sub_url)
+            # QR is built from config_text when both are present
+            _send_with_qr(config_text, text)
         elif has_cfg:
-            text = (
-                f"{info_block}\n"
-                f"{ce('🔗', '5271604874419647061')} <b>کانفیگ اتصال:</b>\n<code>{esc(config_text)}</code>"
-            )
+            text = build_full_config_message(info_block, config_text, "")
             _send_with_qr(config_text, text)
         elif has_sub:
-            text = (
-                f"{info_block}\n"
-                f"{ce('📊', '5231200819986047254')} <b>پنل مدیریت مصرف:</b>\n{esc(sub_url)}"
-            )
+            text = build_full_config_message(info_block, "", sub_url)
             _send_with_qr(sub_url, text)
         else:
             _fail_no_content("کانفیگ و ساب هر دو در دسترس نیستند")

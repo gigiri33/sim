@@ -927,6 +927,8 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
                                     icon_custom_emoji_id="5253997076169115797"))
 
         chat_id = call.message.chat.id if hasattr(call, "message") else call.chat.id
+        import logging as _lg_rn
+        _log_rn = _lg_rn.getLogger(__name__)
 
         # ── Try to hide the keyboard on the list message (best-effort) ───────
         try:
@@ -934,12 +936,17 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
         except Exception:
             pass
 
-        # ── STEP 1: GUARANTEED plain-text delivery ───────────────────────────
-        # Zero HTML, zero custom emoji. This MUST reach the user.
         raw_cfg_text = cfg.get("client_config_text") or ""
         raw_sub_url  = cfg.get("client_sub_url") or ""
         client_name  = cfg.get("client_name") or "—"
 
+        _log_rn.info(
+            "[MY_CFG_DETAIL] cfg=%s has_cfg=%s has_sub=%s cfg_len=%d",
+            config_id, bool(raw_cfg_text.strip()), bool(raw_sub_url.strip()),
+            len(raw_cfg_text),
+        )
+
+        # ── STEP 1: GUARANTEED plain-text delivery (no HTML, no ce) ──────────
         try:
             _plain_lines = [f"🔮 نام سرویس: {client_name}", ""]
             if raw_cfg_text.strip():
@@ -952,10 +959,19 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
             bot.send_message(chat_id, "\n".join(_plain_lines),
                              reply_markup=kb, disable_web_page_preview=True)
         except Exception as _plain_exc:
-            import logging as _lg_rn0
-            _lg_rn0.getLogger(__name__).error(
+            _log_rn.error(
                 "[MY_CFG_DETAIL] plain delivery failed for cfg=%s: %s",
                 config_id, _plain_exc, exc_info=True)
+            # Last-ditch SAFE FALLBACK: send just the config text or sub URL raw
+            try:
+                _raw_body = raw_cfg_text.strip() or raw_sub_url.strip()
+                if _raw_body:
+                    bot.send_message(chat_id, _raw_body, reply_markup=kb,
+                                     disable_web_page_preview=True)
+            except Exception as _ff_exc:
+                _log_rn.error(
+                    "[MY_CFG_DETAIL] safe fallback ALSO failed for cfg=%s: %s",
+                    config_id, _ff_exc)
 
         # ── STEP 2: best-effort QR (no caption) ──────────────────────────────
         qr_source = raw_cfg_text or raw_sub_url
