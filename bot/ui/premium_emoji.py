@@ -149,31 +149,37 @@ def extract_context_text(text: str, offset: int, length: int) -> str:
 
 def serialize_premium_text(text: str, entities) -> str:
     """
-    Store text + custom_emoji entities in a JSON string.
-    Falls back to returning plain text if no custom emojis are present
-    (backward-compatible: old plain-text values still work).
-
-    entities: iterable of telebot MessageEntity objects (or None)
+    Store text + entities (custom_emoji AND formatting: bold, italic, etc.) in JSON.
+    Falls back to returning plain text if no relevant entities are present.
     """
+    _FORMAT_TYPES = {"bold", "italic", "underline", "strikethrough", "spoiler",
+                     "code", "pre", "text_link", "custom_emoji"}
     if not entities:
         return text
 
-    custom: list[dict] = []
+    stored: list[dict] = []
     for e in (entities or []):
+        if e.type not in _FORMAT_TYPES:
+            continue
+        entry: dict = {
+            "type":   e.type,
+            "offset": e.offset,
+            "length": e.length,
+        }
         if e.type == "custom_emoji":
             emoji_char = text[e.offset: e.offset + e.length]
-            custom.append({
-                "type":            "custom_emoji",
-                "offset":          e.offset,
-                "length":          e.length,
-                "emoji":           emoji_char,
-                "custom_emoji_id": e.custom_emoji_id,
-            })
+            entry["emoji"]           = emoji_char
+            entry["custom_emoji_id"] = e.custom_emoji_id
+        elif e.type == "text_link":
+            entry["url"] = getattr(e, "url", "") or ""
+        elif e.type == "pre":
+            entry["language"] = getattr(e, "language", "") or ""
+        stored.append(entry)
 
-    if not custom:
+    if not stored:
         return text
 
-    return json.dumps({"text": text, "entities": custom}, ensure_ascii=False)
+    return json.dumps({"text": text, "entities": stored}, ensure_ascii=False)
 
 
 def deserialize_premium_text(data: str) -> dict:
@@ -202,16 +208,18 @@ def render_premium_text_html(data: str, escape_plain_parts: bool = False) -> str
     """
     Render stored text as an HTML string for Telegram parse_mode="HTML".
 
-    Inserts <tg-emoji emoji-id="...">emoji</tg-emoji> tags at custom emoji
-    positions.  Everything else is left as-is (or HTML-escaped if
-    escape_plain_parts=True).
-
-    escape_plain_parts=False  →  for start_text where admin writes raw HTML.
-    escape_plain_parts=True   →  for rules_text / descriptions (plain text).
-
-    If no custom emojis are stored, the raw value is returned unchanged
-    (preserves old behaviour for every caller that previously used plain text).
+    Handles custom_emoji, bold, italic, underline, strikethrough, code, pre,
+    spoiler, and text_link entities.  Plain parts are optionally HTML-escaped.
     """
+    _TAG_MAP = {
+        "bold":          ("<b>",  "</b>"),
+        "italic":        ("<i>",  "</i>"),
+        "underline":     ("<u>",  "</u>"),
+        "strikethrough": ("<s>",  "</s>"),
+        "spoiler":       ("<tg-spoiler>", "</tg-spoiler>"),
+        "code":          ("<code>", "</code>"),
+    }
+
     parsed      = deserialize_premium_text(data)
     text        = parsed["text"]
     raw_ents    = parsed.get("entities", [])
@@ -224,15 +232,32 @@ def render_premium_text_html(data: str, escape_plain_parts: bool = False) -> str
     cursor = 0
 
     for e in sorted_ents:
-        if e.get("type") != "custom_emoji":
-            continue
-        if e["offset"] > cursor:
-            chunk = text[cursor: e["offset"]]
+        etype = e.get("type", "")
+        offset = e["offset"]
+        length = e["length"]
+        if offset > cursor:
+            chunk = text[cursor:offset]
             result.append(html.escape(chunk) if escape_plain_parts else chunk)
-        emoji_id   = e["custom_emoji_id"]
-        emoji_char = html.escape(e.get("emoji", text[e["offset"]: e["offset"] + e["length"]]))
-        result.append(f'<tg-emoji emoji-id="{emoji_id}">{emoji_char}</tg-emoji>')
-        cursor = e["offset"] + e["length"]
+        inner = text[offset: offset + length]
+        if etype == "custom_emoji":
+            emoji_id   = e["custom_emoji_id"]
+            emoji_char = html.escape(e.get("emoji", inner))
+            result.append(f'<tg-emoji emoji-id="{emoji_id}">{emoji_char}</tg-emoji>')
+        elif etype in _TAG_MAP:
+            open_tag, close_tag = _TAG_MAP[etype]
+            result.append(f"{open_tag}{html.escape(inner)}{close_tag}")
+        elif etype == "pre":
+            lang = e.get("language", "")
+            if lang:
+                result.append(f'<pre><code class="language-{html.escape(lang)}">{html.escape(inner)}</code></pre>')
+            else:
+                result.append(f"<pre>{html.escape(inner)}</pre>")
+        elif etype == "text_link":
+            url = html.escape(e.get("url", ""))
+            result.append(f'<a href="{url}">{html.escape(inner)}</a>')
+        else:
+            result.append(html.escape(inner) if escape_plain_parts else inner)
+        cursor = offset + length
 
     if cursor < len(text):
         chunk = text[cursor:]
@@ -245,8 +270,8 @@ def render_premium_text_entities(data: str):
     """
     Return (text, entities | None) for direct sending without parse_mode.
 
-    Use when you can pass entities= to bot.send_message() directly.
-    The second value is None when there are no custom emojis (plain text).
+    Handles custom_emoji, bold, italic, underline, strikethrough, code, pre,
+    spoiler, and text_link entities.  Returns None for entities when none found.
     """
     from telebot import types as tg_types  # late import — avoids circular dep
 
@@ -259,14 +284,38 @@ def render_premium_text_entities(data: str):
 
     entities: list = []
     for e in raw_ents:
-        if e.get("type") == "custom_emoji":
+        etype = e.get("type", "")
+        if etype == "custom_emoji":
             me = tg_types.MessageEntity(
                 type             = "custom_emoji",
                 offset           = e["offset"],
                 length           = e["length"],
                 custom_emoji_id  = e["custom_emoji_id"],
             )
-            entities.append(me)
+        elif etype in ("bold", "italic", "underline", "strikethrough",
+                       "spoiler", "code"):
+            me = tg_types.MessageEntity(
+                type   = etype,
+                offset = e["offset"],
+                length = e["length"],
+            )
+        elif etype == "pre":
+            me = tg_types.MessageEntity(
+                type     = "pre",
+                offset   = e["offset"],
+                length   = e["length"],
+                language = e.get("language", ""),
+            )
+        elif etype == "text_link":
+            me = tg_types.MessageEntity(
+                type   = "text_link",
+                offset = e["offset"],
+                length = e["length"],
+                url    = e.get("url", ""),
+            )
+        else:
+            continue
+        entities.append(me)
 
     return text, (entities if entities else None)
 
