@@ -2347,7 +2347,7 @@ def _build_card_payment_page(card, bank, owner, price, final_amount):
             f"<b>{fmt_price(display_amount)} تومان</b>\n\n"
             "⚠️ <b>حتما مبلغ را دقیقا به همین مقدار واریز نمایید.\n"
             "در صورت واریز مبلغ غیر دقیق، مسئولیت تایید نشدن رسید بر عهده خود شما خواهد بود.</b>\n\n"
-            "📸 پس از واریز، تصویر رسید یا شماره پیگیری را ارسال کنید."
+            "📸 پس از واریز، تصویر رسید را ارسال کنید."
         )
         kb = types.InlineKeyboardMarkup()
         kb.row(
@@ -2364,7 +2364,7 @@ def _build_card_payment_page(card, bank, owner, price, final_amount):
             "💳 <b>کارت به کارت</b>\n\n"
             f"لطفاً مبلغ <b>{fmt_price(price)}</b> تومان را به کارت زیر واریز کنید:\n\n"
             f"{card_info}"
-            "📸 پس از واریز، تصویر رسید یا شماره پیگیری را ارسال کنید."
+            "📸 پس از واریز، تصویر رسید را ارسال کنید."
         )
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
