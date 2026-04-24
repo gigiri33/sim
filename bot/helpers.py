@@ -186,3 +186,29 @@ def back_button(target="main"):
         "callback_data": f"nav:{target}",
         "icon_custom_emoji_id": "5253997076169115797",
     }]]})
+
+
+# ── Service-name helpers (compatibility shims for newer handler modules) ──────
+def normalize_service_name(name: str) -> str:
+    """Return a lowercase, trimmed version of a service name. Never raises."""
+    if not name:
+        return ""
+    try:
+        return str(name).lower().strip()
+    except Exception:
+        return ""
+
+
+def validate_service_name(name: str) -> bool:
+    """
+    Minimal safe validator used by handler modules. Accepts only lowercase
+    alphanumeric names (after normalisation). Never raises.
+    """
+    if not name:
+        return False
+    try:
+        normalised = normalize_service_name(name)
+        return bool(re.match(r'^[a-z0-9]+$', normalised))
+    except Exception:
+        return False
+
