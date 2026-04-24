@@ -1455,7 +1455,11 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
             except Exception:
                 pass
             try:
-                admin_purchase_notify(payment_method, get_user(uid), package_row, purchase_id=None)
+                admin_purchase_notify(
+                    payment_method, get_user(uid), package_row, purchase_id=None,
+                    panel_config_id=panel_config_ids[0] if panel_config_ids else None,
+                    paid_amount=total_amount,
+                )
             except Exception:
                 pass
         return panel_config_ids, []

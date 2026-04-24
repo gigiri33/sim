@@ -438,15 +438,28 @@ def check_and_notify_stock(package_id: int, package_name: str):
 
 
 # ── Admin notifications ────────────────────────────────────────────────────────
-def admin_purchase_notify(method_label, user_row, package_row, purchase_id=None):
+def admin_purchase_notify(method_label, user_row, package_row, purchase_id=None,
+                          panel_config_id=None, paid_amount=None):
     svc_name = None
-    paid_amount = None
     if purchase_id:
         try:
             _p = get_purchase(purchase_id)
             if _p:
                 svc_name = urllib.parse.unquote(_p["service_name"]) if _p["service_name"] else None
-                paid_amount = _p["amount"]
+                if paid_amount is None:
+                    paid_amount = _p["amount"]
+        except Exception:
+            pass
+    elif panel_config_id:
+        try:
+            from .notifications import get_panel_config as _gpc_n
+        except Exception:
+            _gpc_n = None
+        try:
+            from ..db import get_panel_config as _gpc_n
+            _pc_n = _gpc_n(panel_config_id)
+            if _pc_n and _pc_n["client_name"]:
+                svc_name = _pc_n["client_name"]
         except Exception:
             pass
     svc_line = f"🏷 نام سرویس: {esc(svc_name)}\n" if svc_name else ""
@@ -456,7 +469,7 @@ def admin_purchase_notify(method_label, user_row, package_row, purchase_id=None)
         disc_amount = orig_price - paid_amount
         price_line = (
             f"💰 مبلغ اصلی: {fmt_price(orig_price)} تومان\n"
-            f"🎟 کد تخفیف: {fmt_price(disc_amount)} تومان\n"
+            f"🎟 تخفیف: {fmt_price(disc_amount)} تومان\n"
             f"💚 مبلغ نهایی: {fmt_price(paid_amount)} تومان\n"
         )
     elif paid_amount is not None:
