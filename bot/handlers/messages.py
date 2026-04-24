@@ -12,8 +12,6 @@ from ..helpers import (
     is_admin, admin_has_perm, back_button,
     state_set, state_clear, state_name, state_data, parse_int, parse_volume, normalize_text_number,
     normalize_iranian_phone,
-    validate_service_name, normalize_service_name,
-    generate_random_service_name, parse_service_names_multiline,
 )
 from ..db import (
     setting_get, setting_set,
@@ -79,7 +77,6 @@ from .callbacks import (
     _wg_send_file_group, _wg_caption, _wg_service_name_from_filename,
     _qty_order_summary_text,
     _v2_name_from_config, _v2_name_from_sub, _v2_bulk_data_prompt,
-    _show_naming_choice,
 )
 
 
@@ -776,78 +773,10 @@ def universal_handler(message):
                       unit_price=unit_price, quantity=qty, kind="config_purchase")
             summary = _qty_order_summary_text(package_row, unit_price, qty)
             bot.send_message(uid, summary, parse_mode="HTML")
-            # Show naming choice step before proceeding to payment
-            _show_naming_choice(message, package_id)
-            return
-
-        # ── Single custom service name entry ─────────────────────────────────
-        if sn == "await_custom_name":
-            raw = (message.text or "").strip()
-            package_id  = sd.get("package_id")
-            amount      = int(sd.get("amount", 0) or 0)
-            package_row = get_package(package_id)
-            if not package_row:
-                state_clear(uid)
-                bot.send_message(uid, "⚠️ خطا در اطلاعات سفارش. لطفاً دوباره شروع کنید.", reply_markup=kb_main(uid))
-                return
-            custom_name = normalize_service_name(raw)
-            new_data = dict(sd)
-            if custom_name:
-                new_data["custom_names"] = [custom_name]
-                state_set(uid, "buy_select_method", **new_data)
-                bot.send_message(uid,
-                    f"✅ نام سرویس «<code>{esc(custom_name)}</code>» ثبت شد.",
-                    parse_mode="HTML")
-            else:
-                new_data["custom_names"] = []
-                state_set(uid, "buy_select_method", **new_data)
-                bot.send_message(uid,
-                    "⚠️ نام وارد‌شده نامعتبر بود.\n"
-                    "سیستم به‌صورت خودکار یک نام رندوم برای سرویس شما انتخاب می‌کند.",
-                    parse_mode="HTML")
             if setting_get("discount_codes_enabled", "0") == "1":
-                if _show_discount_prompt(message, amount):
+                if _show_discount_prompt(message, total):
                     return
-            _show_purchase_gateways(message, uid, package_id, amount, package_row)
-            return
-
-        # ── Bulk custom service names entry ───────────────────────────────────
-        if sn == "await_custom_names_bulk":
-            raw = (message.text or "").strip()
-            package_id  = sd.get("package_id")
-            qty         = int(sd.get("quantity", 1) or 1)
-            amount      = int(sd.get("amount", 0) or 0)
-            package_row = get_package(package_id)
-            if not package_row:
-                state_clear(uid)
-                bot.send_message(uid, "⚠️ خطا در اطلاعات سفارش. لطفاً دوباره شروع کنید.", reply_markup=kb_main(uid))
-                return
-            lines = [l.strip() for l in raw.splitlines() if l.strip()]
-            if len(lines) != qty:
-                bot.send_message(uid,
-                    f"⚠️ <b>تعداد نام‌ها اشتباه است.</b>\n\n"
-                    f"شما {len(lines)} نام ارسال کردید، در حالی که تعداد سرویس‌ها {qty} عدد است.\n\n"
-                    f"لطفاً دقیقاً <b>{qty}</b> نام، هر کدام در یک خط جداگانه، ارسال کنید.",
-                    parse_mode="HTML")
-                return
-            custom_names = parse_service_names_multiline(raw, qty, uid)
-            feedback_lines = []
-            for i, (orig_line, final_name) in enumerate(zip(lines, custom_names)):
-                norm = normalize_service_name(orig_line)
-                if norm:
-                    feedback_lines.append(f"{i+1}. <code>{esc(final_name)}</code> ✅")
-                else:
-                    feedback_lines.append(f"{i+1}. <code>{esc(final_name)}</code> 🎲 (جایگزین رندوم)")
-            new_data = dict(sd)
-            new_data["custom_names"] = custom_names
-            state_set(uid, "buy_select_method", **new_data)
-            bot.send_message(uid,
-                "✅ <b>نام سرویس‌ها ثبت شد:</b>\n\n" + "\n".join(feedback_lines),
-                parse_mode="HTML")
-            if setting_get("discount_codes_enabled", "0") == "1":
-                if _show_discount_prompt(message, amount):
-                    return
-            _show_purchase_gateways(message, uid, package_id, amount, package_row)
+            _show_purchase_gateways(message, uid, package_id, total, package_row)
             return
 
         # ── Discount code entry ───────────────────────────────────────────────
