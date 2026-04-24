@@ -943,19 +943,25 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
             pass
 
         # ── Step 1: send the text message (multiple fallbacks) ────────────────
+        import logging as _lg_rn
+        _log_rn = _lg_rn.getLogger(__name__)
         text_sent = False
         try:
             bot.send_message(chat_id, text, parse_mode="HTML",
                              reply_markup=kb, disable_web_page_preview=True)
             text_sent = True
-        except Exception:
+        except Exception as _exc_html:
+            _log_rn.warning("[MY_CFG_DETAIL] HTML send failed for cfg=%s: %s",
+                            config_id, _exc_html)
             try:
                 import re as _re2
                 _plain = _re2.sub(r"<[^>]+>", "", text)
                 bot.send_message(chat_id, _plain, reply_markup=kb,
                                  disable_web_page_preview=True)
                 text_sent = True
-            except Exception:
+            except Exception as _exc_plain:
+                _log_rn.warning("[MY_CFG_DETAIL] plain send failed for cfg=%s: %s",
+                                config_id, _exc_plain)
                 try:
                     pieces = []
                     if cfg.get("client_config_text"):
@@ -966,8 +972,9 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
                         bot.send_message(chat_id, "\n\n".join(pieces), reply_markup=kb,
                                          disable_web_page_preview=True)
                         text_sent = True
-                except Exception:
-                    pass
+                except Exception as _exc_raw:
+                    _log_rn.error("[MY_CFG_DETAIL] raw send failed for cfg=%s: %s",
+                                  config_id, _exc_raw)
 
         # ── Step 2: best-effort QR ───────────────────────────────────────────
         if text_sent and qr_source:

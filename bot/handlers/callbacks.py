@@ -2124,6 +2124,29 @@ def _deliver_panel_config_to_user(chat_id, panel_config_id, package_row):
     raw_config_text = pc["client_config_text"] or ""
     raw_sub_url     = pc["client_sub_url"] or ""
 
+    # ── GUARANTEED PLAIN DELIVERY ──────────────────────────────────────────────
+    # Send the raw config/sub as a plain-text message FIRST, with zero HTML,
+    # zero custom emoji, zero formatting. This guarantees the user receives
+    # the content even if the fancy formatted message below fails for any
+    # reason (invalid custom emoji ID, HTML parse error, caption length, etc.).
+    try:
+        _plain_lines = ["✅ سرویس شما آماده شد:\n"]
+        if raw_config_text.strip():
+            _plain_lines.append("🔗 کانفیگ اتصال:")
+            _plain_lines.append(raw_config_text.strip())
+            _plain_lines.append("")
+        if raw_sub_url.strip():
+            _plain_lines.append("📊 پنل مدیریت مصرف:")
+            _plain_lines.append(raw_sub_url.strip())
+        if len(_plain_lines) > 1:
+            bot.send_message(chat_id, "\n".join(_plain_lines),
+                             disable_web_page_preview=True)
+            log.info("[PANEL_DELIVERY] plain delivery sent for pc=%s uid=%s",
+                     panel_config_id, chat_id)
+    except Exception as _plain_exc:
+        log.error("[PANEL_DELIVERY] plain delivery failed for pc=%s: %s",
+                  panel_config_id, _plain_exc, exc_info=True)
+
     try:
         _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc)
     except Exception as _inner_exc:
