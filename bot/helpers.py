@@ -159,6 +159,51 @@ def move_leading_emoji(name: str) -> str:
     return rest.strip() + " " + prefix.strip()
 
 
+# ── Service-name validation & helpers ─────────────────────────────────────────
+_SVC_NAME_RE = re.compile(r'^[a-z0-9]+$')
+
+
+def validate_service_name(name: str):
+    """Normalize and validate a service name.
+
+    Returns (normalized_name, True) if valid, (None, False) otherwise.
+    Normalizes: strips whitespace, converts to lowercase.
+    Valid: only lowercase ASCII letters a-z and digits 0-9.
+    """
+    if not name:
+        return None, False
+    name = name.strip().lower()
+    if not name or not _SVC_NAME_RE.fullmatch(name):
+        return None, False
+    return name, True
+
+
+def generate_random_service_name(uid: int) -> str:
+    """Generate a random service name: {uid}_{random6}."""
+    import random as _random
+    import string as _string
+    rand_str = "".join(_random.choices(_string.ascii_lowercase + _string.digits, k=6))
+    return f"{uid}_{rand_str}"
+
+
+def parse_custom_names(text: str, expected_count: int, uid: int):
+    """Parse a multi-line custom names input.
+
+    Returns (names_list, None) when the line count matches expected_count.
+    Invalid individual names are silently replaced with a random fallback.
+    Returns (None, actual_count) when the count doesn't match so the caller
+    can display a meaningful error.
+    """
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    if len(lines) != expected_count:
+        return None, len(lines)
+    result = []
+    for line in lines:
+        normalized, valid = validate_service_name(line)
+        result.append(normalized if valid else generate_random_service_name(uid))
+    return result, None
+
+
 # ── State management ───────────────────────────────────────────────────────────
 def state_set(uid, name, **data):
     USER_STATE[uid] = {"state_name": name, "data": data}
