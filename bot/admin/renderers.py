@@ -931,13 +931,46 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
         if has_sub and not has_config:
             qr_source = cfg["client_sub_url"]
 
-        # Telegram caption limit is 1024 chars. With both config+sub the text
-        # usually exceeds this, so send the QR image without a caption and
-        # deliver the full text as a separate (editable) message.
-        CAPTION_LIMIT = 1000
+        # Strategy: TEXT must reach the user. QR is best-effort.
+        # Send the full info/config/sub as a text message (with back+renew buttons)
+        # then attach the QR as a separate photo without caption.
         chat_id = call.message.chat.id if hasattr(call, "message") else call.chat.id
 
-        if qr_source:
+        # Try to strip the inline keyboard from the list message (ignore errors)
+        try:
+            bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        except Exception:
+            pass
+
+        # ── Step 1: send the text message (multiple fallbacks) ────────────────
+        text_sent = False
+        try:
+            bot.send_message(chat_id, text, parse_mode="HTML",
+                             reply_markup=kb, disable_web_page_preview=True)
+            text_sent = True
+        except Exception:
+            try:
+                import re as _re2
+                _plain = _re2.sub(r"<[^>]+>", "", text)
+                bot.send_message(chat_id, _plain, reply_markup=kb,
+                                 disable_web_page_preview=True)
+                text_sent = True
+            except Exception:
+                try:
+                    pieces = []
+                    if cfg.get("client_config_text"):
+                        pieces.append(f"کانفیگ اتصال:\n{cfg['client_config_text']}")
+                    if cfg.get("client_sub_url"):
+                        pieces.append(f"پنل مدیریت مصرف:\n{cfg['client_sub_url']}")
+                    if pieces:
+                        bot.send_message(chat_id, "\n\n".join(pieces), reply_markup=kb,
+                                         disable_web_page_preview=True)
+                        text_sent = True
+                except Exception:
+                    pass
+
+        # ── Step 2: best-effort QR ───────────────────────────────────────────
+        if text_sent and qr_source:
             try:
                 import qrcode as _qr
                 import io as _io
@@ -945,22 +978,10 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
                 _qr.make(qr_source).save(bio, format="PNG")
                 bio.seek(0)
                 bio.name = "qr.png"
-                try:
-                    bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
-                except Exception:
-                    pass
-                if len(text) > CAPTION_LIMIT:
-                    try:
-                        bot.send_photo(chat_id, bio)
-                    except Exception as _ph_exc:
-                        import logging as _lg
-                        _lg.getLogger(__name__).warning(
-                            "_show_panel_config_detail QR send failed: %s", _ph_exc)
-                    bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
-                else:
-                    bot.send_photo(chat_id, bio, caption=text, parse_mode="HTML", reply_markup=kb)
+                bot.send_photo(chat_id, bio)
             except Exception:
-                send_or_edit(call, text, kb)
-        else:
+                pass
+        if not text_sent:
+            # Last resort — try send_or_edit
             send_or_edit(call, text, kb)
 
