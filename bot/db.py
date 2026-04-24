@@ -660,8 +660,6 @@ def _run_init_db_migrations():
             ),
             # ── Crypto comment code shown to user during payment ──────────────
             "ALTER TABLE payments ADD COLUMN crypto_comment TEXT",
-            # ── Stored crypto equivalent amount at time of payment ────────────
-            "ALTER TABLE payments ADD COLUMN crypto_amount TEXT",
             # ── Referral captcha verification tracking ────────────────────────
             "ALTER TABLE referrals ADD COLUMN captcha_verified INTEGER NOT NULL DEFAULT 0",
             # ── Referral captcha failure tracking ─────────────────────────────
@@ -1607,14 +1605,6 @@ def update_payment_crypto_comment(payment_id, comment_code):
         conn.execute(
             "UPDATE payments SET crypto_comment=? WHERE id=?",
             (comment_code, payment_id)
-        )
-
-
-def update_payment_crypto_amount(payment_id, coin_amount_str):
-    with get_conn() as conn:
-        conn.execute(
-            "UPDATE payments SET crypto_amount=? WHERE id=?",
-            (coin_amount_str, payment_id)
         )
 
 
