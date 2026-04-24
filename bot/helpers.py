@@ -174,6 +174,34 @@ def build_full_config_message(info_block: str = "",
     return "\n\n".join(parts)
 
 
+def build_config_text(info_block: str = "", config_text: str = "") -> str:
+    """
+    Build the HTML body for the CONFIG part of a delivery (info + config only).
+    Safe, non-empty, HTML-valid. Never raises.
+    """
+    info_block  = info_block or ""
+    config_text = (config_text or "").strip()
+    parts: list[str] = []
+    if info_block:
+        parts.append(info_block.rstrip("\n"))
+    if config_text:
+        parts.append(f"🔗 <b>کانفیگ اتصال:</b>\n<code>{esc(config_text)}</code>")
+    else:
+        parts.append("🔗 <b>کانفیگ اتصال:</b>\n❌ ندارد")
+    return "\n\n".join(parts) or "⚠️ محتوای کانفیگ در دسترس نیست."
+
+
+def build_sub_text(sub_url: str = "") -> str:
+    """
+    Build the HTML body for the SUB part of a delivery (sub URL only).
+    Safe, non-empty, HTML-valid. Never raises.
+    """
+    sub_url = (sub_url or "").strip()
+    if sub_url:
+        return f"📊 <b>پنل مدیریت مصرف:</b>\n{esc(sub_url)}"
+    return "📊 <b>پنل مدیریت مصرف:</b>\n❌ ندارد"
+
+
 # ── Service name display helper ────────────────────────────────────────────────
 _LEADING_EMOJI_RE = re.compile(
     r'^((?:[\U00002600-\U000027BF'
