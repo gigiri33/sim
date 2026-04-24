@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 import json
 import logging
 import time
@@ -9,12 +9,6 @@ from datetime import datetime, timedelta
 from telebot import types
 
 log = logging.getLogger(__name__)
-
-# ── Module-level: persist custom service names across state transitions ────────
-# Maps payment_id → list[str] of names to use for panel config creation.
-# Set when a config_purchase payment is created; consumed by _deliver_bulk_configs.
-_PENDING_SERVICE_NAMES: dict = {}
-
 from ..config import ADMIN_IDS, ADMIN_PERMS, PERM_FULL_SET, PERM_USER_FULL, PERM_EMOJI_IDS, CRYPTO_COINS, CRYPTO_API_SYMBOLS, CRYPTO_EMOJI_IDS, CONFIGS_PER_PAGE
 from ..bot_instance import bot
 from ..helpers import (
@@ -22,7 +16,6 @@ from ..helpers import (
     is_admin, admin_has_perm, back_button,
     state_set, state_clear, state_name, state_data, parse_int, normalize_text_number,
     move_leading_emoji, _TZ_TEHRAN,
-    validate_service_name, generate_random_service_name, parse_custom_names,
 )
 from ..db import (
     setting_get, setting_set,
@@ -777,45 +770,6 @@ def _show_discount_prompt(call, amount=None):
     return True
 
 
-def _store_custom_names_for_payment(uid: int, payment_id: int) -> None:
-    """Snapshot custom_names from current user state into _PENDING_SERVICE_NAMES.
-
-    Called immediately after create_payment() for every config_purchase so the
-    names survive subsequent state transitions (e.g. await_tetrapay_verify).
-    """
-    names = state_data(uid).get("custom_names", None)
-    if names is not None:
-        _PENDING_SERVICE_NAMES[payment_id] = list(names)
-
-
-def _show_naming_choice(target, uid: int, package_row) -> None:
-    """Show the service-naming step (نام رندوم / نام دلخواه).
-
-    Only called for panel-based packages. The current state (buy_select_method)
-    already holds all order data; we just overlay the choice UI on top of it.
-    """
-    qty = int(state_data(uid).get("quantity", 1) or 1)
-    _pkg_sn = package_row["show_name"] if "show_name" in package_row.keys() else 1
-    qty_line = f"🔢 تعداد سرویس: <b>{qty}</b> عدد\n" if qty > 1 else ""
-    text = (
-        "🏷 <b>نام‌گذاری سرویس</b>\n\n"
-        f"🧩 نوع: {esc(package_row['type_name'])}\n"
-        + (f"📦 پکیج: {esc(package_row['name'])}\n" if _pkg_sn else "")
-        + f"{qty_line}\n"
-        "لطفاً نحوه ثبت نام سرویس خود را مشخص کنید:"
-    )
-    kb = types.InlineKeyboardMarkup()
-    kb.row(
-        types.InlineKeyboardButton("✏️ نام دلخواه", callback_data="buy:name:custom"),
-        types.InlineKeyboardButton("🎲 نام رندوم",  callback_data="buy:name:random"),
-    )
-    kb.add(types.InlineKeyboardButton(
-        "بازگشت", callback_data=f"buy:t:{package_row['type_id']}",
-        icon_custom_emoji_id="5253997076169115797",
-    ))
-    send_or_edit(target, text, kb)
-
-
 def _show_purchase_gateways(target, uid, package_id, price, package_row):
     """Build and show gateway selection keyboard for config purchase."""
     _gw_labels = []
@@ -1441,18 +1395,15 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
 
     # ── Panel-based packages ──────────────────────────────────────────────────
     try:
-        config_source = (package_row["config_source"] or "manual") if package_row else "manual"
-    except (IndexError, KeyError, TypeError, AttributeError):
+        config_source = package_row["config_source"] or "manual"
+    except (IndexError, KeyError):
         config_source = "manual"
 
     if config_source == "panel":
         panel_config_ids = []
         failed_count = 0
-        # Retrieve custom names for this payment (panel packages only)
-        _delivery_custom_names = _PENDING_SERVICE_NAMES.pop(payment_id, None) or []
-        for _i in range(quantity):
-            _cname = _delivery_custom_names[_i] if _i < len(_delivery_custom_names) else None
-            ok, result, pc_id = _create_panel_config(uid, package_id, payment_id, chat_id=chat_id, custom_name=_cname)
+        for _ in range(quantity):
+            ok, result, pc_id = _create_panel_config(uid, package_id, payment_id, chat_id=chat_id)
             if ok:
                 panel_config_ids.append(pc_id)
             else:
@@ -1816,7 +1767,7 @@ def _build_config_from_inbound(inbound, client_uuid, client_name, panel, real_po
     return None
 
 
-def _create_panel_config(uid, package_id, payment_id, chat_id=None, custom_name=None):
+def _create_panel_config(uid, package_id, payment_id, chat_id=None):
     """
     Create a config in the panel for uid/package_id.
     If the package has a client_package_id, the sample config/sub URL from that
@@ -1980,12 +1931,9 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, custom_name=
     real_port      = int(inbound.get("port") or 0)
     inbound_remark = (inbound.get("remark") or inbound.get("tag") or "").strip()
 
-    # Generate config name: {user_id}_{random6} or use provided custom_name
-    if custom_name:
-        client_name = custom_name  # already validated/normalized by caller
-    else:
-        rand_str    = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
-        client_name = f"{uid}_{rand_str}"
+    # Generate config name: {user_id}_{random6}
+    rand_str    = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
+    client_name = f"{uid}_{rand_str}"
 
     # Calculate traffic & expiry
     volume_gb     = float(package_row["volume_gb"] or 0)
@@ -2124,29 +2072,6 @@ def _deliver_panel_config_to_user(chat_id, panel_config_id, package_row):
     raw_config_text = pc["client_config_text"] or ""
     raw_sub_url     = pc["client_sub_url"] or ""
 
-    # ── GUARANTEED PLAIN DELIVERY ──────────────────────────────────────────────
-    # Send the raw config/sub as a plain-text message FIRST, with zero HTML,
-    # zero custom emoji, zero formatting. This guarantees the user receives
-    # the content even if the fancy formatted message below fails for any
-    # reason (invalid custom emoji ID, HTML parse error, caption length, etc.).
-    try:
-        _plain_lines = ["✅ سرویس شما آماده شد:\n"]
-        if raw_config_text.strip():
-            _plain_lines.append("🔗 کانفیگ اتصال:")
-            _plain_lines.append(raw_config_text.strip())
-            _plain_lines.append("")
-        if raw_sub_url.strip():
-            _plain_lines.append("📊 پنل مدیریت مصرف:")
-            _plain_lines.append(raw_sub_url.strip())
-        if len(_plain_lines) > 1:
-            bot.send_message(chat_id, "\n".join(_plain_lines),
-                             disable_web_page_preview=True)
-            log.info("[PANEL_DELIVERY] plain delivery sent for pc=%s uid=%s",
-                     panel_config_id, chat_id)
-    except Exception as _plain_exc:
-        log.error("[PANEL_DELIVERY] plain delivery failed for pc=%s: %s",
-                  panel_config_id, _plain_exc, exc_info=True)
-
     try:
         _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc)
     except Exception as _inner_exc:
@@ -2237,56 +2162,16 @@ def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
 
     def _send_with_qr(qr_source, text):
-        """
-        Deliver the given HTML text + QR image robustly.
-        Priority: the TEXT must reach the user. QR is best-effort.
-        Strategy:
-          1. Send text message first (multiple fallbacks: HTML → plain → raw).
-          2. Try to send the QR as a separate photo (no caption). If it
-             fails, ignore — the text is what matters.
-        Never raises; logs every failure path.
-        """
-        # ── Step 1: send the text (with keyboard) — multiple fallbacks ───────
-        text_sent = False
         try:
-            bot.send_message(chat_id, text, parse_mode="HTML",
-                             reply_markup=kb, disable_web_page_preview=True)
-            text_sent = True
-        except Exception as _msg_exc:
-            log.warning("_send_with_qr: HTML send failed: %s", _msg_exc)
-            try:
-                import re as _re
-                _plain = _re.sub(r"<[^>]+>", "", text or "")
-                bot.send_message(chat_id, _plain, reply_markup=kb,
-                                 disable_web_page_preview=True)
-                text_sent = True
-            except Exception as _plain_exc:
-                log.error("_send_with_qr: plain send failed: %s", _plain_exc)
-                try:
-                    pieces = []
-                    if config_text.strip():
-                        pieces.append(f"کانفیگ اتصال:\n{config_text}")
-                    if sub_url.strip():
-                        pieces.append(f"پنل مدیریت مصرف:\n{sub_url}")
-                    if pieces:
-                        bot.send_message(chat_id, "\n\n".join(pieces),
-                                         reply_markup=kb,
-                                         disable_web_page_preview=True)
-                        text_sent = True
-                except Exception as _raw_exc:
-                    log.error("_send_with_qr: raw send failed: %s", _raw_exc)
-
-        # ── Step 2: best-effort QR image (no caption, separate message) ──────
-        if text_sent and qr_source:
-            try:
-                qr_img = _qrcode.make(qr_source)
-                bio    = _io.BytesIO()
-                qr_img.save(bio, format="PNG")
-                bio.seek(0)
-                bio.name = "qrcode.png"
-                bot.send_photo(chat_id, bio)
-            except Exception as _qr_exc:
-                log.warning("_send_with_qr: QR send failed: %s", _qr_exc)
+            qr_img = _qrcode.make(qr_source)
+            bio    = _io.BytesIO()
+            qr_img.save(bio, format="PNG")
+            bio.seek(0)
+            bio.name = "qrcode.png"
+            bot.send_photo(chat_id, bio, caption=text, parse_mode="HTML", reply_markup=kb)
+        except Exception as _qr_exc:
+            log.warning("_deliver_panel_config QR generation failed: %s", _qr_exc)
+            bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
 
     def _fail_no_content(reason: str):
         """Notify user and alert admins when config content is missing."""
@@ -2303,94 +2188,45 @@ def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
             panel_config_id=panel_config_id,
         )
 
-    # ── DEBUG log BEFORE any delivery attempt ────────────────────────────────
-    log.info(
-        "[PANEL_DELIVERY] pc=%s mode=%s has_cfg=%s has_sub=%s cfg_len=%d sub=%r",
-        panel_config_id, delivery_mode,
-        has_cfg, has_sub,
-        len(config_text), sub_url,
-    )
-
     if delivery_mode == "config_only":
         if has_cfg:
-            from ..helpers import build_full_config_message
-            text = build_full_config_message(info_block, config_text, "")
+            text = (
+                f"{info_block}\n"
+                f"{ce('🔗', '5271604874419647061')} <b>کانفیگ اتصال:</b>\n<code>{esc(config_text)}</code>"
+            )
             _send_with_qr(config_text, text)
         else:
             _fail_no_content("کانفیگ در دسترس نیست")
 
     elif delivery_mode == "sub_only":
         if has_sub:
-            from ..helpers import build_full_config_message
-            text = build_full_config_message(info_block, "", sub_url)
+            text = (
+                f"{info_block}\n"
+                f"{ce('📊', '5231200819986047254')} <b>پنل مدیریت مصرف:</b>\n{esc(sub_url)}"
+            )
             _send_with_qr(sub_url, text)
         else:
             _fail_no_content("لینک ساب در دسترس نیست")
 
     else:  # both
-        from ..helpers import build_config_text, build_sub_text
-        log.info(
-            "[PANEL_DELIVERY] both-mode: has_cfg=%s has_sub=%s cfg_len=%d sub_len=%d",
-            has_cfg, has_sub, len(config_text), len(sub_url),
-        )
         if has_cfg and has_sub:
-            # ── CRITICAL branch — split into TWO separate messages ─────────
-            # Never combine config + sub in one caption (1024-char limit).
-            cfg_delivered = False
-            try:
-                cfg_text_msg = build_config_text(info_block, config_text)
-                if not cfg_text_msg or not cfg_text_msg.strip():
-                    raise ValueError("Empty config message")
-                _send_with_qr(config_text, cfg_text_msg)
-                cfg_delivered = True
-            except Exception as _cfg_exc:
-                log.error("[PANEL_DELIVERY] config message delivery failed: %s",
-                          _cfg_exc, exc_info=True)
-                try:
-                    bot.send_message(
-                        chat_id,
-                        f"{info_block}\n\n🔗 کانفیگ:\n{config_text or '❌ ندارد'}",
-                        reply_markup=kb, disable_web_page_preview=True,
-                    )
-                    cfg_delivered = True
-                except Exception as _cfg_pl_exc:
-                    log.error("[PANEL_DELIVERY] config plain fallback failed: %s",
-                              _cfg_pl_exc, exc_info=True)
-
-            # Always attempt to send the sub URL as its own message.
-            try:
-                sub_msg = build_sub_text(sub_url)
-                try:
-                    bot.send_message(chat_id, sub_msg, parse_mode="HTML",
-                                     disable_web_page_preview=True)
-                except Exception as _sub_html_exc:
-                    log.warning("[PANEL_DELIVERY] sub HTML send failed: %s — sending plain",
-                                _sub_html_exc)
-                    bot.send_message(chat_id,
-                                     f"📊 پنل مدیریت مصرف:\n{sub_url}",
-                                     disable_web_page_preview=True)
-            except Exception as _sub_exc:
-                log.error("[PANEL_DELIVERY] sub message delivery failed: %s",
-                          _sub_exc, exc_info=True)
-
-            # Final safety net — if nothing went through, send a combined plain blob.
-            if not cfg_delivered:
-                try:
-                    fallback = (
-                        f"{info_block}\n\n"
-                        f"🔗 کانفیگ:\n{config_text or '❌ ندارد'}\n\n"
-                        f"📊 ساب:\n{sub_url or '❌ ندارد'}"
-                    )
-                    bot.send_message(chat_id, fallback, reply_markup=kb,
-                                     disable_web_page_preview=True)
-                except Exception as _final_exc:
-                    log.error("[PANEL_DELIVERY] final safety-net fallback failed: %s",
-                              _final_exc, exc_info=True)
+            text = (
+                f"{info_block}\n"
+                f"{ce('🔗', '5271604874419647061')} <b>کانفیگ اتصال:</b>\n<code>{esc(config_text)}</code>\n\n"
+                f"{ce('📊', '5231200819986047254')} <b>پنل مدیریت مصرف:</b>\n{esc(sub_url)}"
+            )
+            _send_with_qr(config_text, text)  # QR for config when both present
         elif has_cfg:
-            text = build_full_config_message(info_block, config_text, "")
+            text = (
+                f"{info_block}\n"
+                f"{ce('🔗', '5271604874419647061')} <b>کانفیگ اتصال:</b>\n<code>{esc(config_text)}</code>"
+            )
             _send_with_qr(config_text, text)
         elif has_sub:
-            text = build_full_config_message(info_block, "", sub_url)
+            text = (
+                f"{info_block}\n"
+                f"{ce('📊', '5231200819986047254')} <b>پنل مدیریت مصرف:</b>\n{esc(sub_url)}"
+            )
             _send_with_qr(sub_url, text)
         else:
             _fail_no_content("کانفیگ و ساب هر دو در دسترس نیستند")
@@ -2408,8 +2244,8 @@ def _send_bulk_delivery_result(chat_id, uid, package_row, purchase_ids, pending_
 
     # Panel packages already delivered their configs; just show a summary
     try:
-        config_source = (package_row["config_source"] or "manual") if package_row else "manual"
-    except (IndexError, KeyError, TypeError, AttributeError):
+        config_source = package_row["config_source"] or "manual"
+    except (IndexError, KeyError):
         config_source = "manual"
 
     if config_source == "panel":
@@ -4718,77 +4554,10 @@ def _dispatch_callback(call, uid, data):
         if should_show_bulk_qty(uid):
             _show_qty_prompt(call, package_row, price)
             return
-        # ── Naming step (panel packages only) ────────────────────────────────
-        try:
-            _cs_p = package_row["config_source"] or "manual"
-        except (IndexError, KeyError):
-            _cs_p = "manual"
-        if _cs_p == "panel":
-            _show_naming_choice(call, uid, package_row)
-            return
         if setting_get("discount_codes_enabled", "0") == "1":
             if _show_discount_prompt(call, price):
                 return
         _show_purchase_gateways(call, uid, package_id, price, package_row)
-        return
-
-    # ── Service naming choice ─────────────────────────────────────────────────
-    # buy:name:random  — user chose random naming, proceed to discount / gateways
-    # buy:name:custom  — user chose custom naming, prompt for name(s)
-    if data in ("buy:name:random", "buy:name:custom"):
-        sn_cur = state_name(uid)
-        if sn_cur != "buy_select_method":
-            bot.answer_callback_query(call.id, "وضعیت نامعتبر. لطفاً دوباره شروع کنید.", show_alert=True)
-            return
-        sd_cur = state_data(uid)
-        package_id  = sd_cur.get("package_id")
-        package_row = get_package(package_id) if package_id else None
-        if not package_row:
-            bot.answer_callback_query(call.id, "اطلاعات سفارش یافت نشد. لطفاً دوباره شروع کنید.", show_alert=True)
-            state_clear(uid)
-            return
-        bot.answer_callback_query(call.id)
-        qty      = int(sd_cur.get("quantity", 1) or 1)
-        price    = int(sd_cur.get("amount", 0) or 0)
-        if data == "buy:name:random":
-            # Keep state as-is (custom_names absent → random naming in delivery)
-            if setting_get("discount_codes_enabled", "0") == "1":
-                if _show_discount_prompt(call, price):
-                    return
-            _show_purchase_gateways(call, uid, package_id, price, package_row)
-        else:
-            # Ask for name(s)
-            if qty == 1:
-                state_set(uid, "await_custom_name", **sd_cur)
-                text = (
-                    "✏️ <b>نام دلخواه سرویس</b>\n\n"
-                    "لطفاً نام سرویس خود را ارسال کنید.\n\n"
-                    "📌 <b>قوانین نام‌گذاری:</b>\n"
-                    "• فقط حروف کوچک انگلیسی (a-z) و اعداد (0-9) مجاز است\n"
-                    "• فاصله، فارسی، ایموجی و کاراکترهای خاص مجاز نیست\n\n"
-                    "نمونه: <code>myservice1</code>"
-                )
-            else:
-                state_set(uid, "await_custom_names", **sd_cur)
-                sample_lines = "\n".join(f"service{i + 1}" for i in range(min(qty, 3)))
-                more = f"\n... ({qty} خط)" if qty > 3 else ""
-                text = (
-                    f"✏️ <b>نام‌گذاری {qty} سرویس</b>\n\n"
-                    f"لطفاً <b>{qty}</b> نام سرویس را در یک پیام ارسال کنید.\n"
-                    "هر نام را در یک خط جداگانه بنویسید.\n\n"
-                    "📌 <b>قوانین نام‌گذاری:</b>\n"
-                    "• فقط حروف کوچک انگلیسی (a-z) و اعداد (0-9) مجاز است\n"
-                    "• هر خط یک نام جداگانه باشد\n"
-                    "• نام‌های نامعتبر به‌صورت خودکار جایگزین می‌شوند\n\n"
-                    "🔡 <b>نمونه:</b>\n"
-                    f"<code>{sample_lines}{more}</code>"
-                )
-            kb_back = types.InlineKeyboardMarkup()
-            kb_back.add(types.InlineKeyboardButton(
-                "بازگشت", callback_data=f"buy:t:{package_row['type_id']}",
-                icon_custom_emoji_id="5253997076169115797",
-            ))
-            send_or_edit(call, text, kb_back)
         return
 
     if data.startswith("pay:wallet:"):
@@ -4814,19 +4583,13 @@ def _dispatch_callback(call, uid, data):
         update_balance(uid, -price)
         payment_id = create_payment("config_purchase", uid, package_id, price, "wallet",
                                     status="completed", quantity=quantity)
-        _store_custom_names_for_payment(uid, payment_id)
         complete_payment(payment_id)
         bot.answer_callback_query(call.id, "خرید با موفقیت انجام شد.")
         send_or_edit(call, "✅ پرداخت از کیف پول انجام شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
                      back_button("main"))
-        try:
-            purchase_ids, pending_ids = _deliver_bulk_configs(
-                call.message.chat.id, uid, package_id, price, "wallet", quantity, payment_id
-            )
-        except Exception as _deliv_exc:
-            log.error("[pay:wallet] _deliver_bulk_configs crashed for uid=%s pkg=%s: %s",
-                      uid, package_id, _deliv_exc, exc_info=True)
-            purchase_ids, pending_ids = [], []
+        purchase_ids, pending_ids = _deliver_bulk_configs(
+            call.message.chat.id, uid, package_id, price, "wallet", quantity, payment_id
+        )
         if not purchase_ids and not pending_ids:
             # Exceptional: refund and abort
             update_balance(uid, price)
@@ -4837,12 +4600,8 @@ def _dispatch_callback(call, uid, data):
                 parse_mode="HTML", reply_markup=back_button("main"))
             state_clear(uid)
             return
-        try:
-            _send_bulk_delivery_result(call.message.chat.id, uid, package_row,
-                                       purchase_ids, pending_ids, "کیف پول")
-        except Exception as _sdr_exc:
-            log.error("[pay:wallet] _send_bulk_delivery_result crashed for uid=%s: %s",
-                      uid, _sdr_exc, exc_info=True)
+        _send_bulk_delivery_result(call.message.chat.id, uid, package_row,
+                                   purchase_ids, pending_ids, "کیف پول")
         state_clear(uid)
         return
 
@@ -4886,7 +4645,6 @@ def _dispatch_callback(call, uid, data):
         _qty_card = int(state_data(uid).get("quantity", 1) or 1)
         payment_id = create_payment("config_purchase", uid, package_id, price, "card",
                                     status="pending", quantity=_qty_card)
-        _store_custom_names_for_payment(uid, payment_id)
         # Generate random amount if enabled
         final_amount = None
         if setting_get("gw_card_random_amount", "0") == "1":
@@ -4938,7 +4696,6 @@ def _dispatch_callback(call, uid, data):
                     return
                 payment_id = create_payment("config_purchase", uid, package_id, amount, "crypto",
                                             status="pending", crypto_coin=coin_key, quantity=_qty_coin)
-                _store_custom_names_for_payment(uid, payment_id)
                 bot.answer_callback_query(call.id)
                 if show_crypto_payment_info(call, uid, coin_key, amount, payment_id=payment_id):
                     state_set(uid, "await_purchase_receipt", payment_id=payment_id)
@@ -5093,7 +4850,6 @@ def _dispatch_callback(call, uid, data):
         pay_url_web = result.get("payment_url_web", "")
         payment_id = create_payment("config_purchase", uid, package_id, price, "tetrapay",
                                     status="pending", quantity=_qty_tetra)
-        _store_custom_names_for_payment(uid, payment_id)
         with get_conn() as conn:
             conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (authority, payment_id))
         state_set(uid, "await_tetrapay_verify", payment_id=payment_id, authority=authority)
@@ -5219,7 +4975,6 @@ def _dispatch_callback(call, uid, data):
             return
         payment_id = create_payment("config_purchase", uid, package_id, price, "tronpays_rial",
                                     status="pending", quantity=_qty_tp_rial)
-        _store_custom_names_for_payment(uid, payment_id)
         with get_conn() as conn:
             conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id, payment_id))
         state_set(uid, "await_tronpays_rial_verify", payment_id=payment_id, invoice_id=invoice_id)
@@ -5670,7 +5425,6 @@ def _dispatch_callback(call, uid, data):
             invoice_id = result.get("id", "")
             payment_id = create_payment("config_purchase", uid, package_id, price, "swapwallet_crypto",
                                         status="pending", quantity=_qty_sw_init)
-            _store_custom_names_for_payment(uid, payment_id)
             with get_conn() as conn:
                 conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id, payment_id))
             state_set(uid, "await_swapwallet_crypto_verify", payment_id=payment_id, invoice_id=invoice_id)
@@ -5813,7 +5567,6 @@ def _dispatch_callback(call, uid, data):
             _qty_swc   = int(sd.get("quantity", 1) or 1)
             payment_id = create_payment("config_purchase", uid, package_id, amount, "swapwallet_crypto",
                                         status="pending", quantity=_qty_swc)
-            _store_custom_names_for_payment(uid, payment_id)
             verify_cb  = f"pay:swapwallet_crypto:verify:{payment_id}"
         elif kind == "renewal":
             package_id  = sd.get("package_id")

@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 Admin panel renderer helpers — reusable screen-building functions
 for types, stock, users, admins, panels.
@@ -890,7 +890,6 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
         qr_source = cfg.get("client_config_text") or ""
         if not qr_source and has_sub:
             qr_source = cfg.get("client_sub_url") or ""
-        CAPTION_LIMIT = 1000
         if qr_source:
             try:
                 import qrcode as _qr
@@ -904,20 +903,13 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
                     bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
                 except Exception:
                     pass
-                if len(text) > CAPTION_LIMIT:
-                    try:
-                        bot.send_photo(chat_id, bio)
-                    except Exception:
-                        pass
-                    bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
-                else:
-                    bot.send_photo(chat_id, bio, caption=text, parse_mode="HTML", reply_markup=kb)
+                bot.send_photo(chat_id, bio, caption=text, parse_mode="HTML", reply_markup=kb)
                 return
             except Exception:
                 pass
         send_or_edit(call, text, kb)
     else:
-        # User view: GUARANTEED plain delivery first, then fancy.
+        # User view: send QR inline if possible, then show buttons
         ar_label = "♻️ تمدید خودکار: ✅" if auto_renew else "♻️ تمدید خودکار: ❌"
         kb.row(
             InlineKeyboardButton("⚡ تمدید فوری",  callback_data=f"mypnlcfg:renewconfirm:{config_id}"),
@@ -926,109 +918,27 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
         kb.add(InlineKeyboardButton("بازگشت", callback_data=back_data,
                                     icon_custom_emoji_id="5253997076169115797"))
 
-        chat_id = call.message.chat.id if hasattr(call, "message") else call.chat.id
-        import logging as _lg_rn
-        _log_rn = _lg_rn.getLogger(__name__)
+        # Determine QR source
+        qr_source = cfg.get("client_config_text") or cfg.get("client_sub_url") or ""
+        if has_sub and not has_config:
+            qr_source = cfg["client_sub_url"]
 
-        # ── Try to hide the keyboard on the list message (best-effort) ───────
-        try:
-            bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
-        except Exception:
-            pass
-
-        raw_cfg_text = cfg.get("client_config_text") or ""
-        raw_sub_url  = cfg.get("client_sub_url") or ""
-        client_name  = cfg.get("client_name") or "—"
-        has_cfg_live = bool(raw_cfg_text.strip())
-        has_sub_live = bool(raw_sub_url.strip())
-
-        _log_rn.info(
-            "[MY_CFG_DETAIL] cfg=%s has_cfg=%s has_sub=%s cfg_len=%d",
-            config_id, has_cfg_live, has_sub_live, len(raw_cfg_text),
-        )
-
-        info_header = f"🔮 نام سرویس: <b>{esc(client_name)}</b>"
-
-        # ── STEP 1: CONFIG message (text + separate QR) ──────────────────────
-        cfg_text_delivered = False
-        if has_cfg_live:
-            try:
-                cfg_msg_html = (
-                    f"{info_header}\n\n"
-                    f"🔗 <b>کانفیگ اتصال:</b>\n<code>{esc(raw_cfg_text.strip())}</code>"
-                )
-                try:
-                    bot.send_message(chat_id, cfg_msg_html,
-                                     parse_mode="HTML",
-                                     reply_markup=kb if not has_sub_live else None,
-                                     disable_web_page_preview=True)
-                    cfg_text_delivered = True
-                except Exception as _cfg_html_exc:
-                    _log_rn.warning(
-                        "[MY_CFG_DETAIL] HTML send failed: %s — plain fallback",
-                        _cfg_html_exc,
-                    )
-                    bot.send_message(
-                        chat_id,
-                        f"🔮 نام سرویس: {client_name}\n\n"
-                        f"🔗 کانفیگ اتصال:\n{raw_cfg_text.strip()}",
-                        reply_markup=kb if not has_sub_live else None,
-                        disable_web_page_preview=True,
-                    )
-                    cfg_text_delivered = True
-            except Exception as _cfg_exc:
-                _log_rn.error("[MY_CFG_DETAIL] config delivery failed: %s",
-                              _cfg_exc, exc_info=True)
-
-            # Best-effort QR (separate photo, no caption)
+        if qr_source:
             try:
                 import qrcode as _qr
                 import io as _io
                 bio = _io.BytesIO()
-                _qr.make(raw_cfg_text).save(bio, format="PNG")
+                _qr.make(qr_source).save(bio, format="PNG")
                 bio.seek(0)
                 bio.name = "qr.png"
-                bot.send_photo(chat_id, bio)
-            except Exception:
-                pass
-
-        # ── STEP 2: SUB message (separate, never combined with config) ───────
-        sub_text_delivered = False
-        if has_sub_live:
-            try:
-                bot.send_message(
-                    chat_id,
-                    f"📊 <b>پنل مدیریت مصرف:</b>\n{esc(raw_sub_url.strip())}",
-                    parse_mode="HTML",
-                    reply_markup=kb,
-                    disable_web_page_preview=True,
-                )
-                sub_text_delivered = True
-            except Exception as _sub_exc:
-                _log_rn.warning("[MY_CFG_DETAIL] sub HTML send failed: %s — plain",
-                                _sub_exc)
+                chat_id = call.message.chat.id if hasattr(call, "message") else call.chat.id
                 try:
-                    bot.send_message(
-                        chat_id,
-                        f"📊 پنل مدیریت مصرف:\n{raw_sub_url.strip()}",
-                        reply_markup=kb, disable_web_page_preview=True,
-                    )
-                    sub_text_delivered = True
-                except Exception as _sub_pl_exc:
-                    _log_rn.error("[MY_CFG_DETAIL] sub plain send failed: %s",
-                                  _sub_pl_exc, exc_info=True)
-
-        # ── STEP 3: final safety net — if nothing was sent, emit raw blob ────
-        if not cfg_text_delivered and not sub_text_delivered:
-            try:
-                _raw_body = raw_cfg_text.strip() or raw_sub_url.strip() or \
-                    "⚠️ محتوای سرویس در دسترس نیست. لطفاً با پشتیبانی تماس بگیرید."
-                bot.send_message(chat_id, _raw_body, reply_markup=kb,
-                                 disable_web_page_preview=True)
-            except Exception as _ff_exc:
-                _log_rn.error(
-                    "[MY_CFG_DETAIL] safety-net delivery failed for cfg=%s: %s",
-                    config_id, _ff_exc,
-                )
-
+                    bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+                except Exception:
+                    pass
+                bot.send_photo(chat_id, bio, caption=text, parse_mode="HTML", reply_markup=kb)
+            except Exception:
+                send_or_edit(call, text, kb)
+        else:
+            send_or_edit(call, text, kb)
 

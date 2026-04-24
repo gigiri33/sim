@@ -134,74 +134,6 @@ def esc(t):
     return html.escape(str(t or ""))
 
 
-# ── Panel config message builder ───────────────────────────────────────────────
-def build_full_config_message(info_block: str = "",
-                              config_text: str = "",
-                              sub_url: str = "") -> str:
-    """
-    Build the HTML message body for a delivered panel config.
-
-    Returns a safe, non-empty, HTML-valid string with:
-      {info_block}
-      🔗 کانفیگ اتصال:  <code>{config_text}</code>       (only if present)
-      📊 پنل مدیریت مصرف: {sub_url}                     (only if present)
-
-    All substitutions are HTML-escaped. Never raises.
-    """
-    # Normalise inputs
-    info_block  = info_block  or ""
-    config_text = (config_text or "").strip()
-    sub_url     = (sub_url     or "").strip()
-
-    parts: list[str] = []
-    if info_block:
-        parts.append(info_block.rstrip("\n"))
-
-    if config_text:
-        parts.append(
-            f"🔗 <b>کانفیگ اتصال:</b>\n<code>{esc(config_text)}</code>"
-        )
-
-    if sub_url:
-        parts.append(
-            f"📊 <b>پنل مدیریت مصرف:</b>\n{esc(sub_url)}"
-        )
-
-    # Guarantee non-empty output
-    if not parts:
-        return "⚠️ محتوای کانفیگ در دسترس نیست."
-
-    return "\n\n".join(parts)
-
-
-def build_config_text(info_block: str = "", config_text: str = "") -> str:
-    """
-    Build the HTML body for the CONFIG part of a delivery (info + config only).
-    Safe, non-empty, HTML-valid. Never raises.
-    """
-    info_block  = info_block or ""
-    config_text = (config_text or "").strip()
-    parts: list[str] = []
-    if info_block:
-        parts.append(info_block.rstrip("\n"))
-    if config_text:
-        parts.append(f"🔗 <b>کانفیگ اتصال:</b>\n<code>{esc(config_text)}</code>")
-    else:
-        parts.append("🔗 <b>کانفیگ اتصال:</b>\n❌ ندارد")
-    return "\n\n".join(parts) or "⚠️ محتوای کانفیگ در دسترس نیست."
-
-
-def build_sub_text(sub_url: str = "") -> str:
-    """
-    Build the HTML body for the SUB part of a delivery (sub URL only).
-    Safe, non-empty, HTML-valid. Never raises.
-    """
-    sub_url = (sub_url or "").strip()
-    if sub_url:
-        return f"📊 <b>پنل مدیریت مصرف:</b>\n{esc(sub_url)}"
-    return "📊 <b>پنل مدیریت مصرف:</b>\n❌ ندارد"
-
-
 # ── Service name display helper ────────────────────────────────────────────────
 _LEADING_EMOJI_RE = re.compile(
     r'^((?:[\U00002600-\U000027BF'
@@ -225,51 +157,6 @@ def move_leading_emoji(name: str) -> str:
     if not rest.strip():
         return name
     return rest.strip() + " " + prefix.strip()
-
-
-# ── Service-name validation & helpers ─────────────────────────────────────────
-_SVC_NAME_RE = re.compile(r'^[a-z0-9]+$')
-
-
-def validate_service_name(name: str):
-    """Normalize and validate a service name.
-
-    Returns (normalized_name, True) if valid, (None, False) otherwise.
-    Normalizes: strips whitespace, converts to lowercase.
-    Valid: only lowercase ASCII letters a-z and digits 0-9.
-    """
-    if not name:
-        return None, False
-    name = name.strip().lower()
-    if not name or not _SVC_NAME_RE.fullmatch(name):
-        return None, False
-    return name, True
-
-
-def generate_random_service_name(uid: int) -> str:
-    """Generate a random service name: {uid}_{random6}."""
-    import random as _random
-    import string as _string
-    rand_str = "".join(_random.choices(_string.ascii_lowercase + _string.digits, k=6))
-    return f"{uid}_{rand_str}"
-
-
-def parse_custom_names(text: str, expected_count: int, uid: int):
-    """Parse a multi-line custom names input.
-
-    Returns (names_list, None) when the line count matches expected_count.
-    Invalid individual names are silently replaced with a random fallback.
-    Returns (None, actual_count) when the count doesn't match so the caller
-    can display a meaningful error.
-    """
-    lines = [ln for ln in text.splitlines() if ln.strip()]
-    if len(lines) != expected_count:
-        return None, len(lines)
-    result = []
-    for line in lines:
-        normalized, valid = validate_service_name(line)
-        result.append(normalized if valid else generate_random_service_name(uid))
-    return result, None
 
 
 # ── State management ───────────────────────────────────────────────────────────
