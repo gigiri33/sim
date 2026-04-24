@@ -374,8 +374,7 @@ def _run_pin_broadcast(admin_uid: int, targets: list, pin_id, stored_text: str,
         sent = 0
         pinned = 0
         failed = 0
-        for i, u_data in enumerate(targets, 1):
-            u_id = u_data["user_id"] if isinstance(u_data, dict) else u_data
+        for i, u_id in enumerate(targets, 1):
             sent_msg = None
             try:
                 if _is_ref and _ref_data:
@@ -3670,7 +3669,7 @@ def universal_handler(message):
             pin_id = add_pinned_message(stored_text)
             log_admin_action(uid, "پیام پین جدید ارسال شد")
             state_clear(uid)
-            users = get_users()
+            users = [u["user_id"] for u in get_users()]
             _run_pin_broadcast(uid, users, pin_id, stored_text,
                                message.chat.id, message.message_id, _is_forwarded)
             return
