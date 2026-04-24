@@ -14,6 +14,7 @@ from ..helpers import (
     is_admin, admin_has_perm, back_button,
     state_set, state_clear, state_name, state_data, parse_int, parse_volume, normalize_text_number,
     normalize_iranian_phone,
+    validate_service_name, generate_random_service_name, parse_custom_names,
 )
 from ..db import (
     setting_get, setting_set,
@@ -79,6 +80,7 @@ from .callbacks import (
     _wg_send_file_group, _wg_caption, _wg_service_name_from_filename,
     _qty_order_summary_text,
     _v2_name_from_config, _v2_name_from_sub, _v2_bulk_data_prompt,
+    _show_naming_choice,
 )
 
 
@@ -954,6 +956,14 @@ def universal_handler(message):
                       unit_price=unit_price, quantity=qty, kind="config_purchase")
             summary = _qty_order_summary_text(package_row, unit_price, qty)
             bot.send_message(uid, summary, parse_mode="HTML")
+            # For panel packages, show naming choice before gateways
+            try:
+                _cs_qty = (package_row["config_source"] or "manual")
+            except (IndexError, KeyError):
+                _cs_qty = "manual"
+            if _cs_qty == "panel":
+                _show_naming_choice(message, uid, package_row)
+                return
             if setting_get("discount_codes_enabled", "0") == "1":
                 if _show_discount_prompt(message, total):
                     return
@@ -1035,6 +1045,57 @@ def universal_handler(message):
                 send_payment_to_admins(payment_id)
             except Exception as _e:
                 print(f"[wallet_receipt] send_payment_to_admins failed: {_e}")
+            return
+
+        # ── Custom service name (single) ───────────────────────────────────────
+        if sn == "await_custom_name":
+            raw = (message.text or "").strip()
+            normalized, valid = validate_service_name(raw)
+            if valid:
+                custom_names = [normalized]
+            else:
+                custom_names = [generate_random_service_name(uid)]
+            package_id  = sd.get("package_id")
+            package_row = get_package(package_id) if package_id else None
+            new_sd = {**sd, "custom_names": custom_names}
+            state_set(uid, "buy_select_method", **new_sd)
+            price = int(new_sd.get("amount", 0) or 0)
+            if not package_row:
+                state_clear(uid)
+                bot.send_message(uid, "⚠️ خطا در اطلاعات سفارش. لطفاً دوباره شروع کنید.", reply_markup=kb_main(uid))
+                return
+            if setting_get("discount_codes_enabled", "0") == "1":
+                if _show_discount_prompt(message, price):
+                    return
+            _show_purchase_gateways(message, uid, package_id, price, package_row)
+            return
+
+        # ── Custom service names (multi) ───────────────────────────────────────
+        if sn == "await_custom_names":
+            raw  = (message.text or "").strip()
+            qty  = int(sd.get("quantity", 1) or 1)
+            names, actual = parse_custom_names(raw, qty, uid)
+            if names is None:
+                bot.send_message(uid,
+                    f"⚠️ <b>تعداد نام‌ها اشتباه است.</b>\n\n"
+                    f"📌 تعداد مورد انتظار: <b>{qty}</b> نام\n"
+                    f"📌 تعداد دریافت‌شده: <b>{actual}</b> نام\n\n"
+                    f"لطفاً دقیقاً <b>{qty}</b> نام، هر کدام در یک خط جداگانه، ارسال کنید.",
+                    parse_mode="HTML")
+                return
+            package_id  = sd.get("package_id")
+            package_row = get_package(package_id) if package_id else None
+            new_sd = {**sd, "custom_names": names}
+            state_set(uid, "buy_select_method", **new_sd)
+            price = int(new_sd.get("amount", 0) or 0)
+            if not package_row:
+                state_clear(uid)
+                bot.send_message(uid, "⚠️ خطا در اطلاعات سفارش. لطفاً دوباره شروع کنید.", reply_markup=kb_main(uid))
+                return
+            if setting_get("discount_codes_enabled", "0") == "1":
+                if _show_discount_prompt(message, price):
+                    return
+            _show_purchase_gateways(message, uid, package_id, price, package_row)
             return
 
         # ── Purchase receipt ───────────────────────────────────────────────────
