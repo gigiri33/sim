@@ -5,6 +5,7 @@ pending-order fulfillment.
 """
 import io
 import json
+import random
 import qrcode
 import urllib.parse
 from telebot import types
@@ -29,11 +30,78 @@ from ..db import (
     record_referral_spam_event,
     count_recent_referrals,
     set_user_restricted,
+    set_referral_captcha_verified,
 )
 from ..helpers import esc, fmt_price, now_str, move_leading_emoji
 from ..bot_instance import bot
 from ..group_manager import send_to_topic
 from .premium_emoji import ce
+
+# ── Referral Captcha in-memory store ────────────────────────────────────────
+# Maps referee_id → correct_answer (int). Cleared on answer (correct or wrong).
+_PENDING_CAPTCHAS: dict = {}
+
+
+def generate_referral_captcha() -> tuple:
+    """Return (question_str, correct_answer) — simple 2-digit ± 1-digit math."""
+    a = random.randint(10, 99)
+    b = random.randint(1, 9)
+    op = random.choice(["+", "-"])
+    if op == "+":
+        answer = a + b
+        question = f"{a} + {b}"
+    else:
+        answer = a - b
+        question = f"{a} - {b}"
+    return question, answer
+
+
+def send_captcha_prompt(referee_id: int) -> None:
+    """Generate a captcha, store the answer and send the prompt to the referee."""
+    question, answer = generate_referral_captcha()
+    _PENDING_CAPTCHAS[referee_id] = answer
+    try:
+        bot.send_message(
+            referee_id,
+            "🤖 <b>تأیید هویت (کپچا)</b>\n\n"
+            "برای تایید حساب و ثبت زیرمجموعه، لطفاً کپچا را حل کنید:\n\n"
+            f"<b>{question} = ؟</b>\n\n"
+            "پاسخ را به صورت عدد ارسال کنید.",
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
+
+def has_pending_captcha(user_id: int) -> bool:
+    """Return True if user has an unanswered captcha."""
+    return user_id in _PENDING_CAPTCHAS
+
+
+def verify_and_process_captcha(referee_id: int, answer_text: str) -> bool:
+    """
+    Verify a captcha answer. Removes the pending captcha regardless of outcome.
+    Returns True if correct, False if wrong or no pending captcha found.
+    Non-numeric text is treated as wrong.
+    """
+    correct = _PENDING_CAPTCHAS.pop(referee_id, None)
+    if correct is None:
+        return False
+    try:
+        user_val = int(answer_text.strip())
+    except (ValueError, AttributeError):
+        return False
+    return user_val == correct
+
+
+def complete_referral_after_captcha(referee_id: int) -> None:
+    """Mark captcha verified and try to give the start reward to the referrer."""
+    set_referral_captcha_verified(referee_id)
+    ref = get_referral_by_referee(referee_id)
+    if not ref:
+        return
+    referrer_id = ref["referrer_id"]
+    check_and_give_referral_start_reward(referrer_id)
 
 
 def _bot_notif_on(key: str) -> bool:
@@ -803,8 +871,9 @@ def check_and_give_referral_start_reward(referrer_id):
     if required_count <= 0:
         return
     channel_required = _channel_reward_required()
+    captcha_required = setting_get("referral_captcha_enabled", "1") == "1"
     # Loop: give one reward per complete batch claimed atomically
-    while try_claim_start_reward_batch(referrer_id, required_count, channel_required):
+    while try_claim_start_reward_batch(referrer_id, required_count, channel_required, captcha_required):
         _give_referral_reward(referrer_id, "referral_start_reward")
 
 
@@ -816,8 +885,8 @@ def try_give_referral_start_reward_for_channel_join(referee_id: int) -> None:
     Flow:
     1. Look up the referral record — if none, nothing to do.
     2. Atomically set channel_joined 0→1. If it was already 1, stop (dedup).
-    3. Notify the referee that their join is complete.
-    4. Try to give the start reward to the referrer (atomic claim).
+    3. If captcha enabled: send captcha prompt (reward deferred until captcha solved).
+    4. If captcha disabled: notify the referee and try to give start reward.
 
     NOTE: We do NOT check referral_start_reward_enabled here so that
     channel_joined is always recorded regardless of whether the reward feature
@@ -839,7 +908,14 @@ def try_give_referral_start_reward_for_channel_join(referee_id: int) -> None:
     if not was_new_join:
         return  # already processed — could be duplicate event or re-join
 
-    # Notify the referee (friendly UX — non-critical)
+    captcha_enabled = setting_get("referral_captcha_enabled", "1") == "1"
+
+    if captcha_enabled:
+        # Defer reward until captcha is solved — send captcha to referee
+        send_captcha_prompt(referee_id)
+        return
+
+    # Captcha disabled — original behaviour: notify referee and give reward
     try:
         bot.send_message(
             referee_id,

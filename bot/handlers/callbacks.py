@@ -11020,16 +11020,21 @@ def _dispatch_callback(call, uid, data):
         window    = setting_get("referral_antispam_window", "15")
         threshold = setting_get("referral_antispam_threshold", "10")
         action    = setting_get("referral_antispam_action", "report_only")
+        captcha   = setting_get("referral_captcha_enabled", "1")
         status_fa = "✅ فعال" if enabled == "1" else "❌ غیرفعال"
         action_fa = _ANTISPAM_ACTION_LABELS.get(action, action)
+        captcha_fa = "✅ فعال" if captcha == "1" else "❌ غیرفعال"
         return (
             "🛡 <b>سیستم ضد اسپم زیرمجموعه‌گیری</b>\n\n"
             f"📌 وضعیت: <b>{status_fa}</b>\n"
             f"⏱ مدت زمان بازه: <b>{window} ثانیه</b>\n"
             f"🔢 آستانه دعوت: <b>{threshold} دعوت</b>\n"
-            f"🎯 نتیجه در صورت تشخیص: <b>{action_fa}</b>\n\n"
+            f"🎯 نتیجه در صورت تشخیص: <b>{action_fa}</b>\n"
+            f"🤖 کپچای رفرال: <b>{captcha_fa}</b>\n\n"
             "اگر یک کاربر در بازه زمانی تنظیم‌شده، به اندازه آستانه یا بیشتر دعوت انجام دهد، "
-            "به‌عنوان مشکوک شناسایی می‌شود و اقدام تنظیم‌شده اعمال خواهد شد."
+            "به‌عنوان مشکوک شناسایی می‌شود و اقدام تنظیم‌شده اعمال خواهد شد.\n\n"
+            "🤖 <b>کپچای رفرال</b>: اگر فعال باشد، کاربر دعوت‌شده باید یک سوال ریاضی ساده را حل کند "
+            "تا به عنوان زیرمجموعه معتبر ثبت شود و پاداش به دعوت‌کننده تعلق گیرد."
         )
 
     def _antispam_kb():
@@ -11037,8 +11042,10 @@ def _dispatch_callback(call, uid, data):
         window    = setting_get("referral_antispam_window", "15")
         threshold = setting_get("referral_antispam_threshold", "10")
         action    = setting_get("referral_antispam_action", "report_only")
+        captcha   = setting_get("referral_captcha_enabled", "1")
         action_fa = _ANTISPAM_ACTION_LABELS.get(action, action)
         en_label  = "✅ فعال" if enabled == "1" else "❌ غیرفعال"
+        captcha_toggle_label = "غیر فعال سازی کپچا" if captcha == "1" else "فعال سازی کپچا"
         kb2 = types.InlineKeyboardMarkup()
         kb2.row(
             types.InlineKeyboardButton("✅ فعال کردن",    callback_data="adm:ref:as:enable"),
@@ -11047,6 +11054,7 @@ def _dispatch_callback(call, uid, data):
         kb2.add(types.InlineKeyboardButton(f"⏱ مدت زمان: {window} ثانیه", callback_data="adm:ref:as:window"))
         kb2.add(types.InlineKeyboardButton(f"🔢 تعداد: {threshold} دعوت",  callback_data="adm:ref:as:threshold"))
         kb2.add(types.InlineKeyboardButton(f"🎯 تنظیم نتیجه: {action_fa}", callback_data="adm:ref:as:action"))
+        kb2.add(types.InlineKeyboardButton(f"🤖 {captcha_toggle_label}",   callback_data="adm:ref:as:captcha:toggle"))
         kb2.add(types.InlineKeyboardButton("👥 مدیریت اشخاص محدود شده",   callback_data="adm:ref:restrictions:0"))
         kb2.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:ref:settings",
                                             icon_custom_emoji_id="5253997076169115797"))
@@ -11178,6 +11186,19 @@ def _dispatch_callback(call, uid, data):
         setting_set("referral_antispam_action", new_action)
         log_admin_action(uid, f"نتیجه ضد اسپم به «{_ANTISPAM_ACTION_LABELS[new_action]}» تغییر کرد")
         bot.answer_callback_query(call.id, f"✅ نتیجه: {_ANTISPAM_ACTION_LABELS[new_action]}")
+        send_or_edit(call, _antispam_text(), _antispam_kb())
+        return
+
+    if data == "adm:ref:as:captcha:toggle":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        cur = setting_get("referral_captcha_enabled", "1")
+        new_val = "0" if cur == "1" else "1"
+        setting_set("referral_captcha_enabled", new_val)
+        state_fa = "فعال" if new_val == "1" else "غیرفعال"
+        log_admin_action(uid, f"کپچای رفرال {state_fa} شد")
+        bot.answer_callback_query(call.id, f"✅ کپچای رفرال {state_fa} شد.")
         send_or_edit(call, _antispam_text(), _antispam_kb())
         return
 

@@ -424,6 +424,8 @@ def _run_init_db_migrations():
             "referral_antispam_window":     "15",
             "referral_antispam_threshold":  "10",
             "referral_antispam_action":     "report_only",
+            # ── Referral Captcha ───────────────────────────────────────────────
+            "referral_captcha_enabled":     "1",
             # ── Payment Card Management ────────────────────────────────────────
             "gw_card_rotation_enabled":     "0",
             # ── Gateway Fee / Bonus ────────────────────────────────────────────
@@ -658,6 +660,8 @@ def _run_init_db_migrations():
             ),
             # ── Crypto comment code shown to user during payment ──────────────
             "ALTER TABLE payments ADD COLUMN crypto_comment TEXT",
+            # ── Referral captcha verification tracking ────────────────────────
+            "ALTER TABLE referrals ADD COLUMN captcha_verified INTEGER NOT NULL DEFAULT 0",
         ]
         for sql in migrations:
             try:
@@ -2140,6 +2144,20 @@ def count_referee_first_purchases(referrer_id):
         ).fetchone()["n"]
 
 
+def set_referral_captcha_verified(referee_id: int) -> bool:
+    """
+    Atomically mark that a referee has passed captcha (0 → 1 transition).
+    Returns True only if this call performed the transition (first time).
+    Idempotent: safe to call multiple times.
+    """
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE referrals SET captcha_verified=1 WHERE referee_id=? AND captcha_verified=0",
+            (referee_id,)
+        )
+        return cur.rowcount > 0
+
+
 def set_referral_channel_joined(referee_id: int) -> bool:
     """
     Atomically mark that a referee has joined the channel (0 → 1 transition).
@@ -2155,17 +2173,20 @@ def set_referral_channel_joined(referee_id: int) -> bool:
 
 
 def try_claim_start_reward_batch(referrer_id: int, required_count: int,
-                                  channel_required: bool) -> bool:
+                                  channel_required: bool,
+                                  captcha_required: bool = False) -> bool:
     """
     Atomically claim `required_count` eligible unrewarded start-referrals.
     First checks if enough eligible rows exist; only then performs the UPDATE.
     Returns True if the batch was fully claimed (caller should now give the reward).
     Thread-safe against race conditions.
+    captcha_required: if True, only count referees who have passed captcha verification.
     """
     ch = "AND channel_joined=1" if channel_required else ""
+    cp = "AND captcha_verified=1" if captcha_required else ""
     with get_conn() as conn:
         count = conn.execute(
-            f"SELECT COUNT(*) AS n FROM referrals WHERE referrer_id=? AND start_reward_given=0 {ch}",
+            f"SELECT COUNT(*) AS n FROM referrals WHERE referrer_id=? AND start_reward_given=0 {ch} {cp}",
             (referrer_id,)
         ).fetchone()["n"]
         if count < required_count:
@@ -2173,10 +2194,10 @@ def try_claim_start_reward_batch(referrer_id: int, required_count: int,
         cur = conn.execute(
             f"""UPDATE referrals
                    SET start_reward_given=1, rewarded_at=?
-                 WHERE referrer_id=? AND start_reward_given=0 {ch}
+                 WHERE referrer_id=? AND start_reward_given=0 {ch} {cp}
                    AND referee_id IN (
                          SELECT referee_id FROM referrals
-                          WHERE referrer_id=? AND start_reward_given=0 {ch}
+                          WHERE referrer_id=? AND start_reward_given=0 {ch} {cp}
                           LIMIT ?
                        )""",
             (now_str(), referrer_id, referrer_id, required_count)

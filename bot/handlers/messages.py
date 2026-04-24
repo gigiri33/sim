@@ -295,6 +295,40 @@ def universal_handler(message):
         channel_lock_message(message)
         return
 
+    # ── Referral captcha check ────────────────────────────────────────────────
+    # Checked before the phone gate so the answer is always processed.
+    # Only acts when there is a pending captcha AND the message is plain text.
+    if message.text and not message.text.startswith("/"):
+        from ..ui.notifications import (
+            has_pending_captcha, verify_and_process_captcha, complete_referral_after_captcha,
+        )
+        if has_pending_captcha(uid):
+            answer_text = message.text.strip()
+            # Only consume the captcha if the message looks like a number; otherwise
+            # let it fall through to the normal message dispatcher (captcha stays pending).
+            if answer_text.lstrip("-").isdigit():
+                correct = verify_and_process_captcha(uid, answer_text)
+                if correct:
+                    bot.send_message(
+                        message.chat.id,
+                        "✅ <b>احراز هویت با موفقیت انجام شد.</b>\n\n"
+                        "دعوت شما به عنوان زیرمجموعه معتبر ثبت شد.",
+                        parse_mode="HTML",
+                    )
+                    try:
+                        complete_referral_after_captcha(uid)
+                    except Exception:
+                        pass
+                else:
+                    bot.send_message(
+                        message.chat.id,
+                        "❌ <b>پاسخ نادرست بود.</b>\n\n"
+                        "زیرمجموعه برای دعوت‌کننده ثبت نشد، اما می‌توانید از ربات استفاده کنید.",
+                        parse_mode="HTML",
+                    )
+                # Either way, let execution continue so the main menu is available
+                return
+
     # Phone gate — enforce for all incoming messages, not just /start
     sn = state_name(uid)
     if not is_admin(uid) and sn not in ("waiting_for_phone", "waiting_for_phone_card"):
