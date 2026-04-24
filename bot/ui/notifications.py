@@ -339,14 +339,87 @@ def deliver_purchase_message(chat_id, purchase_id):
             qr_source = cfg or inquiry_link or ""
 
         if qr_source:
-            qr_img = qrcode.make(qr_source)
-            bio    = io.BytesIO()
-            qr_img.save(bio, format="PNG")
-            bio.seek(0)
-            bio.name = "qrcode.png"
-            bot.send_photo(chat_id, bio, caption=text, parse_mode="HTML", reply_markup=kb)
+            try:
+                qr_img = qrcode.make(qr_source)
+                bio    = io.BytesIO()
+                qr_img.save(bio, format="PNG")
+                bio.seek(0)
+                bio.name = "qrcode.png"
+            except Exception:
+                qr_img = None
+                bio = None
+
+            # Telegram photo caption limit is 1024 chars. When config + sub are
+            # both present the caption often exceeds this limit and send_photo
+            # fails, leaving the user with no message. Split delivery safely.
+            if has_config and has_sub:
+                # Send photo (no caption) + text as separate message.
+                if bio is not None:
+                    try:
+                        bot.send_photo(chat_id, bio)
+                    except Exception:
+                        pass
+                try:
+                    bot.send_message(chat_id, text, parse_mode="HTML",
+                                     reply_markup=kb, disable_web_page_preview=True)
+                except Exception:
+                    # Fallback: plain text (strip HTML tags)
+                    try:
+                        import re as _re
+                        _plain = _re.sub(r"<[^>]+>", "", text)
+                        bot.send_message(chat_id, _plain, reply_markup=kb,
+                                         disable_web_page_preview=True)
+                    except Exception:
+                        # Last-ditch raw delivery
+                        pieces = []
+                        if cfg and cfg.strip():
+                            pieces.append(f"کانفیگ اتصال:\n{cfg}")
+                        if inquiry_link and inquiry_link.strip():
+                            pieces.append(f"پنل مدیریت مصرف:\n{inquiry_link}")
+                        if pieces:
+                            bot.send_message(chat_id, "\n\n".join(pieces),
+                                             reply_markup=kb,
+                                             disable_web_page_preview=True)
+            else:
+                # Short caption case (config-only or sub-only): try photo+caption.
+                sent = False
+                if bio is not None and len(text) <= 1024:
+                    try:
+                        bot.send_photo(chat_id, bio, caption=text,
+                                       parse_mode="HTML", reply_markup=kb)
+                        sent = True
+                    except Exception:
+                        try:
+                            bio.seek(0)
+                        except Exception:
+                            pass
+                if not sent:
+                    if bio is not None:
+                        try:
+                            bot.send_photo(chat_id, bio)
+                        except Exception:
+                            pass
+                    try:
+                        bot.send_message(chat_id, text, parse_mode="HTML",
+                                         reply_markup=kb,
+                                         disable_web_page_preview=True)
+                    except Exception:
+                        try:
+                            import re as _re
+                            _plain = _re.sub(r"<[^>]+>", "", text)
+                            bot.send_message(chat_id, _plain, reply_markup=kb,
+                                             disable_web_page_preview=True)
+                        except Exception:
+                            pass
         else:
-            bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
+            try:
+                bot.send_message(chat_id, text, parse_mode="HTML",
+                                 reply_markup=kb, disable_web_page_preview=True)
+            except Exception:
+                import re as _re
+                _plain = _re.sub(r"<[^>]+>", "", text)
+                bot.send_message(chat_id, _plain, reply_markup=kb,
+                                 disable_web_page_preview=True)
 
     # also mirror to is_test=1 → test_report topic, else → purchase_log topic
     if item["is_test"]:
