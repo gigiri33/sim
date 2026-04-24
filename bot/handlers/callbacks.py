@@ -2099,6 +2099,28 @@ def _deliver_panel_config_to_user(chat_id, panel_config_id, package_row):
             log.error("[PANEL_DELIVERY] even fallback failed for pc=%s: %s", panel_config_id, _fb_exc)
 
 
+def build_full_config_message(info_block, config_text, sub_url):
+    """
+    Build a safe, non-empty delivery message containing both the config
+    and sub URL. Never returns an empty/invalid string.
+    """
+    info_block  = str(info_block or "").rstrip()
+    config_text = str(config_text or "").strip()
+    sub_url     = str(sub_url or "").strip()
+
+    cfg_part = esc(config_text) if config_text else "❌ ندارد"
+    sub_part = esc(sub_url)     if sub_url     else "❌ ندارد"
+
+    text = (
+        f"{info_block}\n\n"
+        f"🔗 <b>کانفیگ اتصال:</b>\n<code>{cfg_part}</code>\n\n"
+        f"📊 <b>پنل مدیریت مصرف:</b>\n{sub_part}"
+    )
+    if not text.strip():
+        text = "⚠️ محتوای سرویس در دسترس نیست. لطفاً با پشتیبانی تماس بگیرید."
+    return text
+
+
 def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
     """Inner delivery — builds message with premium emoji + QR and sends it."""
     from ..helpers import fmt_vol, fmt_dur
@@ -2162,16 +2184,50 @@ def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
 
     def _send_with_qr(qr_source, text):
+        """
+        Send QR photo with text caption. Falls back gracefully:
+        1. If caption exceeds Telegram's 1024-char photo-caption limit, send
+           photo without caption and text as a separate message.
+        2. If QR generation fails, send text only.
+        3. If HTML parsing fails, send as plain text (no parse_mode).
+        Never fails silently.
+        """
+        text = text or ""
         try:
             qr_img = _qrcode.make(qr_source)
             bio    = _io.BytesIO()
             qr_img.save(bio, format="PNG")
             bio.seek(0)
             bio.name = "qrcode.png"
-            bot.send_photo(chat_id, bio, caption=text, parse_mode="HTML", reply_markup=kb)
+
+            if len(text) <= 1024:
+                try:
+                    bot.send_photo(chat_id, bio, caption=text,
+                                   parse_mode="HTML", reply_markup=kb)
+                    return
+                except Exception as _cap_exc:
+                    log.warning("_send_with_qr: send_photo with caption failed: %s", _cap_exc)
+                    bio.seek(0)
+            # Caption too long OR send_photo w/ caption failed: send QR then text.
+            try:
+                bot.send_photo(chat_id, bio)
+            except Exception as _ph_exc:
+                log.warning("_send_with_qr: send_photo (no caption) failed: %s", _ph_exc)
+            try:
+                bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
+            except Exception as _msg_exc:
+                log.warning("_send_with_qr: HTML send_message failed: %s — retrying plain", _msg_exc)
+                bot.send_message(chat_id, text, reply_markup=kb)
         except Exception as _qr_exc:
             log.warning("_deliver_panel_config QR generation failed: %s", _qr_exc)
-            bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
+            try:
+                bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
+            except Exception as _final_exc:
+                log.error("_send_with_qr: final HTML send failed: %s — sending plain", _final_exc)
+                try:
+                    bot.send_message(chat_id, text, reply_markup=kb)
+                except Exception as _plain_exc:
+                    log.error("_send_with_qr: plain send also failed: %s", _plain_exc)
 
     def _fail_no_content(reason: str):
         """Notify user and alert admins when config content is missing."""
@@ -2209,13 +2265,34 @@ def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
             _fail_no_content("لینک ساب در دسترس نیست")
 
     else:  # both
+        log.info("[PANEL_DELIVERY] both-mode: has_cfg=%s has_sub=%s cfg_len=%d sub_len=%d",
+                 has_cfg, has_sub, len(config_text), len(sub_url))
         if has_cfg and has_sub:
-            text = (
-                f"{info_block}\n"
-                f"{ce('🔗', '5271604874419647061')} <b>کانفیگ اتصال:</b>\n<code>{esc(config_text)}</code>\n\n"
-                f"{ce('📊', '5231200819986047254')} <b>پنل مدیریت مصرف:</b>\n{esc(sub_url)}"
-            )
-            _send_with_qr(config_text, text)  # QR for config when both present
+            try:
+                text = build_full_config_message(info_block, config_text, sub_url)
+                if not text or not text.strip():
+                    raise ValueError("Empty message built for config+sub delivery")
+                _send_with_qr(config_text, text)
+            except Exception as _both_exc:
+                log.error("[PANEL_DELIVERY] config+sub delivery failed: %s — using fallback",
+                          _both_exc, exc_info=True)
+                fallback_text = (
+                    f"{info_block}\n\n"
+                    f"🔗 کانفیگ:\n{esc(config_text) if config_text else '❌ ندارد'}\n\n"
+                    f"📊 ساب:\n{esc(sub_url) if sub_url else '❌ ندارد'}"
+                )
+                try:
+                    bot.send_message(chat_id, fallback_text,
+                                     parse_mode="HTML", reply_markup=kb)
+                except Exception as _fb_html_exc:
+                    log.error("[PANEL_DELIVERY] HTML fallback failed: %s — sending plain",
+                              _fb_html_exc)
+                    plain = (
+                        f"{info_block}\n\n"
+                        f"کانفیگ:\n{config_text or '❌ ندارد'}\n\n"
+                        f"ساب:\n{sub_url or '❌ ندارد'}"
+                    )
+                    bot.send_message(chat_id, plain, reply_markup=kb)
         elif has_cfg:
             text = (
                 f"{info_block}\n"

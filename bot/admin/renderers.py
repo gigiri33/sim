@@ -923,22 +923,49 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
         if has_sub and not has_config:
             qr_source = cfg["client_sub_url"]
 
-        if qr_source:
+        chat_id = call.message.chat.id if hasattr(call, "message") else call.chat.id
+
+        def _send_user_view():
+            # Telegram photo caption limit is 1024. If caption fits AND QR source
+            # exists, send as photo with caption. Otherwise send QR (if any) and
+            # the text as a separate message. Fall back to plain text on errors.
             try:
-                import qrcode as _qr
-                import io as _io
-                bio = _io.BytesIO()
-                _qr.make(qr_source).save(bio, format="PNG")
-                bio.seek(0)
-                bio.name = "qr.png"
-                chat_id = call.message.chat.id if hasattr(call, "message") else call.chat.id
+                if qr_source:
+                    import qrcode as _qr
+                    import io as _io
+                    bio = _io.BytesIO()
+                    _qr.make(qr_source).save(bio, format="PNG")
+                    bio.seek(0)
+                    bio.name = "qr.png"
+                    try:
+                        bot.edit_message_reply_markup(chat_id, call.message.message_id,
+                                                      reply_markup=None)
+                    except Exception:
+                        pass
+                    if len(text) <= 1024:
+                        try:
+                            bot.send_photo(chat_id, bio, caption=text,
+                                           parse_mode="HTML", reply_markup=kb)
+                            return
+                        except Exception:
+                            bio.seek(0)
+                    try:
+                        bot.send_photo(chat_id, bio)
+                    except Exception:
+                        pass
+                # Send text as a standalone message (always runs something).
                 try:
-                    bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+                    bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
                 except Exception:
-                    pass
-                bot.send_photo(chat_id, bio, caption=text, parse_mode="HTML", reply_markup=kb)
+                    bot.send_message(chat_id, text, reply_markup=kb)
             except Exception:
-                send_or_edit(call, text, kb)
-        else:
-            send_or_edit(call, text, kb)
+                try:
+                    send_or_edit(call, text, kb)
+                except Exception:
+                    try:
+                        bot.send_message(chat_id, text, reply_markup=kb)
+                    except Exception:
+                        pass
+
+        _send_user_view()
 
