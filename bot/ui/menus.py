@@ -220,7 +220,12 @@ def show_my_configs(target, user_id, page=0, search=None):
             marker = " ⛔"
         else:
             marker = " 🟢"
-        name = esc(pc["client_name"] or pc["package_name"] or "—")
+        _pc_remark = (pc.get("inbound_remark") or "").strip()
+        _pc_cname  = (pc.get("client_name") or "").strip() or (pc.get("package_name") or "—")
+        if _pc_remark and _pc_cname and _pc_cname != "—":
+            name = esc(f"{_pc_remark} _ {_pc_cname}")
+        else:
+            name = esc(_pc_cname)
         kb.add(types.InlineKeyboardButton(f"{name}{marker}", callback_data=f"mypnlcfg:d:{pc['id']}"))
 
     # ── Pagination row ────────────────────────────────────────────────────────

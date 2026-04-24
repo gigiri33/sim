@@ -186,3 +186,61 @@ def back_button(target="main"):
         "callback_data": f"nav:{target}",
         "icon_custom_emoji_id": "5253997076169115797",
     }]]})
+
+
+# ── Service name validation & normalization ────────────────────────────────────
+_SERVICE_NAME_RE = re.compile(r'^[a-z0-9]+$')
+
+
+def validate_service_name(name: str) -> bool:
+    """Return True if name contains only lowercase ASCII letters and digits."""
+    return bool(name) and bool(_SERVICE_NAME_RE.match(name))
+
+
+def normalize_service_name(raw: str) -> "str | None":
+    """Lowercase, strip, then validate.  Returns None for empty or invalid input.
+
+    Converts uppercase to lowercase; rejects anything with non-[a-z0-9] chars
+    (Farsi, spaces, special chars, styled Unicode, emoji, …).
+    """
+    if not raw:
+        return None
+    name = raw.strip().lower()
+    if validate_service_name(name):
+        return name
+    return None
+
+
+def generate_random_service_name(uid: int) -> str:
+    """Generate a random service name in the format ``{uid}_{6-char random}``.
+
+    The underscore is intentional for system-generated names to distinguish
+    them visually from user-chosen names (which are ``[a-z0-9]+`` only).
+    """
+    import random
+    import string as _string
+    rand = "".join(random.choices(_string.ascii_lowercase + _string.digits, k=6))
+    return f"{uid}_{rand}"
+
+
+def parse_service_names_multiline(text: str, count: int, uid: int) -> list:
+    """Parse a multiline string into exactly ``count`` valid service names.
+
+    Rules:
+    - Each non-empty line is trimmed and normalised (lowercased).
+    - Valid lines (``[a-z0-9]+``) are used as-is.
+    - Invalid lines are silently replaced with a random name.
+    - If fewer lines than ``count`` are present, remaining slots are random.
+    - Extra lines beyond ``count`` are ignored.
+
+    Returns a list of exactly ``count`` strings.
+    """
+    lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
+    result: list = []
+    for line in lines[:count]:
+        norm = normalize_service_name(line)
+        result.append(norm if norm else generate_random_service_name(uid))
+    # Pad with random names if fewer lines than required
+    while len(result) < count:
+        result.append(generate_random_service_name(uid))
+    return result

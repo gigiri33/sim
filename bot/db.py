@@ -666,6 +666,8 @@ def _run_init_db_migrations():
             "ALTER TABLE referrals ADD COLUMN captcha_verified INTEGER NOT NULL DEFAULT 0",
             # ── Referral captcha failure tracking ─────────────────────────────
             "ALTER TABLE referrals ADD COLUMN captcha_failed INTEGER NOT NULL DEFAULT 0",
+            # ── Custom service names per purchase (user-chosen naming) ─────────
+            "ALTER TABLE payments ADD COLUMN custom_names_json TEXT",
         ]
         for sql in migrations:
             try:
@@ -1600,6 +1602,36 @@ def update_payment_final_amount(payment_id, final_amount):
             "UPDATE payments SET final_amount=? WHERE id=?",
             (final_amount, payment_id)
         )
+
+
+def set_payment_custom_names(payment_id: int, names: list):
+    """Persist the user-chosen service names list for a payment record.
+    Called once, right after create_payment(), before delivery.
+    """
+    import json as _json
+    if not names:
+        return
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE payments SET custom_names_json=? WHERE id=?",
+            (_json.dumps(names, ensure_ascii=False), payment_id),
+        )
+
+
+def get_payment_custom_names(payment_id: int) -> list:
+    """Return the stored custom service names for a payment, or [] if none."""
+    import json as _json
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT custom_names_json FROM payments WHERE id=?", (payment_id,)
+        ).fetchone()
+    if not row or not row["custom_names_json"]:
+        return []
+    try:
+        result = _json.loads(row["custom_names_json"])
+        return result if isinstance(result, list) else []
+    except Exception:
+        return []
 
 
 def update_payment_crypto_comment(payment_id, comment_code):
