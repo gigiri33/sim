@@ -126,8 +126,14 @@ clone_or_update_repo() {
     git fetch --all --prune
     git reset --hard origin/main
     # restore user config files after reset
-    [[ -f "$DIR/.env.bak" ]]        && mv -f "$DIR/.env.bak"        "$DIR/.env"
-    [[ -f "$DIR/config.env.bak" ]]  && mv -f "$DIR/config.env.bak"  "$DIR/config.env"
+    if [[ -f "$DIR/.env.bak" ]]; then
+      mv -f "$DIR/.env.bak" "$DIR/.env"
+      chmod 600 "$DIR/.env"
+      ok ".env restored"
+    else
+      echo -e "${Y}⚠️  .env backup not found — configuration may be missing.${N}"
+    fi
+    [[ -f "$DIR/config.env.bak" ]] && { mv -f "$DIR/config.env.bak" "$DIR/config.env"; chmod 600 "$DIR/config.env"; }
   else
     rm -rf "$DIR"
     mkdir -p "$DIR"
@@ -394,8 +400,23 @@ update_bot() {
   info "Updating ${BOT_NAME}..."
   clone_or_update_repo
   setup_venv
-  systemctl restart "$SERVICE"
-  ok "Update of ${BOT_NAME} completed!"
+
+  # Check .env exists before restart
+  if [[ ! -f "$DIR/.env" ]]; then
+    echo ""
+    echo -e "${R}⚠️  فایل .env پیدا نشد!${N}"
+    echo -e "${Y}   تنظیمات ربات (توکن و Admin ID) حذف شده.${N}"
+    echo -e "${Y}   لطفاً از منو گزینه ✏️  Edit settings را بزنید تا دوباره تنظیم شود.${N}"
+    echo ""
+    return
+  fi
+
+  if systemctl restart "$SERVICE" 2>/dev/null; then
+    ok "Update of ${BOT_NAME} completed and service restarted!"
+  else
+    echo -e "${R}✗ سرویس ری‌استارت نشد. بررسی وضعیت:${N}"
+    systemctl status "$SERVICE" --no-pager -l || true
+  fi
   echo ""
   echo -e "${Y}ℹ️  License Notice:${N}"
   echo -e "${Y}   If this is an existing bot without a license, it will run in${N}"
