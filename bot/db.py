@@ -676,6 +676,17 @@ def _run_init_db_migrations():
                 "UNIQUE(category_id, duration_days)"
                 ")"
             ),
+            # ── Per-GB pricing per individual reseller ────────────────────────
+            (
+                "CREATE TABLE IF NOT EXISTS agency_user_gb_pricing ("
+                "id            INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "user_id       INTEGER NOT NULL,"
+                "category_id   INTEGER NOT NULL,"
+                "duration_days INTEGER NOT NULL DEFAULT 0,"
+                "price_per_gb  INTEGER NOT NULL,"
+                "UNIQUE(user_id, category_id, duration_days)"
+                ")"
+            ),
         ]
         for sql in migrations:
             try:
@@ -1635,14 +1646,64 @@ def get_all_agency_gb_prices():
     return [dict(r) for r in rows]
 
 
-def get_reseller_gb_price(category_id: int, duration_days: int, volume_gb: float):
+def get_user_gb_price(user_id: int, category_id: int, duration_days: int):
+    """Return user-specific price_per_gb for this agent, or None if not set."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT price_per_gb FROM agency_user_gb_pricing "
+            "WHERE user_id=? AND category_id=? AND duration_days=?",
+            (user_id, category_id, duration_days)
+        ).fetchone()
+    return row["price_per_gb"] if row else None
+
+
+def set_user_gb_price(user_id: int, category_id: int, duration_days: int, price_per_gb: int):
+    """Upsert a per-GB price rule for a specific agent."""
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO agency_user_gb_pricing(user_id, category_id, duration_days, price_per_gb) "
+            "VALUES(?, ?, ?, ?) "
+            "ON CONFLICT(user_id, category_id, duration_days) DO UPDATE SET price_per_gb=excluded.price_per_gb",
+            (user_id, category_id, duration_days, price_per_gb)
+        )
+
+
+def delete_user_gb_price(user_id: int, category_id: int, duration_days: int):
+    """Remove the per-GB rule for a specific agent."""
+    with get_conn() as conn:
+        conn.execute(
+            "DELETE FROM agency_user_gb_pricing WHERE user_id=? AND category_id=? AND duration_days=?",
+            (user_id, category_id, duration_days)
+        )
+
+
+def get_all_user_gb_prices(user_id: int):
+    """Return all per-GB price rules for a specific agent, joined with category name."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT g.*, c.name AS category_name "
+            "FROM agency_user_gb_pricing g "
+            "LEFT JOIN config_types c ON c.id = g.category_id "
+            "WHERE g.user_id=? "
+            "ORDER BY g.category_id, g.duration_days",
+            (user_id,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_reseller_gb_price(category_id: int, duration_days: int, volume_gb: float, user_id: int = 0):
     """
     Compute the reseller price for a package using per-GB rules.
+    Checks user-specific pricing first, then falls back to global.
     Returns the computed total price (int) if a rule exists, else None.
     volume_gb = 0 means unlimited — no per-GB pricing applies.
     """
     if not volume_gb or volume_gb <= 0:
         return None
+    if user_id:
+        ppg = get_user_gb_price(user_id, category_id, duration_days)
+        if ppg is not None:
+            return max(0, round(volume_gb * ppg))
     ppg = get_agency_gb_price(category_id, duration_days)
     if ppg is None:
         return None

@@ -104,7 +104,7 @@ def get_effective_price(user_id, package_row):
         _duration = int(package_row["duration_days"] or 0)
         _volume   = float(package_row["volume_gb"] or 0)
         if _type_id and _volume > 0:
-            _gb_price = get_reseller_gb_price(_type_id, _duration, _volume)
+            _gb_price = get_reseller_gb_price(_type_id, _duration, _volume, user_id=user_id)
             if _gb_price is not None:
                 return _gb_price
     except Exception:
