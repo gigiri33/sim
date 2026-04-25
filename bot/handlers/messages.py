@@ -1,5 +1,7 @@
 ﻿# -*- coding: utf-8 -*-
 import os
+import time
+import threading
 import traceback
 import sqlite3
 import urllib.parse
@@ -27,8 +29,6 @@ from ..db import (
     get_agency_price, set_agency_price,
     get_agency_price_config, set_agency_price_config,
     get_agency_type_discount, set_agency_type_discount,
-    set_agency_gb_price, get_agency_gb_price,
-    set_user_gb_price, get_user_gb_price,
     get_all_admin_users, get_admin_user, add_admin_user, update_admin_permissions, remove_admin_user,
     get_conn, create_pending_order, get_pending_order, search_users,
     notify_first_start_if_needed, update_config_field,
@@ -53,10 +53,6 @@ from ..gateways.tetrapay import create_tetrapay_order, verify_tetrapay_order
 from ..ui.helpers import send_or_edit, check_channel_membership, channel_lock_message
 from ..ui.keyboards import kb_main, kb_admin_panel
 from ..ui.menus import show_main_menu, show_profile, show_support, show_my_configs
-from ..service_naming import (
-    validate_service_name, normalize_service_name,
-    generate_random_name, parse_bulk_names,
-)
 from ..ui.notifications import (
     deliver_purchase_message, admin_purchase_notify, admin_renewal_notify,
     notify_pending_order_to_admins, _complete_pending_order, auto_fulfill_pending_orders,
@@ -237,6 +233,251 @@ def _send_codes_to_admin(admin_id, header, code_lines, chunk_size=3600):
             bot.send_message(admin_id, "\n".join(chunk), parse_mode="HTML")
         except Exception:
             pass
+
+
+# ── Broadcast progress helpers ─────────────────────────────────────────────────
+
+def _make_progress_bar(done: int, total: int, width: int = 10) -> str:
+    if total <= 0:
+        return "▓" * width
+    filled = int(round(done / total * width))
+    filled = max(0, min(width, filled))
+    return "▓" * filled + "░" * (width - filled)
+
+
+def _run_broadcast(admin_uid: int, targets: list, label: str, bc_send_fn):
+    """Start a background-threaded broadcast with a live progress message."""
+    total = len(targets)
+    if total == 0:
+        bot.send_message(admin_uid,
+            f"⚠️ هیچ کاربری برای ارسال در دسته <b>{esc(label)}</b> یافت نشد.",
+            parse_mode="HTML", reply_markup=kb_admin_panel())
+        return
+
+    bar = _make_progress_bar(0, total)
+    try:
+        prog_msg = bot.send_message(
+            admin_uid,
+            f"📢 <b>فوروارد همگانی ({label})</b>\n\n"
+            f"🏃‍♂️ |- {bar} 0.00% 0/{total}\n"
+            f"📤 ارسال موفق: <b>0</b>\n"
+            f"❌ ناموفق: <b>0</b>",
+            parse_mode="HTML",
+        )
+        prog_msg_id = prog_msg.message_id
+    except Exception:
+        prog_msg_id = None
+
+    UPDATE_EVERY = 50
+
+    def _worker():
+        sent = 0
+        failed = 0
+        for i, target_id in enumerate(targets, 1):
+            try:
+                bc_send_fn(target_id)
+                sent += 1
+            except Exception:
+                failed += 1
+            time.sleep(0.05)
+            if prog_msg_id and (i % UPDATE_EVERY == 0 or i == total):
+                pct = i / total * 100
+                _bar = _make_progress_bar(i, total)
+                try:
+                    bot.edit_message_text(
+                        f"📢 <b>فوروارد همگانی ({label})</b>\n\n"
+                        f"🏃‍♂️ |- {_bar} {pct:.2f}% {i}/{total}\n"
+                        f"📤 ارسال موفق: <b>{sent}</b>\n"
+                        f"❌ ناموفق: <b>{failed}</b>",
+                        admin_uid, prog_msg_id,
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    pass
+        # Final update with panel keyboard
+        final_text = (
+            f"✅ <b>فوروارد همگانی تمام شد ({label})</b>\n\n"
+            f"📊 |- {'▓' * 10} 100.00% {total}/{total}\n"
+            f"📤 ارسال موفق: <b>{sent}</b>\n"
+            f"❌ ناموفق: <b>{failed}</b>"
+        )
+        try:
+            if prog_msg_id:
+                bot.edit_message_text(final_text, admin_uid, prog_msg_id,
+                                      parse_mode="HTML", reply_markup=kb_admin_panel())
+            else:
+                bot.send_message(admin_uid, final_text, parse_mode="HTML",
+                                 reply_markup=kb_admin_panel())
+        except Exception:
+            try:
+                bot.send_message(admin_uid,
+                    f"✅ فوروارد ({label}) تمام شد.\n📤 موفق: {sent} | ❌ ناموفق: {failed}",
+                    parse_mode="HTML", reply_markup=kb_admin_panel())
+            except Exception:
+                pass
+        try:
+            from ..group_manager import send_to_topic as _stt2
+            _stt2("broadcast_report",
+                f"📢 <b>اطلاع‌رسانی ({label})</b>\n\n"
+                f"👤 ارسال‌کننده: <code>{admin_uid}</code>\n"
+                f"📤 ارسال شده: <b>{sent}</b> کاربر\n"
+                f"❌ ناموفق: <b>{failed}</b>")
+        except Exception:
+            pass
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+
+def _run_pin_broadcast(admin_uid: int, targets: list, pin_id, stored_text: str,
+                       from_chat_id: int, from_message_id: int, is_forwarded: bool):
+    """Start a background-threaded pin broadcast with a live progress message."""
+    import json as _json
+    total = len(targets)
+    if total == 0:
+        bot.send_message(admin_uid, "⚠️ هیچ کاربری برای ارسال پیام پین یافت نشد.",
+                         parse_mode="HTML", reply_markup=kb_admin_panel())
+        return
+
+    # Determine send method from stored content
+    _is_ref = False
+    _ref_data = None
+    try:
+        _obj = _json.loads(stored_text)
+        if isinstance(_obj, dict) and _obj.get("type") == "pin_ref":
+            _is_ref = True
+            _ref_data = _obj
+    except Exception:
+        pass
+
+    from ..ui.premium_emoji import render_premium_text_entities as _rpe, deserialize_premium_text as _dpt
+    _parsed = _dpt(stored_text) if not _is_ref else {"text": "", "entities": []}
+    _has_entities = bool(_parsed.get("entities"))
+    _plain_text = _parsed.get("text", stored_text) if not _is_ref else ""
+
+    bar = _make_progress_bar(0, total)
+    try:
+        prog_msg = bot.send_message(
+            admin_uid,
+            f"📌 <b>ارسال پیام پین</b>\n\n"
+            f"🏃‍♂️ |- {bar} 0.00% 0/{total}\n"
+            f"📤 ارسال موفق: <b>0</b> | 📌 پین شده: <b>0</b>\n"
+            f"❌ ناموفق: <b>0</b>",
+            parse_mode="HTML",
+        )
+        prog_msg_id = prog_msg.message_id
+    except Exception:
+        prog_msg_id = None
+
+    UPDATE_EVERY = 50
+
+    def _worker():
+        sent = 0
+        pinned = 0
+        failed = 0
+        for i, u_data in enumerate(targets, 1):
+            u_id = u_data["user_id"] if isinstance(u_data, dict) else u_data
+            sent_msg = None
+            try:
+                if _is_ref and _ref_data:
+                    _fc = _ref_data.get("from_chat_id", from_chat_id)
+                    _fm = _ref_data.get("from_message_id", from_message_id)
+                    if _ref_data.get("is_forwarded", is_forwarded):
+                        sent_msg = bot.forward_message(u_id, _fc, _fm)
+                    else:
+                        sent_msg = bot.copy_message(u_id, _fc, _fm)
+                elif _has_entities:
+                    _txt, _ents = _rpe(stored_text)
+                    if _ents:
+                        sent_msg = bot.send_message(u_id, _txt, entities=_ents)
+                    else:
+                        sent_msg = bot.send_message(u_id, _plain_text, parse_mode="HTML")
+                else:
+                    sent_msg = bot.send_message(u_id, _plain_text, parse_mode="HTML")
+                sent += 1
+                if pin_id and sent_msg:
+                    save_pinned_send(pin_id, u_id, sent_msg.message_id)
+                    try:
+                        bot.pin_chat_message(u_id, sent_msg.message_id, disable_notification=True)
+                        pinned += 1
+                    except Exception:
+                        pass
+            except Exception:
+                failed += 1
+            time.sleep(0.05)
+            if prog_msg_id and (i % UPDATE_EVERY == 0 or i == total):
+                pct = i / total * 100
+                _bar = _make_progress_bar(i, total)
+                try:
+                    bot.edit_message_text(
+                        f"📌 <b>ارسال پیام پین</b>\n\n"
+                        f"🏃‍♂️ |- {_bar} {pct:.2f}% {i}/{total}\n"
+                        f"📤 ارسال موفق: <b>{sent}</b> | 📌 پین شده: <b>{pinned}</b>\n"
+                        f"❌ ناموفق: <b>{failed}</b>",
+                        admin_uid, prog_msg_id,
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    pass
+        # Final result + admin panel keyboard
+        from ..db import get_all_pinned_messages as _get_pins
+        from telebot import types as _types
+        pins = _get_pins()
+        kb = _types.InlineKeyboardMarkup()
+        kb.add(_types.InlineKeyboardButton("➕ افزودن پیام پین", callback_data="adm:pin:add"))
+        for p in pins:
+            _preview = _pin_preview_text(p.get("text", ""))
+            kb.row(
+                _types.InlineKeyboardButton(f"📌 {_preview}", callback_data="noop"),
+                _types.InlineKeyboardButton("✏️", callback_data=f"adm:pin:edit:{p['id']}"),
+                _types.InlineKeyboardButton("🗑", callback_data=f"adm:pin:del:{p['id']}"),
+            )
+        kb.add(_types.InlineKeyboardButton("بازگشت", callback_data="admin:settings",
+                                           icon_custom_emoji_id="5253997076169115797"))
+        count_text = f"{len(pins)} پیام" if pins else "هیچ پیامی ثبت نشده"
+        final_text = (
+            f"✅ <b>پیام پین ارسال شد</b>\n\n"
+            f"📊 |- {'▓' * 10} 100.00% {total}/{total}\n"
+            f"📤 ارسال موفق: <b>{sent}</b> | 📌 پین شده: <b>{pinned}</b>\n"
+            f"❌ ناموفق: <b>{failed}</b>\n\n"
+            f"📌 <b>پیام‌های پین شده</b>\n\n{count_text}"
+        )
+        try:
+            if prog_msg_id:
+                bot.edit_message_text(final_text, admin_uid, prog_msg_id,
+                                      parse_mode="HTML", reply_markup=kb)
+            else:
+                bot.send_message(admin_uid, final_text, parse_mode="HTML", reply_markup=kb)
+        except Exception:
+            try:
+                bot.send_message(admin_uid, final_text, parse_mode="HTML", reply_markup=kb)
+            except Exception:
+                pass
+        try:
+            from ..group_manager import send_to_topic as _stt3
+            _stt3("broadcast_report",
+                f"📌 <b>پیام پین جدید</b>\n\n"
+                f"👤 ارسال‌کننده: <code>{admin_uid}</code>\n"
+                f"📤 ارسال شده: <b>{sent}</b> کاربر\n"
+                f"📌 پین شده: <b>{pinned}</b> کاربر")
+        except Exception:
+            pass
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+
+def _pin_preview_text(stored_text: str) -> str:
+    """Return a short display string for a stored pin message."""
+    import json as _json
+    try:
+        obj = _json.loads(stored_text)
+        if isinstance(obj, dict):
+            if obj.get("type") == "pin_ref":
+                return "(فایل/فوروارد)"
+            if "text" in obj:
+                return (obj["text"] or "")[:30].replace("\n", " ")
+    except Exception:
+        pass
+    return (stored_text or "")[:30].replace("\n", " ")
 
 
 @bot.message_handler(content_types=["text", "photo", "document", "contact", "video", "animation", "voice", "audio", "video_note", "sticker"])
@@ -461,8 +702,16 @@ def universal_handler(message):
 
         # ── Broadcast ─────────────────────────────────────────────────────────
         def _bc_send(target_id):
-            """Copy message to target (supports text, photo, video, etc.)."""
-            bot.copy_message(target_id, message.chat.id, message.message_id)
+            """Forward/copy message to target, preserving inline keyboards from forwarded messages."""
+            is_forwarded = bool(
+                getattr(message, "forward_origin", None) or
+                getattr(message, "forward_from", None) or
+                getattr(message, "forward_from_chat", None)
+            )
+            if is_forwarded:
+                bot.forward_message(target_id, message.chat.id, message.message_id)
+            else:
+                bot.copy_message(target_id, message.chat.id, message.message_id)
 
         if sn == "admin_reject_all_note" and is_admin(uid):
             note_text = message.text.strip() if message.text else ""
@@ -584,123 +833,50 @@ def universal_handler(message):
             return
 
         if sn == "admin_broadcast_all" and is_admin(uid):
-            users = get_users()
-            sent  = 0
-            for u in users:
-                try:
-                    _bc_send(u["user_id"])
-                    sent += 1
-                except Exception:
-                    pass
+            _targets = [u["user_id"] for u in get_users()]
             state_clear(uid)
-            bot.send_message(uid, f"✅ پیام برای {sent} کاربر ارسال شد.", reply_markup=kb_admin_panel())
-            from ..group_manager import send_to_topic as _stt
-            _bc_preview = (message.text or message.caption or "")[:200].strip()
-            _stt("broadcast_report",
-                f"📢 <b>اطلاع‌رسانی (همه کاربران)</b>\n\n"
-                f"👤 ارسال‌کننده: <code>{uid}</code>\n"
-                f"📤 ارسال شده: <b>{sent}</b> کاربر\n\n"
-                f"📝 <b>متن پیام:</b>\n{esc(_bc_preview) if _bc_preview else '(فایل/مدیا)'}")
+            _run_broadcast(uid, _targets, "همه کاربران", _bc_send)
             return
 
         if sn == "admin_broadcast_customers" and is_admin(uid):
-            users = get_users(has_purchase=True)
-            sent  = 0
-            for u in users:
-                try:
-                    _bc_send(u["user_id"])
-                    sent += 1
-                except Exception:
-                    pass
+            _targets = [u["user_id"] for u in get_users(has_purchase=True)]
             state_clear(uid)
-            bot.send_message(uid, f"✅ پیام برای {sent} مشتری ارسال شد.", reply_markup=kb_admin_panel())
-            from ..group_manager import send_to_topic as _stt
-            _bc_preview = (message.text or message.caption or "")[:200].strip()
-            _stt("broadcast_report",
-                f"📢 <b>اطلاع‌رسانی (مشتریان)</b>\n\n"
-                f"👤 ارسال‌کننده: <code>{uid}</code>\n"
-                f"📤 ارسال شده: <b>{sent}</b> مشتری\n\n"
-                f"📝 <b>متن پیام:</b>\n{esc(_bc_preview) if _bc_preview else '(فایل/مدیا)'}")
+            _run_broadcast(uid, _targets, "مشتریان", _bc_send)
             return
 
         if sn == "admin_broadcast_normal" and is_admin(uid):
             from ..db import get_all_admin_users as _get_admins
-            admin_ids_set = set(ADMIN_IDS)
+            _admin_ids_set = set(ADMIN_IDS)
             for _ar in _get_admins():
-                admin_ids_set.add(_ar["user_id"])
-            users = get_users(has_purchase=True)
-            sent  = 0
-            for u in users:
-                if u["user_id"] in admin_ids_set:
-                    continue
-                if u["is_agent"]:
-                    continue
-                try:
-                    _bc_send(u["user_id"])
-                    sent += 1
-                except Exception:
-                    pass
+                _admin_ids_set.add(_ar["user_id"])
+            _targets = [
+                u["user_id"] for u in get_users(has_purchase=True)
+                if u["user_id"] not in _admin_ids_set and not u["is_agent"]
+            ]
             state_clear(uid)
-            bot.send_message(uid, f"✅ پیام برای {sent} مشتری عادی ارسال شد.", reply_markup=kb_admin_panel())
-            from ..group_manager import send_to_topic as _stt
-            _bc_preview = (message.text or message.caption or "")[:200].strip()
-            _stt("broadcast_report",
-                f"📢 <b>اطلاع‌رسانی (مشتریان عادی)</b>\n\n"
-                f"👤 ارسال‌کننده: <code>{uid}</code>\n"
-                f"📤 ارسال شده: <b>{sent}</b> کاربر\n\n"
-                f"📝 <b>متن پیام:</b>\n{esc(_bc_preview) if _bc_preview else '(فایل/مدیا)'}")
+            _run_broadcast(uid, _targets, "مشتریان عادی", _bc_send)
             return
 
         if sn == "admin_broadcast_agents" and is_admin(uid):
-            users = get_users()
-            sent  = 0
-            for u in users:
-                if not u["is_agent"]:
-                    continue
-                try:
-                    _bc_send(u["user_id"])
-                    sent += 1
-                except Exception:
-                    pass
+            _targets = [u["user_id"] for u in get_users() if u["is_agent"]]
             state_clear(uid)
-            bot.send_message(uid, f"✅ پیام برای {sent} نماینده ارسال شد.", reply_markup=kb_admin_panel())
-            from ..group_manager import send_to_topic as _stt
-            _bc_preview = (message.text or message.caption or "")[:200].strip()
-            _stt("broadcast_report",
-                f"📢 <b>اطلاع‌رسانی (نمایندگان)</b>\n\n"
-                f"👤 ارسال‌کننده: <code>{uid}</code>\n"
-                f"📤 ارسال شده: <b>{sent}</b> نماینده\n\n"
-                f"📝 <b>متن پیام:</b>\n{esc(_bc_preview) if _bc_preview else '(فایل/مدیا)'}")
+            _run_broadcast(uid, _targets, "نمایندگان", _bc_send)
             return
 
         if sn == "admin_broadcast_admins" and is_admin(uid):
             from ..db import get_all_admin_users as _get_admins
-            sent  = 0
-            # ADMIN_IDS
-            for aid in ADMIN_IDS:
-                try:
-                    _bc_send(aid)
-                    sent += 1
-                except Exception:
-                    pass
-            # Sub-admins
+            _seen = set()
+            _targets = []
+            for _aid in ADMIN_IDS:
+                if _aid not in _seen:
+                    _targets.append(_aid)
+                    _seen.add(_aid)
             for _ar in _get_admins():
-                if _ar["user_id"] in ADMIN_IDS:
-                    continue
-                try:
-                    _bc_send(_ar["user_id"])
-                    sent += 1
-                except Exception:
-                    pass
+                if _ar["user_id"] not in _seen:
+                    _targets.append(_ar["user_id"])
+                    _seen.add(_ar["user_id"])
             state_clear(uid)
-            bot.send_message(uid, f"✅ پیام برای {sent} ادمین ارسال شد.", reply_markup=kb_admin_panel())
-            from ..group_manager import send_to_topic as _stt
-            _bc_preview = (message.text or message.caption or "")[:200].strip()
-            _stt("broadcast_report",
-                f"📢 <b>اطلاع‌رسانی (ادمین‌ها)</b>\n\n"
-                f"👤 ارسال‌کننده: <code>{uid}</code>\n"
-                f"📤 ارسال شده: <b>{sent}</b> ادمین\n\n"
-                f"📝 <b>متن پیام:</b>\n{esc(_bc_preview) if _bc_preview else '(فایل/مدیا)'}")
+            _run_broadcast(uid, _targets, "ادمین‌ها", _bc_send)
             return
 
         # ── Wallet amount ──────────────────────────────────────────────────────
@@ -779,65 +955,6 @@ def universal_handler(message):
                       unit_price=unit_price, quantity=qty, kind="config_purchase")
             summary = _qty_order_summary_text(package_row, unit_price, qty)
             bot.send_message(uid, summary, parse_mode="HTML")
-            _pkg_source = package_row["config_source"] if "config_source" in package_row.keys() else "manual"
-            if _pkg_source == "panel":
-                from .callbacks import _show_naming_choice
-                _show_naming_choice(message, uid, package_row, unit_price, qty, total)
-            else:
-                # Non-panel package: skip naming, go directly to payment
-                state_set(uid, "buy_select_method",
-                          package_id=package_id, amount=total, original_amount=total,
-                          unit_price=unit_price, quantity=qty,
-                          kind="config_purchase", naming_type="random")
-                from .callbacks import _show_purchase_gateways
-                _show_purchase_gateways(message, uid, package_id, total, package_row)
-            return
-
-        # ── Custom service name entry ─────────────────────────────────────────
-        if sn == "await_custom_names":
-            raw_text    = (message.text or "").strip()
-            package_id  = sd.get("package_id")
-            unit_price  = int(sd.get("unit_price", 0) or 0)
-            quantity    = int(sd.get("quantity", 1) or 1)
-            total       = int(sd.get("amount", 0) or 0)
-            package_row = get_package(package_id)
-            if not package_row or not unit_price:
-                state_clear(uid)
-                bot.send_message(uid, "⚠️ خطا در اطلاعات سفارش. لطفاً دوباره شروع کنید.",
-                                 reply_markup=kb_main(uid))
-                return
-
-            if quantity == 1:
-                # Single name input
-                normalised = normalize_service_name(raw_text)
-                if validate_service_name(normalised):
-                    custom_names = [normalised]
-                else:
-                    # Invalid → fallback to random silently
-                    custom_names = [generate_random_name(uid)]
-            else:
-                # Bulk name input
-                custom_names = parse_bulk_names(raw_text, quantity, uid)
-
-            # Save names in state, advance to buy_select_method
-            state_set(uid, "buy_select_method",
-                      package_id=package_id, amount=total, original_amount=total,
-                      unit_price=unit_price, quantity=quantity,
-                      kind="config_purchase", naming_type="custom",
-                      custom_names=",".join(custom_names))
-
-            # Show summary
-            if quantity == 1:
-                names_preview = f"<code>{esc(custom_names[0])}</code>"
-            else:
-                names_preview = "\n".join(
-                    f"{i}. <code>{esc(n)}</code>" for i, n in enumerate(custom_names, 1)
-                )
-            bot.send_message(uid,
-                f"✅ <b>نام‌های سرویس ثبت شد:</b>\n\n{names_preview}",
-                parse_mode="HTML")
-
-            from .callbacks import _show_purchase_gateways, _show_discount_prompt
             if setting_get("discount_codes_enabled", "0") == "1":
                 if _show_discount_prompt(message, total):
                     return
@@ -876,15 +993,12 @@ def universal_handler(message):
                 "discount_code_id": row["id"],
                 "discount_code": row["code"],
             })
-            print("Coupon applied:", disc_amount)
             state_set(uid, prev_state, **new_data)
             if prev_state == "buy_select_method":
                 package_id = new_data.get("package_id")
                 package_row = get_package(package_id) if package_id else None
                 if package_row:
                     _show_purchase_gateways(message, uid, package_id, final_amount, package_row)
-                else:
-                    bot.send_message(uid, "⚠️ اطلاعات خرید یافت نشد. لطفاً دوباره از منو اقدام کنید.")
                 return
             if prev_state == "renew_select_method":
                 purchase_id = new_data.get("purchase_id")
@@ -893,17 +1007,8 @@ def universal_handler(message):
                 package_row = get_package(package_id) if package_id else None
                 if item and package_row:
                     _show_renewal_gateways(message, uid, purchase_id, package_id, final_amount, package_row, item)
-                else:
-                    bot.send_message(uid, "⚠️ اطلاعات تمدید یافت نشد. لطفاً دوباره از منو اقدام کنید.")
                 return
-            # prev_state is unexpected — try to recover by showing gateway based on stored data
-            package_id = new_data.get("package_id")
-            package_row = get_package(package_id) if package_id else None
-            if package_row:
-                state_set(uid, "buy_select_method", **new_data)
-                _show_purchase_gateways(message, uid, package_id, final_amount, package_row)
-            else:
-                bot.send_message(uid, "✅ تخفیف ثبت شد. لطفاً از منو اقدام به پرداخت کنید.", reply_markup=kb_main(uid))
+            bot.send_message(uid, "✅ تخفیف ثبت شد.", reply_markup=kb_main(uid))
             return
 
         # ── Wallet receipt ─────────────────────────────────────────────────────
@@ -3269,55 +3374,6 @@ def universal_handler(message):
                 reply_markup=kb_admin_panel())
             return
 
-        # ── Admin: Per-GB price entry ──────────────────────────────────────────
-        if sn == "admin_gbp_enter_price" and is_admin(uid):
-            category_id   = int(sd.get("category_id", 0) or 0)
-            duration_days = int(sd.get("duration_days", 0) or 0)
-            val = parse_int(normalize_text_number(message.text or ""))
-            if val is None or val <= 0:
-                bot.send_message(uid,
-                    "⚠️ <b>مبلغ نامعتبر است.</b>\n\n"
-                    "یک عدد مثبت (تومان) وارد کنید. مثال: <code>300000</code>",
-                    parse_mode="HTML",
-                    reply_markup=back_button(f"adm:gbp:cat:{category_id}"))
-                return
-            set_agency_gb_price(category_id, duration_days, val)
-            state_clear(uid)
-            dur_lbl = "نامحدود" if duration_days == 0 else f"{duration_days} روز"
-            log_admin_action(uid, f"قیمت هر گیگ: دسته #{category_id}, مدت {dur_lbl}: {fmt_price(val)} تومان")
-            bot.send_message(uid,
-                f"✅ <b>قیمت هر گیگ برای این دسته و این زمان تنظیم شد.</b>\n\n"
-                f"💰 قیمت هر گیگ: <b>{fmt_price(val)} تومان</b>\n"
-                f"⏱ مدت: <b>{dur_lbl}</b>",
-                parse_mode="HTML",
-                reply_markup=kb_admin_panel())
-            return
-
-        # ── Admin: Per-agent GB price entry ───────────────────────────────
-        if sn == "admin_ugbp_enter_price" and is_admin(uid):
-            target_user_id = int(sd.get("target_user_id", 0) or 0)
-            category_id    = int(sd.get("category_id", 0) or 0)
-            duration_days  = int(sd.get("duration_days", 0) or 0)
-            val = parse_int(normalize_text_number(message.text or ""))
-            if val is None or val <= 0:
-                bot.send_message(uid,
-                    "⚠️ <b>مبلغ نامعتبر است.</b>\n\n"
-                    "یک عدد مثبت (تومان) وارد کنید. مثال: <code>300000</code>",
-                    parse_mode="HTML",
-                    reply_markup=back_button(f"adm:ugbp:cat:{target_user_id}:{category_id}"))
-                return
-            set_user_gb_price(target_user_id, category_id, duration_days, val)
-            state_clear(uid)
-            dur_lbl = "نامحدود" if duration_days == 0 else f"{duration_days} روز"
-            log_admin_action(uid, f"قیمت هر گیگ نماینده #{target_user_id}: دسته #{category_id}, مدت {dur_lbl}: {fmt_price(val)} تومان")
-            bot.send_message(uid,
-                f"✅ <b>قیمت هر گیگ برای این نماینده تنظیم شد.</b>\n\n"
-                f"💰 قیمت هر گیگ: <b>{fmt_price(val)} تومان</b>\n"
-                f"⏱ مدت: <b>{dur_lbl}</b>",
-                parse_mode="HTML",
-                reply_markup=back_button(f"adm:agcfg:gbp:{target_user_id}"))
-            return
-
         # ── Admin: Default agency discount % ──────────────────────────────────
         if sn == "admin_set_default_discount_pct" and is_admin(uid):
             val = parse_int(message.text or "")
@@ -3589,104 +3645,117 @@ def universal_handler(message):
 
         # ── Pinned Messages ───────────────────────────────────────────────────
         if sn == "admin_pin_add" and admin_has_perm(uid, "settings"):
-            text = (message.text or "").strip()
-            if not text:
-                bot.send_message(uid, "⚠️ متن پیام نمی‌تواند خالی باشد.")
-                return
-            add_pinned_message(text)
+            import json as _json
+            from ..ui.premium_emoji import serialize_premium_text as _spt
+            # Accept any content type (text, forwarded, photo, video, etc.)
+            _is_forwarded = bool(
+                getattr(message, "forward_origin", None) or
+                getattr(message, "forward_from", None) or
+                getattr(message, "forward_from_chat", None)
+            )
+            if _is_forwarded or message.content_type != "text":
+                # Store a reference to the original message for forwarding/copying
+                stored_text = _json.dumps({
+                    "type": "pin_ref",
+                    "from_chat_id": message.chat.id,
+                    "from_message_id": message.message_id,
+                    "is_forwarded": _is_forwarded,
+                })
+            else:
+                raw_text = (message.text or "").strip()
+                if not raw_text:
+                    bot.send_message(uid, "⚠️ متن پیام نمی‌تواند خالی باشد.")
+                    return
+                stored_text = _spt(raw_text, message.entities)
+            pin_id = add_pinned_message(stored_text)
             log_admin_action(uid, "پیام پین جدید ارسال شد")
             state_clear(uid)
-            # Broadcast to all users and pin in each chat
-            from ..db import get_all_pinned_messages as _get_pins
-            from telebot import types as _types
             users = get_users()
-            sent = 0
-            pinned = 0
-            all_pins = _get_pins()
-            pin_id = all_pins[-1]["id"] if all_pins else None
-            for u in users:
-                try:
-                    sent_msg = bot.send_message(u["user_id"], text, parse_mode="HTML")
-                    if pin_id:
-                        save_pinned_send(pin_id, u["user_id"], sent_msg.message_id)
-                    sent += 1
-                    try:
-                        bot.pin_chat_message(u["user_id"], sent_msg.message_id, disable_notification=True)
-                        pinned += 1
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
-            pins = _get_pins()
-            kb = _types.InlineKeyboardMarkup()
-            kb.add(_types.InlineKeyboardButton("➕ افزودن پیام پین", callback_data="adm:pin:add"))
-            for p in pins:
-                preview = (p["text"] or "")[:30].replace("\n", " ")
-                kb.row(
-                    _types.InlineKeyboardButton(f"📌 {preview}", callback_data="noop"),
-                    _types.InlineKeyboardButton("✏️", callback_data=f"adm:pin:edit:{p['id']}"),
-                    _types.InlineKeyboardButton("🗑", callback_data=f"adm:pin:del:{p['id']}"),
-                )
-            kb.add(_types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
-            count_text = f"{len(pins)} پیام" if pins else "هیچ پیامی ثبت نشده"
-            bot.send_message(uid,
-                f"✅ پیام پین ارسال شد.\n📤 فرستاده شده: {sent} کاربر\n📌 پین شده: {pinned} کاربر\n\n"
-                f"📌 <b>پیام‌های پین شده</b>\n\n{count_text}",
-                reply_markup=kb, parse_mode="HTML")
-            from ..group_manager import send_to_topic as _stt
-            _pin_preview = text[:200].strip()
-            _stt("broadcast_report",
-                f"📌 <b>پیام پین جدید</b>\n\n"
-                f"👤 ارسال‌کننده: <code>{uid}</code>\n"
-                f"📤 ارسال شده: <b>{sent}</b> کاربر\n"
-                f"📌 پین شده: <b>{pinned}</b> کاربر\n\n"
-                f"📝 <b>متن پیام:</b>\n{esc(_pin_preview)}")
+            _run_pin_broadcast(uid, users, pin_id, stored_text,
+                               message.chat.id, message.message_id, _is_forwarded)
             return
 
         if sn == "admin_pin_edit" and admin_has_perm(uid, "settings"):
-            text = (message.text or "").strip()
-            if not text:
-                bot.send_message(uid, "⚠️ متن پیام نمی‌تواند خالی باشد.")
-                return
-            pin_id = sd.get("pin_id")
-            if pin_id:
-                update_pinned_message(pin_id, text)
-                # Edit the sent messages in all user chats
-                sends = get_pinned_sends(pin_id)
-                edited = 0
-                for s in sends:
-                    try:
-                        bot.edit_message_text(text, s["user_id"], s["message_id"], parse_mode="HTML")
-                        edited += 1
-                    except Exception:
-                        pass
-            state_clear(uid)
+            import json as _json
+            from ..ui.premium_emoji import serialize_premium_text as _spt
             from ..db import get_all_pinned_messages as _get_pins
             from telebot import types as _types
+            pin_id = sd.get("pin_id")
+            _is_forwarded = bool(
+                getattr(message, "forward_origin", None) or
+                getattr(message, "forward_from", None) or
+                getattr(message, "forward_from_chat", None)
+            )
+            if _is_forwarded or message.content_type != "text":
+                stored_text = _json.dumps({
+                    "type": "pin_ref",
+                    "from_chat_id": message.chat.id,
+                    "from_message_id": message.message_id,
+                    "is_forwarded": _is_forwarded,
+                })
+            else:
+                raw_text = (message.text or "").strip()
+                if not raw_text:
+                    bot.send_message(uid, "⚠️ متن پیام نمی‌تواند خالی باشد.")
+                    return
+                stored_text = _spt(raw_text, message.entities)
+            if pin_id:
+                update_pinned_message(pin_id, stored_text)
+                # Edit the sent messages in all user chats (text-based only)
+                sends = get_pinned_sends(pin_id)
+                edited = 0
+                # Only attempt editing for non-ref messages (ref = media/forwarded)
+                _is_ref = False
+                try:
+                    _obj = _json.loads(stored_text)
+                    _is_ref = isinstance(_obj, dict) and _obj.get("type") == "pin_ref"
+                except Exception:
+                    pass
+                if not _is_ref:
+                    from ..ui.premium_emoji import render_premium_text_entities as _rpe2, deserialize_premium_text as _dpt2
+                    _parsed2 = _dpt2(stored_text)
+                    _has_ents = bool(_parsed2.get("entities"))
+                    _plain2 = _parsed2.get("text", stored_text)
+                    for s in sends:
+                        try:
+                            if _has_ents:
+                                _txt2, _ents2 = _rpe2(stored_text)
+                                if _ents2:
+                                    bot.edit_message_text(_txt2, s["user_id"], s["message_id"], entities=_ents2)
+                                else:
+                                    bot.edit_message_text(_plain2, s["user_id"], s["message_id"], parse_mode="HTML")
+                            else:
+                                bot.edit_message_text(_plain2, s["user_id"], s["message_id"], parse_mode="HTML")
+                            edited += 1
+                        except Exception:
+                            pass
+            state_clear(uid)
             pins = _get_pins()
             kb = _types.InlineKeyboardMarkup()
             kb.add(_types.InlineKeyboardButton("➕ افزودن پیام پین", callback_data="adm:pin:add"))
             for p in pins:
-                preview = (p["text"] or "")[:30].replace("\n", " ")
+                _prev = _pin_preview_text(p.get("text", ""))
                 kb.row(
-                    _types.InlineKeyboardButton(f"📌 {preview}", callback_data="noop"),
+                    _types.InlineKeyboardButton(f"📌 {_prev}", callback_data="noop"),
                     _types.InlineKeyboardButton("✏️", callback_data=f"adm:pin:edit:{p['id']}"),
                     _types.InlineKeyboardButton("🗑", callback_data=f"adm:pin:del:{p['id']}"),
                 )
-            kb.add(_types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
+            kb.add(_types.InlineKeyboardButton("بازگشت", callback_data="admin:settings",
+                                               icon_custom_emoji_id="5253997076169115797"))
             count_text = f"{len(pins)} پیام" if pins else "هیچ پیامی ثبت نشده"
             edited_count = edited if pin_id else 0
             bot.send_message(uid,
                 f"✅ پیام پین ویرایش شد.\n✏️ آپدیت شده: {edited_count} کاربر\n\n"
                 f"📌 <b>پیام‌های پین شده</b>\n\n{count_text}",
                 reply_markup=kb, parse_mode="HTML")
-            from ..group_manager import send_to_topic as _stt
-            _pin_preview = text[:200].strip()
-            _stt("broadcast_report",
-                f"✏️ <b>ویرایش پیام پین</b>\n\n"
-                f"👤 ویرایش‌کننده: <code>{uid}</code>\n"
-                f"✏️ آپدیت شده: <b>{edited_count}</b> کاربر\n\n"
-                f"📝 <b>متن جدید:</b>\n{esc(_pin_preview)}")
+            try:
+                from ..group_manager import send_to_topic as _stt4
+                _stt4("broadcast_report",
+                    f"✏️ <b>ویرایش پیام پین</b>\n\n"
+                    f"👤 ویرایش‌کننده: <code>{uid}</code>\n"
+                    f"✏️ آپدیت شده: <b>{edited_count}</b> کاربر")
+            except Exception:
+                pass
             return
 
 

@@ -19,7 +19,7 @@ def show_main_menu(target):
     custom_raw  = setting_get("start_text", "")
     if custom_raw:
         parsed = deserialize_premium_text(custom_raw)
-        if parsed.get("entities"):
+        if parsed.get("entities"):  # has formatting or custom emoji entities
             # Has premium/custom emoji → send via entities (no parse_mode, no HTML issues)
             text, entities = render_premium_text_entities(custom_raw)
             chat_id = (
@@ -210,7 +210,7 @@ def show_my_configs(target, user_id, page=0, search=None):
             else:
                 test_label = " 🎁"
         title = f"{svc_name}{test_label}{expired_mark}"
-        kb.add(types.InlineKeyboardButton(title, callback_data=f"service:{item['id']}"))
+        kb.add(types.InlineKeyboardButton(title, callback_data=f"mycfg:{item['id']}"))
 
     # ── Panel configs ─────────────────────────────────────────────────────────
     for pc in panel_items:
@@ -220,12 +220,7 @@ def show_my_configs(target, user_id, page=0, search=None):
             marker = " ⛔"
         else:
             marker = " 🟢"
-        _pc_remark = (pc.get("inbound_remark") or "").strip()
-        _pc_cname  = (pc.get("client_name") or "").strip() or (pc.get("package_name") or "—")
-        if _pc_remark and _pc_cname and _pc_cname != "—":
-            name = esc(f"{_pc_remark} _ {_pc_cname}")
-        else:
-            name = esc(_pc_cname)
+        name = esc(pc["client_name"] or pc["package_name"] or "—")
         kb.add(types.InlineKeyboardButton(f"{name}{marker}", callback_data=f"mypnlcfg:d:{pc['id']}"))
 
     # ── Pagination row ────────────────────────────────────────────────────────

@@ -35,9 +35,6 @@ from ..db import (
     get_agency_price_config, set_agency_price_config,
     get_agency_type_discount, set_agency_type_discount,
     get_agencies,
-    get_agency_gb_price, set_agency_gb_price, delete_agency_gb_price,
-    get_all_agency_gb_prices, get_reseller_gb_price,
-    get_user_gb_price, set_user_gb_price, delete_user_gb_price, get_all_user_gb_prices,
     get_all_admin_users, get_admin_user, add_admin_user, update_admin_permissions, remove_admin_user,
     get_conn, create_pending_order, get_pending_order, add_config, search_users,
     should_show_bulk_qty, get_bulk_qty_limits,
@@ -68,7 +65,6 @@ from ..db import (
     toggle_payment_card_active, delete_payment_card, pick_card_for_payment,
     # Fee / Bonus
     get_gateway_fee_amount, get_gateway_bonus_amount, apply_gateway_fee,
-    set_payment_custom_names, get_payment_custom_names,
 )
 from ..gateways.base import is_gateway_available, is_card_info_complete, get_gateway_range_text, is_gateway_in_range, build_gateway_range_guide
 from ..gateways.crypto import fetch_crypto_prices
@@ -84,11 +80,6 @@ from ..ui.helpers import send_or_edit, check_channel_membership, channel_lock_me
 from ..ui.helpers import _invalidate_channel_cache
 from ..ui.keyboards import kb_main, kb_admin_panel
 from ..ui.menus import show_main_menu, show_profile, show_support, show_my_configs, show_referral_menu
-from ..service_naming import (
-    validate_service_name, normalize_service_name,
-    generate_random_name, parse_bulk_names,
-    build_final_name, ensure_unique_name,
-)
 from ..ui.notifications import (
     deliver_purchase_message, admin_purchase_notify, admin_renewal_notify,
     notify_pending_order_to_admins, _complete_pending_order, auto_fulfill_pending_orders,
@@ -1199,38 +1190,6 @@ def _show_wallet_gateways(target, uid, amount):
 
 # ── Bulk/Quantity Purchase Helpers ─────────────────────────────────────────────
 
-def _show_naming_choice(call_or_msg, uid: int, package_row, unit_price, quantity: int, total: int):
-    """
-    Show the naming type selection step (before payment).
-    Saves current purchase state and sets state to 'await_naming_choice'.
-    """
-    state_set(uid, "await_naming_choice",
-              package_id=package_row["id"],
-              unit_price=unit_price,
-              quantity=quantity,
-              amount=total,
-              original_amount=total,
-              kind="config_purchase")
-    _pkg_sn = package_row["show_name"] if "show_name" in package_row.keys() else 1
-    _name_line = f"📦 پکیج: <b>{esc(package_row['name'])}</b>\n" if _pkg_sn else ""
-    _qty_line  = f"🔢 تعداد: <b>{quantity}</b> عدد\n" if quantity > 1 else ""
-    kb = types.InlineKeyboardMarkup()
-    kb.row(
-        types.InlineKeyboardButton("✏️ نام دلخواه", callback_data="svc_naming:custom"),
-        types.InlineKeyboardButton("🎲 نام رندوم",  callback_data="svc_naming:random"),
-    )
-    kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"buy:t:{package_row['type_id']}",
-                                      icon_custom_emoji_id="5253997076169115797"))
-    text = (
-        "✍️ <b>نام‌گذاری سرویس</b>\n\n"
-        f"🧩 نوع سرویس: <b>{esc(package_row['type_name'])}</b>\n"
-        f"{_name_line}"
-        f"{_qty_line}\n"
-        "لطفاً مشخص کنید نام سرویس شما به چه صورت ثبت شود."
-    )
-    send_or_edit(call_or_msg, text, kb)
-
-
 def _show_qty_prompt(call, package_row, unit_price):
     """Show the quantity-selection prompt to the user."""
     from ..db import should_show_bulk_qty, get_bulk_qty_limits
@@ -1422,19 +1381,8 @@ def _panel_connect_with_retry(uid, protocol, host, port, path, username, passwor
             _t.sleep(FUNC_RETRY_DELAY)
 
 
-def _save_custom_names_to_payment(uid, payment_id):
-    """Extract custom_names from current user state and store in payment DB.
-    Returns the list of names (empty list if none)."""
-    _sd = state_data(uid)
-    _raw = _sd.get("custom_names", "") or ""
-    _names = [n for n in _raw.split(",") if n] if _raw else []
-    if _names:
-        set_payment_custom_names(payment_id, _names)
-    return _names
-
-
 def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method,
-                          quantity, payment_id, service_names=None):
+                          quantity, payment_id):
     """
     Deliver `quantity` configs to user after successful payment.
     Returns (delivered_purchase_ids, pending_ids).
@@ -1454,9 +1402,8 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
     if config_source == "panel":
         panel_config_ids = []
         failed_count = 0
-        for _i in range(quantity):
-            _desired = service_names[_i] if service_names and _i < len(service_names) else None
-            ok, result, pc_id = _create_panel_config(uid, package_id, payment_id, chat_id=chat_id, desired_name=_desired)
+        for _ in range(quantity):
+            ok, result, pc_id = _create_panel_config(uid, package_id, payment_id, chat_id=chat_id)
             if ok:
                 panel_config_ids.append(pc_id)
             else:
@@ -1816,7 +1763,7 @@ def _build_config_from_inbound(inbound, client_uuid, client_name, panel, real_po
     return None
 
 
-def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name=None):
+def _create_panel_config(uid, package_id, payment_id, chat_id=None):
     """
     Create a config in the panel for uid/package_id.
     If the package has a client_package_id, the sample config/sub URL from that
@@ -1980,14 +1927,9 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
     real_port      = int(inbound.get("port") or 0)
     inbound_remark = (inbound.get("remark") or inbound.get("tag") or "").strip()
 
-    # Generate config name (use desired_name if provided and valid)
-    from ..service_naming import validate_service_name, normalize_service_name, build_final_name
-    _desired = normalize_service_name(desired_name) if desired_name else None
-    if _desired and validate_service_name(_desired):
-        client_name = build_final_name(inbound_remark, _desired)
-    else:
-        rand_str    = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
-        client_name = f"{uid}_{rand_str}"
+    # Generate config name: {user_id}_{random6}
+    rand_str    = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
+    client_name = f"{uid}_{rand_str}"
 
     # Calculate traffic & expiry
     volume_gb     = float(package_row["volume_gb"] or 0)
@@ -2027,10 +1969,7 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
                 break
             # rotate client name to avoid duplicate key conflicts on retry
             rand_str    = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
-            if _desired and validate_service_name(_desired):
-                client_name = build_final_name(inbound_remark, f"{_desired}{rand_str[:3]}")
-            else:
-                client_name = f"{uid}_{rand_str}"
+            client_name = f"{uid}_{rand_str}"
             time.sleep(FUNC_RETRY_DELAY)
     if create_err is not None:
         return False, f"خطا در ساخت کلاینت: {create_err}", None
@@ -2408,7 +2347,7 @@ def _build_card_payment_page(card, bank, owner, price, final_amount):
             f"<b>{fmt_price(display_amount)} تومان</b>\n\n"
             "⚠️ <b>حتما مبلغ را دقیقا به همین مقدار واریز نمایید.\n"
             "در صورت واریز مبلغ غیر دقیق، مسئولیت تایید نشدن رسید بر عهده خود شما خواهد بود.</b>\n\n"
-            "📸 پس از واریز، تصویر رسید یا شماره پیگیری را ارسال کنید."
+            "📸 پس از واریز، تصویر رسید را ارسال کنید."
         )
         kb = types.InlineKeyboardMarkup()
         kb.row(
@@ -2425,7 +2364,7 @@ def _build_card_payment_page(card, bank, owner, price, final_amount):
             "💳 <b>کارت به کارت</b>\n\n"
             f"لطفاً مبلغ <b>{fmt_price(price)}</b> تومان را به کارت زیر واریز کنید:\n\n"
             f"{card_info}"
-            "📸 پس از واریز، تصویر رسید یا شماره پیگیری را ارسال کنید."
+            "📸 پس از واریز، تصویر رسید را ارسال کنید."
         )
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
@@ -3221,8 +3160,7 @@ def _tetrapay_auto_verify(payment_id, authority, uid, chat_id, message_id, kind,
                         parse_mode="HTML", reply_markup=back_button("main"))
                 purchase_ids, pending_ids = _deliver_bulk_configs(
                     chat_id, uid, package_id,
-                    payment["amount"], "tetrapay", _qty_tp_auto, payment_id,
-                    service_names=get_payment_custom_names(payment_id) or None
+                    payment["amount"], "tetrapay", _qty_tp_auto, payment_id
                 )
                 try:
                     apply_gateway_bonus_if_needed(uid, "tetrapay", payment["amount"])
@@ -3386,8 +3324,7 @@ def _tronpays_rial_auto_verify(payment_id, invoice_id, uid, chat_id, message_id,
                         parse_mode="HTML", reply_markup=back_button("main"))
                 purchase_ids, pending_ids = _deliver_bulk_configs(
                     chat_id, uid, package_id,
-                    payment["amount"], "tronpays_rial", _qty_trp_auto, payment_id,
-                    service_names=get_payment_custom_names(payment_id) or None
+                    payment["amount"], "tronpays_rial", _qty_trp_auto, payment_id
                 )
                 try:
                     apply_gateway_bonus_if_needed(uid, "tronpays_rial", payment["amount"])
@@ -3701,83 +3638,6 @@ def _dispatch_callback(call, uid, data):
         bot.send_photo(call.message.chat.id, banner_photo, caption=caption, parse_mode="HTML")
         return
 
-    # ── Service naming step ──────────────────────────────────────────────────
-
-    if data == "svc_naming:random":
-        sn = state_name(uid)
-        sd = state_data(uid)
-        if sn not in {"await_naming_choice", "buy_select_method"}:
-            bot.answer_callback_query(call.id)
-            return
-        # User chose random names — store empty custom_names list (will be generated at delivery)
-        package_id  = int(sd.get("package_id", 0))
-        package_row = get_package(package_id)
-        quantity    = int(sd.get("quantity", 1) or 1)
-        unit_price  = int(sd.get("unit_price", 0) or 0)
-        total       = int(sd.get("amount", 0) or 0)
-        if not package_row:
-            bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
-            return
-        # Persist naming_type in state, advance to buy_select_method
-        state_set(uid, "buy_select_method",
-                  package_id=package_id, amount=total, original_amount=total,
-                  unit_price=unit_price, quantity=quantity,
-                  kind="config_purchase", naming_type="random")
-        bot.answer_callback_query(call.id)
-        if setting_get("discount_codes_enabled", "0") == "1":
-            if _show_discount_prompt(call, total):
-                return
-        _show_purchase_gateways(call, uid, package_id, total, package_row)
-        return
-
-    if data == "svc_naming:custom":
-        sn = state_name(uid)
-        sd = state_data(uid)
-        if sn not in {"await_naming_choice", "buy_select_method"}:
-            bot.answer_callback_query(call.id)
-            return
-        package_id = int(sd.get("package_id", 0))
-        package_row = get_package(package_id)
-        quantity   = int(sd.get("quantity", 1) or 1)
-        if not package_row:
-            bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
-            return
-        # Store naming_type + transition to await_custom_names
-        state_set(uid, "await_custom_names",
-                  package_id=sd.get("package_id"),
-                  unit_price=sd.get("unit_price"),
-                  quantity=quantity,
-                  amount=sd.get("amount"),
-                  original_amount=sd.get("original_amount"),
-                  kind="config_purchase",
-                  naming_type="custom")
-        bot.answer_callback_query(call.id)
-        kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("🎲 استفاده از نام رندوم", callback_data="svc_naming:random"))
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"buy:t:{package_row['type_id']}",
-                                          icon_custom_emoji_id="5253997076169115797"))
-        if quantity == 1:
-            text = (
-                "✍️ <b>نام دلخواه سرویس</b>\n\n"
-                "لطفاً نام دلخواه سرویس خود را وارد کنید.\n\n"
-                "📌 <b>قوانین:</b>\n"
-                "• فقط حروف انگلیسی کوچک (<code>a-z</code>) و اعداد (<code>0-9</code>)\n"
-                "• بدون فاصله، کاراکتر خاص یا حرف فارسی\n\n"
-                "✏️ مثال: <code>ali</code>، <code>user123</code>، <code>myserver</code>"
-            )
-        else:
-            text = (
-                f"✍️ <b>نام دلخواه سرویس‌ها ({quantity} عدد)</b>\n\n"
-                f"لطفاً <b>{quantity}</b> نام سرویس را در <b>یک پیام</b> و هرکدام در یک خط ارسال کنید.\n\n"
-                "📌 <b>قوانین:</b>\n"
-                "• فقط حروف انگلیسی کوچک (<code>a-z</code>) و اعداد (<code>0-9</code>)\n"
-                "• هر نام در یک خط جداگانه\n"
-                "• نام‌های نامعتبر به‌طور خودکار با نام رندوم جایگزین می‌شوند\n\n"
-                f"✏️ مثال:\n<code>ali\nuser123\nmyserver</code>"
-            )
-        send_or_edit(call, text, kb)
-        return
-
     # ── Discount code flow ───────────────────────────────────────────────────
     if data == "disc:yes":
         sn = state_name(uid)
@@ -4044,43 +3904,13 @@ def _dispatch_callback(call, uid, data):
         show_my_configs(call, uid, page=0, search="")
         return
 
-    if data.startswith("service:"):
-        # Unified service detail handler (new format)
-        bot.answer_callback_query(call.id)
-        try:
-            service_id = int(data.split(":")[1])
-        except (ValueError, IndexError):
-            log.warning("service: bad callback data from uid=%s: %s", uid, data)
-            bot.send_message(call.message.chat.id, "این سرویس یافت نشد", parse_mode="HTML")
-            return
-        item = get_purchase(service_id)
-        if not item:
-            log.warning("service: purchase %s not found (uid=%s)", service_id, uid)
-            bot.send_message(call.message.chat.id, "این سرویس یافت نشد", parse_mode="HTML")
-            return
-        if item["user_id"] != uid:
-            bot.send_message(call.message.chat.id, "دسترسی مجاز نیست.", parse_mode="HTML")
-            return
-        log.debug("service: delivering purchase %s to uid=%s", service_id, uid)
-        deliver_purchase_message(call.message.chat.id, service_id)
-        return
-
     if data.startswith("mycfg:"):
-        # Legacy service detail handler — kept for backward compat with old inline buttons
-        bot.answer_callback_query(call.id)
-        try:
-            purchase_id = int(data.split(":")[1])
-        except (ValueError, IndexError):
-            log.warning("mycfg: bad callback data from uid=%s: %s", uid, data)
-            bot.send_message(call.message.chat.id, "این سرویس یافت نشد", parse_mode="HTML")
-            return
+        purchase_id = int(data.split(":")[1])
         item = get_purchase(purchase_id)
-        if not item:
-            bot.send_message(call.message.chat.id, "این سرویس یافت نشد", parse_mode="HTML")
+        if not item or item["user_id"] != uid:
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
             return
-        if item["user_id"] != uid:
-            bot.send_message(call.message.chat.id, "دسترسی مجاز نیست.", parse_mode="HTML")
-            return
+        bot.answer_callback_query(call.id)
         deliver_purchase_message(call.message.chat.id, purchase_id)
         return
 
@@ -4715,16 +4545,6 @@ def _dispatch_callback(call, uid, data):
         if should_show_bulk_qty(uid):
             _show_qty_prompt(call, package_row, price)
             return
-        # ── Naming step (panel packages only) ────────────────────────────────
-        _pkg_source = package_row["config_source"] if "config_source" in package_row.keys() else "manual"
-        if _pkg_source == "panel":
-            _show_naming_choice(call, uid, package_row, price, 1, price)
-            return
-        # Non-panel package: skip naming, go directly to payment
-        state_set(uid, "buy_select_method",
-                  package_id=package_id, amount=price, original_amount=price,
-                  unit_price=price, quantity=1,
-                  kind="config_purchase", naming_type="random")
         if setting_get("discount_codes_enabled", "0") == "1":
             if _show_discount_prompt(call, price):
                 return
@@ -4754,15 +4574,12 @@ def _dispatch_callback(call, uid, data):
         update_balance(uid, -price)
         payment_id = create_payment("config_purchase", uid, package_id, price, "wallet",
                                     status="completed", quantity=quantity)
-        _save_custom_names_to_payment(uid, payment_id)
         complete_payment(payment_id)
         bot.answer_callback_query(call.id, "خرید با موفقیت انجام شد.")
         send_or_edit(call, "✅ پرداخت از کیف پول انجام شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
                      back_button("main"))
-        _names_wallet = get_payment_custom_names(payment_id)
         purchase_ids, pending_ids = _deliver_bulk_configs(
-            call.message.chat.id, uid, package_id, price, "wallet", quantity, payment_id,
-            service_names=_names_wallet if _names_wallet else None
+            call.message.chat.id, uid, package_id, price, "wallet", quantity, payment_id
         )
         if not purchase_ids and not pending_ids:
             # Exceptional: refund and abort
@@ -4819,7 +4636,6 @@ def _dispatch_callback(call, uid, data):
         _qty_card = int(state_data(uid).get("quantity", 1) or 1)
         payment_id = create_payment("config_purchase", uid, package_id, price, "card",
                                     status="pending", quantity=_qty_card)
-        _save_custom_names_to_payment(uid, payment_id)
         # Generate random amount if enabled
         final_amount = None
         if setting_get("gw_card_random_amount", "0") == "1":
@@ -4871,7 +4687,6 @@ def _dispatch_callback(call, uid, data):
                     return
                 payment_id = create_payment("config_purchase", uid, package_id, amount, "crypto",
                                             status="pending", crypto_coin=coin_key, quantity=_qty_coin)
-                _save_custom_names_to_payment(uid, payment_id)
                 bot.answer_callback_query(call.id)
                 if show_crypto_payment_info(call, uid, coin_key, amount, payment_id=payment_id):
                     state_set(uid, "await_purchase_receipt", payment_id=payment_id)
@@ -4976,8 +4791,7 @@ def _dispatch_callback(call, uid, data):
                              back_button("main"))
                 purchase_ids, pending_ids = _deliver_bulk_configs(
                     call.message.chat.id, uid, package_id,
-                    payment["amount"], "tetrapay", _qty_tp, payment_id,
-                    service_names=get_payment_custom_names(payment_id) or None
+                    payment["amount"], "tetrapay", _qty_tp, payment_id
                 )
                 try:
                     apply_gateway_bonus_if_needed(uid, "tetrapay", payment["amount"])
@@ -5027,7 +4841,6 @@ def _dispatch_callback(call, uid, data):
         pay_url_web = result.get("payment_url_web", "")
         payment_id = create_payment("config_purchase", uid, package_id, price, "tetrapay",
                                     status="pending", quantity=_qty_tetra)
-        _save_custom_names_to_payment(uid, payment_id)
         with get_conn() as conn:
             conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (authority, payment_id))
         state_set(uid, "await_tetrapay_verify", payment_id=payment_id, authority=authority)
@@ -5094,8 +4907,7 @@ def _dispatch_callback(call, uid, data):
                              back_button("main"))
                 purchase_ids, pending_ids = _deliver_bulk_configs(
                     call.message.chat.id, uid, package_id,
-                    payment["amount"], "tronpays_rial", _qty_tron, payment_id,
-                    service_names=get_payment_custom_names(payment_id) or None
+                    payment["amount"], "tronpays_rial", _qty_tron, payment_id
                 )
                 try:
                     apply_gateway_bonus_if_needed(uid, "tronpays_rial", payment["amount"])
@@ -5154,7 +4966,6 @@ def _dispatch_callback(call, uid, data):
             return
         payment_id = create_payment("config_purchase", uid, package_id, price, "tronpays_rial",
                                     status="pending", quantity=_qty_tp_rial)
-        _save_custom_names_to_payment(uid, payment_id)
         with get_conn() as conn:
             conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id, payment_id))
         state_set(uid, "await_tronpays_rial_verify", payment_id=payment_id, invoice_id=invoice_id)
@@ -5553,8 +5364,7 @@ def _dispatch_callback(call, uid, data):
                              back_button("main"))
                 purchase_ids, pending_ids = _deliver_bulk_configs(
                     call.message.chat.id, uid, package_id,
-                    payment["amount"], "swapwallet_crypto", _qty_sw, payment_id,
-                    service_names=get_payment_custom_names(payment_id) or None
+                    payment["amount"], "swapwallet_crypto", _qty_sw, payment_id
                 )
                 try:
                     apply_gateway_bonus_if_needed(uid, "swapwallet_crypto", payment["amount"])
@@ -5606,7 +5416,6 @@ def _dispatch_callback(call, uid, data):
             invoice_id = result.get("id", "")
             payment_id = create_payment("config_purchase", uid, package_id, price, "swapwallet_crypto",
                                         status="pending", quantity=_qty_sw_init)
-            _save_custom_names_to_payment(uid, payment_id)
             with get_conn() as conn:
                 conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id, payment_id))
             state_set(uid, "await_swapwallet_crypto_verify", payment_id=payment_id, invoice_id=invoice_id)
@@ -5749,7 +5558,6 @@ def _dispatch_callback(call, uid, data):
             _qty_swc   = int(sd.get("quantity", 1) or 1)
             payment_id = create_payment("config_purchase", uid, package_id, amount, "swapwallet_crypto",
                                         status="pending", quantity=_qty_swc)
-            _save_custom_names_to_payment(uid, payment_id)
             verify_cb  = f"pay:swapwallet_crypto:verify:{payment_id}"
         elif kind == "renewal":
             package_id  = sd.get("package_id")
@@ -9545,16 +9353,9 @@ def _dispatch_callback(call, uid, data):
                 return
             kb = types.InlineKeyboardMarkup()
             for p in packs:
-                ap         = get_agency_price(target_id, p["id"])
-                eff_price  = get_effective_price(target_id, p)
-                base_price = p["price"]
-                if eff_price != base_price:
-                    price_display = f"{fmt_price(eff_price)} ت"
-                elif ap is not None:
-                    price_display = f"{fmt_price(ap)} ت"
-                else:
-                    price_display = f"{fmt_price(base_price)} ت"
-                label = f"{p['name']} | {price_display}"
+                ap    = get_agency_price(target_id, p["id"])
+                price = fmt_price(ap) if ap is not None else fmt_price(p["price"])
+                label = f"{p['name']} | {price} ت"
                 kb.add(types.InlineKeyboardButton(label, callback_data=f"adm:usr:agpe:{target_id}:{p['id']}"))
             kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:usr:v:{target_id}", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
@@ -9841,9 +9642,6 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton(
             f"{tick['package']}📦 قیمت جداگانه هر پکیج",
             callback_data=f"adm:agcfg:pkg:{target_id}"))
-        kb.add(types.InlineKeyboardButton(
-            "💎 قیمت بر اساس هر گیگ",
-            callback_data=f"adm:agcfg:gbp:{target_id}"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:usr:v:{target_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         target_user = get_user(target_id)
@@ -9968,381 +9766,13 @@ def _dispatch_callback(call, uid, data):
             return
         kb = types.InlineKeyboardMarkup()
         for p in packs:
-            ap           = get_agency_price(target_id, p["id"])
-            eff_price    = get_effective_price(target_id, p)
-            base_price   = p["price"]
-            if eff_price != base_price:
-                price_display = f"{fmt_price(eff_price)} ت"
-            elif ap is not None:
-                price_display = f"{fmt_price(ap)} ت"
-            else:
-                price_display = f"{fmt_price(base_price)} ت"
-            label = f"{p['name']} | {price_display}"
+            ap    = get_agency_price(target_id, p["id"])
+            price = fmt_price(ap) if ap is not None else fmt_price(p["price"])
+            label = f"{p['name']} | {price} ت"
             kb.add(types.InlineKeyboardButton(label, callback_data=f"adm:usr:agpe:{target_id}:{p['id']}"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:agcfg:{target_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "📦 <b>قیمت هر پکیج</b>\n\nبرای ویرایش روی پکیج بزنید:", kb)
-        return
-
-    # ── Per-GB pricing for resellers ──────────────────────────────────────────
-
-    # ── Per-agent GB pricing (from individual agent pricing menu) ─────────────
-    if data.startswith("adm:agcfg:gbp:") and data.count(":") == 3:
-        # adm:agcfg:gbp:{target_id}  — per-agent GB pricing list
-        target_id = int(data.split(":")[3])
-        if not admin_has_perm(uid, "agency") and not admin_has_perm(uid, "full_users"):
-            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
-            return
-        rules = get_all_user_gb_prices(target_id)
-        target_user = get_user(target_id)
-        uname = esc(target_user["full_name"]) if target_user else str(target_id)
-        def _ugbp_dur_label(days: int) -> str:
-            return "نامحدود" if days == 0 else f"{days} روز"
-        bot.answer_callback_query(call.id)
-        kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("➕ افزودن قانون جدید", callback_data=f"adm:ugbp:add:{target_id}"))
-        for r in rules:
-            cat_name = r.get("category_name") or f"دسته #{r['category_id']}"
-            dur_lbl  = _ugbp_dur_label(r["duration_days"])
-            ppg_lbl  = fmt_price(r["price_per_gb"])
-            kb.row(
-                types.InlineKeyboardButton(
-                    f"📂 {cat_name} | ⏱ {dur_lbl} | 💰 {ppg_lbl}ت/گیگ",
-                    callback_data=f"adm:ugbp:view:{target_id}:{r['category_id']}:{r['duration_days']}"),
-                types.InlineKeyboardButton(
-                    "🗑",
-                    callback_data=f"adm:ugbp:del:{target_id}:{r['category_id']}:{r['duration_days']}")
-            )
-        body = f"تعداد قوانین: <b>{len(rules)}</b>" if rules else "هیچ قانون قیمت‌گذاری بر اساس هر گیگ تنظیم نشده است."
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:agcfg:{target_id}", icon_custom_emoji_id="5253997076169115797"))
-        send_or_edit(call,
-            f"💎 <b>قیمت بر اساس هر گیگ</b>\n"
-            f"👤 {uname}\n\n{body}",
-            kb)
-        return
-
-    if data.startswith("adm:ugbp:add:"):
-        # adm:ugbp:add:{target_id}
-        target_id = int(data.split(":")[3])
-        if not admin_has_perm(uid, "agency") and not admin_has_perm(uid, "full_users"):
-            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
-            return
-        types_list = get_all_types()
-        if not types_list:
-            bot.answer_callback_query(call.id, "هیچ دسته‌ای تعریف نشده است.", show_alert=True)
-            return
-        bot.answer_callback_query(call.id)
-        kb = types.InlineKeyboardMarkup()
-        for t in types_list:
-            kb.add(types.InlineKeyboardButton(
-                f"📂 {t['name']}",
-                callback_data=f"adm:ugbp:cat:{target_id}:{t['id']}"))
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:agcfg:gbp:{target_id}", icon_custom_emoji_id="5253997076169115797"))
-        target_user = get_user(target_id)
-        uname = esc(target_user["full_name"]) if target_user else str(target_id)
-        send_or_edit(call,
-            f"💎 <b>افزودن قانون هر گیگ</b>\n"
-            f"👤 {uname}\n\n"
-            "مرحله ۱ از ۳: دسته‌بندی را انتخاب کنید:",
-            kb)
-        return
-
-    if data.startswith("adm:ugbp:cat:"):
-        # adm:ugbp:cat:{target_id}:{cat_id}
-        parts       = data.split(":")
-        target_id   = int(parts[3])
-        category_id = int(parts[4])
-        if not admin_has_perm(uid, "agency") and not admin_has_perm(uid, "full_users"):
-            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
-            return
-        bot.answer_callback_query(call.id)
-        with get_conn() as _c:
-            _dur_rows = _c.execute(
-                "SELECT DISTINCT duration_days FROM packages ORDER BY duration_days"
-            ).fetchall()
-        durations = sorted({0} | {int(r["duration_days"]) for r in _dur_rows if r["duration_days"] is not None})
-        def _ugbp_dur_lbl2(days: int) -> str:
-            return "نامحدود" if days == 0 else f"{days} روز"
-        kb = types.InlineKeyboardMarkup()
-        for d in durations:
-            kb.add(types.InlineKeyboardButton(
-                f"⏱ {_ugbp_dur_lbl2(d)}",
-                callback_data=f"adm:ugbp:dur:{target_id}:{category_id}:{d}"))
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:ugbp:add:{target_id}", icon_custom_emoji_id="5253997076169115797"))
-        cat_row  = get_type(category_id)
-        cat_name = cat_row["name"] if cat_row else f"#{category_id}"
-        target_user = get_user(target_id)
-        uname = esc(target_user["full_name"]) if target_user else str(target_id)
-        send_or_edit(call,
-            f"💎 <b>افزودن قانون هر گیگ</b>\n"
-            f"👤 {uname}\n"
-            f"دسته: <b>{esc(cat_name)}</b>\n\n"
-            "مرحله ۲ از ۳: مدت زمان پکیج را انتخاب کنید:",
-            kb)
-        return
-
-    if data.startswith("adm:ugbp:dur:"):
-        # adm:ugbp:dur:{target_id}:{cat_id}:{dur}
-        parts       = data.split(":")
-        target_id   = int(parts[3])
-        category_id = int(parts[4])
-        duration    = int(parts[5])
-        if not admin_has_perm(uid, "agency") and not admin_has_perm(uid, "full_users"):
-            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
-            return
-        existing = get_user_gb_price(target_id, category_id, duration)
-        cat_row  = get_type(category_id)
-        cat_name = cat_row["name"] if cat_row else f"#{category_id}"
-        dur_lbl  = "نامحدود" if duration == 0 else f"{duration} روز"
-        target_user = get_user(target_id)
-        uname = esc(target_user["full_name"]) if target_user else str(target_id)
-        state_set(uid, "admin_ugbp_enter_price",
-                  target_user_id=target_id, category_id=category_id, duration_days=duration)
-        bot.answer_callback_query(call.id)
-        existing_note = f"\n\n⚠️ مقدار فعلی: <b>{fmt_price(existing)} تومان/گیگ</b>" if existing is not None else ""
-        send_or_edit(call,
-            f"💎 <b>افزودن قانون هر گیگ</b>\n"
-            f"👤 {uname}\n"
-            f"دسته: <b>{esc(cat_name)}</b>\n"
-            f"مدت: <b>{dur_lbl}</b>{existing_note}\n\n"
-            "مرحله ۳ از ۳: قیمت هر گیگ (به تومان) را وارد کنید:\n\n"
-            "مثال: <code>300000</code>",
-            back_button(f"adm:ugbp:cat:{target_id}:{category_id}"))
-        return
-
-    if data.startswith("adm:ugbp:del:"):
-        # adm:ugbp:del:{target_id}:{cat_id}:{dur}
-        parts       = data.split(":")
-        target_id   = int(parts[3])
-        category_id = int(parts[4])
-        duration    = int(parts[5])
-        if not admin_has_perm(uid, "agency") and not admin_has_perm(uid, "full_users"):
-            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
-            return
-        delete_user_gb_price(target_id, category_id, duration)
-        bot.answer_callback_query(call.id, "✅ قانون حذف شد.", show_alert=True)
-        rules = get_all_user_gb_prices(target_id)
-        target_user = get_user(target_id)
-        uname = esc(target_user["full_name"]) if target_user else str(target_id)
-        def _ugbp_dur_lbl3(days: int) -> str:
-            return "نامحدود" if days == 0 else f"{days} روز"
-        kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("➕ افزودن قانون جدید", callback_data=f"adm:ugbp:add:{target_id}"))
-        for r in rules:
-            _cn  = r.get("category_name") or f"دسته #{r['category_id']}"
-            _dl  = _ugbp_dur_lbl3(r["duration_days"])
-            _ppg = fmt_price(r["price_per_gb"])
-            kb.row(
-                types.InlineKeyboardButton(
-                    f"📂 {_cn} | ⏱ {_dl} | 💰 {_ppg}ت/گیگ",
-                    callback_data=f"adm:ugbp:view:{target_id}:{r['category_id']}:{r['duration_days']}"),
-                types.InlineKeyboardButton("🗑", callback_data=f"adm:ugbp:del:{target_id}:{r['category_id']}:{r['duration_days']}")
-            )
-        _body = f"تعداد قوانین: <b>{len(rules)}</b>" if rules else "هیچ قانونی وجود ندارد."
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:agcfg:{target_id}", icon_custom_emoji_id="5253997076169115797"))
-        send_or_edit(call,
-            f"💎 <b>قیمت بر اساس هر گیگ</b>\n"
-            f"👤 {uname}\n\n{_body}",
-            kb)
-        return
-
-    if data.startswith("adm:ugbp:view:"):
-        # adm:ugbp:view:{target_id}:{cat_id}:{dur}
-        parts       = data.split(":")
-        target_id   = int(parts[3])
-        category_id = int(parts[4])
-        duration    = int(parts[5])
-        if not admin_has_perm(uid, "agency") and not admin_has_perm(uid, "full_users"):
-            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
-            return
-        ppg = get_user_gb_price(target_id, category_id, duration)
-        cat_row  = get_type(category_id)
-        cat_name = cat_row["name"] if cat_row else f"#{category_id}"
-        dur_lbl  = "نامحدود" if duration == 0 else f"{duration} روز"
-        target_user = get_user(target_id)
-        uname = esc(target_user["full_name"]) if target_user else str(target_id)
-        kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("✏️ ویرایش قیمت",
-            callback_data=f"adm:ugbp:dur:{target_id}:{category_id}:{duration}"))
-        kb.add(types.InlineKeyboardButton("🗑 حذف این قانون",
-            callback_data=f"adm:ugbp:del:{target_id}:{category_id}:{duration}"))
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:agcfg:gbp:{target_id}", icon_custom_emoji_id="5253997076169115797"))
-        bot.answer_callback_query(call.id)
-        send_or_edit(call,
-            f"💎 <b>جزئیات قانون هر گیگ</b>\n"
-            f"👤 {uname}\n\n"
-            f"📂 دسته: <b>{esc(cat_name)}</b>\n"
-            f"⏱ مدت: <b>{dur_lbl}</b>\n"
-            f"💰 قیمت هر گیگ: <b>{fmt_price(ppg) if ppg is not None else '—'} تومان</b>",
-            kb)
-        return
-
-    def _gbp_duration_label(days: int) -> str:
-        if days == 0:
-            return "نامحدود"
-        return f"{days} روز"
-
-    if data == "adm:gbp:list":
-        if not admin_has_perm(uid, "agency"):
-            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
-            return
-        rules = get_all_agency_gb_prices()
-        bot.answer_callback_query(call.id)
-        kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("➕ افزودن قانون جدید", callback_data="adm:gbp:add"))
-        for r in rules:
-            cat_name = r.get("category_name") or f"دسته #{r['category_id']}"
-            dur_lbl  = _gbp_duration_label(r["duration_days"])
-            ppg_lbl  = fmt_price(r["price_per_gb"])
-            kb.row(
-                types.InlineKeyboardButton(
-                    f"📂 {cat_name} | ⏱ {dur_lbl} | 💰 {ppg_lbl}ت/گیگ",
-                    callback_data=f"adm:gbp:view:{r['category_id']}:{r['duration_days']}"),
-                types.InlineKeyboardButton(
-                    "🗑",
-                    callback_data=f"adm:gbp:del:{r['category_id']}:{r['duration_days']}")
-            )
-        if not rules:
-            body = "هیچ قانون قیمت‌گذاری بر اساس هر گیگ تنظیم نشده است."
-        else:
-            body = f"تعداد قوانین فعال: <b>{len(rules)}</b>"
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:agents", icon_custom_emoji_id="5253997076169115797"))
-        send_or_edit(call,
-            f"💎 <b>قیمت‌گذاری بر اساس هر گیگ (نمایندگان)</b>\n\n{body}\n\n"
-            "این قیمت‌ها برای همه نمایندگان اعمال می‌شود و نسبت به تنظیمات قیمت فردی اولویت دارد.",
-            kb)
-        return
-
-    if data == "adm:gbp:add":
-        if not admin_has_perm(uid, "agency"):
-            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
-            return
-        types_list = get_all_types()
-        if not types_list:
-            bot.answer_callback_query(call.id, "هیچ دسته‌ای تعریف نشده است.", show_alert=True)
-            return
-        bot.answer_callback_query(call.id)
-        kb = types.InlineKeyboardMarkup()
-        for t in types_list:
-            kb.add(types.InlineKeyboardButton(
-                f"📂 {t['name']}",
-                callback_data=f"adm:gbp:cat:{t['id']}"))
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:gbp:list", icon_custom_emoji_id="5253997076169115797"))
-        send_or_edit(call,
-            "💎 <b>افزودن قانون هر گیگ</b>\n\n"
-            "مرحله ۱ از ۳: دسته‌بندی (نوع سرویس) را انتخاب کنید:",
-            kb)
-        return
-
-    if data.startswith("adm:gbp:cat:"):
-        if not admin_has_perm(uid, "agency"):
-            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
-            return
-        category_id = int(data.split(":")[3])
-        bot.answer_callback_query(call.id)
-        # Show common durations derived from existing packages + 0
-        with get_conn() as _c:
-            _dur_rows = _c.execute(
-                "SELECT DISTINCT duration_days FROM packages ORDER BY duration_days"
-            ).fetchall()
-        durations = sorted({0} | {int(r["duration_days"]) for r in _dur_rows if r["duration_days"] is not None})
-        kb = types.InlineKeyboardMarkup()
-        for d in durations:
-            kb.add(types.InlineKeyboardButton(
-                f"⏱ {_gbp_duration_label(d)}",
-                callback_data=f"adm:gbp:dur:{category_id}:{d}"))
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:gbp:add", icon_custom_emoji_id="5253997076169115797"))
-        cat_row = get_type(category_id)
-        cat_name = cat_row["name"] if cat_row else f"#{category_id}"
-        send_or_edit(call,
-            f"💎 <b>افزودن قانون هر گیگ</b>\n\n"
-            f"دسته: <b>{esc(cat_name)}</b>\n\n"
-            "مرحله ۲ از ۳: مدت زمان (duration) پکیج را انتخاب کنید:",
-            kb)
-        return
-
-    if data.startswith("adm:gbp:dur:"):
-        if not admin_has_perm(uid, "agency"):
-            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
-            return
-        parts       = data.split(":")
-        category_id = int(parts[3])
-        duration    = int(parts[4])
-        existing    = get_agency_gb_price(category_id, duration)
-        cat_row     = get_type(category_id)
-        cat_name    = cat_row["name"] if cat_row else f"#{category_id}"
-        dur_lbl     = _gbp_duration_label(duration)
-        state_set(uid, "admin_gbp_enter_price",
-                  category_id=category_id, duration_days=duration)
-        bot.answer_callback_query(call.id)
-        existing_note = f"\n\n⚠️ مقدار فعلی: <b>{fmt_price(existing)} تومان/گیگ</b>" if existing else ""
-        send_or_edit(call,
-            f"💎 <b>افزودن قانون هر گیگ</b>\n\n"
-            f"دسته: <b>{esc(cat_name)}</b>\n"
-            f"مدت: <b>{dur_lbl}</b>{existing_note}\n\n"
-            "مرحله ۳ از ۳: قیمت هر گیگ (به تومان) را وارد کنید:\n\n"
-            "مثال: <code>300000</code>",
-            back_button(f"adm:gbp:cat:{category_id}"))
-        return
-
-    if data.startswith("adm:gbp:view:"):
-        if not admin_has_perm(uid, "agency"):
-            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
-            return
-        parts       = data.split(":")
-        category_id = int(parts[3])
-        duration    = int(parts[4])
-        ppg         = get_agency_gb_price(category_id, duration)
-        cat_row     = get_type(category_id)
-        cat_name    = cat_row["name"] if cat_row else f"#{category_id}"
-        dur_lbl     = _gbp_duration_label(duration)
-        kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("✏️ ویرایش قیمت",
-            callback_data=f"adm:gbp:dur:{category_id}:{duration}"))
-        kb.add(types.InlineKeyboardButton("🗑 حذف این قانون",
-            callback_data=f"adm:gbp:del:{category_id}:{duration}"))
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:gbp:list", icon_custom_emoji_id="5253997076169115797"))
-        bot.answer_callback_query(call.id)
-        send_or_edit(call,
-            f"💎 <b>جزئیات قانون هر گیگ</b>\n\n"
-            f"📂 دسته: <b>{esc(cat_name)}</b>\n"
-            f"⏱ مدت: <b>{dur_lbl}</b>\n"
-            f"💰 قیمت هر گیگ: <b>{fmt_price(ppg) if ppg is not None else '—'} تومان</b>",
-            kb)
-        return
-
-    if data.startswith("adm:gbp:del:"):
-        if not admin_has_perm(uid, "agency"):
-            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
-            return
-        parts       = data.split(":")
-        category_id = int(parts[3])
-        duration    = int(parts[4])
-        delete_agency_gb_price(category_id, duration)
-        cat_row  = get_type(category_id)
-        cat_name = cat_row["name"] if cat_row else f"#{category_id}"
-        log_admin_action(uid, f"حذف قیمت هر گیگ — دسته: {cat_name}, مدت: {_gbp_duration_label(duration)}")
-        bot.answer_callback_query(call.id, "✅ قانون حذف شد.", show_alert=True)
-        # Re-show list
-        data = "adm:gbp:list"
-        rules = get_all_agency_gb_prices()
-        kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("➕ افزودن قانون جدید", callback_data="adm:gbp:add"))
-        for r in rules:
-            _cn   = r.get("category_name") or f"دسته #{r['category_id']}"
-            _dl   = _gbp_duration_label(r["duration_days"])
-            _ppg  = fmt_price(r["price_per_gb"])
-            kb.row(
-                types.InlineKeyboardButton(
-                    f"📂 {_cn} | ⏱ {_dl} | 💰 {_ppg}ت/گیگ",
-                    callback_data=f"adm:gbp:view:{r['category_id']}:{r['duration_days']}"),
-                types.InlineKeyboardButton("🗑", callback_data=f"adm:gbp:del:{r['category_id']}:{r['duration_days']}")
-            )
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:agents", icon_custom_emoji_id="5253997076169115797"))
-        _body = f"تعداد قوانین فعال: <b>{len(rules)}</b>" if rules else "هیچ قانونی وجود ندارد."
-        send_or_edit(call,
-            f"💎 <b>قیمت‌گذاری بر اساس هر گیگ (نمایندگان)</b>\n\n{_body}",
-            kb)
         return
 
     # ── Admin: Broadcast ──────────────────────────────────────────────────────
@@ -13845,6 +13275,7 @@ def _dispatch_callback(call, uid, data):
             f"📝 پیام تأیید برای کاربر را تایپ کنید و ارسال کنید:"
         )
         kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("✅ تأیید بدون توضیحات", callback_data=f"adm:pay:apc:{payment_id}"))
         kb.add(types.InlineKeyboardButton("🔙 انصراف", callback_data="nav:admin:panel"))
         state_set(uid, "admin_payment_approve_note", payment_id=payment_id)
         bot.answer_callback_query(call.id)

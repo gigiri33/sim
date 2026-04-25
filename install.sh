@@ -120,20 +120,8 @@ clone_or_update_repo() {
   if [[ -d "$DIR/.git" ]]; then
     info "Repository exists. Updating..."
     cd "$DIR"
-    # backup user config files before hard reset
-    [[ -f "$DIR/.env" ]]        && cp -p "$DIR/.env"        "$DIR/.env.bak"
-    [[ -f "$DIR/config.env" ]]  && cp -p "$DIR/config.env"  "$DIR/config.env.bak"
     git fetch --all --prune
     git reset --hard origin/main
-    # restore user config files after reset
-    if [[ -f "$DIR/.env.bak" ]]; then
-      mv -f "$DIR/.env.bak" "$DIR/.env"
-      chmod 600 "$DIR/.env"
-      ok ".env restored"
-    else
-      echo -e "${Y}⚠️  .env backup not found — configuration may be missing.${N}"
-    fi
-    [[ -f "$DIR/config.env.bak" ]] && { mv -f "$DIR/config.env.bak" "$DIR/config.env"; chmod 600 "$DIR/config.env"; }
   else
     rm -rf "$DIR"
     mkdir -p "$DIR"
@@ -400,23 +388,8 @@ update_bot() {
   info "Updating ${BOT_NAME}..."
   clone_or_update_repo
   setup_venv
-
-  # Check .env exists before restart
-  if [[ ! -f "$DIR/.env" ]]; then
-    echo ""
-    echo -e "${R}⚠️  فایل .env پیدا نشد!${N}"
-    echo -e "${Y}   تنظیمات ربات (توکن و Admin ID) حذف شده.${N}"
-    echo -e "${Y}   لطفاً از منو گزینه ✏️  Edit settings را بزنید تا دوباره تنظیم شود.${N}"
-    echo ""
-    return
-  fi
-
-  if systemctl restart "$SERVICE" 2>/dev/null; then
-    ok "Update of ${BOT_NAME} completed and service restarted!"
-  else
-    echo -e "${R}✗ سرویس ری‌استارت نشد. بررسی وضعیت:${N}"
-    systemctl status "$SERVICE" --no-pager -l || true
-  fi
+  systemctl restart "$SERVICE"
+  ok "Update of ${BOT_NAME} completed!"
   echo ""
   echo -e "${Y}ℹ️  License Notice:${N}"
   echo -e "${Y}   If this is an existing bot without a license, it will run in${N}"
@@ -724,34 +697,6 @@ bot_loop() {
 }
 
 main() {
-  # ── non-interactive flags ──────────────────────────────────────────────────
-  case "${1:-}" in
-    --update-all|-u)
-      check_root
-      ensure_safe_cwd
-      header
-      local instances; instances="$(all_instances)"
-      if [[ -z "$instances" ]]; then
-        echo -e "${R}✗ No installed bots found.${N}"
-        exit 1
-      fi
-      for num in $instances; do
-        DIR="${BASE_DIR}-${num}"
-        SERVICE="${BASE_SERVICE}-${num}"
-        BOT_NAME="$(get_bot_name "$num")"
-        echo ""
-        echo -e "${C}━━━ Updating ${BOT_NAME} (instance ${num}) ━━━${N}"
-        [[ -d "$DIR/.git" ]] || { echo -e "${R}✗ Not installed, skipping.${N}"; continue; }
-        clone_or_update_repo
-        setup_venv
-        systemctl restart "$SERVICE" 2>/dev/null || true
-        ok "${BOT_NAME} updated and restarted"
-      done
-      echo ""
-      exit 0
-      ;;
-  esac
-  # ──────────────────────────────────────────────────────────────────────────
 
   [[ -t 0 ]] || exec < /dev/tty
   check_root

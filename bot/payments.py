@@ -17,8 +17,6 @@ from .db import (
     assign_config_to_user, get_conn, create_pending_order, get_purchase,
     get_all_admin_users,
     save_payment_admin_message, get_payment_admin_messages, delete_payment_admin_messages,
-    get_payment_custom_names,
-    get_reseller_gb_price,
 )
 from .helpers import esc, fmt_price, display_username, back_button, now_str
 import time
@@ -96,20 +94,7 @@ def get_effective_price(user_id, package_row):
     user = get_user(user_id)
     if not user or not user["is_agent"]:
         return package_row["price"]
-    base = package_row["price"]
-
-    # ── Per-GB pricing (highest priority for resellers) ────────────────────────
-    try:
-        _type_id  = package_row["type_id"]
-        _duration = int(package_row["duration_days"] or 0)
-        _volume   = float(package_row["volume_gb"] or 0)
-        if _type_id and _volume > 0:
-            _gb_price = get_reseller_gb_price(_type_id, _duration, _volume, user_id=user_id)
-            if _gb_price is not None:
-                return _gb_price
-    except Exception:
-        pass
-
+    base  = package_row["price"]
     cfg   = get_agency_price_config(user_id)
     mode  = cfg["price_mode"]
     if mode == "global":
@@ -269,6 +254,14 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
                 except Exception:
                     pass
 
+        # Save the coin amount to the DB so admin notification always shows it
+        if payment_id and coin_amount_str and symbol:
+            try:
+                from .db import update_payment_crypto_amount
+                update_payment_crypto_amount(payment_id, f"{coin_amount_str} {symbol}")
+            except Exception:
+                pass
+
         text = (
             f"{ce('💎', '5471952986970267163')} <b>پرداخت با {esc(label)}</b>\n\n"
             f"{ce('💰', '5375296873982604963')} مبلغ: <b>{fmt_price(amount)}</b> تومان"
@@ -362,14 +355,20 @@ def send_payment_to_admins(payment_id):
             f"\n👥 تعداد کاربر: {'نامحدود' if not (package_row['max_users'] if 'max_users' in package_row.keys() else 0) else str(package_row['max_users']) + ' کاربره'}"
         )
     # Crypto equivalent line (shown only for crypto payments)
+    # Prefer the value stored in DB at payment time; fall back to live price
     crypto_line = ""
     if coin_key:
-        symbol = CRYPTO_API_SYMBOLS.get(coin_key, "")
-        if symbol:
-            prices = _get_prices()
-            if symbol in prices and prices[symbol] > 0:
-                coin_amount = payment["amount"] / prices[symbol]
-                crypto_line = f"\n💱 معادل ارزی: <code>{coin_amount:.6f} {symbol}</code>"
+        _pay_dict = dict(payment)
+        _stored_amt = _pay_dict.get("crypto_amount")
+        if _stored_amt:
+            crypto_line = f"\n💱 معادل ارزی: <code>{esc(_stored_amt)}</code>"
+        else:
+            symbol = CRYPTO_API_SYMBOLS.get(coin_key, "")
+            if symbol:
+                prices = _get_prices()
+                if symbol in prices and prices[symbol] > 0:
+                    coin_amount = payment["amount"] / prices[symbol]
+                    crypto_line = f"\n💱 معادل ارزی: <code>{coin_amount:.6f} {symbol}</code>"
 
     # Crypto comment code shown to admin (for verification)
     ton_fraud_line = ""
@@ -654,8 +653,7 @@ def _finish_card_payment_approval_core(payment_id, admin_note, approved):
                 pass
             purchase_ids, pending_ids = _deliver_bulk_configs(
                 user_id, user_id, package_id,
-                payment["amount"], payment["payment_method"], _qty_card, payment_id,
-                service_names=get_payment_custom_names(payment_id) or None
+                payment["amount"], payment["payment_method"], _qty_card, payment_id
             )
             _send_bulk_delivery_result(user_id, user_id, package_row,
                                        purchase_ids, pending_ids,

@@ -681,12 +681,7 @@ def _show_panel_config_list(call, filter_type="all", package_id=None,
         else:
             marker = "🟢"
         pkg_name    = (item["package_name"] or f"#{item['package_id']}")[:20]
-        _adm_remark = (item.get("inbound_remark") or "").strip()
-        _adm_cname  = (item.get("client_name") or "—")
-        if _adm_remark and _adm_cname and _adm_cname != "—":
-            client_name = f"{_adm_remark} _ {_adm_cname}"[:35]
-        else:
-            client_name = _adm_cname[:30]
+        client_name = (item["client_name"] or "—")[:30]
         btn_text    = f"{marker} {client_name} | {pkg_name}"
         kb.add(InlineKeyboardButton(btn_text, callback_data=f"admin:pcfg:d:{item['id']}"))
 
@@ -840,17 +835,9 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
         f"زمان مانده: {remaining_time_str}"
     )
 
-    # Build display service name: "{inbound_remark} _ {client_name}"
-    _det_remark = (cfg.get("inbound_remark") or "").strip()
-    _det_cname  = (cfg.get("client_name") or "").strip()
-    if _det_remark and _det_cname:
-        _det_svc_name = f"{_det_remark} _ {_det_cname}"
-    else:
-        _det_svc_name = _det_cname or "—"
-
     if is_user_view:
         text = (
-            f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(_det_svc_name)}</b>\n"
+            f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(cfg.get('client_name') or '—')}</b>\n"
             f"{ce('🧩', '5463224921935082813')} نوع سرویس: <b>{esc(cfg.get('type_name') or '—')}</b>\n"
             f"{ce('🔋', '5924538142198600679')} حجم: <b>{vol_text}</b>\n"
             f"{ce('⏰', '5343724178547691280')} مدت: <b>{dur_text}</b>\n"
@@ -871,7 +858,7 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
             f"زمان خرید: <code>{purchase_time}</code>"
         )
         text = (
-            f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(_det_svc_name)}</b>\n"
+            f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(cfg.get('client_name') or '—')}</b>\n"
             f"{ce('🧩', '5463224921935082813')} نوع سرویس: <b>{esc(cfg.get('type_name') or '—')}</b>\n"
             f"{ce('🔋', '5924538142198600679')} حجم: <b>{vol_text}</b>\n"
             f"{ce('⏰', '5343724178547691280')} مدت: <b>{dur_text}</b>"

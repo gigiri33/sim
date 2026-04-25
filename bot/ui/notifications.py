@@ -33,6 +33,8 @@ from ..db import (
     set_referral_captcha_verified,
     set_referral_captcha_failed,
 )
+import jdatetime
+from datetime import timedelta
 from ..helpers import esc, fmt_price, now_str, move_leading_emoji
 from ..bot_instance import bot
 from ..group_manager import send_to_topic
@@ -189,7 +191,16 @@ def deliver_purchase_message(chat_id, purchase_id):
     service_name = move_leading_emoji(urllib.parse.unquote(item["service_name"] or ""))
     inquiry_link = item["inquiry_link"] or ""
     show_pkg_name = ("show_name" not in item.keys()) or bool(item["show_name"])
-    package_line = f"{ce('📦', '5258134813302332906')} پکیج: <b>{esc(item['package_name'])}</b>\n" if show_pkg_name and item["package_name"] else ""
+    package_line = f"{ce('�', '5397782960512444700')} پکیج: <b>{esc(item['package_name'])}</b>\n" if show_pkg_name and item["package_name"] else ""
+    # Compute Jalali expiry date
+    _expiry_line = ""
+    try:
+        if item["created_at"] and item["duration_days"]:
+            _created_jdt = jdatetime.datetime.strptime(str(item["created_at"])[:19], "%Y-%m-%d %H:%M:%S")
+            _expiry_jdt  = _created_jdt + timedelta(days=int(item["duration_days"]))
+            _expiry_line = f"{ce('📅', '5373026167086121198')} تاریخ انقضا: <b>{_expiry_jdt.strftime('%Y/%m/%d')}</b>\n"
+    except Exception:
+        pass
     expired_note = ""
     if item["is_expired"]:
         if item["is_test"]:
@@ -230,12 +241,13 @@ def deliver_purchase_message(chat_id, purchase_id):
             username = cfg_data.get("username", "")
             password = cfg_data.get("password", "")
             caption = (
-                f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(service_name)}</b>\n"
-                f"{ce('🧩', '5463224921935082813')} نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
+                f"{ce('✏️', '5395444784611480792')} نام سرویس: <b>{esc(service_name)}</b>\n"
+                f"{ce('💡', '5422439311196834318')} نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
                 f"{package_line}"
-                f"{ce('🔋', '5924538142198600679')} حجم: <b>{esc(vol_text)}</b>\n"
-                f"{ce('⏰', '5343724178547691280')} مدت: <b>{esc(dur_text)}</b>\n"
-                f"👤 کاربر: <b>{esc(users_label)}</b>\n"
+                f"{ce('🕯', '5451882707875276247')} حجم: <b>{esc(vol_text)}</b>\n"
+                f"{ce('⌛', '5386367538735104399')} مدت زمان: <b>{esc(dur_text)}</b>\n"
+                f"{_expiry_line}"
+                f"{ce('📇', '5332724926216428039')} تعداد کاربر: <b>{esc(users_label)}</b>\n"
                 f"┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n"
                 f"{ce('🔐', '5472308992514464048')} اطلاعات اکانت\n"
                 f"username: <code>{esc(username)}</code>\n"
@@ -245,12 +257,13 @@ def deliver_purchase_message(chat_id, purchase_id):
             )
         else:  # wg
             caption = (
-                f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(service_name)}</b>\n"
-                f"{ce('🧩', '5463224921935082813')} نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
+                f"{ce('✏️', '5395444784611480792')} نام سرویس: <b>{esc(service_name)}</b>\n"
+                f"{ce('💡', '5422439311196834318')} نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
                 f"{package_line}"
-                f"{ce('🔋', '5924538142198600679')} حجم: <b>{esc(vol_text)}</b>\n"
-                f"{ce('⏰', '5343724178547691280')} مدت: <b>{esc(dur_text)}</b>\n"
-                f"{ce('👥', '5372926953978341366')} نوع کاربری: <b>{esc(users_label)}</b>"
+                f"{ce('🕯', '5451882707875276247')} حجم: <b>{esc(vol_text)}</b>\n"
+                f"{ce('⌛', '5386367538735104399')} مدت زمان: <b>{esc(dur_text)}</b>\n"
+                f"{_expiry_line}"
+                f"{ce('📇', '5332724926216428039')} نوع کاربری: <b>{esc(users_label)}</b>"
                 f"{inq_line}"
                 f"{expired_note}"
             )
@@ -269,54 +282,58 @@ def deliver_purchase_message(chat_id, purchase_id):
         if has_config and has_sub:
             # Mode: config + sub
             text = (
-                f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(service_name)}</b>\n"
-                f"{ce('🧩', '5463224921935082813')} نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
+                f"{ce('✏️', '5395444784611480792')} نام سرویس: <b>{esc(service_name)}</b>\n"
+                f"{ce('💡', '5422439311196834318')} نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
                 f"{package_line}"
-                f"{ce('🔋', '5924538142198600679')} حجم: <b>{esc(_vol_text_v2)}</b>\n"
-                f"{ce('⏰', '5343724178547691280')} مدت: <b>{esc(_dur_text_v2)}</b>\n"
-                f"{ce('👥', '5372926953978341366')} تعداد کاربر: <b>{esc(_users_v2)}</b>\n\n"
-                f"{ce('💝', '5900197669178970457')} <b>Config:</b>\n<code>{esc(cfg)}</code>\n\n"
-                f"{ce('🔗', '5271604874419647061')} <b>لینک ساب:</b>\n{esc(inquiry_link)}"
+                f"{ce('🕯', '5451882707875276247')} حجم: <b>{esc(_vol_text_v2)}</b>\n"
+                f"{ce('⌛', '5386367538735104399')} مدت زمان: <b>{esc(_dur_text_v2)}</b>\n"
+                f"{_expiry_line}"
+                f"{ce('📇', '5332724926216428039')} تعداد کاربر: <b>{esc(_users_v2)}</b>\n\n"
+                f"{ce('🔗', '5271604874419647061')} <b>کانفیگ اتصال:</b>\n<code>{esc(cfg)}</code>\n\n"
+                f"{ce('📊', '5231200819986047254')} <b>پنل مدیریت مصرف:</b>\n{esc(inquiry_link)}"
                 f"{expired_note}"
             )
             qr_source = cfg
         elif has_config:
             # Mode: config only
             text = (
-                f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(service_name)}</b>\n"
-                f"{ce('🧩', '5463224921935082813')} نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
+                f"{ce('✏️', '5395444784611480792')} نام سرویس: <b>{esc(service_name)}</b>\n"
+                f"{ce('💡', '5422439311196834318')} نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
                 f"{package_line}"
-                f"{ce('🔋', '5924538142198600679')} حجم: <b>{esc(_vol_text_v2)}</b>\n"
-                f"{ce('⏰', '5343724178547691280')} مدت: <b>{esc(_dur_text_v2)}</b>\n"
-                f"{ce('👥', '5372926953978341366')} تعداد کاربر: <b>{esc(_users_v2)}</b>\n\n"
-                f"{ce('💝', '5900197669178970457')} <b>Config:</b>\n<code>{esc(cfg)}</code>"
+                f"{ce('🕯', '5451882707875276247')} حجم: <b>{esc(_vol_text_v2)}</b>\n"
+                f"{ce('⌛', '5386367538735104399')} مدت زمان: <b>{esc(_dur_text_v2)}</b>\n"
+                f"{_expiry_line}"
+                f"{ce('📇', '5332724926216428039')} تعداد کاربر: <b>{esc(_users_v2)}</b>\n\n"
+                f"{ce('🔗', '5271604874419647061')} <b>کانفیگ اتصال:</b>\n<code>{esc(cfg)}</code>"
                 f"{expired_note}"
             )
             qr_source = cfg
         elif has_sub:
             # Mode: sub only
             text = (
-                f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(service_name)}</b>\n"
-                f"{ce('🧩', '5463224921935082813')} نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
+                f"{ce('✏️', '5395444784611480792')} نام سرویس: <b>{esc(service_name)}</b>\n"
+                f"{ce('💡', '5422439311196834318')} نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
                 f"{package_line}"
-                f"{ce('🔋', '5924538142198600679')} حجم: <b>{esc(_vol_text_v2)}</b>\n"
-                f"{ce('⏰', '5343724178547691280')} مدت: <b>{esc(_dur_text_v2)}</b>\n"
-                f"{ce('👥', '5372926953978341366')} تعداد کاربر: <b>{esc(_users_v2)}</b>\n\n"
-                f"{ce('🔗', '5271604874419647061')} <b>لینک ساب:</b>\n{esc(inquiry_link)}"
+                f"{ce('🕯', '5451882707875276247')} حجم: <b>{esc(_vol_text_v2)}</b>\n"
+                f"{ce('⌛', '5386367538735104399')} مدت زمان: <b>{esc(_dur_text_v2)}</b>\n"
+                f"{_expiry_line}"
+                f"{ce('📇', '5332724926216428039')} تعداد کاربر: <b>{esc(_users_v2)}</b>\n\n"
+                f"{ce('📊', '5231200819986047254')} <b>پنل مدیریت مصرف:</b>\n{esc(inquiry_link)}"
                 f"{expired_note}"
             )
             qr_source = inquiry_link
         else:
             # Fallback: legacy display
             text = (
-                f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(service_name)}</b>\n"
-                f"{ce('🧩', '5463224921935082813')} نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
+                f"{ce('✏️', '5395444784611480792')} نام سرویس: <b>{esc(service_name)}</b>\n"
+                f"{ce('💡', '5422439311196834318')} نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
                 f"{package_line}"
-                f"{ce('🔋', '5924538142198600679')} حجم: <b>{esc(_vol_text_v2)}</b>\n"
-                f"{ce('⏰', '5343724178547691280')} مدت: <b>{esc(_dur_text_v2)}</b>\n"
-                f"{ce('👥', '5372926953978341366')} تعداد کاربر: <b>{esc(_users_v2)}</b>\n\n"
-                f"{ce('💝', '5900197669178970457')} <b>Config:</b>\n<code>{esc(cfg or '-')}</code>\n\n"
-                f"{ce('🔗', '5271604874419647061')} <b>لینک ساب:</b>\n{esc(inquiry_link or '-')}"
+                f"{ce('🕯', '5451882707875276247')} حجم: <b>{esc(_vol_text_v2)}</b>\n"
+                f"{ce('⌛', '5386367538735104399')} مدت زمان: <b>{esc(_dur_text_v2)}</b>\n"
+                f"{_expiry_line}"
+                f"{ce('📇', '5332724926216428039')} تعداد کاربر: <b>{esc(_users_v2)}</b>\n\n"
+                f"{ce('🔗', '5271604874419647061')} <b>کانفیگ اتصال:</b>\n<code>{esc(cfg or '-')}</code>\n\n"
+                f"{ce('📊', '5231200819986047254')} <b>پنل مدیریت مصرف:</b>\n{esc(inquiry_link or '-')}"
                 f"{expired_note}"
             )
             qr_source = cfg or inquiry_link or ""
