@@ -120,8 +120,14 @@ clone_or_update_repo() {
   if [[ -d "$DIR/.git" ]]; then
     info "Repository exists. Updating..."
     cd "$DIR"
+    # backup user config files before hard reset
+    [[ -f "$DIR/.env" ]]        && cp -p "$DIR/.env"        "$DIR/.env.bak"
+    [[ -f "$DIR/config.env" ]]  && cp -p "$DIR/config.env"  "$DIR/config.env.bak"
     git fetch --all --prune
     git reset --hard origin/main
+    # restore user config files after reset
+    [[ -f "$DIR/.env.bak" ]]        && mv -f "$DIR/.env.bak"        "$DIR/.env"
+    [[ -f "$DIR/config.env.bak" ]]  && mv -f "$DIR/config.env.bak"  "$DIR/config.env"
   else
     rm -rf "$DIR"
     mkdir -p "$DIR"

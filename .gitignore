@@ -1,0 +1,13 @@
+.env
+.env.bak
+config.env
+config.env.bak
+*.db
+*.db-journal
+__pycache__/
+*.py[cod]
+venv/
+.last_update
+.bot_name
+autoupdate.log
+auto_update.sh
