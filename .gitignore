@@ -1,31 +1,5 @@
-# Environment / secrets
-.env
-.env.bak
-config.env
-config.env.bak
+# Auto detect text files and perform LF normalization
+* text=auto
 
-# Database
-*.db
-*.db-journal
-
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-
-# Virtual env
-venv/
-
-# Bot runtime files
-.last_update
-.bot_name
-autoupdate.log
-auto_update.sh
-
-# Editor
-.vscode/
-.idea/
-
-# Patch / diff files
-_diff_*.patch
-*.patch
+# Shell scripts must always use LF line endings on all platforms
+*.sh text eol=lf
