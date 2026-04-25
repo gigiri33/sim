@@ -210,7 +210,7 @@ def show_my_configs(target, user_id, page=0, search=None):
             else:
                 test_label = " 🎁"
         title = f"{svc_name}{test_label}{expired_mark}"
-        kb.add(types.InlineKeyboardButton(title, callback_data=f"mycfg:{item['id']}"))
+        kb.add(types.InlineKeyboardButton(title, callback_data=f"service:{item['id']}"))
 
     # ── Panel configs ─────────────────────────────────────────────────────────
     for pc in panel_items:

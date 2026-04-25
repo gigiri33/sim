@@ -876,12 +876,15 @@ def universal_handler(message):
                 "discount_code_id": row["id"],
                 "discount_code": row["code"],
             })
+            print("Coupon applied:", disc_amount)
             state_set(uid, prev_state, **new_data)
             if prev_state == "buy_select_method":
                 package_id = new_data.get("package_id")
                 package_row = get_package(package_id) if package_id else None
                 if package_row:
                     _show_purchase_gateways(message, uid, package_id, final_amount, package_row)
+                else:
+                    bot.send_message(uid, "⚠️ اطلاعات خرید یافت نشد. لطفاً دوباره از منو اقدام کنید.")
                 return
             if prev_state == "renew_select_method":
                 purchase_id = new_data.get("purchase_id")
@@ -890,8 +893,17 @@ def universal_handler(message):
                 package_row = get_package(package_id) if package_id else None
                 if item and package_row:
                     _show_renewal_gateways(message, uid, purchase_id, package_id, final_amount, package_row, item)
+                else:
+                    bot.send_message(uid, "⚠️ اطلاعات تمدید یافت نشد. لطفاً دوباره از منو اقدام کنید.")
                 return
-            bot.send_message(uid, "✅ تخفیف ثبت شد.", reply_markup=kb_main(uid))
+            # prev_state is unexpected — try to recover by showing gateway based on stored data
+            package_id = new_data.get("package_id")
+            package_row = get_package(package_id) if package_id else None
+            if package_row:
+                state_set(uid, "buy_select_method", **new_data)
+                _show_purchase_gateways(message, uid, package_id, final_amount, package_row)
+            else:
+                bot.send_message(uid, "✅ تخفیف ثبت شد. لطفاً از منو اقدام به پرداخت کنید.", reply_markup=kb_main(uid))
             return
 
         # ── Wallet receipt ─────────────────────────────────────────────────────

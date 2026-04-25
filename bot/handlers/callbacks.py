@@ -4044,13 +4044,43 @@ def _dispatch_callback(call, uid, data):
         show_my_configs(call, uid, page=0, search="")
         return
 
-    if data.startswith("mycfg:"):
-        purchase_id = int(data.split(":")[1])
-        item = get_purchase(purchase_id)
-        if not item or item["user_id"] != uid:
-            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
-            return
+    if data.startswith("service:"):
+        # Unified service detail handler (new format)
         bot.answer_callback_query(call.id)
+        try:
+            service_id = int(data.split(":")[1])
+        except (ValueError, IndexError):
+            log.warning("service: bad callback data from uid=%s: %s", uid, data)
+            bot.send_message(call.message.chat.id, "این سرویس یافت نشد", parse_mode="HTML")
+            return
+        item = get_purchase(service_id)
+        if not item:
+            log.warning("service: purchase %s not found (uid=%s)", service_id, uid)
+            bot.send_message(call.message.chat.id, "این سرویس یافت نشد", parse_mode="HTML")
+            return
+        if item["user_id"] != uid:
+            bot.send_message(call.message.chat.id, "دسترسی مجاز نیست.", parse_mode="HTML")
+            return
+        log.debug("service: delivering purchase %s to uid=%s", service_id, uid)
+        deliver_purchase_message(call.message.chat.id, service_id)
+        return
+
+    if data.startswith("mycfg:"):
+        # Legacy service detail handler — kept for backward compat with old inline buttons
+        bot.answer_callback_query(call.id)
+        try:
+            purchase_id = int(data.split(":")[1])
+        except (ValueError, IndexError):
+            log.warning("mycfg: bad callback data from uid=%s: %s", uid, data)
+            bot.send_message(call.message.chat.id, "این سرویس یافت نشد", parse_mode="HTML")
+            return
+        item = get_purchase(purchase_id)
+        if not item:
+            bot.send_message(call.message.chat.id, "این سرویس یافت نشد", parse_mode="HTML")
+            return
+        if item["user_id"] != uid:
+            bot.send_message(call.message.chat.id, "دسترسی مجاز نیست.", parse_mode="HTML")
+            return
         deliver_purchase_message(call.message.chat.id, purchase_id)
         return
 
