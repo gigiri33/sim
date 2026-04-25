@@ -4720,7 +4720,8 @@ def _dispatch_callback(call, uid, data):
         purchase_ids, pending_ids = _deliver_bulk_configs(
             call.message.chat.id, uid, package_id, price, "wallet", quantity, payment_id,
             service_names=_names_wallet if _names_wallet else None
-        )        if not purchase_ids and not pending_ids:
+        )
+        if not purchase_ids and not pending_ids:
             # Exceptional: refund and abort
             update_balance(uid, price)
             bot.send_message(uid,
