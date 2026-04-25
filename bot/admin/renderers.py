@@ -401,8 +401,8 @@ def _show_panel_detail(call, panel_id):
     checked   = p["last_checked_at"] or "—"
     err_line  = f"\n⚠️ خطا: <code>{esc(p['last_error'])}</code>" if p["last_error"] else ""
 
-    uname_disp  = p['username'] if p['username'] else '—'
-    passwd_disp = p['password'] if p['password'] else '—'
+    uname_censored = p['username'][:2] + '***' if p['username'] else '—'
+    passwd_censored = '••••••••'
     try:
         sub_url_base_disp = p['sub_url_base'] or "<i>(ندارد — از آدرس پنل استفاده می‌شود)</i>"
     except (IndexError, KeyError):
@@ -416,8 +416,8 @@ def _show_panel_detail(call, panel_id):
         f"{icon} <b>{esc(p['name'])}</b>\n\n"
         f"🔗 آدرس:  <code>{p['protocol']}://{esc(p['host'])}:{p['port']}{esc(p['path'] or '')}</code>\n"
         f"📡 ساب:   {sub_url_base_disp}\n"
-        f"👤 نام کاربری: <code>{uname_disp}</code>\n"
-        f"🔑 رمز عبور:   <code>{passwd_disp}</code>\n"
+        f"👤 نام کاربری: <code>{uname_censored}</code>\n"
+        f"🔑 رمز عبور:   <code>{passwd_censored}</code>\n"
         f"📡 وضعیت: {status_label}\n"
         f"🕐 آخرین بررسی: {checked}"
         f"{err_line}\n\n"
