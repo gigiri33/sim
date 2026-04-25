@@ -65,6 +65,7 @@ from ..db import (
     toggle_payment_card_active, delete_payment_card, pick_card_for_payment,
     # Fee / Bonus
     get_gateway_fee_amount, get_gateway_bonus_amount, apply_gateway_fee,
+    set_payment_custom_names, get_payment_custom_names,
 )
 from ..gateways.base import is_gateway_available, is_card_info_complete, get_gateway_range_text, is_gateway_in_range, build_gateway_range_guide
 from ..gateways.crypto import fetch_crypto_prices
@@ -80,6 +81,11 @@ from ..ui.helpers import send_or_edit, check_channel_membership, channel_lock_me
 from ..ui.helpers import _invalidate_channel_cache
 from ..ui.keyboards import kb_main, kb_admin_panel
 from ..ui.menus import show_main_menu, show_profile, show_support, show_my_configs, show_referral_menu
+from ..service_naming import (
+    validate_service_name, normalize_service_name,
+    generate_random_name, parse_bulk_names,
+    build_final_name, ensure_unique_name,
+)
 from ..ui.notifications import (
     deliver_purchase_message, admin_purchase_notify, admin_renewal_notify,
     notify_pending_order_to_admins, _complete_pending_order, auto_fulfill_pending_orders,
@@ -1190,6 +1196,38 @@ def _show_wallet_gateways(target, uid, amount):
 
 # ── Bulk/Quantity Purchase Helpers ─────────────────────────────────────────────
 
+def _show_naming_choice(call_or_msg, uid: int, package_row, unit_price, quantity: int, total: int):
+    """
+    Show the naming type selection step (before payment).
+    Saves current purchase state and sets state to 'await_naming_choice'.
+    """
+    state_set(uid, "await_naming_choice",
+              package_id=package_row["id"],
+              unit_price=unit_price,
+              quantity=quantity,
+              amount=total,
+              original_amount=total,
+              kind="config_purchase")
+    _pkg_sn = package_row["show_name"] if "show_name" in package_row.keys() else 1
+    _name_line = f"📦 پکیج: <b>{esc(package_row['name'])}</b>\n" if _pkg_sn else ""
+    _qty_line  = f"🔢 تعداد: <b>{quantity}</b> عدد\n" if quantity > 1 else ""
+    kb = types.InlineKeyboardMarkup()
+    kb.row(
+        types.InlineKeyboardButton("✏️ نام دلخواه", callback_data="svc_naming:custom"),
+        types.InlineKeyboardButton("🎲 نام رندوم",  callback_data="svc_naming:random"),
+    )
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"buy:t:{package_row['type_id']}",
+                                      icon_custom_emoji_id="5253997076169115797"))
+    text = (
+        "✍️ <b>نام‌گذاری سرویس</b>\n\n"
+        f"🧩 نوع سرویس: <b>{esc(package_row['type_name'])}</b>\n"
+        f"{_name_line}"
+        f"{_qty_line}\n"
+        "لطفاً مشخص کنید نام سرویس شما به چه صورت ثبت شود."
+    )
+    send_or_edit(call_or_msg, text, kb)
+
+
 def _show_qty_prompt(call, package_row, unit_price):
     """Show the quantity-selection prompt to the user."""
     from ..db import should_show_bulk_qty, get_bulk_qty_limits
@@ -1381,8 +1419,19 @@ def _panel_connect_with_retry(uid, protocol, host, port, path, username, passwor
             _t.sleep(FUNC_RETRY_DELAY)
 
 
+def _save_custom_names_to_payment(uid, payment_id):
+    """Extract custom_names from current user state and store in payment DB.
+    Returns the list of names (empty list if none)."""
+    _sd = state_data(uid)
+    _raw = _sd.get("custom_names", "") or ""
+    _names = [n for n in _raw.split(",") if n] if _raw else []
+    if _names:
+        set_payment_custom_names(payment_id, _names)
+    return _names
+
+
 def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method,
-                          quantity, payment_id):
+                          quantity, payment_id, service_names=None):
     """
     Deliver `quantity` configs to user after successful payment.
     Returns (delivered_purchase_ids, pending_ids).
@@ -1402,8 +1451,9 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
     if config_source == "panel":
         panel_config_ids = []
         failed_count = 0
-        for _ in range(quantity):
-            ok, result, pc_id = _create_panel_config(uid, package_id, payment_id, chat_id=chat_id)
+        for _i in range(quantity):
+            _desired = service_names[_i] if service_names and _i < len(service_names) else None
+            ok, result, pc_id = _create_panel_config(uid, package_id, payment_id, chat_id=chat_id, desired_name=_desired)
             if ok:
                 panel_config_ids.append(pc_id)
             else:
@@ -1763,7 +1813,7 @@ def _build_config_from_inbound(inbound, client_uuid, client_name, panel, real_po
     return None
 
 
-def _create_panel_config(uid, package_id, payment_id, chat_id=None):
+def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name=None):
     """
     Create a config in the panel for uid/package_id.
     If the package has a client_package_id, the sample config/sub URL from that
@@ -1927,9 +1977,14 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None):
     real_port      = int(inbound.get("port") or 0)
     inbound_remark = (inbound.get("remark") or inbound.get("tag") or "").strip()
 
-    # Generate config name: {user_id}_{random6}
-    rand_str    = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
-    client_name = f"{uid}_{rand_str}"
+    # Generate config name (use desired_name if provided and valid)
+    from ..service_naming import validate_service_name, normalize_service_name, build_final_name
+    _desired = normalize_service_name(desired_name) if desired_name else None
+    if _desired and validate_service_name(_desired):
+        client_name = build_final_name(inbound_remark, _desired)
+    else:
+        rand_str    = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        client_name = f"{uid}_{rand_str}"
 
     # Calculate traffic & expiry
     volume_gb     = float(package_row["volume_gb"] or 0)
@@ -1969,7 +2024,10 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None):
                 break
             # rotate client name to avoid duplicate key conflicts on retry
             rand_str    = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
-            client_name = f"{uid}_{rand_str}"
+            if _desired and validate_service_name(_desired):
+                client_name = build_final_name(inbound_remark, f"{_desired}{rand_str[:3]}")
+            else:
+                client_name = f"{uid}_{rand_str}"
             time.sleep(FUNC_RETRY_DELAY)
     if create_err is not None:
         return False, f"خطا در ساخت کلاینت: {create_err}", None
@@ -3160,7 +3218,8 @@ def _tetrapay_auto_verify(payment_id, authority, uid, chat_id, message_id, kind,
                         parse_mode="HTML", reply_markup=back_button("main"))
                 purchase_ids, pending_ids = _deliver_bulk_configs(
                     chat_id, uid, package_id,
-                    payment["amount"], "tetrapay", _qty_tp_auto, payment_id
+                    payment["amount"], "tetrapay", _qty_tp_auto, payment_id,
+                    service_names=get_payment_custom_names(payment_id) or None
                 )
                 try:
                     apply_gateway_bonus_if_needed(uid, "tetrapay", payment["amount"])
@@ -3324,7 +3383,8 @@ def _tronpays_rial_auto_verify(payment_id, invoice_id, uid, chat_id, message_id,
                         parse_mode="HTML", reply_markup=back_button("main"))
                 purchase_ids, pending_ids = _deliver_bulk_configs(
                     chat_id, uid, package_id,
-                    payment["amount"], "tronpays_rial", _qty_trp_auto, payment_id
+                    payment["amount"], "tronpays_rial", _qty_trp_auto, payment_id,
+                    service_names=get_payment_custom_names(payment_id) or None
                 )
                 try:
                     apply_gateway_bonus_if_needed(uid, "tronpays_rial", payment["amount"])
@@ -3636,6 +3696,83 @@ def _dispatch_callback(call, uid, data):
             )
         bot.answer_callback_query(call.id)
         bot.send_photo(call.message.chat.id, banner_photo, caption=caption, parse_mode="HTML")
+        return
+
+    # ── Service naming step ──────────────────────────────────────────────────
+
+    if data == "svc_naming:random":
+        sn = state_name(uid)
+        sd = state_data(uid)
+        if sn not in {"await_naming_choice", "buy_select_method"}:
+            bot.answer_callback_query(call.id)
+            return
+        # User chose random names — store empty custom_names list (will be generated at delivery)
+        package_id  = int(sd.get("package_id", 0))
+        package_row = get_package(package_id)
+        quantity    = int(sd.get("quantity", 1) or 1)
+        unit_price  = int(sd.get("unit_price", 0) or 0)
+        total       = int(sd.get("amount", 0) or 0)
+        if not package_row:
+            bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
+            return
+        # Persist naming_type in state, advance to buy_select_method
+        state_set(uid, "buy_select_method",
+                  package_id=package_id, amount=total, original_amount=total,
+                  unit_price=unit_price, quantity=quantity,
+                  kind="config_purchase", naming_type="random")
+        bot.answer_callback_query(call.id)
+        if setting_get("discount_codes_enabled", "0") == "1":
+            if _show_discount_prompt(call, total):
+                return
+        _show_purchase_gateways(call, uid, package_id, total, package_row)
+        return
+
+    if data == "svc_naming:custom":
+        sn = state_name(uid)
+        sd = state_data(uid)
+        if sn not in {"await_naming_choice", "buy_select_method"}:
+            bot.answer_callback_query(call.id)
+            return
+        package_id = int(sd.get("package_id", 0))
+        package_row = get_package(package_id)
+        quantity   = int(sd.get("quantity", 1) or 1)
+        if not package_row:
+            bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
+            return
+        # Store naming_type + transition to await_custom_names
+        state_set(uid, "await_custom_names",
+                  package_id=sd.get("package_id"),
+                  unit_price=sd.get("unit_price"),
+                  quantity=quantity,
+                  amount=sd.get("amount"),
+                  original_amount=sd.get("original_amount"),
+                  kind="config_purchase",
+                  naming_type="custom")
+        bot.answer_callback_query(call.id)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("🎲 استفاده از نام رندوم", callback_data="svc_naming:random"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"buy:t:{package_row['type_id']}",
+                                          icon_custom_emoji_id="5253997076169115797"))
+        if quantity == 1:
+            text = (
+                "✍️ <b>نام دلخواه سرویس</b>\n\n"
+                "لطفاً نام دلخواه سرویس خود را وارد کنید.\n\n"
+                "📌 <b>قوانین:</b>\n"
+                "• فقط حروف انگلیسی کوچک (<code>a-z</code>) و اعداد (<code>0-9</code>)\n"
+                "• بدون فاصله، کاراکتر خاص یا حرف فارسی\n\n"
+                "✏️ مثال: <code>ali</code>، <code>user123</code>، <code>myserver</code>"
+            )
+        else:
+            text = (
+                f"✍️ <b>نام دلخواه سرویس‌ها ({quantity} عدد)</b>\n\n"
+                f"لطفاً <b>{quantity}</b> نام سرویس را در <b>یک پیام</b> و هرکدام در یک خط ارسال کنید.\n\n"
+                "📌 <b>قوانین:</b>\n"
+                "• فقط حروف انگلیسی کوچک (<code>a-z</code>) و اعداد (<code>0-9</code>)\n"
+                "• هر نام در یک خط جداگانه\n"
+                "• نام‌های نامعتبر به‌طور خودکار با نام رندوم جایگزین می‌شوند\n\n"
+                f"✏️ مثال:\n<code>ali\nuser123\nmyserver</code>"
+            )
+        send_or_edit(call, text, kb)
         return
 
     # ── Discount code flow ───────────────────────────────────────────────────
@@ -4545,10 +4682,8 @@ def _dispatch_callback(call, uid, data):
         if should_show_bulk_qty(uid):
             _show_qty_prompt(call, package_row, price)
             return
-        if setting_get("discount_codes_enabled", "0") == "1":
-            if _show_discount_prompt(call, price):
-                return
-        _show_purchase_gateways(call, uid, package_id, price, package_row)
+        # ── Naming step (always shown for all users) ──────────────────────────
+        _show_naming_choice(call, uid, package_row, price, 1, price)
         return
 
     if data.startswith("pay:wallet:"):
@@ -4574,14 +4709,16 @@ def _dispatch_callback(call, uid, data):
         update_balance(uid, -price)
         payment_id = create_payment("config_purchase", uid, package_id, price, "wallet",
                                     status="completed", quantity=quantity)
+        _save_custom_names_to_payment(uid, payment_id)
         complete_payment(payment_id)
         bot.answer_callback_query(call.id, "خرید با موفقیت انجام شد.")
         send_or_edit(call, "✅ پرداخت از کیف پول انجام شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
                      back_button("main"))
+        _names_wallet = get_payment_custom_names(payment_id)
         purchase_ids, pending_ids = _deliver_bulk_configs(
-            call.message.chat.id, uid, package_id, price, "wallet", quantity, payment_id
-        )
-        if not purchase_ids and not pending_ids:
+            call.message.chat.id, uid, package_id, price, "wallet", quantity, payment_id,
+            service_names=_names_wallet if _names_wallet else None
+        )        if not purchase_ids and not pending_ids:
             # Exceptional: refund and abort
             update_balance(uid, price)
             bot.send_message(uid,
@@ -4636,6 +4773,7 @@ def _dispatch_callback(call, uid, data):
         _qty_card = int(state_data(uid).get("quantity", 1) or 1)
         payment_id = create_payment("config_purchase", uid, package_id, price, "card",
                                     status="pending", quantity=_qty_card)
+        _save_custom_names_to_payment(uid, payment_id)
         # Generate random amount if enabled
         final_amount = None
         if setting_get("gw_card_random_amount", "0") == "1":
@@ -4687,6 +4825,7 @@ def _dispatch_callback(call, uid, data):
                     return
                 payment_id = create_payment("config_purchase", uid, package_id, amount, "crypto",
                                             status="pending", crypto_coin=coin_key, quantity=_qty_coin)
+                _save_custom_names_to_payment(uid, payment_id)
                 bot.answer_callback_query(call.id)
                 if show_crypto_payment_info(call, uid, coin_key, amount, payment_id=payment_id):
                     state_set(uid, "await_purchase_receipt", payment_id=payment_id)
@@ -4791,7 +4930,8 @@ def _dispatch_callback(call, uid, data):
                              back_button("main"))
                 purchase_ids, pending_ids = _deliver_bulk_configs(
                     call.message.chat.id, uid, package_id,
-                    payment["amount"], "tetrapay", _qty_tp, payment_id
+                    payment["amount"], "tetrapay", _qty_tp, payment_id,
+                    service_names=get_payment_custom_names(payment_id) or None
                 )
                 try:
                     apply_gateway_bonus_if_needed(uid, "tetrapay", payment["amount"])
@@ -4841,6 +4981,7 @@ def _dispatch_callback(call, uid, data):
         pay_url_web = result.get("payment_url_web", "")
         payment_id = create_payment("config_purchase", uid, package_id, price, "tetrapay",
                                     status="pending", quantity=_qty_tetra)
+        _save_custom_names_to_payment(uid, payment_id)
         with get_conn() as conn:
             conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (authority, payment_id))
         state_set(uid, "await_tetrapay_verify", payment_id=payment_id, authority=authority)
@@ -4907,7 +5048,8 @@ def _dispatch_callback(call, uid, data):
                              back_button("main"))
                 purchase_ids, pending_ids = _deliver_bulk_configs(
                     call.message.chat.id, uid, package_id,
-                    payment["amount"], "tronpays_rial", _qty_tron, payment_id
+                    payment["amount"], "tronpays_rial", _qty_tron, payment_id,
+                    service_names=get_payment_custom_names(payment_id) or None
                 )
                 try:
                     apply_gateway_bonus_if_needed(uid, "tronpays_rial", payment["amount"])
@@ -4966,6 +5108,7 @@ def _dispatch_callback(call, uid, data):
             return
         payment_id = create_payment("config_purchase", uid, package_id, price, "tronpays_rial",
                                     status="pending", quantity=_qty_tp_rial)
+        _save_custom_names_to_payment(uid, payment_id)
         with get_conn() as conn:
             conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id, payment_id))
         state_set(uid, "await_tronpays_rial_verify", payment_id=payment_id, invoice_id=invoice_id)
@@ -5364,7 +5507,8 @@ def _dispatch_callback(call, uid, data):
                              back_button("main"))
                 purchase_ids, pending_ids = _deliver_bulk_configs(
                     call.message.chat.id, uid, package_id,
-                    payment["amount"], "swapwallet_crypto", _qty_sw, payment_id
+                    payment["amount"], "swapwallet_crypto", _qty_sw, payment_id,
+                    service_names=get_payment_custom_names(payment_id) or None
                 )
                 try:
                     apply_gateway_bonus_if_needed(uid, "swapwallet_crypto", payment["amount"])
@@ -5416,6 +5560,7 @@ def _dispatch_callback(call, uid, data):
             invoice_id = result.get("id", "")
             payment_id = create_payment("config_purchase", uid, package_id, price, "swapwallet_crypto",
                                         status="pending", quantity=_qty_sw_init)
+            _save_custom_names_to_payment(uid, payment_id)
             with get_conn() as conn:
                 conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id, payment_id))
             state_set(uid, "await_swapwallet_crypto_verify", payment_id=payment_id, invoice_id=invoice_id)
@@ -5558,6 +5703,7 @@ def _dispatch_callback(call, uid, data):
             _qty_swc   = int(sd.get("quantity", 1) or 1)
             payment_id = create_payment("config_purchase", uid, package_id, amount, "swapwallet_crypto",
                                         status="pending", quantity=_qty_swc)
+            _save_custom_names_to_payment(uid, payment_id)
             verify_cb  = f"pay:swapwallet_crypto:verify:{payment_id}"
         elif kind == "renewal":
             package_id  = sd.get("package_id")

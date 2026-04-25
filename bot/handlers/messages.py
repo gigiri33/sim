@@ -51,6 +51,10 @@ from ..gateways.tetrapay import create_tetrapay_order, verify_tetrapay_order
 from ..ui.helpers import send_or_edit, check_channel_membership, channel_lock_message
 from ..ui.keyboards import kb_main, kb_admin_panel
 from ..ui.menus import show_main_menu, show_profile, show_support, show_my_configs
+from ..service_naming import (
+    validate_service_name, normalize_service_name,
+    generate_random_name, parse_bulk_names,
+)
 from ..ui.notifications import (
     deliver_purchase_message, admin_purchase_notify, admin_renewal_notify,
     notify_pending_order_to_admins, _complete_pending_order, auto_fulfill_pending_orders,
@@ -773,6 +777,55 @@ def universal_handler(message):
                       unit_price=unit_price, quantity=qty, kind="config_purchase")
             summary = _qty_order_summary_text(package_row, unit_price, qty)
             bot.send_message(uid, summary, parse_mode="HTML")
+            from .callbacks import _show_naming_choice
+            _show_naming_choice(message, uid, package_row, unit_price, qty, total)
+            return
+
+        # ── Custom service name entry ─────────────────────────────────────────
+        if sn == "await_custom_names":
+            raw_text    = (message.text or "").strip()
+            package_id  = sd.get("package_id")
+            unit_price  = int(sd.get("unit_price", 0) or 0)
+            quantity    = int(sd.get("quantity", 1) or 1)
+            total       = int(sd.get("amount", 0) or 0)
+            package_row = get_package(package_id)
+            if not package_row or not unit_price:
+                state_clear(uid)
+                bot.send_message(uid, "⚠️ خطا در اطلاعات سفارش. لطفاً دوباره شروع کنید.",
+                                 reply_markup=kb_main(uid))
+                return
+
+            if quantity == 1:
+                # Single name input
+                normalised = normalize_service_name(raw_text)
+                if validate_service_name(normalised):
+                    custom_names = [normalised]
+                else:
+                    # Invalid → fallback to random silently
+                    custom_names = [generate_random_name(uid)]
+            else:
+                # Bulk name input
+                custom_names = parse_bulk_names(raw_text, quantity, uid)
+
+            # Save names in state, advance to buy_select_method
+            state_set(uid, "buy_select_method",
+                      package_id=package_id, amount=total, original_amount=total,
+                      unit_price=unit_price, quantity=quantity,
+                      kind="config_purchase", naming_type="custom",
+                      custom_names=",".join(custom_names))
+
+            # Show summary
+            if quantity == 1:
+                names_preview = f"<code>{esc(custom_names[0])}</code>"
+            else:
+                names_preview = "\n".join(
+                    f"{i}. <code>{esc(n)}</code>" for i, n in enumerate(custom_names, 1)
+                )
+            bot.send_message(uid,
+                f"✅ <b>نام‌های سرویس ثبت شد:</b>\n\n{names_preview}",
+                parse_mode="HTML")
+
+            from .callbacks import _show_purchase_gateways, _show_discount_prompt
             if setting_get("discount_codes_enabled", "0") == "1":
                 if _show_discount_prompt(message, total):
                     return
