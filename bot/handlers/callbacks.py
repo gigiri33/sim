@@ -35,6 +35,8 @@ from ..db import (
     get_agency_price_config, set_agency_price_config,
     get_agency_type_discount, set_agency_type_discount,
     get_agencies,
+    get_agency_gb_price, set_agency_gb_price, delete_agency_gb_price,
+    get_all_agency_gb_prices, get_reseller_gb_price,
     get_all_admin_users, get_admin_user, add_admin_user, update_admin_permissions, remove_admin_user,
     get_conn, create_pending_order, get_pending_order, add_config, search_users,
     should_show_bulk_qty, get_bulk_qty_limits,
@@ -9657,6 +9659,7 @@ def _dispatch_callback(call, uid, data):
             f"{req_icon} درخواست نمایندگی — {req_label}",
             callback_data="adm:agt:toggle"))
         kb.add(types.InlineKeyboardButton("➕ اضافه کردن نماینده", callback_data="adm:agt:add"))
+        kb.add(types.InlineKeyboardButton("💎 قیمت بر اساس هر گیگ", callback_data="adm:gbp:list"))
         # Inline list: each agent on one row with remove button
         for ag in agents:
             name = esc(ag["full_name"]) if ag["full_name"] else str(ag["user_id"])
@@ -9919,6 +9922,176 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:agcfg:{target_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "📦 <b>قیمت هر پکیج</b>\n\nبرای ویرایش روی پکیج بزنید:", kb)
+        return
+
+    # ── Per-GB pricing for resellers ──────────────────────────────────────────
+
+    def _gbp_duration_label(days: int) -> str:
+        if days == 0:
+            return "نامحدود"
+        return f"{days} روز"
+
+    if data == "adm:gbp:list":
+        if not admin_has_perm(uid, "agency"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        rules = get_all_agency_gb_prices()
+        bot.answer_callback_query(call.id)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("➕ افزودن قانون جدید", callback_data="adm:gbp:add"))
+        for r in rules:
+            cat_name = r.get("category_name") or f"دسته #{r['category_id']}"
+            dur_lbl  = _gbp_duration_label(r["duration_days"])
+            ppg_lbl  = fmt_price(r["price_per_gb"])
+            kb.row(
+                types.InlineKeyboardButton(
+                    f"📂 {cat_name} | ⏱ {dur_lbl} | 💰 {ppg_lbl}ت/گیگ",
+                    callback_data=f"adm:gbp:view:{r['category_id']}:{r['duration_days']}"),
+                types.InlineKeyboardButton(
+                    "🗑",
+                    callback_data=f"adm:gbp:del:{r['category_id']}:{r['duration_days']}")
+            )
+        if not rules:
+            body = "هیچ قانون قیمت‌گذاری بر اساس هر گیگ تنظیم نشده است."
+        else:
+            body = f"تعداد قوانین فعال: <b>{len(rules)}</b>"
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:agents", icon_custom_emoji_id="5253997076169115797"))
+        send_or_edit(call,
+            f"💎 <b>قیمت‌گذاری بر اساس هر گیگ (نمایندگان)</b>\n\n{body}\n\n"
+            "این قیمت‌ها برای همه نمایندگان اعمال می‌شود و نسبت به تنظیمات قیمت فردی اولویت دارد.",
+            kb)
+        return
+
+    if data == "adm:gbp:add":
+        if not admin_has_perm(uid, "agency"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        types_list = get_all_types()
+        if not types_list:
+            bot.answer_callback_query(call.id, "هیچ دسته‌ای تعریف نشده است.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        kb = types.InlineKeyboardMarkup()
+        for t in types_list:
+            kb.add(types.InlineKeyboardButton(
+                f"📂 {t['name']}",
+                callback_data=f"adm:gbp:cat:{t['id']}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:gbp:list", icon_custom_emoji_id="5253997076169115797"))
+        send_or_edit(call,
+            "💎 <b>افزودن قانون هر گیگ</b>\n\n"
+            "مرحله ۱ از ۳: دسته‌بندی (نوع سرویس) را انتخاب کنید:",
+            kb)
+        return
+
+    if data.startswith("adm:gbp:cat:"):
+        if not admin_has_perm(uid, "agency"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        category_id = int(data.split(":")[3])
+        bot.answer_callback_query(call.id)
+        # Show common durations derived from existing packages + 0
+        with get_conn() as _c:
+            _dur_rows = _c.execute(
+                "SELECT DISTINCT duration_days FROM packages ORDER BY duration_days"
+            ).fetchall()
+        durations = sorted({0} | {int(r["duration_days"]) for r in _dur_rows if r["duration_days"] is not None})
+        kb = types.InlineKeyboardMarkup()
+        for d in durations:
+            kb.add(types.InlineKeyboardButton(
+                f"⏱ {_gbp_duration_label(d)}",
+                callback_data=f"adm:gbp:dur:{category_id}:{d}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:gbp:add", icon_custom_emoji_id="5253997076169115797"))
+        cat_row = get_type(category_id)
+        cat_name = cat_row["name"] if cat_row else f"#{category_id}"
+        send_or_edit(call,
+            f"💎 <b>افزودن قانون هر گیگ</b>\n\n"
+            f"دسته: <b>{esc(cat_name)}</b>\n\n"
+            "مرحله ۲ از ۳: مدت زمان (duration) پکیج را انتخاب کنید:",
+            kb)
+        return
+
+    if data.startswith("adm:gbp:dur:"):
+        if not admin_has_perm(uid, "agency"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        parts       = data.split(":")
+        category_id = int(parts[3])
+        duration    = int(parts[4])
+        existing    = get_agency_gb_price(category_id, duration)
+        cat_row     = get_type(category_id)
+        cat_name    = cat_row["name"] if cat_row else f"#{category_id}"
+        dur_lbl     = _gbp_duration_label(duration)
+        state_set(uid, "admin_gbp_enter_price",
+                  category_id=category_id, duration_days=duration)
+        bot.answer_callback_query(call.id)
+        existing_note = f"\n\n⚠️ مقدار فعلی: <b>{fmt_price(existing)} تومان/گیگ</b>" if existing else ""
+        send_or_edit(call,
+            f"💎 <b>افزودن قانون هر گیگ</b>\n\n"
+            f"دسته: <b>{esc(cat_name)}</b>\n"
+            f"مدت: <b>{dur_lbl}</b>{existing_note}\n\n"
+            "مرحله ۳ از ۳: قیمت هر گیگ (به تومان) را وارد کنید:\n\n"
+            "مثال: <code>300000</code>",
+            back_button(f"adm:gbp:cat:{category_id}"))
+        return
+
+    if data.startswith("adm:gbp:view:"):
+        if not admin_has_perm(uid, "agency"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        parts       = data.split(":")
+        category_id = int(parts[3])
+        duration    = int(parts[4])
+        ppg         = get_agency_gb_price(category_id, duration)
+        cat_row     = get_type(category_id)
+        cat_name    = cat_row["name"] if cat_row else f"#{category_id}"
+        dur_lbl     = _gbp_duration_label(duration)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("✏️ ویرایش قیمت",
+            callback_data=f"adm:gbp:dur:{category_id}:{duration}"))
+        kb.add(types.InlineKeyboardButton("🗑 حذف این قانون",
+            callback_data=f"adm:gbp:del:{category_id}:{duration}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:gbp:list", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"💎 <b>جزئیات قانون هر گیگ</b>\n\n"
+            f"📂 دسته: <b>{esc(cat_name)}</b>\n"
+            f"⏱ مدت: <b>{dur_lbl}</b>\n"
+            f"💰 قیمت هر گیگ: <b>{fmt_price(ppg) if ppg is not None else '—'} تومان</b>",
+            kb)
+        return
+
+    if data.startswith("adm:gbp:del:"):
+        if not admin_has_perm(uid, "agency"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        parts       = data.split(":")
+        category_id = int(parts[3])
+        duration    = int(parts[4])
+        delete_agency_gb_price(category_id, duration)
+        cat_row  = get_type(category_id)
+        cat_name = cat_row["name"] if cat_row else f"#{category_id}"
+        log_admin_action(uid, f"حذف قیمت هر گیگ — دسته: {cat_name}, مدت: {_gbp_duration_label(duration)}")
+        bot.answer_callback_query(call.id, "✅ قانون حذف شد.", show_alert=True)
+        # Re-show list
+        data = "adm:gbp:list"
+        rules = get_all_agency_gb_prices()
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("➕ افزودن قانون جدید", callback_data="adm:gbp:add"))
+        for r in rules:
+            _cn   = r.get("category_name") or f"دسته #{r['category_id']}"
+            _dl   = _gbp_duration_label(r["duration_days"])
+            _ppg  = fmt_price(r["price_per_gb"])
+            kb.row(
+                types.InlineKeyboardButton(
+                    f"📂 {_cn} | ⏱ {_dl} | 💰 {_ppg}ت/گیگ",
+                    callback_data=f"adm:gbp:view:{r['category_id']}:{r['duration_days']}"),
+                types.InlineKeyboardButton("🗑", callback_data=f"adm:gbp:del:{r['category_id']}:{r['duration_days']}")
+            )
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:agents", icon_custom_emoji_id="5253997076169115797"))
+        _body = f"تعداد قوانین فعال: <b>{len(rules)}</b>" if rules else "هیچ قانونی وجود ندارد."
+        send_or_edit(call,
+            f"💎 <b>قیمت‌گذاری بر اساس هر گیگ (نمایندگان)</b>\n\n{_body}",
+            kb)
         return
 
     # ── Admin: Broadcast ──────────────────────────────────────────────────────

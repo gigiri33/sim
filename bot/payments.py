@@ -18,6 +18,7 @@ from .db import (
     get_all_admin_users,
     save_payment_admin_message, get_payment_admin_messages, delete_payment_admin_messages,
     get_payment_custom_names,
+    get_reseller_gb_price,
 )
 from .helpers import esc, fmt_price, display_username, back_button, now_str
 import time
@@ -95,7 +96,20 @@ def get_effective_price(user_id, package_row):
     user = get_user(user_id)
     if not user or not user["is_agent"]:
         return package_row["price"]
-    base  = package_row["price"]
+    base = package_row["price"]
+
+    # ── Per-GB pricing (highest priority for resellers) ────────────────────────
+    try:
+        _type_id  = package_row["type_id"]
+        _duration = int(package_row["duration_days"] or 0)
+        _volume   = float(package_row["volume_gb"] or 0)
+        if _type_id and _volume > 0:
+            _gb_price = get_reseller_gb_price(_type_id, _duration, _volume)
+            if _gb_price is not None:
+                return _gb_price
+    except Exception:
+        pass
+
     cfg   = get_agency_price_config(user_id)
     mode  = cfg["price_mode"]
     if mode == "global":

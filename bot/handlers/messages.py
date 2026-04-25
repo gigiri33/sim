@@ -27,6 +27,7 @@ from ..db import (
     get_agency_price, set_agency_price,
     get_agency_price_config, set_agency_price_config,
     get_agency_type_discount, set_agency_type_discount,
+    set_agency_gb_price, get_agency_gb_price,
     get_all_admin_users, get_admin_user, add_admin_user, update_admin_permissions, remove_admin_user,
     get_conn, create_pending_order, get_pending_order, search_users,
     notify_first_start_if_needed, update_config_field,
@@ -3242,6 +3243,30 @@ def universal_handler(message):
             log_admin_action(uid, f"تخفیف دسته #{type_id} نماینده {target_user_id}: {label}")
             bot.send_message(uid,
                 f"✅ تخفیف دسته #{type_id}: <b>{label}</b> تنظیم شد.",
+                reply_markup=kb_admin_panel())
+            return
+
+        # ── Admin: Per-GB price entry ──────────────────────────────────────────
+        if sn == "admin_gbp_enter_price" and is_admin(uid):
+            category_id   = int(sd.get("category_id", 0) or 0)
+            duration_days = int(sd.get("duration_days", 0) or 0)
+            val = parse_int(normalize_text_number(message.text or ""))
+            if val is None or val <= 0:
+                bot.send_message(uid,
+                    "⚠️ <b>مبلغ نامعتبر است.</b>\n\n"
+                    "یک عدد مثبت (تومان) وارد کنید. مثال: <code>300000</code>",
+                    parse_mode="HTML",
+                    reply_markup=back_button(f"adm:gbp:cat:{category_id}"))
+                return
+            set_agency_gb_price(category_id, duration_days, val)
+            state_clear(uid)
+            dur_lbl = "نامحدود" if duration_days == 0 else f"{duration_days} روز"
+            log_admin_action(uid, f"قیمت هر گیگ: دسته #{category_id}, مدت {dur_lbl}: {fmt_price(val)} تومان")
+            bot.send_message(uid,
+                f"✅ <b>قیمت هر گیگ برای این دسته و این زمان تنظیم شد.</b>\n\n"
+                f"💰 قیمت هر گیگ: <b>{fmt_price(val)} تومان</b>\n"
+                f"⏱ مدت: <b>{dur_lbl}</b>",
+                parse_mode="HTML",
                 reply_markup=kb_admin_panel())
             return
 
