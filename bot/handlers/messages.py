@@ -45,6 +45,8 @@ from ..db import (
     get_wallet_pay_exceptions, add_wallet_pay_exception,
     add_referral_restriction,
     add_payment_card, update_payment_card,
+    set_per_gb_price,
+    create_reseller_request, get_reseller_request,
 )
 from ..gateways.base import is_gateway_available, is_card_info_complete, get_global_amount_range, get_gateway_range_text, is_gateway_in_range, build_gateway_range_guide
 from ..gateways.tetrapay import create_tetrapay_order, verify_tetrapay_order
@@ -3192,6 +3194,78 @@ def universal_handler(message):
                 reply_markup=kb_admin_panel())
             return
 
+        if sn == "admin_agcfg_pergb_val" and is_admin(uid):
+            target_user_id = sd["target_user_id"]
+            type_id        = sd.get("type_id")
+            val            = parse_int(message.text or "")
+            if val is None or val < 0:
+                bot.send_message(uid, "⚠️ عدد معتبر (مثبت یا صفر) وارد کنید.")
+                return
+            set_per_gb_price(target_user_id, type_id, val)
+            state_clear(uid)
+            log_admin_action(uid, f"قیمت هر گیگ دسته #{type_id} نماینده {target_user_id}: {fmt_price(val)} تومان")
+            bot.send_message(uid,
+                f"✅ قیمت هر گیگ دسته #{type_id}: <b>{fmt_price(val)} تومان</b> تنظیم شد.",
+                reply_markup=kb_admin_panel())
+            return
+
+        if sn == "admin_resreq_reject_reason" and is_admin(uid):
+            from ..db import reject_reseller_request as _rr_reject, get_reseller_request_by_id as _rr_get
+            from ..db import delete_agency_request_messages as _del_arm, get_agency_request_messages as _get_arm
+            req_id     = sd.get("req_id")
+            target_uid = sd.get("target_uid")
+            reason     = (message.text or "").strip()
+            req        = _rr_get(req_id)
+            if req:
+                _rr_reject(req_id, uid)
+                for row in _get_arm(target_uid):
+                    try:
+                        bot.edit_message_reply_markup(row["chat_id"], row["message_id"], reply_markup=None)
+                    except Exception:
+                        pass
+                _del_arm(target_uid)
+                try:
+                    notify_msg = "❌ <b>درخواست نمایندگی شما رد شد.</b>"
+                    if reason:
+                        notify_msg += f"\n\n💬 دلیل: {esc(reason)}"
+                    bot.send_message(target_uid, notify_msg, parse_mode="HTML")
+                except Exception:
+                    pass
+                log_admin_action(uid, f"درخواست نمایندگی #{req_id} (کاربر {target_uid}) رد شد: {reason}")
+            state_clear(uid)
+            bot.send_message(uid, f"❌ درخواست #{req_id} رد شد.", reply_markup=kb_admin_panel())
+            return
+
+        if sn == "admin_set_resreq_min_wallet" and is_admin(uid):
+            val = parse_int(message.text or "")
+            if val is None or val < 0:
+                bot.send_message(uid, "⚠️ عدد معتبر (0 یا بیشتر) وارد کنید.")
+                return
+            setting_set("agency_request_min_wallet", str(val))
+            state_clear(uid)
+            log_admin_action(uid, f"حداقل موجودی درخواست نمایندگی: {fmt_price(val)} تومان")
+            bot.send_message(uid,
+                f"✅ حداقل موجودی درخواست نمایندگی: <b>{fmt_price(val)} تومان</b> تنظیم شد.",
+                reply_markup=kb_admin_panel())
+            return
+
+        if sn == "admin_set_credit_limit" and is_admin(uid):
+            from ..db import set_user_purchase_credit as _set_credit, get_user as _get_user
+            target_user_id = sd.get("target_user_id")
+            val = parse_int(message.text or "")
+            if val is None or val < 0:
+                bot.send_message(uid, "⚠️ عدد معتبر (0 یا بیشتر) وارد کنید.")
+                return
+            existing = _get_user(target_user_id)
+            credit_enabled = existing["purchase_credit_enabled"] if existing and "purchase_credit_enabled" in existing.keys() else 0
+            _set_credit(target_user_id, credit_enabled, val)
+            state_clear(uid)
+            log_admin_action(uid, f"سقف اعتبار کاربر {target_user_id}: {fmt_price(val)} تومان")
+            bot.send_message(uid,
+                f"✅ سقف اعتبار کاربر <code>{target_user_id}</code>: <b>{fmt_price(val)} تومان</b> تنظیم شد.",
+                reply_markup=kb_admin_panel())
+            return
+
         # ── Admin: Default agency discount % ──────────────────────────────────
         if sn == "admin_set_default_discount_pct" and is_admin(uid):
             val = parse_int(message.text or "")
@@ -3357,6 +3431,13 @@ def universal_handler(message):
             user = get_user(uid)
             bot.send_message(uid, "✅ درخواست نمایندگی شما ارسال شد.\n⏳ لطفاً منتظر بررسی ادمین باشید.",
                              reply_markup=kb_main(uid))
+            # Save to reseller_requests table
+            req_id = create_reseller_request(
+                uid,
+                user["username"] if user else None,
+                user["full_name"] if user else str(uid),
+                req_text if req_text != "بدون متن" else None
+            )
             text = (
                 f"🤝 <b>درخواست نمایندگی جدید</b>\n\n"
                 f"👤 نام: {esc(user['full_name'])}\n"
@@ -3366,8 +3447,8 @@ def universal_handler(message):
             )
             admin_kb = types.InlineKeyboardMarkup()
             admin_kb.row(
-                types.InlineKeyboardButton("✅ تأیید", callback_data=f"agency:approve_now:{uid}"),
-                types.InlineKeyboardButton("❌ رد", callback_data=f"agency:reject_now:{uid}"),
+                types.InlineKeyboardButton("✅ تأیید", callback_data=f"adm:resreq:approve:{req_id}"),
+                types.InlineKeyboardButton("❌ رد", callback_data=f"adm:resreq:reject:{req_id}"),
             )
             for admin_id in ADMIN_IDS:
                 try:

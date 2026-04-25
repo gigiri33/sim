@@ -421,37 +421,56 @@ def check_and_notify_stock(package_id: int, package_name: str):
 
 
 # ── Admin notifications ────────────────────────────────────────────────────────
-def admin_purchase_notify(method_label, user_row, package_row, purchase_id=None):
+def admin_purchase_notify(method_label, user_row, package_row, purchase_id=None, amount=None):
     svc_name = None
-    paid_amount = None
+    paid_amount = amount
     if purchase_id:
         try:
             _p = get_purchase(purchase_id)
             if _p:
                 svc_name = urllib.parse.unquote(_p["service_name"]) if _p["service_name"] else None
-                paid_amount = _p["amount"]
+                if paid_amount is None:
+                    paid_amount = _p["amount"]
         except Exception:
             pass
     svc_line = f"🏷 نام سرویس: {esc(svc_name)}\n" if svc_name else ""
     orig_price = package_row['price']
     is_agent = user_row['is_agent'] if 'is_agent' in user_row.keys() else 0
-    if paid_amount is not None and not is_agent and paid_amount < orig_price:
+
+    # Method label mapping
+    _method_map = {"wallet": "کیف پول", "card": "کارت به کارت"}
+    method_display = _method_map.get(str(method_label).lower(), method_label)
+
+    # Username with @ prefix
+    raw_username = user_row['username'] or ''
+    if raw_username and not raw_username.startswith('@'):
+        username_display = f"@{raw_username}"
+    elif raw_username:
+        username_display = raw_username
+    else:
+        username_display = 'ندارد'
+
+    # Clickable user name link
+    user_link = f"<a href='tg://user?id={user_row['user_id']}'>{esc(user_row['full_name'])}</a>"
+
+    if paid_amount is not None and paid_amount < orig_price:
         disc_amount = orig_price - paid_amount
         price_line = (
             f"💰 مبلغ اصلی: {fmt_price(orig_price)} تومان\n"
-            f"🎟 کد تخفیف: {fmt_price(disc_amount)} تومان\n"
+            f"🎟 تخفیف: {fmt_price(disc_amount)} تومان\n"
             f"💚 مبلغ نهایی: {fmt_price(paid_amount)} تومان\n"
         )
     elif paid_amount is not None:
         price_line = f"💰 مبلغ: {fmt_price(paid_amount)} تومان\n"
     else:
         price_line = f"💰 مبلغ: {fmt_price(orig_price)} تومان\n"
+
     text = (
-        f"❗️ | خرید جدید ({method_label})\n\n"
+        f"❗️ | خرید جدید ({method_display})\n\n"
         f"🕐 زمان: {now_str()}\n"
         f"▫️ آیدی کاربر: <code>{user_row['user_id']}</code>\n"
-        f"👨‍💼 نام: {esc(user_row['full_name'])}\n"
-        f"⚡️ نام کاربری: {esc(user_row['username'] or 'ندارد')}\n"
+        f"👨‍💼 نام: {user_link}\n"
+        f"⚡️ نام کاربری: {username_display}\n"
         f"{price_line}"
         f"🚦 سرور: {esc(package_row['type_name'])}\n"
         f"✏️ پکیج: {esc(package_row['name'])}\n"
@@ -489,21 +508,41 @@ def admin_renewal_notify(user_id, purchase_item, package_row, amount, method_lab
     config_id = purchase_item["config_id"]
     orig_price = package_row['price'] if package_row and 'price' in package_row.keys() else amount
     is_agent = user_row['is_agent'] if user_row and 'is_agent' in user_row.keys() else 0
-    if not is_agent and amount < orig_price:
+
+    # Method label mapping
+    _method_map = {"wallet": "کیف پول", "card": "کارت به کارت"}
+    method_display = _method_map.get(str(method_label).lower(), method_label)
+
+    # Username with @ prefix
+    raw_username = (user_row['username'] or '') if user_row else ''
+    if raw_username and not raw_username.startswith('@'):
+        username_display = f"@{raw_username}"
+    elif raw_username:
+        username_display = raw_username
+    else:
+        username_display = 'ندارد'
+
+    # Clickable user name link
+    if user_row:
+        user_link = f"<a href='tg://user?id={user_row['user_id']}'>{esc(user_row['full_name'])}</a>"
+    else:
+        user_link = str(user_id)
+
+    if amount < orig_price:
         disc_amount = orig_price - amount
         price_block = (
             f"💰 مبلغ اصلی: {fmt_price(orig_price)} تومان\n"
-            f"🎟 کد تخفیف: {fmt_price(disc_amount)} تومان\n"
+            f"🎟 تخفیف: {fmt_price(disc_amount)} تومان\n"
             f"💚 مبلغ نهایی: <b>{fmt_price(amount)}</b> تومان\n"
         )
     else:
         price_block = f"💰 مبلغ پرداختی: <b>{fmt_price(amount)}</b> تومان\n"
     text = (
-        f"♻️ | <b>درخواست تمدید</b> ({method_label})\n\n"
+        f"♻️ | <b>درخواست تمدید</b> ({method_display})\n\n"
         f"\U0001f552 زمان: {now_str()}\n"
-        f"👤 کاربر: {esc(user_row['full_name'])}\n"
-        f"⚡️ نام کاربری: {esc(user_row['username'] or 'ندارد')}\n"
-        f"🆔 آیدی: <code>{user_row['user_id']}</code>\n"
+        f"👤 کاربر: {user_link}\n"
+        f"⚡️ نام کاربری: {username_display}\n"
+        f"🆔 آیدی: <code>{user_id}</code>\n"
         f"{price_block}\n"
         f"📌 <b>سرویس فعلی:</b>\n"
         f"🏷 نام سرویس: {esc(urllib.parse.unquote(purchase_item['service_name'] or ''))}\n"

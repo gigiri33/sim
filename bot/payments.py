@@ -17,6 +17,7 @@ from .db import (
     assign_config_to_user, get_conn, create_pending_order, get_purchase,
     get_all_admin_users,
     save_payment_admin_message, get_payment_admin_messages, delete_payment_admin_messages,
+    get_per_gb_price,
 )
 from .helpers import esc, fmt_price, display_username, back_button, now_str
 import time
@@ -89,33 +90,87 @@ def _get_prices() -> dict:
 
 
 # ── Pricing ────────────────────────────────────────────────────────────────────
-def get_effective_price(user_id, package_row):
-    """Return discounted price for agents, else regular price."""
+def calculate_effective_order_price(user_id, package_row, quantity=1):
+    """
+    Returns a dict with:
+      original_unit_price  – package base price
+      unit_price           – effective price per unit after reseller discount
+      quantity             – quantity requested
+      subtotal             – unit_price * quantity
+      discount_amount      – total discount vs original (0 for regular users)
+      final_amount         – same as subtotal (kept as alias)
+      pricing_mode         – 'normal'|'global_pct'|'global_fixed'|'type_pct'|'type_fixed'|'package'|'per_gb'
+    """
+    base = package_row["price"]
     user = get_user(user_id)
     if not user or not user["is_agent"]:
-        return package_row["price"]
-    base  = package_row["price"]
-    cfg   = get_agency_price_config(user_id)
-    mode  = cfg["price_mode"]
+        subtotal = base * quantity
+        return {
+            "original_unit_price": base,
+            "unit_price": base,
+            "quantity": quantity,
+            "subtotal": subtotal,
+            "discount_amount": 0,
+            "final_amount": subtotal,
+            "pricing_mode": "normal",
+        }
+
+    cfg  = get_agency_price_config(user_id)
+    mode = cfg["price_mode"]
+
     if mode == "global":
         g_type = cfg["global_type"]
         g_val  = cfg["global_val"]
         if g_type == "pct":
-            return max(0, base - round(base * g_val / 100))
+            unit_price = max(0, base - round(base * g_val / 100))
+            pricing_mode = "global_pct"
         else:
-            return max(0, base - g_val)
+            unit_price = max(0, base - g_val)
+            pricing_mode = "global_fixed"
     elif mode == "type":
         type_id = package_row["type_id"]
         td = get_agency_type_discount(user_id, type_id)
         if td:
             if td["discount_type"] == "pct":
-                return max(0, base - round(base * td["discount_value"] / 100))
+                unit_price = max(0, base - round(base * td["discount_value"] / 100))
+                pricing_mode = "type_pct"
             else:
-                return max(0, base - td["discount_value"])
-        return base
+                unit_price = max(0, base - td["discount_value"])
+                pricing_mode = "type_fixed"
+        else:
+            unit_price = base
+            pricing_mode = "type_fixed"
+    elif mode == "per_gb":
+        type_id = package_row["type_id"]
+        pgb = get_per_gb_price(user_id, type_id)
+        if pgb is not None:
+            volume_gb = (package_row["volume_gb"] or 0)
+            unit_price = max(0, int(pgb * volume_gb))
+            pricing_mode = "per_gb"
+        else:
+            unit_price = base
+            pricing_mode = "normal"
     else:  # package (default)
         ap = get_agency_price(user_id, package_row["id"])
-        return ap if ap is not None else base
+        unit_price = ap if ap is not None else base
+        pricing_mode = "package"
+
+    subtotal = unit_price * quantity
+    discount_amount = (base - unit_price) * quantity
+    return {
+        "original_unit_price": base,
+        "unit_price": unit_price,
+        "quantity": quantity,
+        "subtotal": subtotal,
+        "discount_amount": max(0, discount_amount),
+        "final_amount": subtotal,
+        "pricing_mode": pricing_mode,
+    }
+
+
+def get_effective_price(user_id, package_row):
+    """Return discounted price for agents, else regular price."""
+    return calculate_effective_order_price(user_id, package_row)["unit_price"]
 
 
 # ── Payment method selection ───────────────────────────────────────────────────

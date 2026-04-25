@@ -666,6 +666,37 @@ def _run_init_db_migrations():
             "ALTER TABLE referrals ADD COLUMN captcha_verified INTEGER NOT NULL DEFAULT 0",
             # ── Referral captcha failure tracking ─────────────────────────────
             "ALTER TABLE referrals ADD COLUMN captcha_failed INTEGER NOT NULL DEFAULT 0",
+            # ── Reseller per-GB pricing ────────────────────────────────────────
+            (
+                "CREATE TABLE IF NOT EXISTS reseller_per_gb_prices ("
+                "id         INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "user_id    INTEGER NOT NULL,"
+                "type_id    INTEGER NOT NULL,"
+                "price_per_gb INTEGER NOT NULL,"
+                "created_at TEXT NOT NULL,"
+                "updated_at TEXT NOT NULL,"
+                "UNIQUE(user_id, type_id)"
+                ")"
+            ),
+            # ── Reseller requests table ────────────────────────────────────────
+            (
+                "CREATE TABLE IF NOT EXISTS reseller_requests ("
+                "id          INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "user_id     INTEGER NOT NULL,"
+                "username    TEXT,"
+                "full_name   TEXT,"
+                "description TEXT,"
+                "status      TEXT NOT NULL DEFAULT 'pending',"
+                "rejected_at TEXT,"
+                "reviewed_at TEXT,"
+                "reviewed_by INTEGER,"
+                "created_at  TEXT NOT NULL,"
+                "updated_at  TEXT NOT NULL"
+                ")"
+            ),
+            # ── Purchase credit on users table ────────────────────────────────
+            "ALTER TABLE users ADD COLUMN purchase_credit_enabled INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN purchase_credit_limit INTEGER NOT NULL DEFAULT 0",
         ]
         for sql in migrations:
             try:
@@ -851,7 +882,9 @@ def get_user_detail(user_id):
                    (SELECT COALESCE(SUM(amount),0) FROM purchases p WHERE p.user_id=u.user_id) AS total_spent,
                    (SELECT COUNT(*) FROM payments py WHERE py.user_id=u.user_id AND py.kind='renewal' AND py.status='completed') AS renewal_count,
                    (SELECT COALESCE(SUM(amount),0) FROM payments py WHERE py.user_id=u.user_id AND py.kind='renewal' AND py.status='completed') AS total_renewals,
-                   (SELECT COALESCE(SUM(py2.amount),0) FROM payments py2 WHERE py2.user_id=u.user_id AND py2.status='completed' AND py2.payment_method != 'wallet') AS total_direct_payments
+                   (SELECT COALESCE(SUM(py2.amount),0) FROM payments py2 WHERE py2.user_id=u.user_id AND py2.status='completed' AND py2.payment_method != 'wallet') AS total_direct_payments,
+                   (SELECT COUNT(*) FROM panel_configs pc WHERE pc.sold_to=u.user_id) AS panel_sales_count,
+                   (SELECT COUNT(*) FROM panel_configs pc WHERE pc.sold_to=u.user_id AND pc.auto_renew=1) AS panel_renew_count
             FROM users u WHERE u.user_id=?
             """,
             (user_id,)
@@ -2120,6 +2153,127 @@ def delete_agency_request_messages(referee_uid):
         conn.execute(
             "DELETE FROM agency_request_messages WHERE referee_uid=?", (referee_uid,)
         )
+
+
+# ── Reseller per-GB pricing ────────────────────────────────────────────────────
+def get_per_gb_price(user_id, type_id):
+    """Returns price_per_gb integer or None if not set."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT price_per_gb FROM reseller_per_gb_prices WHERE user_id=? AND type_id=?",
+            (user_id, type_id)
+        ).fetchone()
+    return row["price_per_gb"] if row else None
+
+
+def set_per_gb_price(user_id, type_id, price):
+    from .helpers import now_str
+    now = now_str()
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO reseller_per_gb_prices (user_id, type_id, price_per_gb, created_at, updated_at) "
+            "VALUES (?,?,?,?,?) "
+            "ON CONFLICT(user_id, type_id) DO UPDATE SET price_per_gb=excluded.price_per_gb, updated_at=excluded.updated_at",
+            (user_id, type_id, price, now, now)
+        )
+
+
+def get_all_per_gb_prices(user_id):
+    """Returns list of rows with type_id and price_per_gb for a user."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT type_id, price_per_gb FROM reseller_per_gb_prices WHERE user_id=?",
+            (user_id,)
+        ).fetchall()
+
+
+# ── Reseller requests ──────────────────────────────────────────────────────────
+def create_reseller_request(user_id, username, full_name, description):
+    from .helpers import now_str
+    now = now_str()
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO reseller_requests (user_id, username, full_name, description, status, created_at, updated_at) "
+            "VALUES (?,?,?,?,'pending',?,?)",
+            (user_id, username, full_name, description, now, now)
+        )
+        return cur.lastrowid
+
+
+def get_reseller_request(user_id, status=None):
+    """Get the most recent request for a user, optionally filtered by status."""
+    with get_conn() as conn:
+        if status:
+            return conn.execute(
+                "SELECT * FROM reseller_requests WHERE user_id=? AND status=? ORDER BY id DESC LIMIT 1",
+                (user_id, status)
+            ).fetchone()
+        return conn.execute(
+            "SELECT * FROM reseller_requests WHERE user_id=? ORDER BY id DESC LIMIT 1",
+            (user_id,)
+        ).fetchone()
+
+
+def get_pending_reseller_requests(page=0, per_page=10):
+    offset = page * per_page
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM reseller_requests WHERE status='pending' ORDER BY created_at ASC LIMIT ? OFFSET ?",
+            (per_page, offset)
+        ).fetchall()
+        total = conn.execute(
+            "SELECT COUNT(*) AS n FROM reseller_requests WHERE status='pending'"
+        ).fetchone()["n"]
+    return rows, total
+
+
+def get_reseller_request_by_id(request_id):
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM reseller_requests WHERE id=?", (request_id,)
+        ).fetchone()
+
+
+def approve_reseller_request(request_id, reviewed_by):
+    from .helpers import now_str
+    now = now_str()
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE reseller_requests SET status='approved', reviewed_at=?, reviewed_by=?, updated_at=? WHERE id=?",
+            (now, reviewed_by, now, request_id)
+        )
+
+
+def reject_reseller_request(request_id, reviewed_by):
+    from .helpers import now_str
+    now = now_str()
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE reseller_requests SET status='rejected', rejected_at=?, reviewed_at=?, reviewed_by=?, updated_at=? WHERE id=?",
+            (now, now, reviewed_by, now, request_id)
+        )
+
+
+# ── Purchase credit ────────────────────────────────────────────────────────────
+def set_user_purchase_credit(user_id, enabled, limit):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE users SET purchase_credit_enabled=?, purchase_credit_limit=? WHERE user_id=?",
+            (1 if enabled else 0, int(limit), user_id)
+        )
+
+
+def can_use_credit(user_id, amount):
+    """Returns True if user can use purchase credit to cover `amount` (even with negative balance)."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT balance, purchase_credit_enabled, purchase_credit_limit FROM users WHERE user_id=?",
+            (user_id,)
+        ).fetchone()
+    if not row or not row["purchase_credit_enabled"]:
+        return False
+    # Can pay if balance + credit_limit >= amount
+    return (row["balance"] + row["purchase_credit_limit"]) >= amount
 
 
 # ── Payment admin message tracking ────────────────────────────────────────────

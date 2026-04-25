@@ -44,6 +44,10 @@ from ..db import (
     save_pinned_send, get_pinned_sends, delete_pinned_sends,
     save_payment_admin_message, get_payment_admin_messages, delete_payment_admin_messages,
     save_agency_request_message, get_agency_request_messages, delete_agency_request_messages,
+    get_per_gb_price, set_per_gb_price, get_all_per_gb_prices,
+    create_reseller_request, get_reseller_request, get_pending_reseller_requests,
+    get_reseller_request_by_id, approve_reseller_request, reject_reseller_request,
+    set_user_purchase_credit, can_use_credit,
     get_all_discount_codes, get_discount_code, add_discount_code,
     toggle_discount_code, update_discount_code_field, delete_discount_code,
     validate_discount_code, record_discount_usage, has_eligible_discount_codes,
@@ -89,7 +93,7 @@ from ..group_manager import (
     _count_active_topics, TOPICS, send_to_topic, log_admin_action,
 )
 from ..payments import (
-    get_effective_price, show_payment_method_selection,
+    get_effective_price, calculate_effective_order_price, show_payment_method_selection,
     show_crypto_selection, show_crypto_payment_info,
     send_payment_to_admins, finish_card_payment_approval,
     apply_gateway_bonus_if_needed,
@@ -3695,6 +3699,34 @@ def _dispatch_callback(call, uid, data):
         if user and user["is_agent"]:
             bot.answer_callback_query(call.id, "شما در حال حاضر نماینده هستید.", show_alert=True)
             return
+        if setting_get("agency_request_enabled", "1") != "1":
+            bot.answer_callback_query(call.id, "درخواست نمایندگی در حال حاضر غیرفعال است.", show_alert=True)
+            return
+        # Check min wallet balance
+        min_wallet = int(setting_get("agency_request_min_wallet", "0") or "0")
+        if min_wallet > 0 and (not user or (user["balance"] or 0) < min_wallet):
+            bot.answer_callback_query(call.id,
+                f"برای ارسال درخواست نمایندگی باید حداقل {fmt_price(min_wallet)} تومان موجودی کیف پول داشته باشید.",
+                show_alert=True)
+            return
+        # Check for pending or recent rejected request (7-day cooldown)
+        existing = get_reseller_request(uid)
+        if existing:
+            if existing["status"] == "pending":
+                bot.answer_callback_query(call.id, "درخواست نمایندگی شما در حال بررسی است.", show_alert=True)
+                return
+            if existing["status"] == "rejected" and existing["rejected_at"]:
+                import datetime as _dt
+                try:
+                    rej_dt = _dt.datetime.fromisoformat(existing["rejected_at"])
+                    diff = (_dt.datetime.now() - rej_dt).days
+                    if diff < 7:
+                        bot.answer_callback_query(call.id,
+                            f"درخواست شما {diff} روز پیش رد شده است. پس از ۷ روز می‌توانید دوباره درخواست دهید.",
+                            show_alert=True)
+                        return
+                except Exception:
+                    pass
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("📤 ارسال درخواست (بدون متن)", callback_data="agency:send_empty"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
@@ -3718,6 +3750,13 @@ def _dispatch_callback(call, uid, data):
             return
         bot.answer_callback_query(call.id)
         send_or_edit(call, "✅ درخواست نمایندگی شما ارسال شد.\n⏳ لطفاً منتظر بررسی ادمین باشید.", back_button("main"))
+        # Save to reseller_requests table
+        req_id = create_reseller_request(
+            uid,
+            user["username"] if user else None,
+            user["full_name"] if user else str(uid),
+            None
+        )
         # Notify admins
         text = (
             f"🤝 <b>درخواست نمایندگی جدید</b>\n\n"
@@ -3728,8 +3767,8 @@ def _dispatch_callback(call, uid, data):
         )
         admin_kb = types.InlineKeyboardMarkup()
         admin_kb.row(
-            types.InlineKeyboardButton("✅ تأیید", callback_data=f"agency:approve_now:{uid}"),
-            types.InlineKeyboardButton("❌ رد", callback_data=f"agency:reject_now:{uid}"),
+            types.InlineKeyboardButton("✅ تأیید", callback_data=f"adm:resreq:approve:{req_id}"),
+            types.InlineKeyboardButton("❌ رد", callback_data=f"adm:resreq:reject:{req_id}"),
         )
         for admin_id in ADMIN_IDS:
             try:
@@ -3781,8 +3820,11 @@ def _dispatch_callback(call, uid, data):
             return
         target_uid = int(data.split(":")[2])
         state_clear(uid)
-        with get_conn() as conn:
-            conn.execute("UPDATE users SET is_agent=1 WHERE user_id=?", (target_uid,))
+        set_user_agent(target_uid, 1)
+        # Also update any pending reseller_request for this user
+        pending_req = get_reseller_request(target_uid, status="pending")
+        if pending_req:
+            approve_reseller_request(pending_req["id"], uid)
         bot.answer_callback_query(call.id, "✅ نمایندگی تأیید شد.")
         # Remove buttons from all tracked messages
         for row in get_agency_request_messages(target_uid):
@@ -3805,7 +3847,6 @@ def _dispatch_callback(call, uid, data):
             f"👤 نام: {esc(user_row['full_name'] if user_row else str(target_uid))}\n"
             f"🆔 نام کاربری: {esc(user_row['username'] or 'ندارد' if user_row else '-')}\n"
             f"🆔 آیدی: <code>{target_uid}</code>\n"
-            f"📊 تخفیف پیش‌فرض: <b>{default_pct}%</b>\n"
             f"تأییدکننده: <code>{uid}</code>"
         )
         # If called from admin DM, show user detail panel
@@ -3827,6 +3868,10 @@ def _dispatch_callback(call, uid, data):
             return
         target_uid = int(data.split(":")[2])
         bot.answer_callback_query(call.id, "❌ رد شد.")
+        # Update reseller_request record
+        pending_req = get_reseller_request(target_uid, status="pending")
+        if pending_req:
+            reject_reseller_request(pending_req["id"], uid)
         # Remove buttons from all tracked messages
         for row in get_agency_request_messages(target_uid):
             try:
@@ -3986,8 +4031,9 @@ def _dispatch_callback(call, uid, data):
             return
         price = _get_state_price(uid, package_row, "renew_select_method")
         if user["balance"] < price:
-            bot.answer_callback_query(call.id, "موجودی کیف پول کافی نیست.", show_alert=True)
-            return
+            if not can_use_credit(uid, price):
+                bot.answer_callback_query(call.id, "موجودی کیف پول کافی نیست.", show_alert=True)
+                return
         update_balance(uid, -price)
         payment_id = create_payment("renewal", uid, package_id, price, "wallet",
                                      status="completed", config_id=item["config_id"])
@@ -4538,8 +4584,10 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
             return
         price = get_effective_price(uid, package_row)
+        _price_info = calculate_effective_order_price(uid, package_row)
         state_set(uid, "buy_select_method",
-                  package_id=package_id, amount=price, original_amount=price,
+                  package_id=package_id, amount=price, original_amount=_price_info["original_unit_price"],
+                  discount_amount=_price_info["discount_amount"],
                   kind="config_purchase", unit_price=price, quantity=1)
         bot.answer_callback_query(call.id)
         if should_show_bulk_qty(uid):
@@ -4568,8 +4616,9 @@ def _dispatch_callback(call, uid, data):
         price    = _get_state_price(uid, package_row, "buy_select_method")
         quantity = int(state_data(uid).get("quantity", 1) or 1)
         if user["balance"] < price:
-            bot.answer_callback_query(call.id, "موجودی کیف پول کافی نیست.", show_alert=True)
-            return
+            if not can_use_credit(uid, price):
+                bot.answer_callback_query(call.id, "موجودی کیف پول کافی نیست.", show_alert=True)
+                return
         # Deduct total and create payment record first
         update_balance(uid, -price)
         payment_id = create_payment("config_purchase", uid, package_id, price, "wallet",
@@ -6704,7 +6753,8 @@ def _dispatch_callback(call, uid, data):
             sd = state_data(uid)
             price = sd.get("amount") or get_effective_price(uid, package_row)
             if user["balance"] < price:
-                bot.answer_callback_query(call.id, "موجودی کیف پول کافی نیست.", show_alert=True); return
+                if not can_use_credit(uid, price):
+                    bot.answer_callback_query(call.id, "موجودی کیف پول کافی نیست.", show_alert=True); return
             update_balance(uid, -price)
             create_payment("pnlcfg_renewal", uid, package_id, price, "wallet",
                            status="completed", config_id=config_id)
@@ -9510,6 +9560,8 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton(
             f"{req_icon} درخواست نمایندگی — {req_label}",
             callback_data="adm:agt:toggle"))
+        kb.add(types.InlineKeyboardButton("📋 درخواست‌های بررسی نشده", callback_data="adm:resreq:list:0"))
+        kb.add(types.InlineKeyboardButton("💰 حداقل موجودی درخواست", callback_data="adm:resreq:minwallet"))
         kb.add(types.InlineKeyboardButton("➕ اضافه کردن نماینده", callback_data="adm:agt:add"))
         # Inline list: each agent on one row with remove button
         for ag in agents:
@@ -9565,6 +9617,8 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton(
             f"{req_icon} درخواست نمایندگی — {req_label}",
             callback_data="adm:agt:toggle"))
+        kb.add(types.InlineKeyboardButton("📋 درخواست‌های بررسی نشده", callback_data="adm:resreq:list:0"))
+        kb.add(types.InlineKeyboardButton("💰 حداقل موجودی درخواست", callback_data="adm:resreq:minwallet"))
         kb.add(types.InlineKeyboardButton("➕ اضافه کردن نماینده", callback_data="adm:agt:add"))
         for ag in agents:
             name = esc(ag["full_name"]) if ag["full_name"] else str(ag["user_id"])
@@ -9600,6 +9654,8 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton(
             f"{req_icon} درخواست نمایندگی — {req_label}",
             callback_data="adm:agt:toggle"))
+        kb.add(types.InlineKeyboardButton("📋 درخواست‌های بررسی نشده", callback_data="adm:resreq:list:0"))
+        kb.add(types.InlineKeyboardButton("💰 حداقل موجودی درخواست", callback_data="adm:resreq:minwallet"))
         kb.add(types.InlineKeyboardButton("➕ اضافه کردن نماینده", callback_data="adm:agt:add"))
         for ag in agents:
             name = esc(ag["full_name"]) if ag["full_name"] else str(ag["user_id"])
@@ -9619,6 +9675,243 @@ def _dispatch_callback(call, uid, data):
             kb)
         return
 
+    # ── Admin: Purchase Credit ────────────────────────────────────────────────
+    if data.startswith("adm:credit:"):
+        parts     = data.split(":")
+        target_id = int(parts[2])
+        if not admin_has_perm(uid, "full_users") and not is_admin(uid):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        user = get_user(target_id)
+        if not user:
+            bot.answer_callback_query(call.id, "کاربر یافت نشد.", show_alert=True)
+            return
+        credit_enabled = user["purchase_credit_enabled"] if "purchase_credit_enabled" in user.keys() else 0
+        credit_limit   = user["purchase_credit_limit"]   if "purchase_credit_limit"   in user.keys() else 0
+        kb = types.InlineKeyboardMarkup()
+        toggle_label = "❌ غیرفعال کردن" if credit_enabled else "✅ فعال کردن"
+        kb.add(types.InlineKeyboardButton(toggle_label, callback_data=f"adm:credit:tog:{target_id}"))
+        kb.add(types.InlineKeyboardButton("✏️ تغییر سقف اعتبار", callback_data=f"adm:credit:setlimit:{target_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:usr:v:{target_id}", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"💳 <b>اعتبار خرید</b>\n\n"
+            f"کاربر: {esc(user['full_name'])} (<code>{target_id}</code>)\n"
+            f"وضعیت: {'✅ فعال' if credit_enabled else '❌ غیرفعال'}\n"
+            f"سقف اعتبار: <b>{fmt_price(credit_limit)} تومان</b>",
+            kb)
+        return
+
+    if data.startswith("adm:credit:tog:"):
+        target_id = int(data.split(":")[3])
+        user = get_user(target_id)
+        if not user:
+            bot.answer_callback_query(call.id, "کاربر یافت نشد.", show_alert=True)
+            return
+        credit_enabled = user["purchase_credit_enabled"] if "purchase_credit_enabled" in user.keys() else 0
+        credit_limit   = user["purchase_credit_limit"]   if "purchase_credit_limit"   in user.keys() else 0
+        new_enabled    = 0 if credit_enabled else 1
+        set_user_purchase_credit(target_id, new_enabled, credit_limit)
+        bot.answer_callback_query(call.id, "✅ وضعیت اعتبار تغییر یافت.")
+        log_admin_action(uid, f"اعتبار خرید کاربر {target_id}: {'فعال' if new_enabled else 'غیرفعال'}")
+        # Re-render
+        user2 = get_user(target_id)
+        credit_enabled2 = user2["purchase_credit_enabled"] if user2 and "purchase_credit_enabled" in user2.keys() else 0
+        credit_limit2   = user2["purchase_credit_limit"]   if user2 and "purchase_credit_limit"   in user2.keys() else 0
+        kb = types.InlineKeyboardMarkup()
+        toggle_label2 = "❌ غیرفعال کردن" if credit_enabled2 else "✅ فعال کردن"
+        kb.add(types.InlineKeyboardButton(toggle_label2, callback_data=f"adm:credit:tog:{target_id}"))
+        kb.add(types.InlineKeyboardButton("✏️ تغییر سقف اعتبار", callback_data=f"adm:credit:setlimit:{target_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:usr:v:{target_id}", icon_custom_emoji_id="5253997076169115797"))
+        send_or_edit(call,
+            f"💳 <b>اعتبار خرید</b>\n\n"
+            f"کاربر: {esc(user2['full_name'])} (<code>{target_id}</code>)\n"
+            f"وضعیت: {'✅ فعال' if credit_enabled2 else '❌ غیرفعال'}\n"
+            f"سقف اعتبار: <b>{fmt_price(credit_limit2)} تومان</b>",
+            kb)
+        return
+
+    if data.startswith("adm:credit:setlimit:"):
+        target_id = int(data.split(":")[3])
+        state_set(uid, "admin_set_credit_limit", target_user_id=target_id)
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "💳 <b>تغییر سقف اعتبار</b>\n\nسقف اعتبار جدید را به تومان وارد کنید (مثال: 500000):",
+            back_button(f"adm:credit:{target_id}"))
+        return
+
+    # ── Admin: Reseller Requests ──────────────────────────────────────────────
+    if data.startswith("adm:resreq:list:"):
+        if not admin_has_perm(uid, "agency") and not admin_has_perm(uid, "full_users"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        page = int(data.split(":")[3])
+        per_page = 5
+        rows, total = get_pending_reseller_requests(page=page, per_page=per_page)
+        bot.answer_callback_query(call.id)
+        if not rows:
+            send_or_edit(call,
+                "📋 <b>درخواست‌های بررسی نشده</b>\n\nهیچ درخواست بررسی نشده‌ای وجود ندارد.",
+                back_button("admin:agents"))
+            return
+        text = f"📋 <b>درخواست‌های بررسی نشده</b> ({total} عدد)\n\n"
+        kb = types.InlineKeyboardMarkup()
+        for r in rows:
+            uname = r["username"] or "—"
+            if uname != "—" and not uname.startswith("@"):
+                uname = f"@{uname}"
+            btn_label = f"👤 {r['full_name'] or r['user_id']} | {uname}"
+            kb.add(types.InlineKeyboardButton(btn_label, callback_data=f"adm:resreq:view:{r['id']}"))
+        nav_row = []
+        if page > 0:
+            nav_row.append(types.InlineKeyboardButton("⬅️ قبلی", callback_data=f"adm:resreq:list:{page-1}"))
+        if (page + 1) * per_page < total:
+            nav_row.append(types.InlineKeyboardButton("➡️ بعدی", callback_data=f"adm:resreq:list:{page+1}"))
+        if nav_row:
+            kb.row(*nav_row)
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:agents", icon_custom_emoji_id="5253997076169115797"))
+        send_or_edit(call, text, kb)
+        return
+
+    if data.startswith("adm:resreq:view:"):
+        if not admin_has_perm(uid, "agency") and not admin_has_perm(uid, "full_users"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        req_id = int(data.split(":")[3])
+        req = get_reseller_request_by_id(req_id)
+        if not req:
+            bot.answer_callback_query(call.id, "درخواست یافت نشد.", show_alert=True)
+            return
+        uname = req["username"] or "—"
+        if uname != "—" and not uname.startswith("@"):
+            uname = f"@{uname}"
+        desc = esc(req["description"] or "بدون متن")
+        text = (
+            f"🤝 <b>درخواست نمایندگی</b> #{req_id}\n\n"
+            f"👤 نام: {esc(req['full_name'] or '—')}\n"
+            f"⚡️ نام کاربری: {uname}\n"
+            f"🆔 آیدی: <code>{req['user_id']}</code>\n"
+            f"📅 تاریخ: {req['created_at']}\n\n"
+            f"📝 متن درخواست:\n{desc}"
+        )
+        kb = types.InlineKeyboardMarkup()
+        kb.row(
+            types.InlineKeyboardButton("✅ تأیید", callback_data=f"adm:resreq:approve:{req_id}"),
+            types.InlineKeyboardButton("❌ رد", callback_data=f"adm:resreq:reject:{req_id}"),
+        )
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:resreq:list:0", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, text, kb)
+        return
+
+    if data.startswith("adm:resreq:approve:"):
+        if not admin_has_perm(uid, "agency") and not admin_has_perm(uid, "full_users"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        req_id = int(data.split(":")[3])
+        req = get_reseller_request_by_id(req_id)
+        if not req:
+            bot.answer_callback_query(call.id, "درخواست یافت نشد.", show_alert=True)
+            return
+        target_uid = req["user_id"]
+        approve_reseller_request(req_id, uid)
+        set_user_agent(target_uid, 1)
+        # Remove buttons from tracked messages
+        for row in get_agency_request_messages(target_uid):
+            try:
+                bot.edit_message_reply_markup(row["chat_id"], row["message_id"], reply_markup=None)
+            except Exception:
+                pass
+        delete_agency_request_messages(target_uid)
+        bot.answer_callback_query(call.id, "✅ نمایندگی تأیید شد.")
+        try:
+            bot.send_message(target_uid,
+                "🎉 <b>درخواست نمایندگی شما تأیید شد!</b>\n\nاکنون شما نماینده هستید.",
+                parse_mode="HTML")
+        except Exception:
+            pass
+        user_row = get_user(target_uid)
+        send_to_topic("agency_log",
+            f"✅ <b>نمایندگی تأیید شد</b>\n\n"
+            f"👤 نام: {esc(user_row['full_name'] if user_row else str(target_uid))}\n"
+            f"🆔 آیدی: <code>{target_uid}</code>\n"
+            f"تأییدکننده: <code>{uid}</code>"
+        )
+        log_admin_action(uid, f"درخواست نمایندگی #{req_id} (کاربر {target_uid}) تأیید شد")
+        send_or_edit(call, f"✅ نمایندگی کاربر <code>{target_uid}</code> تأیید شد.", back_button("adm:resreq:list:0"))
+        return
+
+    if data.startswith("adm:resreq:reject:"):
+        if not admin_has_perm(uid, "agency") and not admin_has_perm(uid, "full_users"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        req_id = int(data.split(":")[3])
+        req = get_reseller_request_by_id(req_id)
+        if not req:
+            bot.answer_callback_query(call.id, "درخواست یافت نشد.", show_alert=True)
+            return
+        target_uid = req["user_id"]
+        state_set(uid, "admin_resreq_reject_reason", req_id=req_id, target_uid=target_uid)
+        bot.answer_callback_query(call.id)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("⏭ بدون دلیل", callback_data=f"adm:resreq:reject_now:{req_id}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:resreq:view:{req_id}", icon_custom_emoji_id="5253997076169115797"))
+        send_or_edit(call,
+            f"❌ <b>رد درخواست #{req_id}</b>\n\nدلیل رد را بنویسید (یا دکمه زیر را بزنید):",
+            kb)
+        return
+
+    if data.startswith("adm:resreq:reject_now:"):
+        if not admin_has_perm(uid, "agency") and not admin_has_perm(uid, "full_users"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        req_id = int(data.split(":")[3])
+        req = get_reseller_request_by_id(req_id)
+        if not req:
+            bot.answer_callback_query(call.id, "درخواست یافت نشد.", show_alert=True)
+            return
+        target_uid = req["user_id"]
+        state_clear(uid)
+        reject_reseller_request(req_id, uid)
+        # Remove buttons from tracked messages
+        for row in get_agency_request_messages(target_uid):
+            try:
+                bot.edit_message_reply_markup(row["chat_id"], row["message_id"], reply_markup=None)
+            except Exception:
+                pass
+        delete_agency_request_messages(target_uid)
+        bot.answer_callback_query(call.id, "❌ رد شد.")
+        try:
+            bot.send_message(target_uid,
+                "❌ <b>درخواست نمایندگی شما رد شد.</b>",
+                parse_mode="HTML")
+        except Exception:
+            pass
+        user_row = get_user(target_uid)
+        send_to_topic("agency_log",
+            f"❌ <b>نمایندگی رد شد</b>\n\n"
+            f"👤 نام: {esc(user_row['full_name'] if user_row else str(target_uid))}\n"
+            f"🆔 آیدی: <code>{target_uid}</code>\n"
+            f"ردکننده: <code>{uid}</code>"
+        )
+        log_admin_action(uid, f"درخواست نمایندگی #{req_id} (کاربر {target_uid}) رد شد")
+        send_or_edit(call, f"❌ درخواست #{req_id} رد شد.", back_button("adm:resreq:list:0"))
+        return
+
+    if data == "adm:resreq:minwallet":
+        if not admin_has_perm(uid, "agency") and not admin_has_perm(uid, "full_users"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        cur_val = setting_get("agency_request_min_wallet", "0")
+        state_set(uid, "admin_set_resreq_min_wallet")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"💰 <b>حداقل موجودی برای درخواست نمایندگی</b>\n\n"
+            f"مقدار فعلی: <b>{fmt_price(int(cur_val or 0))} تومان</b>\n\n"
+            "مقدار جدید را به تومان وارد کنید (0 = بدون محدودیت):",
+            back_button("admin:agents"))
+        return
+
     # ── Agency price config (3-mode) ──────────────────────────────────────────
     if data.startswith("adm:agcfg:") and data.count(":") == 2:
         # adm:agcfg:{target_id}  — show mode selector
@@ -9629,7 +9922,7 @@ def _dispatch_callback(call, uid, data):
             return
         cfg  = get_agency_price_config(target_id)
         mode = cfg["price_mode"]
-        tick = {m: "✅ " for m in ["global", "type", "package"]}
+        tick = {m: "✅ " for m in ["global", "type", "package", "per_gb"]}
         for k in tick:
             tick[k] = "✅ " if mode == k else ""
         kb = types.InlineKeyboardMarkup()
@@ -9642,11 +9935,14 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton(
             f"{tick['package']}📦 قیمت جداگانه هر پکیج",
             callback_data=f"adm:agcfg:pkg:{target_id}"))
+        kb.add(types.InlineKeyboardButton(
+            f"{tick['per_gb']}💵 قیمت به ازای هر گیگ",
+            callback_data=f"adm:agcfg:pergb:{target_id}"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:usr:v:{target_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         target_user = get_user(target_id)
         uname = esc(target_user["full_name"]) if target_user else str(target_id)
-        mode_labels = {"global": "🌍 تخفیف کل محصولات", "type": "🧩 تخفیف هر دسته", "package": "📦 قیمت هر پکیج"}
+        mode_labels = {"global": "🌍 تخفیف کل محصولات", "type": "🧩 تخفیف هر دسته", "package": "📦 قیمت هر پکیج", "per_gb": "💵 قیمت به ازای هر گیگ"}
         send_or_edit(call,
             f"💰 <b>قیمت نمایندگی کاربر</b>\n"
             f"👤 {uname}\n\n"
@@ -9773,6 +10069,47 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:agcfg:{target_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "📦 <b>قیمت هر پکیج</b>\n\nبرای ویرایش روی پکیج بزنید:", kb)
+        return
+
+    if data.startswith("adm:agcfg:pergb:") and data.count(":") == 3:
+        # adm:agcfg:pergb:{target_id} — show types list with per-GB prices
+        target_id = int(data.split(":")[3])
+        set_agency_price_config(target_id, "per_gb",
+            get_agency_price_config(target_id)["global_type"],
+            get_agency_price_config(target_id)["global_val"])
+        types_list = get_all_types()
+        if not types_list:
+            bot.answer_callback_query(call.id, "هیچ نوعی تعریف نشده.", show_alert=True)
+            return
+        pgb_rows = {r["type_id"]: r["price_per_gb"] for r in get_all_per_gb_prices(target_id)}
+        kb = types.InlineKeyboardMarkup()
+        for t in types_list:
+            pgb = pgb_rows.get(t["id"])
+            dot = "✅" if pgb is not None else "⬜️"
+            val_lbl = f"{fmt_price(pgb)} ت/گیگ" if pgb is not None else "تنظیم نشده"
+            kb.add(types.InlineKeyboardButton(
+                f"{dot} {t['name']} | {val_lbl}",
+                callback_data=f"adm:agcfg:pgbt:{target_id}:{t['id']}"
+            ))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:agcfg:{target_id}", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "💵 <b>قیمت به ازای هر گیگ (هر دسته)</b>\n\nبرای ویرایش روی دسته بزنید:", kb)
+        return
+
+    if data.startswith("adm:agcfg:pgbt:") and data.count(":") == 4:
+        # adm:agcfg:pgbt:{target_id}:{type_id}
+        parts     = data.split(":")
+        target_id = int(parts[3])
+        type_id   = int(parts[4])
+        pgb = get_per_gb_price(target_id, type_id)
+        cur_label = f"{fmt_price(pgb)} تومان/گیگ" if pgb is not None else "تنظیم نشده"
+        state_set(uid, "admin_agcfg_pergb_val", target_user_id=target_id, type_id=type_id)
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"💵 <b>قیمت به ازای هر گیگ</b>\n\n"
+            f"تنظیم فعلی: <b>{cur_label}</b>\n\n"
+            "قیمت به ازای هر گیگ را به تومان وارد کنید (مثال: 5000):",
+            back_button(f"adm:agcfg:pergb:{target_id}"))
         return
 
     # ── Admin: Broadcast ──────────────────────────────────────────────────────
