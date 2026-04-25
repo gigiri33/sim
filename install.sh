@@ -697,6 +697,34 @@ bot_loop() {
 }
 
 main() {
+  # ── non-interactive flags ──────────────────────────────────────────────────
+  case "${1:-}" in
+    --update-all|-u)
+      check_root
+      ensure_safe_cwd
+      header
+      local instances; instances="$(all_instances)"
+      if [[ -z "$instances" ]]; then
+        echo -e "${R}✗ No installed bots found.${N}"
+        exit 1
+      fi
+      for num in $instances; do
+        DIR="${BASE_DIR}-${num}"
+        SERVICE="${BASE_SERVICE}-${num}"
+        BOT_NAME="$(get_bot_name "$num")"
+        echo ""
+        echo -e "${C}━━━ Updating ${BOT_NAME} (instance ${num}) ━━━${N}"
+        [[ -d "$DIR/.git" ]] || { echo -e "${R}✗ Not installed, skipping.${N}"; continue; }
+        clone_or_update_repo
+        setup_venv
+        systemctl restart "$SERVICE" 2>/dev/null || true
+        ok "${BOT_NAME} updated and restarted"
+      done
+      echo ""
+      exit 0
+      ;;
+  esac
+  # ──────────────────────────────────────────────────────────────────────────
 
   [[ -t 0 ]] || exec < /dev/tty
   check_root
