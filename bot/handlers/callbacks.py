@@ -4685,8 +4685,20 @@ def _dispatch_callback(call, uid, data):
         if should_show_bulk_qty(uid):
             _show_qty_prompt(call, package_row, price)
             return
-        # ── Naming step (always shown for all users) ──────────────────────────
-        _show_naming_choice(call, uid, package_row, price, 1, price)
+        # ── Naming step (panel packages only) ────────────────────────────────
+        _pkg_source = package_row["config_source"] if "config_source" in package_row.keys() else "manual"
+        if _pkg_source == "panel":
+            _show_naming_choice(call, uid, package_row, price, 1, price)
+            return
+        # Non-panel package: skip naming, go directly to payment
+        state_set(uid, "buy_select_method",
+                  package_id=package_id, amount=price, original_amount=price,
+                  unit_price=price, quantity=1,
+                  kind="config_purchase", naming_type="random")
+        if setting_get("discount_codes_enabled", "0") == "1":
+            if _show_discount_prompt(call, price):
+                return
+        _show_purchase_gateways(call, uid, package_id, price, package_row)
         return
 
     if data.startswith("pay:wallet:"):
@@ -9503,9 +9515,16 @@ def _dispatch_callback(call, uid, data):
                 return
             kb = types.InlineKeyboardMarkup()
             for p in packs:
-                ap    = get_agency_price(target_id, p["id"])
-                price = fmt_price(ap) if ap is not None else fmt_price(p["price"])
-                label = f"{p['name']} | {price} ت"
+                ap         = get_agency_price(target_id, p["id"])
+                eff_price  = get_effective_price(target_id, p)
+                base_price = p["price"]
+                if eff_price != base_price:
+                    price_display = f"{fmt_price(eff_price)} ت"
+                elif ap is not None:
+                    price_display = f"{fmt_price(ap)} ت"
+                else:
+                    price_display = f"{fmt_price(base_price)} ت"
+                label = f"{p['name']} | {price_display}"
                 kb.add(types.InlineKeyboardButton(label, callback_data=f"adm:usr:agpe:{target_id}:{p['id']}"))
             kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:usr:v:{target_id}", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
@@ -9919,9 +9938,16 @@ def _dispatch_callback(call, uid, data):
             return
         kb = types.InlineKeyboardMarkup()
         for p in packs:
-            ap    = get_agency_price(target_id, p["id"])
-            price = fmt_price(ap) if ap is not None else fmt_price(p["price"])
-            label = f"{p['name']} | {price} ت"
+            ap           = get_agency_price(target_id, p["id"])
+            eff_price    = get_effective_price(target_id, p)
+            base_price   = p["price"]
+            if eff_price != base_price:
+                price_display = f"{fmt_price(eff_price)} ت"
+            elif ap is not None:
+                price_display = f"{fmt_price(ap)} ت"
+            else:
+                price_display = f"{fmt_price(base_price)} ت"
+            label = f"{p['name']} | {price_display}"
             kb.add(types.InlineKeyboardButton(label, callback_data=f"adm:usr:agpe:{target_id}:{p['id']}"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:agcfg:{target_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)

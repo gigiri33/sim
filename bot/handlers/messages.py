@@ -779,8 +779,18 @@ def universal_handler(message):
                       unit_price=unit_price, quantity=qty, kind="config_purchase")
             summary = _qty_order_summary_text(package_row, unit_price, qty)
             bot.send_message(uid, summary, parse_mode="HTML")
-            from .callbacks import _show_naming_choice
-            _show_naming_choice(message, uid, package_row, unit_price, qty, total)
+            _pkg_source = package_row["config_source"] if "config_source" in package_row.keys() else "manual"
+            if _pkg_source == "panel":
+                from .callbacks import _show_naming_choice
+                _show_naming_choice(message, uid, package_row, unit_price, qty, total)
+            else:
+                # Non-panel package: skip naming, go directly to payment
+                state_set(uid, "buy_select_method",
+                          package_id=package_id, amount=total, original_amount=total,
+                          unit_price=unit_price, quantity=qty,
+                          kind="config_purchase", naming_type="random")
+                from .callbacks import _show_purchase_gateways
+                _show_purchase_gateways(message, uid, package_id, total, package_row)
             return
 
         # ── Custom service name entry ─────────────────────────────────────────
