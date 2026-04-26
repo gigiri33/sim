@@ -69,6 +69,8 @@ from ..db import (
     toggle_payment_card_active, delete_payment_card, pick_card_for_payment,
     # Fee / Bonus
     get_gateway_fee_amount, get_gateway_bonus_amount, apply_gateway_fee,
+    # Addon prices
+    get_panel_connected_types, get_addon_price, set_addon_price, get_all_addon_prices_for_addon_type,
 )
 from ..gateways.base import is_gateway_available, is_card_info_complete, get_gateway_range_text, is_gateway_in_range, build_gateway_range_guide
 from ..gateways.crypto import fetch_crypto_prices
@@ -87,6 +89,7 @@ from ..ui.menus import show_main_menu, show_profile, show_support, show_my_confi
 from ..ui.notifications import (
     deliver_purchase_message, admin_purchase_notify, admin_renewal_notify,
     notify_pending_order_to_admins, _complete_pending_order, auto_fulfill_pending_orders,
+    admin_addon_notify,
 )
 from ..group_manager import (
     ensure_group_topics, reset_and_recreate_topics, get_group_id,
@@ -1247,7 +1250,192 @@ def _qty_order_summary_text(package_row, unit_price, quantity):
     )
 
 
-def _notify_panel_error(uid, package_row, stage: str, detail: str = "", panel_config_id=None, panel_id=None):
+# ── Admin add-on price list renderer ─────────────────────────────────────────
+
+def _render_addon_price_list(call_or_target, addon_type):
+    """Render the admin panel for setting per-unit addon prices for all panel types."""
+    enabled_key  = f"addon_{addon_type}_enabled"
+    is_enabled   = setting_get(enabled_key, "1") == "1"
+    toggle_label = (
+        f"{'❌ غیرفعال کردن' if is_enabled else '✅ فعال کردن'} خرید "
+        f"{'حجم' if addon_type == 'volume' else 'زمان'} اضافه"
+    )
+    toggle_cb  = f"adm:addons:{addon_type}:toggle"
+    unit_label = "گیگ" if addon_type == "volume" else "روز"
+    cb_prefix  = "vol" if addon_type == "volume" else "time"
+    title      = "📦 تعیین قیمت حجم اضافه" if addon_type == "volume" else "⏰ تعیین قیمت زمان اضافه"
+
+    rows = get_all_addon_prices_for_addon_type(addon_type)
+    text = (
+        f"{title}\n\n"
+        f"وضعیت: {'✅ فعال' if is_enabled else '❌ غیرفعال'}\n\n"
+    )
+    if rows:
+        for r in rows:
+            norm = (fmt_price(r["normal_unit_price"]) + " تومان") if r["normal_unit_price"] is not None else "تعیین نشده"
+            res  = (fmt_price(r["reseller_unit_price"]) + " تومان") if r["reseller_unit_price"] is not None else "تعیین نشده"
+            text += (
+                f"🧩 <b>{esc(r['type_name'])}</b>\n"
+                f"  👤 کاربران عادی: {norm} / {unit_label}\n"
+                f"  🤝 نمایندگان: {res} / {unit_label}\n\n"
+            )
+    else:
+        text += "هیچ نوع سرویس پنل‌محوری یافت نشد."
+
+    kb = types.InlineKeyboardMarkup()
+    kb.add(types.InlineKeyboardButton(toggle_label, callback_data=toggle_cb))
+    for r in rows:
+        tid = r["type_id"]
+        short_name = esc(r["type_name"][:15])
+        kb.row(
+            types.InlineKeyboardButton(f"👤 {short_name} - کاربر",
+                                       callback_data=f"adm:addons:{cb_prefix}:set:{tid}:normal"),
+            types.InlineKeyboardButton(f"🤝 {short_name} - نماینده",
+                                       callback_data=f"adm:addons:{cb_prefix}:set:{tid}:res"),
+        )
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:addons",
+                                      icon_custom_emoji_id="5253997076169115797"))
+    send_or_edit(call_or_target, text, kb)
+
+
+# ── Addon flow helpers ────────────────────────────────────────────────────────
+
+def _get_addon_unit_price(cfg_row, addon_type):
+    """Resolve effective per-unit price for an addon (volume/time) given the config row.
+    Returns (unit_price: int, error_msg: str|None).
+    """
+    from ..db import get_package as _gpkg
+    pkg = _gpkg(cfg_row["package_id"])
+    if not pkg:
+        return None, "سرویس یافت نشد."
+    price_row = get_addon_price(pkg["type_id"], addon_type)
+    from ..db import get_user as _guser
+    user = _guser(cfg_row["user_id"])
+    is_agent = bool(user["is_agent"]) if user else False
+    unit_price = None
+    if price_row:
+        if is_agent and price_row["reseller_unit_price"] is not None:
+            unit_price = price_row["reseller_unit_price"]
+        elif price_row["normal_unit_price"] is not None:
+            unit_price = price_row["normal_unit_price"]
+    if unit_price is None:
+        return None, "قیمت این افزودنی از سمت پشتیبانی تعیین نشده است."
+    return unit_price, None
+
+
+def _show_addon_invoice(target, uid, addon_type):
+    """Build and send/edit the addon purchase invoice based on current state_data."""
+    sd = state_data(uid)
+    config_id       = sd.get("config_id")
+    unit_price      = int(sd.get("unit_price", 0))
+    subtotal        = int(sd.get("subtotal", 0))
+    discount_amount = int(sd.get("discount_amount", 0))
+    final_amount    = int(sd.get("final_amount", subtotal))
+
+    from ..db import get_panel_config as _gcfg, get_package as _gpkg
+    cfg = _gcfg(config_id) if config_id else None
+    pkg = _gpkg(cfg["package_id"]) if cfg else None
+
+    # Get type_name via joined query if possible
+    from ..db import get_all_types as _gt
+    type_name = "—"
+    if pkg:
+        all_types = _gt()
+        for t in all_types:
+            if t["id"] == pkg["type_id"]:
+                type_name = t["name"]
+                break
+
+    if addon_type == "volume":
+        gb     = sd.get("amount_gb", 0)
+        title  = "📋 <b>فاکتور خرید حجم اضافه</b>"
+        detail = (
+            f"📦 حجم اضافه: <b>{gb} گیگ</b>\n"
+            f"💵 قیمت هر گیگ: <b>{fmt_price(unit_price)} تومان</b>\n"
+        )
+    else:
+        days   = sd.get("amount_days", 0)
+        title  = "📋 <b>فاکتور خرید زمان اضافه</b>"
+        detail = (
+            f"⏰ زمان اضافه: <b>{days} روز</b>\n"
+            f"💵 قیمت هر روز: <b>{fmt_price(unit_price)} تومان</b>\n"
+        )
+
+    disc_line = f"🎁 مبلغ تخفیف: <b>{fmt_price(discount_amount)} تومان</b>\n" if discount_amount else ""
+    text = (
+        f"{title}\n\n"
+        f"🧩 نوع سرویس: {esc(type_name)}\n"
+        f"{detail}"
+        f"💰 مبلغ کل: <b>{fmt_price(subtotal)} تومان</b>\n"
+        f"{disc_line}"
+        f"✅ مبلغ نهایی: <b>{fmt_price(final_amount)} تومان</b>"
+    )
+
+    kb = types.InlineKeyboardMarkup()
+    # Discount code button
+    if setting_get("discount_codes_enabled", "1") == "1":
+        from ..db import get_user as _gu
+        user = _gu(uid)
+        is_agent = bool(user["is_agent"]) if user else False
+        if has_eligible_discount_codes(is_agent):
+            kb.add(types.InlineKeyboardButton(
+                "🎟 کد تخفیف",
+                callback_data=f"addon:disc:{config_id}:{addon_type}"))
+
+    # Wallet pay
+    if wallet_pay_enabled_for(uid):
+        from ..db import get_user as _gu2
+        user2 = _gu2(uid)
+        balance = int(user2["balance"]) if user2 else 0
+        bal_label = f"💰 پرداخت از موجودی ({fmt_price(balance)} تومان)"
+        kb.add(types.InlineKeyboardButton(bal_label,
+                                          callback_data=f"addon:pay:{config_id}:{addon_type}:wallet"))
+
+    # Card gateway
+    if is_gateway_available("card", uid) and is_card_info_complete():
+        lbl = setting_get("gw_card_display_name", "").strip() or "💳 کارت به کارت"
+        kb.add(types.InlineKeyboardButton(lbl,
+                                          callback_data=f"addon:pay:{config_id}:{addon_type}:card"))
+
+    back_cb = f"addon:{'vol' if addon_type == 'volume' else 'time'}:{config_id}"
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data=back_cb,
+                                      icon_custom_emoji_id="5253997076169115797"))
+    send_or_edit(target, text, kb)
+
+
+def _execute_addon_update(config_id, addon_type, sd, uid):
+    """Apply volume/time addon to the panel client.
+    Returns (True, None) or (False, user_friendly_error_str).
+    """
+    from ..db import get_panel_config as _gcfg, get_panel as _gpnl
+    from ..panels.client import PanelClient
+    cfg = _gcfg(config_id)
+    if not cfg:
+        return False, "کانفیگ یافت نشد."
+    panel = _gpnl(cfg["panel_id"])
+    if not panel:
+        return False, "پنل یافت نشد."
+    pc = PanelClient(
+        protocol=panel["protocol"],
+        host=panel["host"],
+        port=panel["port"],
+        path=panel.get("path") or "",
+        username=panel["username"],
+        password=panel["password"],
+    )
+    if addon_type == "volume":
+        gb = float(sd.get("amount_gb", 0))
+        ok, result = pc.add_client_volume(cfg["inbound_id"], cfg["client_uuid"], gb)
+    else:
+        days = int(sd.get("amount_days", 0))
+        ok, result = pc.add_client_time(cfg["inbound_id"], cfg["client_uuid"], days)
+    if not ok:
+        _notify_panel_error(uid, None, f"addon_{addon_type}", str(result), config_id, cfg["panel_id"])
+        return False, str(result)
+    return True, None
+
+
+
     """
     Alert owner admins (ADMIN_IDS) and the error_log group topic
     when a panel config creation or delivery fails.
@@ -6680,6 +6868,23 @@ def _dispatch_callback(call, uid, data):
                                       is_user_view=True)
             return
 
+        # mypnlcfg:renewwarn:{config_id}  — confirmation warning before quick renewal
+        if data.startswith("mypnlcfg:renewwarn:"):
+            config_id = int(data.split(":")[-1])
+            cfg = get_panel_config(config_id)
+            if not cfg or cfg["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            bot.answer_callback_query(call.id)
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("✅ بله، تمدید کن", callback_data=f"mypnlcfg:renewconfirm:{config_id}"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"mypnlcfg:d:{config_id}", icon_custom_emoji_id="5253997076169115797"))
+            send_or_edit(call,
+                "⚠️ <b>تمدید فوری</b>\n\n"
+                "با تمدید فوری، <b>حجم و زمان</b> کانفیگ شما ریست می‌شود و از نو با اطلاعات پکیج جدید فعال می‌گردد.\n\n"
+                "آیا مطمئن هستید؟",
+                kb)
+            return
+
         # mypnlcfg:renewconfirm:{config_id}  — show package list for panel config renewal
         if data.startswith("mypnlcfg:renewconfirm:"):
             config_id = int(data.split(":")[-1])
@@ -7264,11 +7469,230 @@ def _dispatch_callback(call, uid, data):
             send_or_edit(call, header, kb)
             return
 
+    # ── User: Volume add-on ──────────────────────────────────────────────────
+    if data.startswith("addon:vol:") and len(data.split(":")) == 3:
+        config_id = int(data.split(":")[2])
+        cfg = get_panel_config(config_id)
+        if not cfg or cfg["user_id"] != uid:
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+        if setting_get("addon_volume_enabled", "1") != "1":
+            bot.answer_callback_query(call.id, "خرید حجم اضافه در حال حاضر غیرفعال است.", show_alert=True); return
+        unit_price, err = _get_addon_unit_price(cfg, "volume")
+        if unit_price is None:
+            bot.answer_callback_query(call.id, err, show_alert=True); return
+        bot.answer_callback_query(call.id)
+        state_set(uid, "addon_vol_flow", config_id=config_id, unit_price=unit_price,
+                  discount_amount=0, final_amount=0)
+        kb = types.InlineKeyboardMarkup()
+        kb.row(
+            types.InlineKeyboardButton("1 گیگ",  callback_data=f"addon:va:{config_id}:1"),
+            types.InlineKeyboardButton("5 گیگ",  callback_data=f"addon:va:{config_id}:5"),
+            types.InlineKeyboardButton("10 گیگ", callback_data=f"addon:va:{config_id}:10"),
+        )
+        kb.row(
+            types.InlineKeyboardButton("20 گیگ", callback_data=f"addon:va:{config_id}:20"),
+            types.InlineKeyboardButton("50 گیگ", callback_data=f"addon:va:{config_id}:50"),
+            types.InlineKeyboardButton("مقدار دلخواه", callback_data=f"addon:va:{config_id}:custom"),
+        )
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"mypnlcfg:d:{config_id}",
+                                          icon_custom_emoji_id="5253997076169115797"))
+        send_or_edit(call,
+            f"📦 <b>خرید حجم اضافه</b>\n\n"
+            f"💵 قیمت هر گیگ: <b>{fmt_price(unit_price)} تومان</b>\n\n"
+            "مقدار حجم مورد نیاز را انتخاب کنید:", kb)
+        return
+
+    if data.startswith("addon:va:"):
+        # addon:va:{config_id}:{gb_or_custom}
+        parts     = data.split(":")
+        config_id = int(parts[2])
+        gb_str    = parts[3]
+        if gb_str == "custom":
+            state_set(uid, "addon_vol_custom", config_id=config_id)
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                "📦 مقدار حجم را به گیگابایت وارد کنید (عدد صحیح یا اعشاری، مثال: 5 یا 2.5):",
+                back_button(f"addon:vol:{config_id}"))
+            return
+        gb = float(gb_str)
+        sd = state_data(uid)
+        unit_price = int(sd.get("unit_price", 0))
+        subtotal   = int(gb * unit_price)
+        state_set(uid, "addon_vol_flow",
+                  config_id=config_id, unit_price=unit_price,
+                  amount_gb=gb, subtotal=subtotal, discount_amount=0, final_amount=subtotal)
+        bot.answer_callback_query(call.id)
+        _show_addon_invoice(call, uid, "volume")
+        return
+
+    # ── User: Time add-on ────────────────────────────────────────────────────
+    if data.startswith("addon:time:") and len(data.split(":")) == 3:
+        config_id = int(data.split(":")[2])
+        cfg = get_panel_config(config_id)
+        if not cfg or cfg["user_id"] != uid:
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+        if setting_get("addon_time_enabled", "1") != "1":
+            bot.answer_callback_query(call.id, "خرید زمان اضافه در حال حاضر غیرفعال است.", show_alert=True); return
+        unit_price, err = _get_addon_unit_price(cfg, "time")
+        if unit_price is None:
+            bot.answer_callback_query(call.id, err, show_alert=True); return
+        bot.answer_callback_query(call.id)
+        state_set(uid, "addon_time_flow", config_id=config_id, unit_price=unit_price,
+                  discount_amount=0, final_amount=0)
+        kb = types.InlineKeyboardMarkup()
+        kb.row(
+            types.InlineKeyboardButton("7 روز",  callback_data=f"addon:ta:{config_id}:7"),
+            types.InlineKeyboardButton("15 روز", callback_data=f"addon:ta:{config_id}:15"),
+            types.InlineKeyboardButton("30 روز", callback_data=f"addon:ta:{config_id}:30"),
+        )
+        kb.row(
+            types.InlineKeyboardButton("60 روز", callback_data=f"addon:ta:{config_id}:60"),
+            types.InlineKeyboardButton("مقدار دلخواه", callback_data=f"addon:ta:{config_id}:custom"),
+        )
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"mypnlcfg:d:{config_id}",
+                                          icon_custom_emoji_id="5253997076169115797"))
+        send_or_edit(call,
+            f"⏰ <b>خرید زمان اضافه</b>\n\n"
+            f"💵 قیمت هر روز: <b>{fmt_price(unit_price)} تومان</b>\n\n"
+            "تعداد روز مورد نیاز را انتخاب کنید:", kb)
+        return
+
+    if data.startswith("addon:ta:"):
+        # addon:ta:{config_id}:{days_or_custom}
+        parts     = data.split(":")
+        config_id = int(parts[2])
+        days_str  = parts[3]
+        if days_str == "custom":
+            state_set(uid, "addon_time_custom", config_id=config_id)
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                "⏰ تعداد روز را وارد کنید (عدد صحیح مثبت):",
+                back_button(f"addon:time:{config_id}"))
+            return
+        days       = int(days_str)
+        sd         = state_data(uid)
+        unit_price = int(sd.get("unit_price", 0))
+        subtotal   = days * unit_price
+        state_set(uid, "addon_time_flow",
+                  config_id=config_id, unit_price=unit_price,
+                  amount_days=days, subtotal=subtotal, discount_amount=0, final_amount=subtotal)
+        bot.answer_callback_query(call.id)
+        _show_addon_invoice(call, uid, "time")
+        return
+
+    # ── User: Addon discount code ────────────────────────────────────────────
+    if data.startswith("addon:disc:"):
+        # addon:disc:{config_id}:{addon_type}
+        parts      = data.split(":")
+        config_id  = int(parts[2])
+        addon_type = parts[3]
+        sd         = state_data(uid)
+        subtotal   = int(sd.get("subtotal", sd.get("final_amount", 0)))
+        # Keep all state fields, just change state name
+        new_sd = {k: v for k, v in sd.items()}
+        new_sd["prev_addon_type"]    = addon_type
+        new_sd["prev_addon_config"]  = config_id
+        new_sd["original_amount"]    = subtotal
+        state_set(uid, "await_addon_discount", **new_sd)
+        bot.answer_callback_query(call.id)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("بدون تخفیف", callback_data=f"addon:nodisc:{config_id}:{addon_type}"))
+        send_or_edit(call,
+            "🎟 <b>کد تخفیف</b>\n\nکد تخفیف خود را وارد کنید:", kb)
+        return
+
+    if data.startswith("addon:nodisc:"):
+        # addon:nodisc:{config_id}:{addon_type}
+        parts      = data.split(":")
+        config_id  = int(parts[2])
+        addon_type = parts[3]
+        sd         = state_data(uid)
+        prev       = f"addon_{'vol' if addon_type == 'volume' else 'time'}_flow"
+        state_set(uid, prev, **{k: v for k, v in sd.items()
+                                if k not in ("prev_addon_type", "prev_addon_config", "original_amount")})
+        bot.answer_callback_query(call.id)
+        _show_addon_invoice(call, uid, addon_type)
+        return
+
+    # ── User: Addon payment ──────────────────────────────────────────────────
+    if data.startswith("addon:pay:"):
+        # addon:pay:{config_id}:{addon_type}:{method}
+        parts      = data.split(":")
+        config_id  = int(parts[2])
+        addon_type = parts[3]   # 'volume' or 'time'
+        method     = parts[4]   # 'wallet' or 'card'
+        cfg = get_panel_config(config_id)
+        if not cfg or cfg["user_id"] != uid:
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+        sd           = state_data(uid)
+        final_amount = int(sd.get("final_amount", sd.get("subtotal", 0)))
+        subtotal     = int(sd.get("subtotal", final_amount))
+        discount_id  = sd.get("discount_code_id")
+
+        if method == "wallet":
+            user = get_user(uid)
+            balance = int(user["balance"]) if user else 0
+            if balance < final_amount and not can_use_credit(uid, final_amount):
+                bot.answer_callback_query(call.id, "موجودی کیف پول کافی نیست.", show_alert=True); return
+            # Deduct balance
+            update_balance(uid, -final_amount)
+            # Record discount usage
+            if discount_id:
+                record_discount_usage(discount_id, uid)
+            # Apply panel change
+            ok, err = _execute_addon_update(config_id, addon_type, sd, uid)
+            if not ok:
+                # Refund on failure
+                update_balance(uid, final_amount)
+                bot.answer_callback_query(call.id)
+                send_or_edit(call,
+                    "❌ خطا در اعمال افزودنی.\nمبلغ به کیف پول بازگردانده شد.\nلطفاً با پشتیبانی تماس بگیرید.",
+                    back_button(f"mypnlcfg:d:{config_id}"))
+                return
+            state_clear(uid)
+            bot.answer_callback_query(call.id, "✅ افزودنی با موفقیت اعمال شد.")
+            label = "حجم" if addon_type == "volume" else "زمان"
+            send_or_edit(call,
+                f"✅ <b>افزودنی با موفقیت اعمال شد</b>\n\n"
+                f"{'📦' if addon_type == 'volume' else '⏰'} {label} اضافه به سرویس شما اضافه شد.",
+                back_button(f"mypnlcfg:d:{config_id}"))
+            admin_addon_notify(uid, config_id, addon_type, sd, final_amount, "wallet")
+            return
+
+        if method == "card":
+            # Card payment — store current state and show card info
+            from ..db import pick_card_for_payment as _pick_card
+            card = _pick_card()
+            if not card:
+                bot.answer_callback_query(call.id, "در حال حاضر پرداخت کارت به کارت امکان‌پذیر نیست.", show_alert=True); return
+            state_set(uid, "addon_card_pending",
+                      config_id=config_id, addon_type=addon_type,
+                      final_amount=final_amount, subtotal=subtotal,
+                      discount_code_id=discount_id,
+                      **{k: v for k, v in sd.items()})
+            bot.answer_callback_query(call.id)
+            card_holder = card.get("holder_name", "")
+            card_number = card.get("card_number", "")
+            bank_name   = card.get("bank_name", "")
+            label       = "حجم اضافه" if addon_type == "volume" else "زمان اضافه"
+            text = (
+                f"💳 <b>پرداخت {label}</b>\n\n"
+                f"💰 مبلغ: <b>{fmt_price(final_amount)} تومان</b>\n\n"
+                f"🏦 بانک: {esc(bank_name)}\n"
+                f"👤 صاحب حساب: {esc(card_holder)}\n"
+                f"💳 شماره کارت:\n<code>{esc(card_number)}</code>\n\n"
+                f"پس از واریز، تصویر رسید را ارسال کنید."
+            )
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("❌ انصراف", callback_data=f"addon:{'vol' if addon_type=='volume' else 'time'}:{config_id}"))
+            send_or_edit(call, text, kb)
+            return
+        return
+
     if data == "admin:add_config":
         if not (admin_has_perm(uid, "register_config") or admin_has_perm(uid, "manage_configs")):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
             return
-        types_list = get_all_types()
         kb = types.InlineKeyboardMarkup()
         for item in types_list:
             kb.add(types.InlineKeyboardButton(f"🧩 {item['name']}", callback_data=f"adm:cfg:t:{item['id']}"))
@@ -13241,7 +13665,7 @@ def _dispatch_callback(call, uid, data):
             return
         audience = data.split(":")[3] if data.split(":")[3] in ("all", "public", "agents") else "all"
         sd = state_data(uid)
-        state_set(uid, "admin_discount_add_scope",
+        state_set(uid, "admin_discount_add_usage",
                   code=sd.get("code", ""),
                   disc_type=sd.get("disc_type", "pct"),
                   discount_value=sd.get("discount_value", 0),
@@ -13250,18 +13674,50 @@ def _dispatch_callback(call, uid, data):
                   audience=audience)
         bot.answer_callback_query(call.id)
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("🌐 همه پکیج‌ها", callback_data="admin:disc:scope:all"))
-        kb.add(types.InlineKeyboardButton("🧩 فقط نوع‌های خاص", callback_data="admin:disc:scope:types"))
-        kb.add(types.InlineKeyboardButton("📦 فقط پکیج‌های خاص", callback_data="admin:disc:scope:packages"))
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:discounts", icon_custom_emoji_id="5253997076169115797"))
+        kb.add(types.InlineKeyboardButton("🌐 همه خریدها",          callback_data="admin:disc:add_usage:all"))
+        kb.add(types.InlineKeyboardButton("🛒 فقط خرید پکیج",       callback_data="admin:disc:add_usage:package"))
+        kb.add(types.InlineKeyboardButton("📦 فقط خرید حجم اضافه", callback_data="admin:disc:add_usage:addon_volume"))
+        kb.add(types.InlineKeyboardButton("⏰ فقط خرید زمان اضافه", callback_data="admin:disc:add_usage:addon_time"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:discounts",
+                                          icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call,
             "🎟 <b>افزودن کد تخفیف</b>\n\n"
-            "مرحله ۶/۶: محدوده استفاده از این کد را انتخاب کنید:\n\n"
+            "مرحله ۶/۷: این کد تخفیف برای کدام نوع خرید قابل استفاده باشد؟",
+            kb)
+        return
+
+    if data.startswith("admin:disc:add_usage:"):
+        if not is_admin(uid):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        usage_scope = data.split(":")[3]
+        if usage_scope not in ("all", "package", "addon_volume", "addon_time"):
+            usage_scope = "all"
+        sd = state_data(uid)
+        state_set(uid, "admin_discount_add_scope",
+                  code=sd.get("code", ""),
+                  disc_type=sd.get("disc_type", "pct"),
+                  discount_value=sd.get("discount_value", 0),
+                  max_uses_total=sd.get("max_uses_total", 0),
+                  max_uses_per_user=sd.get("max_uses_per_user", 0),
+                  audience=sd.get("audience", "all"),
+                  usage_scope=usage_scope)
+        bot.answer_callback_query(call.id)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("🌐 همه پکیج‌ها",          callback_data="admin:disc:scope:all"))
+        kb.add(types.InlineKeyboardButton("🧩 فقط نوع‌های خاص",      callback_data="admin:disc:scope:types"))
+        kb.add(types.InlineKeyboardButton("📦 فقط پکیج‌های خاص",    callback_data="admin:disc:scope:packages"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:discounts",
+                                          icon_custom_emoji_id="5253997076169115797"))
+        send_or_edit(call,
+            "🎟 <b>افزودن کد تخفیف</b>\n\n"
+            "مرحله ۷/۷: محدوده پکیج را انتخاب کنید:\n\n"
             "🌐 <b>همه پکیج‌ها</b> — بدون محدودیت\n"
             "🧩 <b>نوع‌های خاص</b> — فقط برای نوع‌های انتخابی\n"
             "📦 <b>پکیج‌های خاص</b> — فقط برای پکیج‌های انتخابی",
             kb)
         return
+
 
     if data.startswith("admin:disc:scope:"):
         if not is_admin(uid):
@@ -13282,6 +13738,7 @@ def _dispatch_callback(call, uid, data):
                     int(sd.get("max_uses_per_user", 0) or 0),
                     audience=sd.get("audience", "all"),
                     scope_type="all",
+                    usage_scope=sd.get("usage_scope", "all"),
                 )
             except Exception:
                 bot.answer_callback_query(call.id, "⚠️ این کد قبلاً ثبت شده است.", show_alert=True)
@@ -13351,6 +13808,7 @@ def _dispatch_callback(call, uid, data):
                 int(sd.get("max_uses_per_user", 0) or 0),
                 audience=sd.get("audience", "all"),
                 scope_type=scope_type,
+                usage_scope=sd.get("usage_scope", "all"),
             )
         except Exception:
             bot.answer_callback_query(call.id, "⚠️ این کد قبلاً ثبت شده است.", show_alert=True)
@@ -14574,6 +15032,61 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id)
         _show_admin_panels(call)
         return
+
+    # ── Admin: Add-on purchase settings ─────────────────────────────────────
+    if data == "adm:addons":
+        if uid not in ADMIN_IDS:
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("📦 تعیین قیمت حجم اضافه",  callback_data="adm:addons:volume"))
+        kb.add(types.InlineKeyboardButton("⏰ تعیین قیمت زمان اضافه", callback_data="adm:addons:time"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel",
+                                          icon_custom_emoji_id="5253997076169115797"))
+        send_or_edit(call, "🛒 <b>افزودنی های خرید</b>\n\nنوع افزودنی را انتخاب کنید:", kb)
+        return
+
+    if data in ("adm:addons:volume", "adm:addons:time"):
+        if uid not in ADMIN_IDS:
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        addon_kind = "volume" if data.endswith(":volume") else "time"
+        bot.answer_callback_query(call.id)
+        _render_addon_price_list(call, addon_kind)
+        return
+
+    if data in ("adm:addons:volume:toggle", "adm:addons:time:toggle"):
+        if uid not in ADMIN_IDS:
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        addon_kind = "volume" if ":volume:" in data else "time"
+        enabled_key = f"addon_{addon_kind}_enabled"
+        cur = setting_get(enabled_key, "1")
+        setting_set(enabled_key, "0" if cur == "1" else "1")
+        bot.answer_callback_query(call.id, "✅ تغییر اعمال شد.")
+        _render_addon_price_list(call, addon_kind)
+        return
+
+    if data.startswith("adm:addons:vol:set:") or data.startswith("adm:addons:time:set:"):
+        if uid not in ADMIN_IDS:
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        # Format: adm:addons:vol:set:{type_id}:{normal|res}
+        parts     = data.split(":")
+        cb_prefix = parts[2]           # 'vol' or 'time'
+        type_id   = int(parts[4])
+        role      = parts[5]           # 'normal' or 'res'
+        addon_kind = "volume" if cb_prefix == "vol" else "time"
+        state_set(uid, "admin_addon_price_set",
+                  addon_type=addon_kind, type_id=type_id, role=role)
+        bot.answer_callback_query(call.id)
+        unit_name = "گیگابایت" if addon_kind == "volume" else "روز"
+        send_or_edit(call,
+            f"💰 قیمت هر {unit_name} را به تومان وارد کنید\n(0 = رایگان):",
+            back_button(f"adm:addons:{addon_kind}"))
+        return
+
 
     if data == "adm:pnl:add":
         if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):

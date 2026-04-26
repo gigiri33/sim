@@ -338,7 +338,8 @@ def universal_handler(message):
 
     # Phone gate — enforce for all incoming messages, not just /start
     sn = state_name(uid)
-    if not is_admin(uid) and sn not in ("waiting_for_phone", "waiting_for_phone_card"):
+    if not is_admin(uid) and sn not in ("waiting_for_phone", "waiting_for_phone_card",
+                                        "await_purchase_receipt", "await_renewal_receipt", "await_wallet_receipt"):
         from ..handlers.start import _phone_required_for_user, _send_phone_request
         if _phone_required_for_user(uid):
             _send_phone_request(message.chat.id, uid)
@@ -831,9 +832,124 @@ def universal_handler(message):
             bot.send_message(uid, "✅ تخفیف ثبت شد.", reply_markup=kb_main(uid))
             return
 
-        # ── Wallet receipt ─────────────────────────────────────────────────────
+        # ── Addon discount code (separate from regular discount flow) ──────────
+        if sn == "await_addon_discount":
+            from ..db import (
+                validate_discount_code as _vdc,
+                get_addon_price as _gap,
+                get_panel_config as _gcfg2,
+                get_package as _gpkg2,
+            )
+            from ..handlers.callbacks import _show_addon_invoice
+            code       = (message.text or "").strip().upper()
+            addon_type = sd.get("prev_addon_type", "volume")
+            config_id  = sd.get("prev_addon_config")
+            original_amount = int(sd.get("original_amount", sd.get("subtotal", 0)))
+            _user2      = get_user(uid)
+            _is_agent2  = bool(_user2 and _user2["is_agent"])
+            usage_scope = f"addon_{addon_type}"
+            ok2, row2, disc2, final2, err2 = _vdc(
+                code, uid, original_amount,
+                is_agent=_is_agent2, package_id=None, usage_scope=usage_scope,
+            )
+            if not ok2:
+                kb = types.InlineKeyboardMarkup()
+                kb.add(types.InlineKeyboardButton("بدون تخفیف", callback_data=f"addon:nodisc:{config_id}:{addon_type}"))
+                bot.send_message(uid,
+                    f"{err2}\n\nمجدداً کد تخفیف وارد کنید یا ادامه دهید.",
+                    reply_markup=kb)
+                return
+            prev = f"addon_{'vol' if addon_type == 'volume' else 'time'}_flow"
+            unit_price = int(sd.get("unit_price", 0))
+            new_sd = {k: v for k, v in sd.items()
+                      if k not in ("prev_addon_type", "prev_addon_config", "original_amount")}
+            new_sd.update({
+                "discount_amount": disc2,
+                "final_amount": final2,
+                "discount_code_id": row2["id"],
+                "subtotal": original_amount,
+            })
+            state_set(uid, prev, **new_sd)
+            bot.send_message(uid, f"✅ کد تخفیف اعمال شد! مبلغ تخفیف: <b>{fmt_price(disc2)} تومان</b>")
+            _show_addon_invoice(message, uid, addon_type)
+            return
+
+        # ── User: Custom volume amount ─────────────────────────────────────────
+        if sn == "addon_vol_custom":
+            from ..db import get_addon_price as _gap2, get_panel_config as _gcfg3, get_package as _gpkg3
+            from ..handlers.callbacks import _show_addon_invoice as _sai
+            config_id = sd.get("config_id")
+            try:
+                gb = float((message.text or "").replace(",", "."))
+                if gb <= 0:
+                    raise ValueError
+            except (ValueError, TypeError):
+                bot.send_message(uid, "⚠️ مقدار معتبر وارد کنید (مثال: 5 یا 2.5)")
+                return
+            cfg3  = _gcfg3(config_id)
+            pkg3  = _gpkg3(cfg3["package_id"]) if cfg3 else None
+            if not pkg3:
+                bot.send_message(uid, "⚠️ سرویس یافت نشد.")
+                return
+            pr = _gap2(pkg3["type_id"], "volume")
+            _usr3 = get_user(uid)
+            _agt3 = bool(_usr3 and _usr3["is_agent"])
+            unit_price = None
+            if pr:
+                if _agt3 and pr["reseller_unit_price"] is not None:
+                    unit_price = pr["reseller_unit_price"]
+                elif pr["normal_unit_price"] is not None:
+                    unit_price = pr["normal_unit_price"]
+            if unit_price is None:
+                bot.send_message(uid, "قیمت این افزودنی تعیین نشده است.")
+                return
+            subtotal = int(gb * unit_price)
+            state_set(uid, "addon_vol_flow",
+                      config_id=config_id, unit_price=unit_price,
+                      amount_gb=gb, subtotal=subtotal, discount_amount=0, final_amount=subtotal)
+            _sai(message, uid, "volume")
+            return
+
+        # ── User: Custom time amount ───────────────────────────────────────────
+        if sn == "addon_time_custom":
+            from ..db import get_addon_price as _gap4, get_panel_config as _gcfg4, get_package as _gpkg4
+            from ..handlers.callbacks import _show_addon_invoice as _sai2
+            config_id = sd.get("config_id")
+            val4 = parse_int(message.text or "")
+            if val4 is None or val4 <= 0:
+                bot.send_message(uid, "⚠️ عدد صحیح مثبت وارد کنید.")
+                return
+            cfg4  = _gcfg4(config_id)
+            pkg4  = _gpkg4(cfg4["package_id"]) if cfg4 else None
+            if not pkg4:
+                bot.send_message(uid, "⚠️ سرویس یافت نشد.")
+                return
+            pr4 = _gap4(pkg4["type_id"], "time")
+            _usr4 = get_user(uid)
+            _agt4 = bool(_usr4 and _usr4["is_agent"])
+            unit_price4 = None
+            if pr4:
+                if _agt4 and pr4["reseller_unit_price"] is not None:
+                    unit_price4 = pr4["reseller_unit_price"]
+                elif pr4["normal_unit_price"] is not None:
+                    unit_price4 = pr4["normal_unit_price"]
+            if unit_price4 is None:
+                bot.send_message(uid, "قیمت این افزودنی تعیین نشده است.")
+                return
+            subtotal4 = val4 * unit_price4
+            state_set(uid, "addon_time_flow",
+                      config_id=config_id, unit_price=unit_price4,
+                      amount_days=val4, subtotal=subtotal4, discount_amount=0, final_amount=subtotal4)
+            _sai2(message, uid, "time")
+            return
+
+
         if sn == "await_wallet_receipt":
             payment_id  = sd.get("payment_id")
+            if not payment_id:
+                state_clear(uid)
+                bot.send_message(uid, "⚠️ اطلاعات پرداخت یافت نشد. لطفاً دوباره از منو اقدام کنید.", reply_markup=kb_main(uid))
+                return
             file_id     = None
             text_value  = (message.caption or message.text or "").strip()
             if message.photo:
@@ -848,7 +964,12 @@ def universal_handler(message):
                 bot.send_message(uid,
                     "⚠️ لطفاً هش تراکنش را به صورت متن، یا تصویر/فایل رسید را ارسال کنید.")
                 return
-            update_payment_receipt(payment_id, file_id, text_value.strip())
+            try:
+                update_payment_receipt(payment_id, file_id, text_value.strip())
+            except Exception as _e:
+                print(f"[wallet_receipt] update_payment_receipt failed: {_e}")
+                bot.send_message(uid, "⚠️ خطایی در ثبت رسید رخ داد. لطفاً دوباره تلاش کنید.", reply_markup=kb_main(uid))
+                return
             state_clear(uid)
             bot.send_message(uid, "✅ رسید شما ارسال شد. لطفاً تا تأیید ادمین صبر کنید.",
                              reply_markup=kb_main(uid))
@@ -861,6 +982,10 @@ def universal_handler(message):
         # ── Purchase receipt ───────────────────────────────────────────────────
         if sn == "await_purchase_receipt":
             payment_id  = sd.get("payment_id")
+            if not payment_id:
+                state_clear(uid)
+                bot.send_message(uid, "⚠️ اطلاعات پرداخت یافت نشد. لطفاً دوباره از منو اقدام کنید.", reply_markup=kb_main(uid))
+                return
             file_id     = None
             text_value  = (message.caption or message.text or "").strip()
             if message.photo:
@@ -871,7 +996,12 @@ def universal_handler(message):
                 bot.send_message(uid,
                     "⚠️ لطفاً هش تراکنش را به صورت متن، یا تصویر/فایل رسید را ارسال کنید.")
                 return
-            update_payment_receipt(payment_id, file_id, text_value.strip())
+            try:
+                update_payment_receipt(payment_id, file_id, text_value.strip())
+            except Exception as _e:
+                print(f"[purchase_receipt] update_payment_receipt failed: {_e}")
+                bot.send_message(uid, "⚠️ خطایی در ثبت رسید رخ داد. لطفاً دوباره تلاش کنید.", reply_markup=kb_main(uid))
+                return
             state_clear(uid)
             bot.send_message(uid, "✅ رسید شما ارسال شد. لطفاً تا تأیید ادمین صبر کنید.",
                              reply_markup=kb_main(uid))
@@ -884,6 +1014,10 @@ def universal_handler(message):
         # ── Renewal receipt ────────────────────────────────────────────────────
         if sn == "await_renewal_receipt":
             payment_id  = sd.get("payment_id")
+            if not payment_id:
+                state_clear(uid)
+                bot.send_message(uid, "⚠️ اطلاعات پرداخت یافت نشد. لطفاً دوباره از منو اقدام کنید.", reply_markup=kb_main(uid))
+                return
             file_id     = None
             text_value  = (message.caption or message.text or "").strip()
             if message.photo:
@@ -894,7 +1028,12 @@ def universal_handler(message):
                 bot.send_message(uid,
                     "⚠️ لطفاً هش تراکنش را به صورت متن، یا تصویر/فایل رسید را ارسال کنید.")
                 return
-            update_payment_receipt(payment_id, file_id, text_value.strip())
+            try:
+                update_payment_receipt(payment_id, file_id, text_value.strip())
+            except Exception as _e:
+                print(f"[renewal_receipt] update_payment_receipt failed: {_e}")
+                bot.send_message(uid, "⚠️ خطایی در ثبت رسید رخ داد. لطفاً دوباره تلاش کنید.", reply_markup=kb_main(uid))
+                return
             state_clear(uid)
             bot.send_message(uid, "✅ رسید تمدید شما ارسال شد. لطفاً تا تأیید ادمین صبر کنید.",
                              reply_markup=kb_main(uid))
@@ -3266,7 +3405,28 @@ def universal_handler(message):
                 reply_markup=kb_admin_panel())
             return
 
-        # ── Admin: Default agency discount % ──────────────────────────────────
+        # ── Admin: Addon unit price ────────────────────────────────────────────
+        if sn == "admin_addon_price_set" and is_admin(uid):
+            from ..db import set_addon_price as _set_ap
+            addon_type = sd.get("addon_type")
+            type_id    = sd.get("type_id")
+            role       = sd.get("role")  # 'normal' | 'res'
+            val = parse_int(message.text or "")
+            if val is None or val < 0:
+                bot.send_message(uid, "⚠️ عدد معتبر (0 یا بیشتر) وارد کنید.")
+                return
+            db_role = "normal" if role == "normal" else "reseller"
+            _set_ap(type_id, addon_type, db_role, val)
+            state_clear(uid)
+            unit = "گیگابایت" if addon_type == "volume" else "روز"
+            role_fa = "کاربران عادی" if role == "normal" else "نمایندگان"
+            log_admin_action(uid, f"قیمت افزودنی {addon_type} نوع {type_id} ({role_fa}): {fmt_price(val)} تومان/{unit}")
+            bot.send_message(uid,
+                f"✅ قیمت تنظیم شد: <b>{fmt_price(val)} تومان / {unit}</b> ({role_fa})",
+                reply_markup=kb_admin_panel())
+            return
+
+
         if sn == "admin_set_default_discount_pct" and is_admin(uid):
             val = parse_int(message.text or "")
             if val is None or val < 0 or val > 100:

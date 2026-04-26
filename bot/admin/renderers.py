@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 Admin panel renderer helpers — reusable screen-building functions
 for types, stock, users, admins, panels.
@@ -13,6 +13,7 @@ from ..db import (
     get_panel_configs, get_panel_configs_count, get_panel_config_full,
     get_panel_client_packages, get_panel_client_package,
     get_panel,
+    setting_get,
 )
 from ..helpers import esc, fmt_price, display_username, back_button
 from ..ui.keyboards import _btn, _raw_markup
@@ -401,8 +402,8 @@ def _show_panel_detail(call, panel_id):
     checked   = p["last_checked_at"] or "—"
     err_line  = f"\n⚠️ خطا: <code>{esc(p['last_error'])}</code>" if p["last_error"] else ""
 
-    uname_censored = p['username'][:2] + '***' if p['username'] else '—'
-    passwd_censored = '••••••••'
+    uname_disp  = p['username'] if p['username'] else '—'
+    passwd_disp = p['password'] if p['password'] else '—'
     try:
         sub_url_base_disp = p['sub_url_base'] or "<i>(ندارد — از آدرس پنل استفاده می‌شود)</i>"
     except (IndexError, KeyError):
@@ -416,8 +417,8 @@ def _show_panel_detail(call, panel_id):
         f"{icon} <b>{esc(p['name'])}</b>\n\n"
         f"🔗 آدرس:  <code>{p['protocol']}://{esc(p['host'])}:{p['port']}{esc(p['path'] or '')}</code>\n"
         f"📡 ساب:   {sub_url_base_disp}\n"
-        f"👤 نام کاربری: <code>{uname_censored}</code>\n"
-        f"🔑 رمز عبور:   <code>{passwd_censored}</code>\n"
+        f"👤 نام کاربری: <code>{uname_disp}</code>\n"
+        f"🔑 رمز عبور:   <code>{passwd_disp}</code>\n"
         f"📡 وضعیت: {status_label}\n"
         f"🕐 آخرین بررسی: {checked}"
         f"{err_line}\n\n"
@@ -930,9 +931,19 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
         # User view: send QR inline if possible, then show buttons
         ar_label = "♻️ تمدید خودکار: ✅" if auto_renew else "♻️ تمدید خودکار: ❌"
         kb.row(
-            InlineKeyboardButton("⚡ تمدید فوری",  callback_data=f"mypnlcfg:renewconfirm:{config_id}"),
+            InlineKeyboardButton("⚡ تمدید فوری",  callback_data=f"mypnlcfg:renewwarn:{config_id}"),
             InlineKeyboardButton(ar_label,          callback_data=f"mypnlcfg:autorenew:{config_id}"),
         )
+        # ── Add-on purchase buttons (only for panel-created configs) ──────
+        _vol_en  = setting_get("addon_volume_enabled", "1") == "1"
+        _time_en = setting_get("addon_time_enabled",   "1") == "1"
+        _addon_row = []
+        if _vol_en:
+            _addon_row.append(InlineKeyboardButton("📦 خرید حجم",  callback_data=f"addon:vol:{config_id}"))
+        if _time_en:
+            _addon_row.append(InlineKeyboardButton("⏰ خرید زمان", callback_data=f"addon:time:{config_id}"))
+        if _addon_row:
+            kb.row(*_addon_row)
         kb.add(InlineKeyboardButton("بازگشت", callback_data=back_data,
                                     icon_custom_emoji_id="5253997076169115797"))
 

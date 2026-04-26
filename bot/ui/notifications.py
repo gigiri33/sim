@@ -580,6 +580,58 @@ def admin_renewal_notify(user_id, purchase_item, package_row, amount, method_lab
         send_to_topic("agency_log", text, reply_markup=kb)
 
 
+def admin_addon_notify(user_id, config_id, addon_type, sd, final_amount, payment_method):
+    """Send addon purchase log to purchase_log topic and relevant admins."""
+    from ..db import get_panel_config as _gcfg
+    user_row = get_user(user_id)
+    cfg_row  = _gcfg(config_id)
+    if not user_row:
+        return
+
+    method_display = {"wallet": "کیف پول", "card": "کارت به کارت"}.get(str(payment_method).lower(), payment_method)
+
+    raw_username = (user_row["username"] or "") if user_row else ""
+    username_display = f"@{raw_username}" if raw_username else "ندارد"
+    user_link = f"<a href='tg://user?id={user_id}'>{esc(user_row['full_name'])}</a>"
+
+    subtotal        = int(sd.get("subtotal", final_amount) or final_amount)
+    discount_amount = int(sd.get("discount_amount", 0) or 0)
+    unit_price      = int(sd.get("unit_price", 0) or 0)
+
+    if addon_type == "volume":
+        amount_str = f"{sd.get('amount_gb', 0)} گیگ"
+        unit_str   = "هر گیگ"
+        emoji      = "📦"
+        title      = "خرید حجم اضافه"
+    else:
+        amount_str = f"{sd.get('amount_days', 0)} روز"
+        unit_str   = "هر روز"
+        emoji      = "⏰"
+        title      = "خرید زمان اضافه"
+
+    disc_line = f"🎁 تخفیف: <b>{fmt_price(discount_amount)} تومان</b>\n" if discount_amount else ""
+    text = (
+        f"🛒 | <b>{title}</b>\n\n"
+        f"\U0001f552 زمان: {now_str()}\n"
+        f"👤 کاربر: {user_link}\n"
+        f"⚡️ نام کاربری: {username_display}\n"
+        f"🆔 آیدی: <code>{user_id}</code>\n\n"
+        f"{emoji} {('حجم' if addon_type == 'volume' else 'زمان')} اضافه: <b>{amount_str}</b>\n"
+        f"💵 قیمت {unit_str}: <b>{fmt_price(unit_price)} تومان</b>\n"
+        f"💰 مبلغ کل: <b>{fmt_price(subtotal)} تومان</b>\n"
+        f"{disc_line}"
+        f"✅ مبلغ نهایی: <b>{fmt_price(final_amount)} تومان</b>\n"
+        f"💳 روش پرداخت: {method_display}"
+    )
+    if _own_notif_on("purchase_log"):
+        for admin_id in ADMIN_IDS:
+            try:
+                bot.send_message(admin_id, text)
+            except Exception:
+                pass
+    send_to_topic("purchase_log", text)
+
+
 def notify_pending_order_to_admins(pending_id, user_id, package_row, amount, method):
     user = get_user(user_id)
     text = (

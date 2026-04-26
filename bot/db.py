@@ -697,6 +697,23 @@ def _run_init_db_migrations():
             # ── Purchase credit on users table ────────────────────────────────
             "ALTER TABLE users ADD COLUMN purchase_credit_enabled INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE users ADD COLUMN purchase_credit_limit INTEGER NOT NULL DEFAULT 0",
+            # ── Purchase addon prices ─────────────────────────────────────────
+            (
+                "CREATE TABLE IF NOT EXISTS purchase_addon_prices ("
+                "id                   INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "type_id              INTEGER NOT NULL,"
+                "addon_type           TEXT    NOT NULL,"
+                "normal_unit_price    INTEGER,"
+                "reseller_unit_price  INTEGER,"
+                "created_at           TEXT    NOT NULL,"
+                "updated_at           TEXT    NOT NULL,"
+                "UNIQUE(type_id, addon_type)"
+                ")"
+            ),
+            "INSERT OR IGNORE INTO settings(key,value) VALUES('addon_volume_enabled','1')",
+            "INSERT OR IGNORE INTO settings(key,value) VALUES('addon_time_enabled','1')",
+            # ── Discount code usage scope ─────────────────────────────────────
+            "ALTER TABLE discount_codes ADD COLUMN usage_scope TEXT NOT NULL DEFAULT 'all'",
         ]
         for sql in migrations:
             try:
@@ -883,8 +900,8 @@ def get_user_detail(user_id):
                    (SELECT COUNT(*) FROM payments py WHERE py.user_id=u.user_id AND py.kind='renewal' AND py.status='completed') AS renewal_count,
                    (SELECT COALESCE(SUM(amount),0) FROM payments py WHERE py.user_id=u.user_id AND py.kind='renewal' AND py.status='completed') AS total_renewals,
                    (SELECT COALESCE(SUM(py2.amount),0) FROM payments py2 WHERE py2.user_id=u.user_id AND py2.status='completed' AND py2.payment_method != 'wallet') AS total_direct_payments,
-                   (SELECT COUNT(*) FROM panel_configs pc WHERE pc.sold_to=u.user_id) AS panel_sales_count,
-                   (SELECT COUNT(*) FROM panel_configs pc WHERE pc.sold_to=u.user_id AND pc.auto_renew=1) AS panel_renew_count
+                   (SELECT COUNT(*) FROM panel_configs pc WHERE pc.user_id=u.user_id) AS panel_sales_count,
+                   (SELECT COUNT(*) FROM panel_configs pc WHERE pc.user_id=u.user_id AND pc.auto_renew=1) AS panel_renew_count
             FROM users u WHERE u.user_id=?
             """,
             (user_id,)
@@ -1816,16 +1833,17 @@ def get_discount_code_by_code(code):
         ).fetchone()
 
 
-def add_discount_code(code, discount_type, discount_value, max_uses_total, max_uses_per_user, audience="all", scope_type="all"):
+def add_discount_code(code, discount_type, discount_value, max_uses_total, max_uses_per_user, audience="all", scope_type="all", usage_scope="all"):
     audience = audience if audience in ("all", "public", "agents") else "all"
     scope_type = scope_type if scope_type in ("all", "types", "packages") else "all"
+    usage_scope = usage_scope if usage_scope in ("all", "package", "addon_volume", "addon_time") else "all"
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO discount_codes(code, discount_type, discount_value, "
-            "max_uses_total, max_uses_per_user, used_count, is_active, created_at, audience, scope_type) "
-            "VALUES(?,?,?,?,?,0,1,?,?,?)",
+            "max_uses_total, max_uses_per_user, used_count, is_active, created_at, audience, scope_type, usage_scope) "
+            "VALUES(?,?,?,?,?,0,1,?,?,?,?)",
             (code.strip().upper(), discount_type, int(discount_value),
-             int(max_uses_total), int(max_uses_per_user), now_str(), audience, scope_type)
+             int(max_uses_total), int(max_uses_per_user), now_str(), audience, scope_type, usage_scope)
         )
         return conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
 
@@ -1863,8 +1881,10 @@ def get_discount_code_user_uses(code_id, user_id):
         return row["cnt"] if row else 0
 
 
-def validate_discount_code(code, user_id, amount, is_agent=False, package_id=None):
-    """Returns (ok, row, discount_amount, final_amount, error_msg)."""
+def validate_discount_code(code, user_id, amount, is_agent=False, package_id=None, usage_scope="all"):
+    """Returns (ok, row, discount_amount, final_amount, error_msg).
+    usage_scope: 'all' | 'package' | 'addon_volume' | 'addon_time'
+    """
     row = get_discount_code_by_code(code)
     if not row:
         return False, None, 0, amount, "❌ کد تخفیف وارد شده معتبر نیست."
@@ -1882,7 +1902,12 @@ def validate_discount_code(code, user_id, amount, is_agent=False, package_id=Non
         user_uses = get_discount_code_user_uses(row["id"], user_id)
         if user_uses >= row["max_uses_per_user"]:
             return False, None, 0, amount, "❌ شما قبلاً از این کد تخفیف استفاده کرده‌اید."
-    # Scope check
+    # Usage scope check (what type of purchase this code can be used for)
+    row_usage_scope = row["usage_scope"] if "usage_scope" in row.keys() else "all"
+    if row_usage_scope != "all" and usage_scope != "all":
+        if row_usage_scope != usage_scope:
+            return False, None, 0, amount, "❌ این کد تخفیف برای این نوع خرید قابل استفاده نیست."
+    # Scope check (which category/package)
     scope_type = row["scope_type"] if "scope_type" in row.keys() else "all"
     if scope_type != "all" and package_id is not None:
         targets = get_discount_code_targets(row["id"])
@@ -2187,7 +2212,69 @@ def get_all_per_gb_prices(user_id):
         ).fetchall()
 
 
-# ── Reseller requests ──────────────────────────────────────────────────────────
+# ── Purchase addon prices ──────────────────────────────────────────────────────
+
+def get_panel_connected_types():
+    """Returns config_types that have at least one panel-linked package."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT DISTINCT ct.id, ct.name FROM config_types ct "
+            "JOIN packages p ON p.type_id=ct.id "
+            "WHERE p.config_source='panel' AND ct.is_active=1 "
+            "ORDER BY ct.name"
+        ).fetchall()
+
+
+def get_addon_price(type_id, addon_type):
+    """Returns the addon price row for a given type_id and addon_type, or None."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM purchase_addon_prices WHERE type_id=? AND addon_type=?",
+            (type_id, addon_type)
+        ).fetchone()
+
+
+def set_addon_price(type_id, addon_type, role, unit_price):
+    """Set normal or reseller unit price for a category addon.
+    role: 'normal' | 'reseller'
+    unit_price: integer or None to clear.
+    """
+    field = "normal_unit_price" if role == "normal" else "reseller_unit_price"
+    with get_conn() as conn:
+        # Try upsert — insert if not exists, then update the specific role column
+        try:
+            conn.execute(
+                "INSERT INTO purchase_addon_prices(type_id, addon_type, created_at, updated_at) "
+                "VALUES(?,?,?,?)",
+                (type_id, addon_type, now_str(), now_str())
+            )
+        except Exception:
+            pass
+        conn.execute(
+            f"UPDATE purchase_addon_prices SET {field}=?, updated_at=? WHERE type_id=? AND addon_type=?",
+            (unit_price, now_str(), type_id, addon_type)
+        )
+
+
+def get_all_addon_prices_for_addon_type(addon_type):
+    """Returns rows (type_id, type_name, normal_unit_price, reseller_unit_price)
+    for all panel-connected types, joined with any existing price row."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT ct.id AS type_id, ct.name AS type_name, "
+            "ap.normal_unit_price, ap.reseller_unit_price "
+            "FROM config_types ct "
+            "JOIN packages p ON p.type_id = ct.id AND p.config_source = 'panel' "
+            "LEFT JOIN purchase_addon_prices ap "
+            "       ON ap.type_id = ct.id AND ap.addon_type = ? "
+            "WHERE ct.is_active = 1 "
+            "GROUP BY ct.id "
+            "ORDER BY ct.name",
+            (addon_type,)
+        ).fetchall()
+
+
+
 def create_reseller_request(user_id, username, full_name, description):
     from .helpers import now_str
     now = now_str()

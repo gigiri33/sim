@@ -394,6 +394,49 @@ class PanelClient:
         except RequestException as exc:
             return False, str(exc)
 
+    def add_client_volume(self, inbound_id: int, client_uuid: str,
+                          extra_gb: float) -> tuple:
+        """
+        Add extra GB to the client's total traffic limit WITHOUT resetting used traffic.
+        Reads current totalGB from panel, adds extra_gb to it, then patches via _update_client.
+        Returns (True, new_total_bytes) or (False, error_str).
+        """
+        ok, current = self.get_client_full(inbound_id, client_uuid)
+        if not ok:
+            return False, current
+        current_total = int(current.get("totalGB", 0) or 0)
+        extra_bytes   = int(extra_gb * 1_073_741_824)
+        new_total     = current_total + extra_bytes
+        ok2, err2 = self._update_client(inbound_id, client_uuid, {"totalGB": new_total})
+        if ok2:
+            return True, new_total
+        return False, err2
+
+    def add_client_time(self, inbound_id: int, client_uuid: str,
+                        extra_days: int) -> tuple:
+        """
+        Add extra days to the client's expiry WITHOUT touching volume.
+        - If expiry is in the future → new_expiry = current_expiry + extra_days.
+        - If expired (or unlimited/0) → new_expiry = now + extra_days.
+        Returns (True, new_expiry_ms) or (False, error_str).
+        """
+        import time as _time
+        ok, current = self.get_client_full(inbound_id, client_uuid)
+        if not ok:
+            return False, current
+        current_exp_ms = int(current.get("expiryTime", 0) or 0)
+        now_ms = int(_time.time() * 1000)
+        if current_exp_ms > 0 and current_exp_ms > now_ms:
+            new_exp_ms = current_exp_ms + extra_days * 86_400_000
+        else:
+            # Already expired or unlimited → start fresh from now
+            new_exp_ms = now_ms + extra_days * 86_400_000
+        ok2, err2 = self._update_client(inbound_id, client_uuid,
+                                        {"expiryTime": new_exp_ms})
+        if ok2:
+            return True, new_exp_ms
+        return False, err2
+
     def get_sub_url(self, client_uuid: str) -> str:
         """Return the subscription URL for this client.
         Uses subId (first 16 chars of UUID without dashes) as per 3x-ui spec.
