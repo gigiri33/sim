@@ -6940,9 +6940,6 @@ def _dispatch_callback(call, uid, data):
 
     # ── User: My Panel Configs ─────────────────────────────────────────────────
     if data.startswith("mypnlcfg:") or data.startswith("mypnlcfgrpay:"):
-        from ..db import (
-            get_panel_config, update_panel_config_field,
-        )
         from ..admin.renderers import _show_panel_config_detail
 
         # mypnlcfg:d:{config_id}
