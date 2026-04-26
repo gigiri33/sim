@@ -17,7 +17,7 @@ from .db import (
     assign_config_to_user, get_conn, create_pending_order, get_purchase,
     get_all_admin_users,
     save_payment_admin_message, get_payment_admin_messages, delete_payment_admin_messages,
-    get_per_gb_price,
+    get_per_gb_price, get_payment_service_names,
 )
 from .helpers import esc, fmt_price, display_username, back_button, now_str
 import time
@@ -708,7 +708,8 @@ def _finish_card_payment_approval_core(payment_id, admin_note, approved):
                 pass
             purchase_ids, pending_ids = _deliver_bulk_configs(
                 user_id, user_id, package_id,
-                payment["amount"], payment["payment_method"], _qty_card, payment_id
+                payment["amount"], payment["payment_method"], _qty_card, payment_id,
+                service_names=get_payment_service_names(payment_id)
             )
             _send_bulk_delivery_result(user_id, user_id, package_row,
                                        purchase_ids, pending_ids,

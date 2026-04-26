@@ -716,6 +716,8 @@ def _run_init_db_migrations():
             "ALTER TABLE discount_codes ADD COLUMN usage_scope TEXT NOT NULL DEFAULT 'all'",
             # ── Admin balance adjustment tracking ─────────────────────────────
             "ALTER TABLE users ADD COLUMN total_admin_adjusted INTEGER NOT NULL DEFAULT 0",
+            # ── Service naming for panel configs ──────────────────────────────
+            "ALTER TABLE payments ADD COLUMN service_names_json TEXT",
         ]
         for sql in migrations:
             try:
@@ -1717,6 +1719,32 @@ def update_payment_final_amount(payment_id, final_amount):
             "UPDATE payments SET final_amount=? WHERE id=?",
             (final_amount, payment_id)
         )
+
+
+def set_payment_service_names(payment_id, names: list):
+    """Persist the ordered list of chosen service names for a panel config payment."""
+    import json as _json
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE payments SET service_names_json=? WHERE id=?",
+            (_json.dumps(names, ensure_ascii=False), payment_id)
+        )
+
+
+def get_payment_service_names(payment_id) -> list:
+    """Return the saved service names list for a payment, or None if not set."""
+    import json as _json
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT service_names_json FROM payments WHERE id=?", (payment_id,)
+        ).fetchone()
+    if not row or not row["service_names_json"]:
+        return None
+    try:
+        result = _json.loads(row["service_names_json"])
+        return result if isinstance(result, list) and result else None
+    except Exception:
+        return None
 
 
 def update_payment_crypto_comment(payment_id, comment_code):

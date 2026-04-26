@@ -12,6 +12,7 @@ from ..helpers import (
     is_admin, admin_has_perm, back_button,
     state_set, state_clear, state_name, state_data, parse_int, parse_volume, normalize_text_number,
     normalize_iranian_phone,
+    validate_service_name, normalize_service_name, generate_random_name, parse_bulk_names,
 )
 from ..db import (
     setting_get, setting_set,
@@ -79,6 +80,7 @@ from .callbacks import (
     _wg_send_file_group, _wg_caption, _wg_service_name_from_filename,
     _qty_order_summary_text,
     _v2_name_from_config, _v2_name_from_sub, _v2_bulk_data_prompt,
+    _is_panel_package, _show_naming_prompt,
 )
 
 
@@ -776,6 +778,59 @@ def universal_handler(message):
                       unit_price=unit_price, quantity=qty, kind="config_purchase")
             summary = _qty_order_summary_text(package_row, unit_price, qty)
             bot.send_message(uid, summary, parse_mode="HTML")
+            # Naming step for panel packages
+            if _is_panel_package(package_row):
+                _show_naming_prompt(message, package_id, qty)
+                return
+            if setting_get("discount_codes_enabled", "0") == "1":
+                if _show_discount_prompt(message, total):
+                    return
+            _show_purchase_gateways(message, uid, package_id, total, package_row)
+            return
+
+        # ── Custom service name (single) ──────────────────────────────────────
+        if sn == "await_service_name":
+            raw        = (message.text or "").strip()
+            normalized = normalize_service_name(raw)
+            package_id = sd.get("package_id")
+            unit_price = int(sd.get("unit_price", 0) or 0)
+            package_row = get_package(package_id) if package_id else None
+            if not package_row or not unit_price:
+                state_clear(uid)
+                bot.send_message(uid, "⚠️ خطا در اطلاعات سفارش. لطفاً دوباره شروع کنید.", reply_markup=kb_main(uid))
+                return
+            # Fallback to random if invalid
+            if not validate_service_name(normalized):
+                chosen_name = generate_random_name()
+            else:
+                chosen_name = normalized
+            total = unit_price * 1
+            state_set(uid, "buy_select_method",
+                      package_id=package_id, amount=total, original_amount=total,
+                      unit_price=unit_price, quantity=1, kind="config_purchase",
+                      service_names=[chosen_name])
+            if setting_get("discount_codes_enabled", "0") == "1":
+                if _show_discount_prompt(message, total):
+                    return
+            _show_purchase_gateways(message, uid, package_id, total, package_row)
+            return
+
+        # ── Custom service names (bulk) ───────────────────────────────────────
+        if sn == "await_bulk_service_names":
+            package_id = sd.get("package_id")
+            unit_price = int(sd.get("unit_price", 0) or 0)
+            quantity   = int(sd.get("quantity", 1) or 1)
+            package_row = get_package(package_id) if package_id else None
+            if not package_row or not unit_price:
+                state_clear(uid)
+                bot.send_message(uid, "⚠️ خطا در اطلاعات سفارش. لطفاً دوباره شروع کنید.", reply_markup=kb_main(uid))
+                return
+            chosen_names = parse_bulk_names(message.text or "", quantity)
+            total = unit_price * quantity
+            state_set(uid, "buy_select_method",
+                      package_id=package_id, amount=total, original_amount=total,
+                      unit_price=unit_price, quantity=quantity, kind="config_purchase",
+                      service_names=chosen_names)
             if setting_get("discount_codes_enabled", "0") == "1":
                 if _show_discount_prompt(message, total):
                     return
