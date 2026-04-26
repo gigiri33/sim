@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 import json
 import sqlite3
 import threading
@@ -371,6 +371,7 @@ def _run_init_db_migrations():
             "gw_tronpays_rial_display_name": "",
             "shop_open":         "1",
             "preorder_mode":     "0",
+            "panel_renewal_enabled": "1",
             "support_link":     "",
             "support_link_desc": "",
             "start_text":       "",
@@ -719,6 +720,7 @@ def _run_init_db_migrations():
             "ALTER TABLE users ADD COLUMN total_admin_adjusted INTEGER NOT NULL DEFAULT 0",
             # ── Service naming for panel configs ──────────────────────────────
             "ALTER TABLE payments ADD COLUMN service_names_json TEXT",
+            "INSERT OR IGNORE INTO settings(key,value) VALUES('panel_renewal_enabled','1')",
         ]
         for sql in migrations:
             try:

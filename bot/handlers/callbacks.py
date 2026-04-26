@@ -1682,12 +1682,13 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
                 check_and_give_referral_purchase_reward(uid)
             except Exception:
                 pass
-            try:
-                admin_purchase_notify(payment_method, get_user(uid), package_row,
-                                      purchase_id=None, amount=unit_price,
-                                      service_name=panel_client_names[0] if panel_client_names else None)
-            except Exception:
-                pass
+            for _i, _pc_id in enumerate(panel_config_ids):
+                try:
+                    admin_purchase_notify(payment_method, get_user(uid), package_row,
+                                          purchase_id=None, amount=unit_price,
+                                          service_name=panel_client_names[_i] if _i < len(panel_client_names) else None)
+                except Exception:
+                    pass
         return panel_config_ids, []
 
     # ── Manual / stock-based packages (original logic) ────────────────────────
@@ -4203,6 +4204,9 @@ def _dispatch_callback(call, uid, data):
 
     # ── Renewal flow ──────────────────────────────────────────────────────────
     if data.startswith("renew:") and not data.startswith("renew:p:") and not data.startswith("renew:confirm:"):
+        if setting_get("shop_open", "1") == "0" and not is_admin(uid):
+            bot.answer_callback_query(call.id, "⛔ فروشگاه موقتاً تعطیل است. تمدید امکان‌پذیر نیست.", show_alert=True)
+            return
         if setting_get("manual_renewal_enabled", "1") != "1" and not is_admin(uid):
             bot.answer_callback_query(call.id, "⛔ تمدید در حال حاضر غیرفعال است.", show_alert=True)
             return
@@ -4692,11 +4696,18 @@ def _dispatch_callback(call, uid, data):
 
     if data == "buy:start_real":
         # Check if shop is open
-        if setting_get("shop_open", "1") != "1":
+        _shop_st = setting_get("shop_open", "1")
+        if _shop_st not in ("1", "2"):
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call, "🔴 <b>فروشگاه موقتاً تعطیل است.</b>\n\nلطفاً بعداً مراجعه کنید.", kb)
+            return
+        if _shop_st == "2":
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
+            bot.answer_callback_query(call.id)
+            send_or_edit(call, "🟡 <b>خرید جدید فعلاً غیرفعال است.</b>\n\nدر حال حاضر فقط تمدید سرویس و افزایش حجم/زمان امکان‌پذیر است.", kb)
             return
         stock_only = setting_get("preorder_mode", "0") == "1"
         items = get_active_types()
@@ -4716,11 +4727,18 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data.startswith("buy:t:"):
-        if setting_get("shop_open", "1") != "1":
+        _shop_st2 = setting_get("shop_open", "1")
+        if _shop_st2 not in ("1", "2"):
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call, "🔴 <b>فروشگاه موقتاً تعطیل است.</b>\n\nلطفاً بعداً مراجعه کنید.", kb)
+            return
+        if _shop_st2 == "2":
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
+            bot.answer_callback_query(call.id)
+            send_or_edit(call, "🟡 <b>خرید جدید فعلاً غیرفعال است.</b>\n\nدر حال حاضر فقط تمدید سرویس و افزایش حجم/زمان امکان‌پذیر است.", kb)
             return
         type_id   = int(data.split(":")[2])
         stock_only = setting_get("preorder_mode", "0") == "1"
@@ -4757,11 +4775,18 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data.startswith("buy:mu:"):
-        if setting_get("shop_open", "1") != "1":
+        _shop_st3 = setting_get("shop_open", "1")
+        if _shop_st3 not in ("1", "2"):
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call, "🔴 <b>فروشگاه موقتاً تعطیل است.</b>\n\nلطفاً بعداً مراجعه کنید.", kb)
+            return
+        if _shop_st3 == "2":
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
+            bot.answer_callback_query(call.id)
+            send_or_edit(call, "🟡 <b>خرید جدید فعلاً غیرفعال است.</b>\n\nدر حال حاضر فقط تمدید سرویس و افزایش حجم/زمان امکان‌پذیر است.", kb)
             return
         parts_mu     = data.split(":")
         selected_mu  = int(parts_mu[2])
@@ -4789,11 +4814,18 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data.startswith("buy:p:"):
-        if setting_get("shop_open", "1") != "1":
+        _shop_st4 = setting_get("shop_open", "1")
+        if _shop_st4 not in ("1", "2"):
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call, "🔴 <b>فروشگاه موقتاً تعطیل است.</b>\n\nلطفاً بعداً مراجعه کنید.", kb)
+            return
+        if _shop_st4 == "2":
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
+            bot.answer_callback_query(call.id)
+            send_or_edit(call, "🟡 <b>خرید جدید فعلاً غیرفعال است.</b>\n\nدر حال حاضر فقط تمدید سرویس و افزایش حجم/زمان امکان‌پذیر است.", kb)
             return
         package_id  = int(data.split(":")[2])
         package_row = get_package(package_id)
@@ -5457,7 +5489,7 @@ def _dispatch_callback(call, uid, data):
 
     # ── Wallet charge ─────────────────────────────────────────────────────────
     if data == "wallet:charge":
-        if setting_get("shop_open", "1") != "1":
+        if setting_get("shop_open", "1") not in ("1", "2"):
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
@@ -7080,6 +7112,10 @@ def _dispatch_callback(call, uid, data):
             cfg = get_panel_config(config_id)
             if not cfg or cfg["user_id"] != uid:
                 bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            if setting_get("shop_open", "1") == "0" and not is_admin(uid):
+                bot.answer_callback_query(call.id, "⛔ فروشگاه موقتاً تعطیل است. تمدید امکان‌پذیر نیست.", show_alert=True); return
+            if setting_get("panel_renewal_enabled", "1") != "1" and not is_admin(uid):
+                bot.answer_callback_query(call.id, "⛔ تمدیدی‌های پنل در حال حاضر غیرفعال است.", show_alert=True); return
             cfg = dict(cfg)
             # Find packages of same type
             with get_conn() as conn:
@@ -7664,6 +7700,8 @@ def _dispatch_callback(call, uid, data):
         cfg = get_panel_config(config_id)
         if not cfg or cfg["user_id"] != uid:
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+        if setting_get("shop_open", "1") == "0" and not is_admin(uid):
+            bot.answer_callback_query(call.id, "⛔ فروشگاه موقتاً تعطیل است.", show_alert=True); return
         if setting_get("addon_volume_enabled", "1") != "1":
             bot.answer_callback_query(call.id, "خرید حجم اضافه در حال حاضر غیرفعال است.", show_alert=True); return
         unit_price, err = _get_addon_unit_price(cfg, "volume")
@@ -7720,6 +7758,8 @@ def _dispatch_callback(call, uid, data):
         cfg = get_panel_config(config_id)
         if not cfg or cfg["user_id"] != uid:
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+        if setting_get("shop_open", "1") == "0" and not is_admin(uid):
+            bot.answer_callback_query(call.id, "⛔ فروشگاه موقتاً تعطیل است.", show_alert=True); return
         if setting_get("addon_time_enabled", "1") != "1":
             bot.answer_callback_query(call.id, "خرید زمان اضافه در حال حاضر غیرفعال است.", show_alert=True); return
         unit_price, err = _get_addon_unit_price(cfg, "time")
@@ -11179,20 +11219,28 @@ def _dispatch_callback(call, uid, data):
     if data == "adm:set:shop":
         shop_open     = setting_get("shop_open", "1")
         preorder_mode = setting_get("preorder_mode", "0")
-        open_icon  = "🟢" if shop_open     == "1" else "🔴"
+        # 3-state: "1"=باز  "2"=فقط تمدید  "0"=بسته
+        _shop_icon  = {"1": "🟢", "2": "🟡", "0": "🔴"}.get(shop_open, "🟢")
+        _shop_label = {"1": "باز", "2": "فقط تمدید و خرید حجم/زمان", "0": "بسته"}.get(shop_open, "باز")
         stock_icon = "🟢" if preorder_mode == "1" else "🔴"
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton(
-            f"{open_icon} وضعیت فروش: {'باز' if shop_open == '1' else 'بسته'}",
+            f"{_shop_icon} وضعیت فروش: {_shop_label}",
             callback_data="adm:shop:toggle_open"))
         kb.add(types.InlineKeyboardButton(
             f"{stock_icon} فروش بر اساس موجودی: {'فعال' if preorder_mode == '1' else 'غیرفعال'}",
             callback_data="adm:shop:toggle_stock"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
+        _shop_desc = {
+            "1": "🟢 باز — خرید، تمدید و افزایش حجم/زمان همه فعال",
+            "2": "🟡 فقط تمدید و خرید حجم/زمان — خرید جدید غیرفعال",
+            "0": "🔴 بسته — هیچ‌چیز در دسترس نیست",
+        }.get(shop_open, "🟢 باز")
         text = (
             "🏪 <b>مدیریت فروش</b>\n\n"
-            f"🔹 <b>وضعیت فروش:</b> {'🟢 باز' if shop_open == '1' else '🔴 بسته'}\n"
-            f"🔹 <b>فروش بر اساس موجودی:</b> {'🟢 فعال – فقط پکیج‌های دارای موجودی نمایش داده می‌شوند.' if preorder_mode == '1' else '🔴 غیرفعال – همه پکیج‌ها نمایش داده می‌شوند. در صورت نبود موجودی، سفارش به پشتیبانی ارسال می‌شود.'}"
+            f"🔹 <b>وضعیت فروش:</b> {_shop_desc}\n"
+            f"🔹 <b>فروش بر اساس موجودی:</b> {'🟢 فعال – فقط پکیج‌های دارای موجودی نمایش داده می‌شوند.' if preorder_mode == '1' else '🔴 غیرفعال – همه پکیج‌ها نمایش داده می‌شوند. در صورت نبود موجودی، سفارش به پشتیبانی ارسال می‌شود.'}\n\n"
+            "برای تغییر وضعیت فروش روی دکمه آن بزنید (چرخه: باز ← فقط تمدید ← بسته)."
         )
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
@@ -11200,15 +11248,16 @@ def _dispatch_callback(call, uid, data):
 
     if data == "adm:shop:toggle_open":
         current = setting_get("shop_open", "1")
-        setting_set("shop_open", "0" if current == "1" else "1")
-        log_admin_action(uid, f"فروشگاه {'بسته' if current == '1' else 'باز'} شد")
-        bot.answer_callback_query(call.id, "وضعیت فروش تغییر کرد.")
-        # Re-show shop settings
-        data = "adm:set:shop"
-        # fall through by calling the handler again via fake callback
+        # cycle: "1" → "2" → "0" → "1"
+        cycle = {"1": "2", "2": "0", "0": "1"}
+        new_val = cycle.get(current, "1")
+        setting_set("shop_open", new_val)
+        _labels = {"1": "باز", "2": "فقط تمدید و خرید حجم/زمان", "0": "بسته"}
+        log_admin_action(uid, f"وضعیت فروشگاه به «{_labels[new_val]}» تغییر کرد")
+        bot.answer_callback_query(call.id, f"وضعیت فروش: {_labels[new_val]}")
         from types import SimpleNamespace as _SN
-        fake = _SN(id=call.id, from_user=call.from_user, message=call.message, data=data)
-        _dispatch_callback(fake, uid, data)
+        fake = _SN(id=call.id, from_user=call.from_user, message=call.message, data="adm:set:shop")
+        _dispatch_callback(fake, uid, "adm:set:shop")
         return
 
     if data == "adm:shop:toggle_stock":
@@ -11225,6 +11274,7 @@ def _dispatch_callback(call, uid, data):
     def _build_ops_kb():
         bot_status      = setting_get("bot_status", "on")
         renewal_enabled = setting_get("manual_renewal_enabled", "1")
+        panel_renewal   = setting_get("panel_renewal_enabled", "1")
         referral_enabled = setting_get("referral_enabled", "1")
         bulk_mode       = setting_get("bulk_sale_mode", "everyone")
         status_map = {"on": "🟢 روشن", "off": "🔴 خاموش", "update": "🔄 بروزرسانی"}
@@ -11233,6 +11283,7 @@ def _dispatch_callback(call, uid, data):
         bulk_map = {"everyone": "✅ همه کاربران", "agents_only": "🤝 فقط نمایندگان", "disabled": "❌ غیرفعال"}
         status_label  = status_map.get(bot_status, "🟢 روشن")
         renewal_label = renewal_map.get(renewal_enabled, "✅ فعال")
+        panel_renewal_label = renewal_map.get(panel_renewal, "✅ فعال")
         referral_label = referral_map.get(referral_enabled, "✅ فعال")
         bulk_label    = bulk_map.get(bulk_mode, "✅ همه کاربران")
         ops_kb = types.InlineKeyboardMarkup(row_width=2)
@@ -11243,6 +11294,10 @@ def _dispatch_callback(call, uid, data):
         ops_kb.row(
             types.InlineKeyboardButton(renewal_label, callback_data="adm:ops:renewal"),
             types.InlineKeyboardButton("♻️ تمدید کانفیگ‌های ثبت دستی", callback_data="adm:ops:noop"),
+        )
+        ops_kb.row(
+            types.InlineKeyboardButton(panel_renewal_label, callback_data="adm:ops:panel_renewal"),
+            types.InlineKeyboardButton("🔁 تمدیدی‌های پنل", callback_data="adm:ops:noop"),
         )
         ops_kb.row(
             types.InlineKeyboardButton(referral_label, callback_data="adm:ops:referral_toggle"),
@@ -11274,12 +11329,14 @@ def _dispatch_callback(call, uid, data):
     def _ops_menu_text():
         bot_status      = setting_get("bot_status", "on")
         renewal_enabled = setting_get("manual_renewal_enabled", "1")
+        panel_renewal   = setting_get("panel_renewal_enabled", "1")
         referral_enabled = setting_get("referral_enabled", "1")
         bulk_mode       = setting_get("bulk_sale_mode", "everyone")
         min_qty, max_qty = get_bulk_qty_limits()
         max_label = "بدون محدودیت" if max_qty == 0 else str(max_qty)
         status_fa  = {"on": "🟢 روشن", "off": "🔴 خاموش", "update": "🔄 بروزرسانی"}.get(bot_status, "🟢 روشن")
         renewal_fa = "✅ فعال" if renewal_enabled == "1" else "❌ غیرفعال"
+        panel_renewal_fa = "✅ فعال" if panel_renewal == "1" else "❌ غیرفعال"
         referral_fa = "✅ فعال" if referral_enabled == "1" else "❌ غیرفعال"
         bulk_fa = {"everyone": "✅ همه کاربران", "agents_only": "🤝 فقط نمایندگان", "disabled": "❌ غیرفعال"}.get(bulk_mode, "✅ همه کاربران")
         _inv_exp_enabled = setting_get("invoice_expiry_enabled", "1")
@@ -11295,6 +11352,7 @@ def _dispatch_callback(call, uid, data):
             "🤖 <b>مدیریت عملیات ربات</b>\n\n"
             f"🔹 <b>وضعیت ربات:</b> {status_fa}\n"
             f"🔹 <b>تمدید کانفیگ‌های ثبت دستی:</b> {renewal_fa}\n"
+            f"🔹 <b>تمدیدی‌های پنل:</b> {panel_renewal_fa}\n"
             f"🔹 <b>زیرمجموعه‌گیری:</b> {referral_fa}\n"
             f"🔹 <b>فروش عمده:</b> {bulk_fa}\n"
             f"   ↳ حداقل تعداد: <b>{min_qty}</b> | حداکثر تعداد: <b>{max_label}</b>\n"
@@ -11339,6 +11397,19 @@ def _dispatch_callback(call, uid, data):
         log_admin_action(uid, f"تمدید دستی {'فعال' if new_val == '1' else 'غیرفعال'} شد")
         label = "فعال" if new_val == "1" else "غیرفعال"
         bot.answer_callback_query(call.id, f"تمدید دستی: {label}")
+        send_or_edit(call, _ops_menu_text(), _build_ops_kb())
+        return
+
+    if data == "adm:ops:panel_renewal":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        cur = setting_get("panel_renewal_enabled", "1")
+        new_val = "0" if cur == "1" else "1"
+        setting_set("panel_renewal_enabled", new_val)
+        log_admin_action(uid, f"تمدیدی‌های پنل {'فعال' if new_val == '1' else 'غیرفعال'} شد")
+        label = "فعال" if new_val == "1" else "غیرفعال"
+        bot.answer_callback_query(call.id, f"تمدیدی‌های پنل: {label}")
         send_or_edit(call, _ops_menu_text(), _build_ops_kb())
         return
 
@@ -13476,10 +13547,17 @@ def _dispatch_callback(call, uid, data):
         except Exception:
             pass
         # Now dispatch buy:start_real via a fresh message-based call
-        if setting_get("shop_open", "1") != "1":
+        _shop_st_msg = setting_get("shop_open", "1")
+        if _shop_st_msg not in ("1", "2"):
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
             bot.send_message(uid, "🔴 <b>فروشگاه موقتاً تعطیل است.</b>\n\nلطفاً بعداً مراجعه کنید.",
+                             parse_mode="HTML", reply_markup=kb)
+            return
+        if _shop_st_msg == "2":
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
+            bot.send_message(uid, "🟡 <b>خرید جدید فعلاً غیرفعال است.</b>\n\nدر حال حاضر فقط تمدید سرویس و افزایش حجم/زمان امکان‌پذیر است.",
                              parse_mode="HTML", reply_markup=kb)
             return
         stock_only = setting_get("preorder_mode", "0") == "1"
