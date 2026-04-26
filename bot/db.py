@@ -1073,16 +1073,26 @@ def count_users_by_filter(filter_type):
 # ── Config Types ───────────────────────────────────────────────────────────────
 def get_all_types():
     with get_conn() as conn:
-        return conn.execute(
-            "SELECT * FROM config_types ORDER BY sort_order ASC, id ASC"
-        ).fetchall()
+        try:
+            return conn.execute(
+                "SELECT * FROM config_types ORDER BY sort_order ASC, id ASC"
+            ).fetchall()
+        except Exception:
+            return conn.execute(
+                "SELECT * FROM config_types ORDER BY id ASC"
+            ).fetchall()
 
 
 def get_active_types():
     with get_conn() as conn:
-        return conn.execute(
-            "SELECT * FROM config_types WHERE is_active=1 ORDER BY sort_order ASC, id ASC"
-        ).fetchall()
+        try:
+            return conn.execute(
+                "SELECT * FROM config_types WHERE is_active=1 ORDER BY sort_order ASC, id ASC"
+            ).fetchall()
+        except Exception:
+            return conn.execute(
+                "SELECT * FROM config_types WHERE is_active=1 ORDER BY id ASC"
+            ).fetchall()
 
 
 def get_type(type_id):
@@ -1094,13 +1104,19 @@ def get_type(type_id):
 
 def add_type(name, description=""):
     with get_conn() as conn:
-        max_order = conn.execute(
-            "SELECT COALESCE(MAX(sort_order), 0) FROM config_types"
-        ).fetchone()[0]
-        conn.execute(
-            "INSERT INTO config_types(name, description, sort_order) VALUES(?, ?, ?)",
-            (name.strip(), description.strip(), max_order + 1)
-        )
+        try:
+            max_order = conn.execute(
+                "SELECT COALESCE(MAX(sort_order), 0) FROM config_types"
+            ).fetchone()[0]
+            conn.execute(
+                "INSERT INTO config_types(name, description, sort_order) VALUES(?, ?, ?)",
+                (name.strip(), description.strip(), max_order + 1)
+            )
+        except Exception:
+            conn.execute(
+                "INSERT INTO config_types(name, description) VALUES(?, ?)",
+                (name.strip(), description.strip())
+            )
 
 
 def update_type(type_id, new_name):
@@ -1128,9 +1144,14 @@ def update_type_active(type_id, is_active):
 def reorder_type(type_id, new_position):
     """Move a type to new_position (1-indexed) and renumber all types."""
     with get_conn() as conn:
-        all_types = conn.execute(
-            "SELECT id FROM config_types ORDER BY sort_order ASC, id ASC"
-        ).fetchall()
+        try:
+            all_types = conn.execute(
+                "SELECT id FROM config_types ORDER BY sort_order ASC, id ASC"
+            ).fetchall()
+        except Exception:
+            all_types = conn.execute(
+                "SELECT id FROM config_types ORDER BY id ASC"
+            ).fetchall()
         ids = [r["id"] for r in all_types]
         if type_id not in ids:
             return
@@ -1138,9 +1159,12 @@ def reorder_type(type_id, new_position):
         pos = max(1, min(new_position, len(ids) + 1)) - 1  # 0-indexed clamp
         ids.insert(pos, type_id)
         for order, tid in enumerate(ids, start=1):
-            conn.execute(
-                "UPDATE config_types SET sort_order=? WHERE id=?", (order, tid)
-            )
+            try:
+                conn.execute(
+                    "UPDATE config_types SET sort_order=? WHERE id=?", (order, tid)
+                )
+            except Exception:
+                pass
 
 
 def delete_type(type_id):
