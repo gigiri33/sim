@@ -71,6 +71,9 @@ from ..db import (
     get_gateway_fee_amount, get_gateway_bonus_amount, apply_gateway_fee,
     # Addon prices
     get_panel_connected_types, get_addon_price, set_addon_price, get_all_addon_prices_for_addon_type,
+    # Panel config
+    get_panel_config, get_panel_config_full,
+    update_panel_config_field, delete_panel_config,
 )
 from ..gateways.base import is_gateway_available, is_card_info_complete, get_gateway_range_text, is_gateway_in_range, build_gateway_range_guide
 from ..gateways.crypto import fetch_crypto_prices
@@ -1049,17 +1052,21 @@ def _execute_pnlcfg_renewal(config_id, package_id, chat_id=None, uid=None):
         new_exp_str = None
         new_exp_ms  = 0
 
+    new_traffic_bytes = int((pkg["volume_gb"] or 0) * 1073741824)
+
     enable_err = None
     _t0 = _time.time()
     while True:
         if _time.time() - _t_start > MAX_WAIT:
             enable_err = "حداکثر زمان انتظار تمام شد"
             break
-        ok_e, res_e = pc_api.enable_client(
-            inbound_id=cfg["inbound_id"], client_uuid=cfg["client_uuid"],
-            email=cfg["client_name"] or "",
-            traffic_bytes=int((pkg["volume_gb"] or 0) * 1073741824),
-            expire_ms=new_exp_ms,
+        ok_e, res_e = pc_api._update_client(
+            cfg["inbound_id"], cfg["client_uuid"],
+            {
+                "enable": True,
+                "totalGB": new_traffic_bytes,
+                "expiryTime": new_exp_ms,
+            },
         )
         if ok_e:
             enable_err = None
@@ -6576,11 +6583,6 @@ def _dispatch_callback(call, uid, data):
         from ..admin.renderers import (
             _show_panel_configs, _show_panel_config_list,
             _show_panel_config_pkg, _show_panel_config_detail,
-        )
-        from ..db import (
-            get_panel_config, get_panel_config_full,
-            update_panel_config_field,
-            delete_panel_config,
         )
         bot.answer_callback_query(call.id)
 
