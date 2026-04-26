@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 import json
 import sqlite3
 import threading
@@ -477,6 +477,7 @@ def _run_init_db_migrations():
             "ALTER TABLE packages ADD COLUMN position INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE config_types ADD COLUMN description TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE config_types ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE config_types ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
             "CREATE TABLE IF NOT EXISTS pinned_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL, created_at TEXT NOT NULL)",
             "CREATE TABLE IF NOT EXISTS pinned_message_sends (id INTEGER PRIMARY KEY AUTOINCREMENT, pin_id INTEGER NOT NULL, user_id INTEGER NOT NULL, message_id INTEGER NOT NULL)",
             "CREATE TABLE IF NOT EXISTS referrals (id INTEGER PRIMARY KEY AUTOINCREMENT, referrer_id INTEGER NOT NULL, referee_id INTEGER NOT NULL UNIQUE, created_at TEXT NOT NULL, start_reward_given INTEGER NOT NULL DEFAULT 0, purchase_reward_given INTEGER NOT NULL DEFAULT 0)",
