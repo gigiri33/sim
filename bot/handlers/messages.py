@@ -3268,6 +3268,11 @@ def universal_handler(message):
                 return
             delta = amount if sn == "admin_bal_add" else -amount
             update_balance(target_user_id, delta)
+            try:
+                from ..db import update_admin_adjusted
+                update_admin_adjusted(target_user_id, delta)
+            except Exception:
+                pass
             state_clear(uid)
             action_label = "اضافه" if delta > 0 else "کاهش"
             kb = types.InlineKeyboardMarkup()

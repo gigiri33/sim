@@ -421,14 +421,15 @@ def check_and_notify_stock(package_id: int, package_name: str):
 
 
 # ── Admin notifications ────────────────────────────────────────────────────────
-def admin_purchase_notify(method_label, user_row, package_row, purchase_id=None, amount=None):
-    svc_name = None
+def admin_purchase_notify(method_label, user_row, package_row, purchase_id=None, amount=None, service_name=None):
+    svc_name = service_name  # may be overridden by purchase record below
     paid_amount = amount
     if purchase_id:
         try:
             _p = get_purchase(purchase_id)
             if _p:
-                svc_name = urllib.parse.unquote(_p["service_name"]) if _p["service_name"] else None
+                if svc_name is None:
+                    svc_name = urllib.parse.unquote(_p["service_name"]) if _p["service_name"] else None
                 if paid_amount is None:
                     paid_amount = _p["amount"]
         except Exception:

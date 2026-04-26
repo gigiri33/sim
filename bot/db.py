@@ -714,6 +714,8 @@ def _run_init_db_migrations():
             "INSERT OR IGNORE INTO settings(key,value) VALUES('addon_time_enabled','1')",
             # ── Discount code usage scope ─────────────────────────────────────
             "ALTER TABLE discount_codes ADD COLUMN usage_scope TEXT NOT NULL DEFAULT 'all'",
+            # ── Admin balance adjustment tracking ─────────────────────────────
+            "ALTER TABLE users ADD COLUMN total_admin_adjusted INTEGER NOT NULL DEFAULT 0",
         ]
         for sql in migrations:
             try:
@@ -902,13 +904,17 @@ def get_user_detail(user_id):
         return conn.execute(
             """
             SELECT u.*,
-                   (SELECT COUNT(*) FROM purchases p WHERE p.user_id=u.user_id) AS purchase_count,
-                   (SELECT COALESCE(SUM(amount),0) FROM purchases p WHERE p.user_id=u.user_id) AS total_spent,
-                   (SELECT COUNT(*) FROM payments py WHERE py.user_id=u.user_id AND py.kind='renewal' AND py.status='completed') AS renewal_count,
-                   (SELECT COALESCE(SUM(amount),0) FROM payments py WHERE py.user_id=u.user_id AND py.kind='renewal' AND py.status='completed') AS total_renewals,
+                   (SELECT COUNT(*) FROM purchases p WHERE p.user_id=u.user_id)
+                   + (SELECT COUNT(*) FROM panel_configs pc WHERE pc.user_id=u.user_id) AS purchase_count,
+                   (SELECT COALESCE(SUM(p.amount),0) FROM purchases p WHERE p.user_id=u.user_id)
+                   + (SELECT COALESCE(SUM(py.amount),0) FROM payments py
+                      INNER JOIN panel_configs pc ON pc.payment_id=py.id
+                      WHERE pc.user_id=u.user_id AND py.status='completed' AND py.kind='config_purchase') AS total_spent,
+                   (SELECT COUNT(*) FROM payments py WHERE py.user_id=u.user_id AND py.kind IN ('renewal','pnlcfg_renewal') AND py.status='completed') AS renewal_count,
+                   (SELECT COALESCE(SUM(amount),0) FROM payments py WHERE py.user_id=u.user_id AND py.kind IN ('renewal','pnlcfg_renewal') AND py.status='completed') AS total_renewals,
                    (SELECT COALESCE(SUM(py2.amount),0) FROM payments py2 WHERE py2.user_id=u.user_id AND py2.status='completed' AND py2.payment_method != 'wallet') AS total_direct_payments,
                    (SELECT COUNT(*) FROM panel_configs pc WHERE pc.user_id=u.user_id) AS panel_sales_count,
-                   (SELECT COUNT(*) FROM panel_configs pc WHERE pc.user_id=u.user_id AND pc.auto_renew=1) AS panel_renew_count
+                   (SELECT COUNT(*) FROM payments py WHERE py.user_id=u.user_id AND py.kind='pnlcfg_renewal' AND py.status='completed') AS panel_renew_count
             FROM users u WHERE u.user_id=?
             """,
             (user_id,)
@@ -958,6 +964,15 @@ def update_balance(user_id, delta):
     with get_conn() as conn:
         conn.execute(
             "UPDATE users SET balance=balance+? WHERE user_id=?", (delta, user_id)
+        )
+
+
+def update_admin_adjusted(user_id, delta):
+    """Track admin manual balance additions/subtractions for statistics."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE users SET total_admin_adjusted=total_admin_adjusted+? WHERE user_id=?",
+            (delta, user_id)
         )
 
 

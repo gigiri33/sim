@@ -1593,11 +1593,13 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
 
     if config_source == "panel":
         panel_config_ids = []
+        panel_client_names = []
         failed_count = 0
         for _ in range(quantity):
-            ok, result, pc_id = _create_panel_config(uid, package_id, payment_id, chat_id=chat_id)
+            ok, result, pc_id, c_name = _create_panel_config(uid, package_id, payment_id, chat_id=chat_id)
             if ok:
                 panel_config_ids.append(pc_id)
+                panel_client_names.append(c_name or "")
             else:
                 failed_count += 1
                 # Refund the unit price to wallet regardless of original payment method
@@ -1647,9 +1649,27 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
             except Exception:
                 pass
             try:
-                admin_purchase_notify(payment_method, get_user(uid), package_row, purchase_id=None)
+                _svc_name = panel_client_names[0] if panel_client_names else None
+                admin_purchase_notify(payment_method, get_user(uid), package_row,
+                                      purchase_id=None, amount=unit_price, service_name=_svc_name)
             except Exception:
                 pass
+        # Debt notification: if user's balance is negative after purchase (used credit)
+        try:
+            _u_after = get_user(uid)
+            if _u_after and _u_after["balance"] < 0:
+                _debt = abs(_u_after["balance"])
+                from ..helpers import fmt_price as _fp
+                bot.send_message(
+                    uid,
+                    "⚠️ <b>اطلاعیه بدهی</b>\n\n"
+                    "موجودی شما به پایان رسیده بود و هزینه این کانفیگ از اعتبارتون کم شد.\n"
+                    f"💸 بدهی فعلی شما: <b>{_fp(_debt)}</b> تومان\n\n"
+                    "لطفاً با شارژ کیف پول بدهی خود را پرداخت کنید. سپاس 🙏",
+                    parse_mode="HTML",
+                )
+        except Exception:
+            pass
         return panel_config_ids, []
 
     # ── Manual / stock-based packages (original logic) ────────────────────────
@@ -2229,7 +2249,7 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None):
         cpkg_id=cpkg["id"] if cpkg else None,  # store which template was used
     )
 
-    return True, delivery_mode, pc_id
+    return True, delivery_mode, pc_id, client_name
 
 
 def _deliver_panel_config_to_user(chat_id, panel_config_id, package_row):
@@ -2488,6 +2508,23 @@ def _send_bulk_delivery_result(chat_id, uid, package_row, purchase_ids, pending_
                 notify_pending_order_to_admins(p_id, uid, package_row, package_row["price"], method_label)
             except Exception:
                 pass
+
+    # Debt notification: if user's balance is negative after purchase (used credit)
+    if purchase_ids:
+        try:
+            _u_after = get_user(uid)
+            if _u_after and _u_after["balance"] < 0:
+                _debt = abs(_u_after["balance"])
+                bot.send_message(
+                    uid,
+                    "⚠️ <b>اطلاعیه بدهی</b>\n\n"
+                    "موجودی شما به پایان رسیده بود و هزینه این کانفیگ از اعتبارتون کم شد.\n"
+                    f"💸 بدهی فعلی شما: <b>{fmt_price(_debt)}</b> تومان\n\n"
+                    "لطفاً با شارژ کیف پول بدهی خود را پرداخت کنید. سپاس 🙏",
+                    parse_mode="HTML",
+                )
+        except Exception:
+            pass
 
 
 # ── Voucher helpers ────────────────────────────────────────────────────────────
