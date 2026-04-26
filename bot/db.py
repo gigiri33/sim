@@ -737,6 +737,13 @@ def _run_init_db_migrations():
                 conn.execute(sql)
             except Exception:
                 pass
+        # Initialize sort_order for existing rows that still have the default 0
+        try:
+            conn.execute(
+                "UPDATE config_types SET sort_order=id WHERE sort_order=0"
+            )
+        except Exception:
+            pass
         conn.commit()
     finally:
         _init_conn.close()
@@ -1067,14 +1074,14 @@ def count_users_by_filter(filter_type):
 def get_all_types():
     with get_conn() as conn:
         return conn.execute(
-            "SELECT * FROM config_types ORDER BY id DESC"
+            "SELECT * FROM config_types ORDER BY sort_order ASC, id ASC"
         ).fetchall()
 
 
 def get_active_types():
     with get_conn() as conn:
         return conn.execute(
-            "SELECT * FROM config_types WHERE is_active=1 ORDER BY id DESC"
+            "SELECT * FROM config_types WHERE is_active=1 ORDER BY sort_order ASC, id ASC"
         ).fetchall()
 
 
@@ -1087,9 +1094,12 @@ def get_type(type_id):
 
 def add_type(name, description=""):
     with get_conn() as conn:
+        max_order = conn.execute(
+            "SELECT COALESCE(MAX(sort_order), 0) FROM config_types"
+        ).fetchone()[0]
         conn.execute(
-            "INSERT INTO config_types(name, description) VALUES(?, ?)",
-            (name.strip(), description.strip())
+            "INSERT INTO config_types(name, description, sort_order) VALUES(?, ?, ?)",
+            (name.strip(), description.strip(), max_order + 1)
         )
 
 
@@ -1113,6 +1123,24 @@ def update_type_active(type_id, is_active):
         conn.execute(
             "UPDATE config_types SET is_active=? WHERE id=?", (is_active, type_id)
         )
+
+
+def reorder_type(type_id, new_position):
+    """Move a type to new_position (1-indexed) and renumber all types."""
+    with get_conn() as conn:
+        all_types = conn.execute(
+            "SELECT id FROM config_types ORDER BY sort_order ASC, id ASC"
+        ).fetchall()
+        ids = [r["id"] for r in all_types]
+        if type_id not in ids:
+            return
+        ids.remove(type_id)
+        pos = max(1, min(new_position, len(ids) + 1)) - 1  # 0-indexed clamp
+        ids.insert(pos, type_id)
+        for order, tid in enumerate(ids, start=1):
+            conn.execute(
+                "UPDATE config_types SET sort_order=? WHERE id=?", (order, tid)
+            )
 
 
 def delete_type(type_id):

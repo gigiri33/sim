@@ -18,7 +18,7 @@ from ..db import (
     ensure_user, get_user, get_users, set_user_status,
     set_user_agent, update_balance, get_user_purchases, get_purchase,
     get_all_types, get_active_types, get_packages, get_package, add_package, update_package_field, delete_package,
-    add_type, update_type, update_type_description, delete_type,
+    add_type, update_type, update_type_description, delete_type, reorder_type,
     get_registered_packages_stock, get_configs_paginated, count_configs,
     expire_config, add_config,
     assign_config_to_user, reserve_first_config,
@@ -1388,6 +1388,18 @@ def universal_handler(message):
             update_type_description(sd["type_id"], _spt(desc, entities))
             state_clear(uid)
             bot.send_message(uid, "✅ توضیحات با موفقیت ویرایش شد.")
+            _show_admin_types(message)
+            return
+
+        if sn == "admin_edit_type_order" and is_admin(uid):
+            val = (message.text or "").strip()
+            if not val.isdigit() or int(val) < 1:
+                bot.send_message(uid, "⚠️ یک عدد صحیح مثبت وارد کنید.", reply_markup=back_button(f"admin:type:edit:{sd['type_id']}"))
+                return
+            reorder_type(sd["type_id"], int(val))
+            log_admin_action(uid, f"جایگاه نوع #{sd['type_id']} به {val} تغییر کرد")
+            state_clear(uid)
+            bot.send_message(uid, f"✅ جایگاه با موفقیت به <b>{val}</b> تغییر کرد.", parse_mode="HTML")
             _show_admin_types(message)
             return
 

@@ -5864,6 +5864,11 @@ def _dispatch_callback(call, uid, data):
         if not row:
             bot.answer_callback_query(call.id, "نوع یافت نشد.", show_alert=True)
             return
+        # Compute current position of this type
+        from ..db import get_all_types as _gat
+        _all = _gat()
+        _cur_pos = next((i + 1 for i, t in enumerate(_all) if t["id"] == type_id), "?")
+        _total   = len(_all)
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("✏️ ویرایش نام", callback_data=f"admin:type:editname:{type_id}"))
         kb.add(types.InlineKeyboardButton("📝 ویرایش توضیحات", callback_data=f"admin:type:editdesc:{type_id}"))
@@ -5872,11 +5877,55 @@ def _dispatch_callback(call, uid, data):
         is_active = row["is_active"] if "is_active" in row.keys() else 1
         status_label = "✅ فعال — کلیک برای غیرفعال" if is_active else "❌ غیرفعال — کلیک برای فعال"
         kb.add(types.InlineKeyboardButton(status_label, callback_data=f"admin:type:toggleactive:{type_id}"))
+        kb.add(types.InlineKeyboardButton("📦 ویرایش پکیج‌ها", callback_data=f"admin:type:pkgs:{type_id}"))
+        kb.add(types.InlineKeyboardButton(f"🔢 جایگاه (فعلاً {_cur_pos} از {_total})", callback_data=f"admin:type:sortorder:{type_id}"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:types", icon_custom_emoji_id="5253997076169115797"))
         desc_preview = f"\n📝 توضیحات: {esc(row['description'][:80])}..." if row["description"] and len(row["description"]) > 80 else (f"\n📝 توضیحات: {esc(row['description'])}" if row["description"] else "\n📝 توضیحات: ندارد")
         status_line  = "\n🔘 وضعیت: <b>فعال</b>" if is_active else "\n🔘 وضعیت: <b>غیرفعال</b>"
         bot.answer_callback_query(call.id)
-        send_or_edit(call, f"✏️ <b>ویرایش نوع:</b> {esc(row['name'])}{desc_preview}{status_line}", kb)
+        send_or_edit(call, f"✏️ <b>ویرایش نوع:</b> {esc(row['name'])}{desc_preview}{status_line}\n🔢 جایگاه: <b>{_cur_pos}</b> از <b>{_total}</b>", kb)
+        return
+
+    if data.startswith("admin:type:pkgs:"):
+        type_id = int(data.split(":")[3])
+        row     = get_type(type_id)
+        if not row:
+            bot.answer_callback_query(call.id, "نوع یافت نشد.", show_alert=True)
+            return
+        packs = get_packages(type_id=type_id, include_inactive=True)
+        kb    = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("➕ افزودن پکیج", callback_data=f"admin:pkg:add:t:{type_id}"))
+        for p in packs:
+            pkg_active      = p["active"] if "active" in p.keys() else 1
+            pkg_status_icon = "✅" if pkg_active else "❌"
+            kb.row(
+                types.InlineKeyboardButton(
+                    f"{pkg_status_icon} 📦 {p['name']} | {p['volume_gb']}GB | {fmt_price(p['price'])}ت",
+                    callback_data="noop"
+                ),
+                types.InlineKeyboardButton("✏️", callback_data=f"admin:pkg:edit:{p['id']}"),
+                types.InlineKeyboardButton("🗑",  callback_data=f"admin:pkg:del:{p['id']}"),
+            )
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"admin:type:edit:{type_id}", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, f"📦 <b>پکیج‌های نوع: {esc(row['name'])}</b>", kb)
+        return
+
+    if data.startswith("admin:type:sortorder:"):
+        type_id = int(data.split(":")[3])
+        row     = get_type(type_id)
+        if not row:
+            bot.answer_callback_query(call.id, "نوع یافت نشد.", show_alert=True)
+            return
+        from ..db import get_all_types as _gat2
+        _total2 = len(_gat2())
+        state_set(uid, "admin_edit_type_order", type_id=type_id)
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"🔢 <b>تغییر جایگاه نوع: {esc(row['name'])}</b>\n\n"
+            f"تعداد کل نوع‌ها: <b>{_total2}</b>\n\n"
+            "عدد جایگاه جدید (از ۱) را ارسال کنید:",
+            back_button(f"admin:type:edit:{type_id}"))
         return
 
     if data.startswith("admin:type:editname:"):
@@ -7693,6 +7742,7 @@ def _dispatch_callback(call, uid, data):
         if not (admin_has_perm(uid, "register_config") or admin_has_perm(uid, "manage_configs")):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
             return
+        types_list = get_all_types()
         kb = types.InlineKeyboardMarkup()
         for item in types_list:
             kb.add(types.InlineKeyboardButton(f"🧩 {item['name']}", callback_data=f"adm:cfg:t:{item['id']}"))
@@ -10100,7 +10150,7 @@ def _dispatch_callback(call, uid, data):
         return
 
     # ── Admin: Purchase Credit ────────────────────────────────────────────────
-    if data.startswith("adm:credit:"):
+    if data.startswith("adm:credit:") and data.split(":")[2].isdigit():
         parts     = data.split(":")
         target_id = int(parts[2])
         if not admin_has_perm(uid, "full_users") and not is_admin(uid):
