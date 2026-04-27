@@ -56,6 +56,17 @@ def create_plisio_invoice(amount_toman: int, payment_id, user_id, bot_username: 
 
     amount_usdt  = round(amount_toman / usdt_irt, 4)
 
+    # Minimum amount enforced by Plisio per currency
+    PLISIO_MIN_USDT = 5.0
+    if amount_usdt < PLISIO_MIN_USDT:
+        min_toman = int(PLISIO_MIN_USDT * usdt_irt)
+        from ..helpers import fmt_price
+        return False, {"error": (
+            f"حداقل مبلغ پرداخت از طریق Plisio برابر {PLISIO_MIN_USDT:.0f} USDT "
+            f"(معادل {fmt_price(min_toman)} تومان) است.\n"
+            "لطفاً درگاه دیگری انتخاب کنید یا مبلغ را افزایش دهید."
+        )}
+
     # Crypto currency to receive — default USDT_TRX (USDT on TRON)
     crypto_cur  = ((setting_get("plisio_crypto_currency", "") or "") or "USDT_TRX").strip().upper()
     allowed_psys = (setting_get("plisio_allowed_psys_cids", "") or "").strip()
