@@ -146,5 +146,9 @@ def kb_admin_panel(uid=None):
         else:
             rows.append([_btn("🔐 مدیریت لایسنس", callback_data="license:status")])
 
+    # Analytics dashboard
+    if is_owner or (uid and admin_has_perm(uid, "view_users")):
+        rows.append([_btn("📊 آمار فروش", callback_data="admin:stats", emoji_id="5370935802844946281")])
+
     rows.append([_btn("بازگشت", callback_data="nav:main", emoji_id="5253997076169115797")])
     return _raw_markup(rows)

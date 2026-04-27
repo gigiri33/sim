@@ -6015,6 +6015,102 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, text, kb_admin_panel(uid))
         return
 
+    # ── Admin: Stats / Analytics ───────────────────────────────────────────────
+    if data == "admin:stats":
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "view_users")):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        from ..admin.analytics import show_stats_main
+        show_stats_main(call)
+        return
+
+    if data.startswith("stats:period:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "view_users")):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        period = data[len("stats:period:"):]
+        from ..admin.analytics import show_stats_after_period, _period_bounds
+        import jdatetime as _jdt
+        if period == "prompt_day":
+            state_set(uid, "admin_stats_date")
+            bot.answer_callback_query(call.id)
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:stats", icon_custom_emoji_id="5253997076169115797"))
+            send_or_edit(call,
+                "📅 تاریخ جلالی مورد نظر را وارد کنید:\n\n"
+                "مثال: <code>1403/06/15</code>", kb)
+            return
+        if period == "prompt_range":
+            state_set(uid, "admin_stats_range_start")
+            bot.answer_callback_query(call.id)
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:stats", icon_custom_emoji_id="5253997076169115797"))
+            send_or_edit(call,
+                "📆 تاریخ شروع بازه را وارد کنید (جلالی):\n\n"
+                "مثال: <code>1403/06/01</code>", kb)
+            return
+        show_stats_after_period(call, period)
+        return
+
+    if data.startswith("stats:fin:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "view_users")):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        # stats:fin:{period}:{cs}:{ce}
+        parts = data.split(":")
+        period = parts[2] if len(parts) > 2 else "all"
+        cs = parts[3] if len(parts) > 3 else ""
+        ce = parts[4] if len(parts) > 4 else ""
+        from ..admin.analytics import show_financial_report
+        show_financial_report(call, period, cs or None, ce or None)
+        return
+
+    if data.startswith("stats:svc:panel:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "view_users")):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        # stats:svc:panel:{period}:{cs}:{ce}:{sale_type}:{page}
+        parts = data.split(":")
+        period    = parts[3] if len(parts) > 3 else "all"
+        cs        = parts[4] if len(parts) > 4 else ""
+        ce        = parts[5] if len(parts) > 5 else ""
+        sale_type = parts[6] if len(parts) > 6 else "sale"
+        page      = int(parts[7]) if len(parts) > 7 and parts[7].isdigit() else 0
+        from ..admin.analytics import show_panel_services
+        show_panel_services(call, period, cs, ce, sale_type, page)
+        return
+
+    if data.startswith("stats:svc:manual:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "view_users")):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        # stats:svc:manual:{period}:{cs}:{ce}:{page}
+        parts = data.split(":")
+        period = parts[3] if len(parts) > 3 else "all"
+        cs     = parts[4] if len(parts) > 4 else ""
+        ce     = parts[5] if len(parts) > 5 else ""
+        page   = int(parts[6]) if len(parts) > 6 and parts[6].isdigit() else 0
+        from ..admin.analytics import show_manual_services
+        show_manual_services(call, period, cs, ce, page)
+        return
+
+    if data.startswith("stats:svc:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "view_users")):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        # stats:svc:{period}:{cs}:{ce}
+        parts = data.split(":")
+        period = parts[2] if len(parts) > 2 else "all"
+        cs     = parts[3] if len(parts) > 3 else ""
+        ce     = parts[4] if len(parts) > 4 else ""
+        from ..admin.analytics import show_services_menu
+        show_services_menu(call, period, cs, ce)
+        return
+
+    if data == "stats:noop":
+        bot.answer_callback_query(call.id)
+        return
+
     # ── Admin: Types ──────────────────────────────────────────────────────────
     if data == "admin:types":
         if not admin_has_perm(uid, "types_packages"):

@@ -458,6 +458,58 @@ def universal_handler(message):
             )
             return
 
+        # ── Analytics date input ─────────────────────────────────────────────
+        def _parse_jalali_date(text):
+            """Parse 'YYYY/MM/DD' or 'YYYY-MM-DD' jalali string → 'YYYY-MM-DD'."""
+            import re as _re
+            text = (text or "").strip()
+            m = _re.fullmatch(r"(\d{4})[/\-](\d{1,2})[/\-](\d{1,2})", text)
+            if not m:
+                return None
+            return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+
+        if sn == "admin_stats_date" and is_admin(uid):
+            raw = (message.text or "").strip()
+            jdate = _parse_jalali_date(raw)
+            state_clear(uid)
+            if not jdate:
+                bot.send_message(uid, "⚠️ تاریخ معتبر وارد کنید. مثال: <code>1403/06/15</code>", parse_mode="HTML")
+                return
+            from ..admin.analytics import show_stats_after_period
+            from types import SimpleNamespace as _SN
+            fake = _SN(id=None, from_user=message.from_user, message=message)
+            show_stats_after_period(fake, "custom_day", custom_start=jdate)
+            return
+
+        if sn == "admin_stats_range_start" and is_admin(uid):
+            raw = (message.text or "").strip()
+            jdate = _parse_jalali_date(raw)
+            if not jdate:
+                bot.send_message(uid, "⚠️ تاریخ معتبر وارد کنید. مثال: <code>1403/06/01</code>", parse_mode="HTML")
+                return
+            state_set(uid, "admin_stats_range_end", range_start=jdate)
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:stats", icon_custom_emoji_id="5253997076169115797"))
+            bot.send_message(uid,
+                "📆 تاریخ پایان بازه را وارد کنید (جلالی):\n\n"
+                "مثال: <code>1403/06/30</code>", parse_mode="HTML",
+                reply_markup=kb)
+            return
+
+        if sn == "admin_stats_range_end" and is_admin(uid):
+            raw = (message.text or "").strip()
+            jdate_end = _parse_jalali_date(raw)
+            jdate_start = sd.get("range_start", "")
+            state_clear(uid)
+            if not jdate_end or not jdate_start:
+                bot.send_message(uid, "⚠️ تاریخ معتبر وارد کنید.", parse_mode="HTML")
+                return
+            from ..admin.analytics import show_stats_after_period
+            from types import SimpleNamespace as _SN
+            fake = _SN(id=None, from_user=message.from_user, message=message)
+            show_stats_after_period(fake, "custom", custom_start=jdate_start, custom_end=jdate_end)
+            return
+
         # ── Broadcast ─────────────────────────────────────────────────────────
         def _bc_send(target_id):
             """Copy message to target (supports text, photo, video, etc.)."""
