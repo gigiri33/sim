@@ -4038,7 +4038,7 @@ def _start_plisio_auto_verify(payment_id, txn_id, uid, chat_id, message_id,
     t.start()
 
 
-
+def _dispatch_callback(call, uid, data):
     # ── License callbacks ────────────────────────────────────────────────────
     if data.startswith("license:"):
         from ..license_manager import (
