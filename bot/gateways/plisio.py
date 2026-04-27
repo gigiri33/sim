@@ -127,15 +127,17 @@ def check_plisio_invoice(txn_id: str):
         return False, None
     try:
         resp = requests.get(
-            f"{PLISIO_BASE_URL}/transactions/{txn_id}",
+            f"{PLISIO_BASE_URL}/operations/{txn_id}",
             params={"api_key": api_key},
             timeout=10,
         )
         data = resp.json()
-    except Exception:
+    except Exception as exc:
+        print(f"[Plisio check_invoice] request error: {exc}")
         return False, None
 
     if data.get("status") != "success":
+        print(f"[Plisio check_invoice] API error response: {data}")
         return False, None
 
     status = (data.get("data") or {}).get("status", "")
