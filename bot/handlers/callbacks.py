@@ -7194,10 +7194,16 @@ def _dispatch_callback(call, uid, data):
             cfg = get_panel_config(config_id)
             if not cfg:
                 bot.answer_callback_query(call.id, "کانفیگ یافت نشد.", show_alert=True); return
+            bot.answer_callback_query(call.id)
+            # Always send a fresh text message so we have a safe edit target
+            status_msg = bot.send_message(
+                call.message.chat.id,
+                "⏳ در حال حذف از پنل…",
+                parse_mode="HTML",
+            )
             # Delete from panel
             panel = get_panel(cfg["panel_id"])
             if panel and cfg.get("client_uuid"):
-                send_or_edit(call, "\u23f3 \u062f\u0631 \u062d\u0627\u0644 \u062d\u0630\u0641 \u0627\u0632 \u067e\u0646\u0644\u2026")
                 try:
                     from ..panels.client import PanelClient
                     pc_api = PanelClient(
@@ -7209,6 +7215,18 @@ def _dispatch_callback(call, uid, data):
                     pass
             # Delete from DB
             delete_panel_config(config_id)
+            # Remove status message, then show updated panel configs list
+            try:
+                bot.delete_message(call.message.chat.id, status_msg.message_id)
+            except Exception:
+                pass
+            # Also remove the confirmation message (which was the photo/detail message)
+            try:
+                bot.delete_message(call.message.chat.id, call.message.message_id)
+            except Exception:
+                pass
+            # Send success notification then show list
+            bot.send_message(call.message.chat.id, "✅ کانفیگ با موفقیت حذف شد.", parse_mode="HTML")
             _show_panel_configs(call)
             return
 
