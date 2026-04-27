@@ -3885,8 +3885,8 @@ def _start_tronpays_rial_auto_verify(payment_id, invoice_id, uid, chat_id, messa
 
 # ── Plisio auto-verify thread ─────────────────────────────────────────────────
 def _plisio_auto_verify(payment_id, txn_id, uid, chat_id, message_id, kind, package_id=None):
-    """Background thread: polls Plisio every 15s for up to 60 minutes."""
-    max_tries = 240  # 240 × 15s = 60 minutes
+    """Background thread: polls Plisio every 15s for up to 15 minutes."""
+    max_tries = 60  # 60 × 15s = 15 minutes
     for attempt in range(max_tries):
         time.sleep(15)
         payment = get_payment(payment_id)
@@ -5043,24 +5043,28 @@ def _dispatch_callback(call, uid, data):
                 f"⚠️ <b>خطا در ایجاد فاکتور Plisio</b>\n\n<code>{esc(err_msg[:400])}</code>",
                 back_button(f"renew:{purchase_id}"))
             return
-        txn_id_rp  = result.get("txn_id", "")
-        inv_url_rp = result.get("invoice_url", "")
+        txn_id_rp      = result.get("txn_id", "")
+        inv_url_rp     = result.get("invoice_url", "")
+        amount_usdt_rp = result.get("amount_usdt", 0)
         with get_conn() as conn:
             conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (txn_id_rp, payment_id))
         state_set(uid, "await_plisio_verify", payment_id=payment_id, txn_id=txn_id_rp,
                   purchase_id=purchase_id)
-        text = (
+        short_id_rp = str(payment_id)
+        text_rp = (
             "💎 <b>پرداخت کریپتو Plisio — تمدید</b>\n\n"
-            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n\n"
-            "از لینک زیر پرداخت را انجام دهید.\n\n"
-            "⏳ <b>تا یک ساعت</b> پرداخت به صورت خودکار بررسی می‌شود.\n"
-            "در غیر این صورت دکمه «بررسی پرداخت» را بزنید."
+            f"🛒 کد پیگیری: <code>{short_id_rp}</code>\n"
+            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n"
+            f"💱 معادل: <b>{amount_usdt_rp:.4f} USDT</b>\n\n"
+            "❌ این فاکتور <b>۱ ساعت</b> اعتبار دارد\n"
+            "پس از واریز، دکمه «✅ بررسی پرداخت» را بزنید."
         )
-        kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("💎 پرداخت در Plisio", url=inv_url_rp))
-        kb.add(types.InlineKeyboardButton("🔍 بررسی پرداخت", callback_data=f"rpay:plisio:verify:{payment_id}"))
+        kb_rp = types.InlineKeyboardMarkup()
+        kb_rp.add(types.InlineKeyboardButton("💎 پرداخت در Plisio", url=inv_url_rp))
+        kb_rp.add(types.InlineKeyboardButton("✅ بررسی پرداخت", callback_data=f"rpay:plisio:verify:{payment_id}"))
+        kb_rp.add(types.InlineKeyboardButton("⬅️ بازگشت", callback_data=f"renew:{purchase_id}"))
         bot.answer_callback_query(call.id)
-        send_or_edit(call, text, kb)
+        send_or_edit(call, text_rp, kb_rp)
         _start_plisio_auto_verify(
             payment_id, txn_id_rp, uid,
             call.message.chat.id, call.message.message_id,
@@ -5975,21 +5979,25 @@ def _dispatch_callback(call, uid, data):
                 f"⚠️ <b>خطا در ایجاد فاکتور Plisio</b>\n\n<code>{esc(err_msg[:400])}</code>",
                 back_button(f"buy:p:{package_id}"))
             return
-        txn_id  = result.get("txn_id", "")
-        inv_url = result.get("invoice_url", "")
+        txn_id      = result.get("txn_id", "")
+        inv_url     = result.get("invoice_url", "")
+        amount_usdt = result.get("amount_usdt", 0)
         with get_conn() as conn:
             conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (txn_id, payment_id))
         state_set(uid, "await_plisio_verify", payment_id=payment_id, txn_id=txn_id)
+        short_id = str(payment_id)
         text = (
             "💎 <b>پرداخت کریپتو (Plisio)</b>\n\n"
-            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n\n"
-            "از لینک زیر پرداخت را انجام دهید.\n\n"
-            "⏳ <b>تا یک ساعت</b> پرداخت به صورت خودکار بررسی می‌شود.\n"
-            "در غیر این صورت دکمه «بررسی پرداخت» را بزنید."
+            f"🛒 کد پیگیری: <code>{short_id}</code>\n"
+            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n"
+            f"💱 معادل: <b>{amount_usdt:.4f} USDT</b>\n\n"
+            "❌ این فاکتور <b>۱ ساعت</b> اعتبار دارد\n"
+            "پس از واریز، دکمه «✅ بررسی پرداخت» را بزنید."
         )
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("💎 پرداخت در Plisio", url=inv_url))
-        kb.add(types.InlineKeyboardButton("🔍 بررسی پرداخت", callback_data=f"pay:plisio:verify:{payment_id}"))
+        kb.add(types.InlineKeyboardButton("✅ بررسی پرداخت", callback_data=f"pay:plisio:verify:{payment_id}"))
+        kb.add(types.InlineKeyboardButton("⬅️ بازگشت", callback_data=f"buy:p:{package_id}"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
         _start_plisio_auto_verify(
@@ -6363,25 +6371,29 @@ def _dispatch_callback(call, uid, data):
                 f"⚠️ <b>خطا در ایجاد فاکتور Plisio</b>\n\n<code>{esc(err_msg[:400])}</code>",
                 back_button("wallet:charge"))
             return
-        txn_id  = result.get("txn_id", "")
-        inv_url = result.get("invoice_url", "")
+        txn_id_wc      = result.get("txn_id", "")
+        inv_url_wc     = result.get("invoice_url", "")
+        amount_usdt_wc = result.get("amount_usdt", 0)
         with get_conn() as conn:
-            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (txn_id, payment_id))
-        state_set(uid, "await_plisio_verify", payment_id=payment_id, txn_id=txn_id)
-        text = (
+            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (txn_id_wc, payment_id))
+        state_set(uid, "await_plisio_verify", payment_id=payment_id, txn_id=txn_id_wc)
+        short_id_wc = str(payment_id)
+        text_wc = (
             "💎 <b>شارژ کیف پول — Plisio</b>\n\n"
-            f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان\n\n"
-            "از لینک زیر پرداخت را انجام دهید.\n\n"
-            "⏳ <b>تا یک ساعت</b> پرداخت به صورت خودکار بررسی می‌شود.\n"
-            "در غیر این صورت دکمه «بررسی پرداخت» را بزنید."
+            f"🛒 کد پیگیری: <code>{short_id_wc}</code>\n"
+            f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان\n"
+            f"💱 معادل: <b>{amount_usdt_wc:.4f} USDT</b>\n\n"
+            "❌ این فاکتور <b>۱ ساعت</b> اعتبار دارد\n"
+            "پس از واریز، دکمه «✅ بررسی پرداخت» را بزنید."
         )
-        kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("💎 پرداخت در Plisio", url=inv_url))
-        kb.add(types.InlineKeyboardButton("🔍 بررسی پرداخت", callback_data=f"pay:plisio:verify:{payment_id}"))
+        kb_wc = types.InlineKeyboardMarkup()
+        kb_wc.add(types.InlineKeyboardButton("💎 پرداخت در Plisio", url=inv_url_wc))
+        kb_wc.add(types.InlineKeyboardButton("✅ بررسی پرداخت", callback_data=f"pay:plisio:verify:{payment_id}"))
+        kb_wc.add(types.InlineKeyboardButton("⬅️ بازگشت", callback_data="wallet:charge"))
         bot.answer_callback_query(call.id)
-        send_or_edit(call, text, kb)
+        send_or_edit(call, text_wc, kb_wc)
         _start_plisio_auto_verify(
-            payment_id, txn_id, uid,
+            payment_id, txn_id_wc, uid,
             call.message.chat.id, call.message.message_id,
             "wallet_charge")
         return
@@ -8267,21 +8279,27 @@ def _dispatch_callback(call, uid, data):
                 send_or_edit(call,
                     f"⚠️ <b>خطا در ایجاد فاکتور Plisio</b>\n\n<code>{esc(err_pnl[:400])}</code>",
                     back_button(f"mypnlcfg:renewconfirm:{config_id}")); return
-            txn_id_pnl  = result_pnl.get("txn_id", "")
-            inv_url_pnl = result_pnl.get("invoice_url", "")
+            txn_id_pnl      = result_pnl.get("txn_id", "")
+            inv_url_pnl     = result_pnl.get("invoice_url", "")
+            amount_usdt_pnl = result_pnl.get("amount_usdt", 0)
             with get_conn() as conn:
                 conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (txn_id_pnl, payment_id))
             state_set(uid, "await_pnlcfg_renewal_plisio_verify",
                       payment_id=payment_id, txn_id=txn_id_pnl, config_id=config_id)
+            short_id_pnl = str(payment_id)
             kb_pnl = types.InlineKeyboardMarkup()
             kb_pnl.add(types.InlineKeyboardButton("💎 پرداخت در Plisio", url=inv_url_pnl))
-            kb_pnl.add(types.InlineKeyboardButton("🔍 بررسی پرداخت",
+            kb_pnl.add(types.InlineKeyboardButton("✅ بررسی پرداخت",
                         callback_data=f"mypnlcfgrpay:plisio:verify:{payment_id}"))
+            kb_pnl.add(types.InlineKeyboardButton("⬅️ بازگشت", callback_data=f"mypnlcfg:renewconfirm:{config_id}"))
             bot.answer_callback_query(call.id)
             send_or_edit(call,
                 "💎 <b>پرداخت کریپتو Plisio (تمدید)</b>\n\n"
-                f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n\n"
-                "⏳ پس از پرداخت، دکمه <b>بررسی پرداخت</b> را بزنید.",
+                f"🛒 کد پیگیری: <code>{short_id_pnl}</code>\n"
+                f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n"
+                f"💱 معادل: <b>{amount_usdt_pnl:.4f} USDT</b>\n\n"
+                "❌ این فاکتور <b>۱ ساعت</b> اعتبار دارد\n"
+                "پس از واریز، دکمه «✅ بررسی پرداخت» را بزنید.",
                 kb_pnl)
             _start_plisio_auto_verify(
                 payment_id, txn_id_pnl, uid,
@@ -14041,10 +14059,6 @@ def _dispatch_callback(call, uid, data):
         vis         = setting_get("gw_plisio_visibility", "public")
         api_key     = setting_get("plisio_api_key", "")
         range_en    = setting_get("gw_plisio_range_enabled", "0")
-        usd_rate    = setting_get("plisio_usd_rate", "60000")
-        src_cur     = setting_get("plisio_source_currency", "USD") or "USD"
-        allowed     = setting_get("plisio_allowed_psys_cids", "") or "همه ارزها"
-        expire_min  = setting_get("plisio_expire_min", "60") or "60"
         pub_url     = setting_get("server_public_url", "") or "❌ ثبت نشده"
         enabled_label = "🟢 فعال" if enabled == "1" else "🔴 غیرفعال"
         vis_label     = "👥 عمومی" if vis == "public" else "🔒 کاربران امن"
@@ -14058,7 +14072,6 @@ def _dispatch_callback(call, uid, data):
         )
         kb.add(types.InlineKeyboardButton(f"📊 بازه پرداختی: {range_label}", callback_data="adm:gw:plisio:range"))
         kb.add(types.InlineKeyboardButton("🔑 تنظیم کلید API", callback_data="adm:set:plisio_key"))
-        kb.add(types.InlineKeyboardButton("💱 نرخ تبدیل دلار (تومان)", callback_data="adm:set:plisio_usd_rate"))
         kb.add(types.InlineKeyboardButton("🏷 نام نمایشی درگاه", callback_data="adm:gw:plisio:set_name"))
         kb.add(types.InlineKeyboardButton("🎁 بونس و کارمزد", callback_data="adm:gw:plisio:feebonus"))
         kb.add(types.InlineKeyboardButton("🌐 تنظیم Server Public URL", callback_data="adm:set:server_public_url"))
@@ -14071,7 +14084,6 @@ def _dispatch_callback(call, uid, data):
             f"نمایش: {vis_label}\n"
             f"نام نمایشی: {name_display_pl}\n\n"
             f"🔑 کلید API: {key_display}\n"
-            f"💱 نرخ دلار: <b>{esc(usd_rate)}</b> تومان\n"
             f"🌐 Server Public URL: <code>{esc(pub_url[:80])}</code>\n\n"
             "📋 <b>راهنما:</b>\n"
             "۱. در <a href='https://plisio.net'>plisio.net</a> ثبت‌نام کنید\n"
@@ -14114,17 +14126,6 @@ def _dispatch_callback(call, uid, data):
         state_set(uid, "admin_set_plisio_key")
         bot.answer_callback_query(call.id)
         send_or_edit(call, "🔑 کلید API Plisio را ارسال کنید:", back_button("adm:set:gw:plisio"))
-        return
-
-    if data == "adm:set:plisio_usd_rate":
-        state_set(uid, "admin_set_plisio_usd_rate")
-        bot.answer_callback_query(call.id)
-        current = setting_get("plisio_usd_rate", "60000")
-        send_or_edit(call,
-            f"💱 <b>نرخ تبدیل دلار به تومان</b>\n\n"
-            f"مقدار فعلی: <b>{esc(current)}</b> تومان\n\n"
-            "نرخ جدید را به تومان وارد کنید (مثال: <code>60000</code>):",
-            back_button("adm:set:gw:plisio"))
         return
 
     if data == "adm:set:server_public_url":

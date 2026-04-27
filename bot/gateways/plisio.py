@@ -10,6 +10,7 @@ import json
 import requests
 
 from ..db import setting_get
+from .crypto import fetch_crypto_prices
 
 PLISIO_BASE_URL = "https://api.plisio.net/api/v1"
 
@@ -20,8 +21,10 @@ def normalize_bot_username(bot_username: str) -> str:
 
 
 def get_plisio_callback_urls(bot_username: str) -> dict:
-    """Build callback URLs for a Plisio invoice."""
+    """Build callback URLs for a Plisio invoice (only used when server_public_url is set)."""
     base = (setting_get("server_public_url", "") or "").rstrip("/")
+    if not base:
+        return {}
     slug = normalize_bot_username(bot_username)
     return {
         "callback_url":         f"{base}/plisio/{slug}/callback",
@@ -34,45 +37,47 @@ def create_plisio_invoice(amount_toman: int, payment_id, user_id, bot_username: 
     """
     Create a new Plisio invoice.
 
-    Converts *amount_toman* to USD using the ``plisio_usd_rate`` setting,
+    Converts *amount_toman* to USDT using SwapWallet live rate,
     then calls the Plisio REST API.
 
     Returns:
-        ``(True,  {"txn_id": ..., "invoice_url": ...})``  on success
-        ``(False, {"error": ...})``                        on failure
+        ``(True,  {"txn_id": ..., "invoice_url": ..., "amount_usdt": ..., "usdt_rate": ...})``  on success
+        ``(False, {"error": ...})``                                                               on failure
     """
     api_key = (setting_get("plisio_api_key", "") or "").strip()
     if not api_key:
         return False, {"error": "کلید API Plisio ثبت نشده است."}
 
-    try:
-        usd_rate = float(setting_get("plisio_usd_rate", "60000") or "60000")
-    except (ValueError, TypeError):
-        usd_rate = 60000.0
-    if usd_rate <= 0:
-        return False, {"error": "نرخ دلار نامعتبر است."}
+    # Get live USDT/IRT rate from SwapWallet API
+    prices = fetch_crypto_prices()
+    usdt_irt = prices.get("USDT", 0)
+    if not usdt_irt or usdt_irt <= 0:
+        return False, {"error": "دریافت نرخ USDT ناموفق بود. لطفاً مجدداً تلاش کنید."}
 
-    amount_usd      = round(amount_toman / usd_rate, 4)
-    source_currency = ((setting_get("plisio_source_currency", "") or "") or "USD").strip()
-    allowed_psys    = (setting_get("plisio_allowed_psys_cids", "") or "").strip()
-    expire_min      = ((setting_get("plisio_expire_min", "") or "") or "60").strip()
+    amount_usdt  = round(amount_toman / usdt_irt, 4)
 
-    urls = get_plisio_callback_urls(bot_username)
+    # Crypto currency to receive — default USDT_TRX (USDT on TRON)
+    crypto_cur  = ((setting_get("plisio_crypto_currency", "") or "") or "USDT_TRX").strip().upper()
+    allowed_psys = (setting_get("plisio_allowed_psys_cids", "") or "").strip()
+    expire_min   = ((setting_get("plisio_expire_min", "") or "") or "60").strip()
 
     params = {
-        "api_key":              api_key,
-        "currency":             source_currency,
-        "order_name":           description[:100],
-        "order_number":         str(payment_id),
-        "amount":               amount_usd,
-        "source_currency":      source_currency,
-        "callback_url":         urls["callback_url"],
-        "success_callback_url": urls["success_callback_url"],
-        "fail_callback_url":    urls["fail_callback_url"],
-        "expire_min":           expire_min,
+        "api_key":      api_key,
+        "currency":     crypto_cur,
+        "order_name":   description[:100],
+        "order_number": str(payment_id),
+        "amount":       amount_usdt,
+        "expire_min":   expire_min,
     }
     if allowed_psys:
         params["allowed_psys_cids"] = allowed_psys
+
+    # Optional webhook callbacks (only if server_public_url is configured)
+    urls = get_plisio_callback_urls(bot_username)
+    if urls:
+        params["callback_url"]         = urls["callback_url"]
+        params["success_callback_url"] = urls["success_callback_url"]
+        params["fail_callback_url"]    = urls["fail_callback_url"]
 
     try:
         resp = requests.get(
@@ -95,7 +100,7 @@ def create_plisio_invoice(amount_toman: int, payment_id, user_id, bot_username: 
     invoice_data = data.get("data", {})
     txn_id       = invoice_data.get("txn_id", "")
     invoice_url  = invoice_data.get("invoice_url", "")
-    return True, {"txn_id": txn_id, "invoice_url": invoice_url}
+    return True, {"txn_id": txn_id, "invoice_url": invoice_url, "amount_usdt": amount_usdt, "usdt_rate": usdt_irt}
 
 
 def check_plisio_invoice(txn_id: str):

@@ -3152,17 +3152,6 @@ def universal_handler(message):
             bot.send_message(uid, "✅ کلید API Plisio ذخیره شد.", reply_markup=back_button("adm:set:gw:plisio"))
             return
 
-        if sn == "admin_set_plisio_usd_rate" and is_admin(uid):
-            val = (message.text or "").strip()
-            if not val.isdigit() or int(val) <= 0:
-                bot.send_message(uid, "⚠️ یک عدد مثبت وارد کنید (مثال: <code>60000</code>):", reply_markup=back_button("adm:set:gw:plisio"))
-                return
-            setting_set("plisio_usd_rate", val)
-            log_admin_action(uid, f"نرخ دلار Plisio به {val} تومان تغییر کرد")
-            state_clear(uid)
-            bot.send_message(uid, f"✅ نرخ تبدیل دلار به <b>{val}</b> تومان ذخیره شد.", parse_mode="HTML", reply_markup=back_button("adm:set:gw:plisio"))
-            return
-
         if sn == "admin_set_server_public_url" and is_admin(uid):
             val = (message.text or "").strip().rstrip("/")
             if val and not (val.startswith("http://") or val.startswith("https://")):
