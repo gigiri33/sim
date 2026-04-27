@@ -891,9 +891,15 @@ def get_users(has_purchase=None, limit=None, offset=0, status=None):
     )
     params = []
     if has_purchase is True:
-        q += " AND EXISTS (SELECT 1 FROM purchases p WHERE p.user_id=u.user_id)"
+        q += (
+            " AND (EXISTS (SELECT 1 FROM purchases p WHERE p.user_id=u.user_id)"
+            " OR EXISTS (SELECT 1 FROM panel_configs pc WHERE pc.user_id=u.user_id))"
+        )
     elif has_purchase is False:
-        q += " AND NOT EXISTS (SELECT 1 FROM purchases p WHERE p.user_id=u.user_id)"
+        q += (
+            " AND NOT EXISTS (SELECT 1 FROM purchases p WHERE p.user_id=u.user_id)"
+            " AND NOT EXISTS (SELECT 1 FROM panel_configs pc WHERE pc.user_id=u.user_id)"
+        )
     if status is not None:
         q += " AND u.status=?"
         params.append(status)

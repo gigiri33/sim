@@ -4683,13 +4683,23 @@ def _dispatch_callback(call, uid, data):
                     bot.delete_message(call.message.chat.id, call.message.message_id)
                 except Exception:
                     pass
-                bot.send_message(
-                    call.message.chat.id,
-                    f"📜 <b>قوانین خرید</b>\n\n{rendered_rules}",
-                    parse_mode="HTML",
-                    reply_markup=kb,
-                    disable_web_page_preview=True,
-                )
+                try:
+                    bot.send_message(
+                        call.message.chat.id,
+                        f"📜 <b>قوانین خرید</b>\n\n{rendered_rules}",
+                        parse_mode="HTML",
+                        reply_markup=kb,
+                        disable_web_page_preview=True,
+                    )
+                except Exception:
+                    from ..ui.premium_emoji import deserialize_premium_text as _dpt
+                    _plain = _dpt(rules_text).get("text", rules_text)
+                    bot.send_message(
+                        call.message.chat.id,
+                        f"📜 قوانین خرید\n\n{_plain}",
+                        reply_markup=kb,
+                        disable_web_page_preview=True,
+                    )
                 return
         # Fall through to actual buy
         data = "buy:start_real"
@@ -7161,11 +7171,21 @@ def _dispatch_callback(call, uid, data):
                 InlineKeyboardButton("✅ بله، حذف کن",  callback_data=f"admin:pcfg:delok:{config_id}"),
                 InlineKeyboardButton("❌ لغو",           callback_data=f"admin:pcfg:d:{config_id}"),
             )
-            send_or_edit(call,
+            # Clear buttons from the current message (works on both text and photo messages)
+            try:
+                bot.edit_message_reply_markup(
+                    call.message.chat.id, call.message.message_id, reply_markup=None
+                )
+            except Exception:
+                pass
+            bot.send_message(
+                call.message.chat.id,
                 "⚠️ <b>تأیید حذف کانفیگ</b>\n\n"
                 "این کانفیگ به صورت <b>دائمی</b> حذف می‌شود.\n"
                 "سرویس قابل تمدید نخواهد بود و هیچ مبلغی برگشت داده نمی‌شود.\n\n"
-                "آیا مطمئن هستید؟", kb)
+                "آیا مطمئن هستید؟",
+                parse_mode="HTML", reply_markup=kb
+            )
             return
 
         # admin:pcfg:delok:{config_id}
