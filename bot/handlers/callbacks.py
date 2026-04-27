@@ -6111,6 +6111,52 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id)
         return
 
+    if data.startswith("stats:after:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "view_users")):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        # stats:after:{period}:{cs}:{ce}
+        parts = data.split(":")
+        period = parts[2] if len(parts) > 2 else "all"
+        cs     = parts[3] if len(parts) > 3 else ""
+        ce     = parts[4] if len(parts) > 4 else ""
+        from ..admin.analytics import show_stats_after_period
+        show_stats_after_period(call, period, cs or None, ce or None)
+        return
+
+    if data.startswith("stats:det:panel:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "view_users")):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        # stats:det:panel:{config_id}:{period}:{cs}:{ce}:{sale_type}:{page}
+        parts = data.split(":")
+        config_id = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 0
+        period    = parts[4] if len(parts) > 4 else "all"
+        cs        = parts[5] if len(parts) > 5 else ""
+        ce        = parts[6] if len(parts) > 6 else ""
+        sale_type = parts[7] if len(parts) > 7 else "sale"
+        page      = int(parts[8]) if len(parts) > 8 and parts[8].isdigit() else 0
+        back_cb   = f"stats:svc:panel:{period}:{cs}:{ce}:{sale_type}:{page}"
+        from ..admin.analytics import show_panel_service_detail
+        show_panel_service_detail(call, config_id, back_cb)
+        return
+
+    if data.startswith("stats:det:manual:"):
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "view_users")):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        # stats:det:manual:{purchase_id}:{period}:{cs}:{ce}:{page}
+        parts = data.split(":")
+        purchase_id = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 0
+        period      = parts[4] if len(parts) > 4 else "all"
+        cs          = parts[5] if len(parts) > 5 else ""
+        ce          = parts[6] if len(parts) > 6 else ""
+        page        = int(parts[7]) if len(parts) > 7 and parts[7].isdigit() else 0
+        back_cb     = f"stats:svc:manual:{period}:{cs}:{ce}:{page}"
+        from ..admin.analytics import show_manual_service_detail
+        show_manual_service_detail(call, purchase_id, back_cb)
+        return
+
     # ── Admin: Types ──────────────────────────────────────────────────────────
     if data == "admin:types":
         if not admin_has_perm(uid, "types_packages"):

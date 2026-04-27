@@ -406,7 +406,7 @@ def _service_type_kb(period, cs, ce):
     )
     kb.add(types.InlineKeyboardButton(
         "بازگشت",
-        callback_data=f"stats:svc:{period}:{cs}:{ce}",
+        callback_data=f"stats:after:{period}:{cs}:{ce}",
         icon_custom_emoji_id=_BACK_ICON
     ))
     return kb
@@ -476,7 +476,11 @@ def show_stats_after_period(call, period, custom_start=None, custom_end=None):
         "نوع گزارش را انتخاب کنید:"
     )
     kb = _report_type_kb(period, custom_start, custom_end)
-    bot.answer_callback_query(call.id)
+    if getattr(call, 'id', None):
+        try:
+            bot.answer_callback_query(call.id)
+        except Exception:
+            pass
     send_or_edit(call, text, kb)
 
 
@@ -511,7 +515,7 @@ def show_financial_report(call, period, custom_start=None, custom_end=None):
     kb = types.InlineKeyboardMarkup()
     kb.add(types.InlineKeyboardButton(
         "بازگشت",
-        callback_data=f"stats:svc:{period}:{cs}:{ce}",
+        callback_data=f"stats:after:{period}:{cs}:{ce}",
         icon_custom_emoji_id=_BACK_ICON
     ))
     bot.answer_callback_query(call.id)
@@ -530,7 +534,7 @@ def show_services_menu(call, period, cs, ce):
 
 
 def show_panel_services(call, period, cs, ce, sale_type, page):
-    """Paginated list of panel service records."""
+    """Paginated list of panel service records as inline buttons."""
     start, end = _period_bounds(period, cs or None, ce or None)
     label = _period_label(period, cs or None, ce or None)
     per_page = 10
@@ -539,31 +543,38 @@ def show_panel_services(call, period, cs, ce, sale_type, page):
     kind_label = "فروش" if sale_type == "sale" else "تمدید"
     total_pages = max(1, (total + per_page - 1) // per_page)
 
+    header = (
+        f"🖥 <b>سرویس‌های پنل ({kind_label}) — {label}</b>\n"
+        f"📄 صفحه {page+1} از {total_pages} | مجموع: {_fmt(total)}"
+    )
+
+    kb = types.InlineKeyboardMarkup(row_width=2)
+
     if not rows:
-        text = (
+        header = (
             f"🖥 <b>سرویس‌های پنل ({kind_label}) — {label}</b>\n\n"
             "📭 هیچ داده‌ای در این بازه موجود نیست."
         )
     else:
-        lines = [f"🖥 <b>سرویس‌های پنل ({kind_label}) — {label}</b>\n"
-                 f"📄 صفحه {page+1} از {total_pages} | مجموع: {_fmt(total)}\n"
-                 "━━━━━━━━━━━━━━━━━━"]
-        for i, r in enumerate(rows, start=page * per_page + 1):
-            cname    = r["client_name"] or "—"
-            pkg_name = r["pkg_name"] or "—"
-            typ_name = r["type_name"] or "—"
-            amount   = fmt_price(r["amount"] or 0)
+        for r in rows:
+            cname    = (r["client_name"] or "—")[:28]
             uname    = r["username"] or ""
-            fname    = r["full_name"] or ""
-            user_str = f"@{uname}" if uname else fname or "—"
-            lines.append(
-                f"{i}. <b>{esc(cname)}</b> ({esc(typ_name)} / {esc(pkg_name)})\n"
-                f"   👤 {esc(user_str)} | 💰 {amount} تومان\n"
-                f"   🕐 {r['created_at'][:16]}"
+            fname    = (r["full_name"] or "")[:20]
+            user_str = f"@{uname}" if uname else (fname or "—")
+            kind_icon = "🛒" if sale_type == "sale" else "🔄"
+            detail_cb = f"stats:det:panel:{r['id']}:{period}:{cs}:{ce}:{sale_type}:{page}"
+            kb.row(
+                types.InlineKeyboardButton(
+                    f"{kind_icon} {cname}",
+                    callback_data=detail_cb
+                ),
+                types.InlineKeyboardButton(
+                    f"👤 {user_str}",
+                    callback_data="stats:noop"
+                ),
             )
-        text = "\n".join(lines)
 
-    kb = types.InlineKeyboardMarkup(row_width=2)
+    # Navigation
     nav = []
     if page > 0:
         nav.append(types.InlineKeyboardButton(
@@ -593,11 +604,11 @@ def show_panel_services(call, period, cs, ce, sale_type, page):
         icon_custom_emoji_id=_BACK_ICON
     ))
     bot.answer_callback_query(call.id)
-    send_or_edit(call, text, kb)
+    send_or_edit(call, header, kb)
 
 
 def show_manual_services(call, period, cs, ce, page):
-    """Paginated list of manual purchase records."""
+    """Paginated list of manual purchase records as inline buttons."""
     start, end = _period_bounds(period, cs or None, ce or None)
     label = _period_label(period, cs or None, ce or None)
     per_page = 10
@@ -605,31 +616,36 @@ def show_manual_services(call, period, cs, ce, page):
 
     total_pages = max(1, (total + per_page - 1) // per_page)
 
+    header = (
+        f"📁 <b>سرویس‌های دستی — {label}</b>\n"
+        f"📄 صفحه {page+1} از {total_pages} | مجموع: {_fmt(total)}"
+    )
+
+    kb = types.InlineKeyboardMarkup(row_width=2)
+
     if not rows:
-        text = (
+        header = (
             f"📁 <b>سرویس‌های دستی — {label}</b>\n\n"
             "📭 هیچ داده‌ای در این بازه موجود نیست."
         )
     else:
-        lines = [f"📁 <b>سرویس‌های دستی — {label}</b>\n"
-                 f"📄 صفحه {page+1} از {total_pages} | مجموع: {_fmt(total)}\n"
-                 "━━━━━━━━━━━━━━━━━━"]
-        for i, r in enumerate(rows, start=page * per_page + 1):
-            sname    = r["service_name"] or "—"
-            pkg_name = r["pkg_name"] or "—"
-            typ_name = r["type_name"] or "—"
-            amount   = fmt_price(r["amount"] or 0)
+        for r in rows:
+            sname    = (r["service_name"] or "—")[:28]
             uname    = r["username"] or ""
-            fname    = r["full_name"] or ""
-            user_str = f"@{uname}" if uname else fname or "—"
-            lines.append(
-                f"{i}. <b>{esc(sname)}</b> ({esc(typ_name)} / {esc(pkg_name)})\n"
-                f"   👤 {esc(user_str)} | 💰 {amount} تومان\n"
-                f"   🕐 {r['created_at'][:16]}"
+            fname    = (r["full_name"] or "")[:20]
+            user_str = f"@{uname}" if uname else (fname or "—")
+            detail_cb = f"stats:det:manual:{r['id']}:{period}:{cs}:{ce}:{page}"
+            kb.row(
+                types.InlineKeyboardButton(
+                    f"📁 {sname}",
+                    callback_data=detail_cb
+                ),
+                types.InlineKeyboardButton(
+                    f"👤 {user_str}",
+                    callback_data="stats:noop"
+                ),
             )
-        text = "\n".join(lines)
 
-    kb = types.InlineKeyboardMarkup(row_width=2)
     nav = []
     if page > 0:
         nav.append(types.InlineKeyboardButton(
@@ -651,5 +667,51 @@ def show_manual_services(call, period, cs, ce, page):
         callback_data=f"stats:svc:{period}:{cs}:{ce}",
         icon_custom_emoji_id=_BACK_ICON
     ))
+    bot.answer_callback_query(call.id)
+    send_or_edit(call, header, kb)
+
+
+def show_panel_service_detail(call, config_id, back_cb):
+    """Show full panel config detail, reusing the existing admin renderer."""
+    from .renderers import _show_panel_config_detail
+    bot.answer_callback_query(call.id)
+    _show_panel_config_detail(call, config_id, back_data=back_cb)
+
+
+def show_manual_service_detail(call, purchase_id, back_cb):
+    """Show full manual purchase detail."""
+    from ..db import get_purchase, get_user
+    pr = get_purchase(purchase_id)
+    if not pr:
+        bot.answer_callback_query(call.id, "خرید یافت نشد.", show_alert=True)
+        return
+    u = get_user(pr["user_id"])
+    uname = (u["username"] if u and u["username"] else "") if u else ""
+    fname = (u["full_name"] if u else "") or ""
+    user_str = f"@{uname}" if uname else fname or str(pr["user_id"])
+    sname    = pr["service_name"] or "—"
+    pkg_name = pr["package_name"] or "—"
+    typ_name = pr["type_name"] or "—"
+    vol      = f"{pr['volume_gb']} گیگ" if pr["volume_gb"] else "نامحدود"
+    dur      = f"{pr['duration_days']} روز" if pr["duration_days"] else "نامحدود"
+    amount   = fmt_price(pr["amount"] or 0)
+    method   = pr["payment_method"] or "—"
+    created  = (pr["created_at"] or "")[:16]
+    text = (
+        f"📁 <b>جزئیات سرویس دستی</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"🔖 نام سرویس: <b>{esc(sname)}</b>\n"
+        f"📦 پکیج: <b>{esc(pkg_name)}</b> | {esc(typ_name)}\n"
+        f"📶 حجم: <b>{vol}</b> | ⏱ مدت: <b>{dur}</b>\n"
+        f"👤 خریدار: <b>{esc(user_str)}</b>\n"
+        f"💰 مبلغ: <b>{amount}</b> تومان\n"
+        f"💳 روش پرداخت: <b>{esc(method)}</b>\n"
+        f"🕐 تاریخ خرید: <b>{created}</b>\n"
+    )
+    inq = pr["inquiry_link"] or ""
+    if inq:
+        text += f"🔗 لینک استعلام: {esc(inq)}\n"
+    kb = types.InlineKeyboardMarkup()
+    kb.add(_back_btn(back_cb))
     bot.answer_callback_query(call.id)
     send_or_edit(call, text, kb)

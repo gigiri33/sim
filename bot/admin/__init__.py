@@ -20,6 +20,8 @@ from .analytics import (
     show_services_menu,
     show_panel_services,
     show_manual_services,
+    show_panel_service_detail,
+    show_manual_service_detail,
 )
 
 __all__ = [
@@ -30,4 +32,5 @@ __all__ = [
     "_send_backup", "_backup_loop",
     "show_stats_main", "show_stats_after_period", "show_financial_report",
     "show_services_menu", "show_panel_services", "show_manual_services",
+    "show_panel_service_detail", "show_manual_service_detail",
 ]

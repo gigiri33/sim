@@ -475,10 +475,11 @@ def universal_handler(message):
             if not jdate:
                 bot.send_message(uid, "⚠️ تاریخ معتبر وارد کنید. مثال: <code>1403/06/15</code>", parse_mode="HTML")
                 return
-            from ..admin.analytics import show_stats_after_period
-            from types import SimpleNamespace as _SN
-            fake = _SN(id=None, from_user=message.from_user, message=message)
-            show_stats_after_period(fake, "custom_day", custom_start=jdate)
+            from ..admin.analytics import _report_type_kb, _period_label
+            label = _period_label("custom_day", custom_start=jdate)
+            text = f"📊 <b>آمار — {label}</b>\n\nنوع گزارش را انتخاب کنید:"
+            kb = _report_type_kb("custom_day", jdate, None)
+            bot.send_message(uid, text, parse_mode="HTML", reply_markup=kb)
             return
 
         if sn == "admin_stats_range_start" and is_admin(uid):
@@ -504,10 +505,11 @@ def universal_handler(message):
             if not jdate_end or not jdate_start:
                 bot.send_message(uid, "⚠️ تاریخ معتبر وارد کنید.", parse_mode="HTML")
                 return
-            from ..admin.analytics import show_stats_after_period
-            from types import SimpleNamespace as _SN
-            fake = _SN(id=None, from_user=message.from_user, message=message)
-            show_stats_after_period(fake, "custom", custom_start=jdate_start, custom_end=jdate_end)
+            from ..admin.analytics import _report_type_kb, _period_label
+            label = _period_label("custom", custom_start=jdate_start, custom_end=jdate_end)
+            text = f"📊 <b>آمار — {label}</b>\n\nنوع گزارش را انتخاب کنید:"
+            kb = _report_type_kb("custom", jdate_start, jdate_end)
+            bot.send_message(uid, text, parse_mode="HTML", reply_markup=kb)
             return
 
         # ── Broadcast ─────────────────────────────────────────────────────────
