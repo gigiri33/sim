@@ -5079,6 +5079,16 @@ def _dispatch_callback(call, uid, data):
         return
 
     # ── Naming step for panel packages ────────────────────────────────────────
+    # buy:naming:show:{package_id}:{quantity}  — back button: re-show naming prompt
+    if data.startswith("buy:naming:show:"):
+        parts      = data.split(":")
+        package_id = int(parts[3])
+        quantity   = int(parts[4])
+        bot.answer_callback_query(call.id)
+        state_clear(uid)
+        _show_naming_prompt(call, package_id, quantity)
+        return
+
     # buy:naming:{random|custom}:{package_id}:{quantity}
     if data.startswith("buy:naming:"):
         parts      = data.split(":")
@@ -5111,7 +5121,7 @@ def _dispatch_callback(call, uid, data):
                       package_id=package_id, unit_price=unit_price,
                       quantity=quantity, kind="config_purchase")
             kb = types.InlineKeyboardMarkup()
-            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"buy:naming:random:{package_id}:{quantity}",
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"buy:naming:show:{package_id}:{quantity}",
                                               icon_custom_emoji_id="5253997076169115797"))
             send_or_edit(call,
                 "✏️ <b>نام سرویس</b>\n\n"
@@ -5124,7 +5134,7 @@ def _dispatch_callback(call, uid, data):
                       package_id=package_id, unit_price=unit_price,
                       quantity=quantity, kind="config_purchase")
             kb = types.InlineKeyboardMarkup()
-            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"buy:naming:random:{package_id}:{quantity}",
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"buy:naming:show:{package_id}:{quantity}",
                                               icon_custom_emoji_id="5253997076169115797"))
             send_or_edit(call,
                 f"✏️ <b>نام سرویس‌ها</b>\n\n"
@@ -7055,11 +7065,6 @@ def _dispatch_callback(call, uid, data):
             _show_panel_configs, _show_panel_config_list,
             _show_panel_config_pkg, _show_panel_config_detail,
         )
-        from ..db import (
-            get_panel_config, get_panel_config_full,
-            update_panel_config_field,
-            delete_panel_config,
-        )
         bot.answer_callback_query(call.id)
 
         if data == "admin:pcfg:search":
@@ -7431,9 +7436,6 @@ def _dispatch_callback(call, uid, data):
 
     # ── User: My Panel Configs ─────────────────────────────────────────────────
     if data.startswith("mypnlcfg:") or data.startswith("mypnlcfgrpay:"):
-        from ..db import (
-            get_panel_config, update_panel_config_field,
-        )
         from ..admin.renderers import _show_panel_config_detail
 
         # mypnlcfg:d:{config_id}
@@ -15966,7 +15968,6 @@ def _dispatch_callback(call, uid, data):
             panel_id = add_panel(name=pnl_name or "بدون نام", protocol=protocol,
                                  host=host, port=int(port or 2053), path=path,
                                  username=username, password=password, sub_url_base="")
-            from ..db import update_panel_status
             update_panel_status(panel_id, "connected", "")
             bot.send_message(uid, "✅ اتصال موفق! پنل ذخیره شد.")
             _show_panel_detail(call, panel_id)
