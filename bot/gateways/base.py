@@ -8,7 +8,7 @@ from ..db import (
     get_gateway_fee_amount, get_gateway_bonus_amount, apply_gateway_fee,
 )
 
-_ALL_GATEWAYS = ("card", "crypto", "tetrapay", "swapwallet_crypto", "tronpays_rial")
+_ALL_GATEWAYS = ("card", "crypto", "tetrapay", "swapwallet_crypto", "tronpays_rial", "plisio")
 
 
 def is_gateway_available(gw_name, user_id, amount=None):

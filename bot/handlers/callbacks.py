@@ -88,6 +88,10 @@ from ..gateways.swapwallet_crypto import (
 from ..gateways.tronpays_rial import (
     create_tronpays_rial_invoice, check_tronpays_rial_invoice, is_tronpays_paid,
 )
+from ..gateways.plisio import (
+    create_plisio_invoice, check_plisio_invoice,
+    is_plisio_paid, is_plisio_pending, is_plisio_failed,
+)
 from ..ui.helpers import send_or_edit, check_channel_membership, channel_lock_message
 from ..ui.helpers import _invalidate_channel_cache
 from ..ui.keyboards import kb_main, kb_admin_panel
@@ -833,6 +837,10 @@ def _show_purchase_gateways(target, uid, package_id, price, package_row):
         _lbl = setting_get("gw_tronpays_rial_display_name", "").strip() or "💳 درگاه کارت به کارت (TronPay)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:tronpays_rial:{package_id}"))
         _gw_labels.append(("tronpays_rial", _lbl))
+    if is_gateway_available("plisio", uid):
+        _lbl = setting_get("gw_plisio_display_name", "").strip() or "💎 پرداخت کریپتو (Plisio)"
+        kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:plisio:{package_id}"))
+        _gw_labels.append(("plisio", _lbl))
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"buy:t:{package_row['type_id']}", icon_custom_emoji_id="5253997076169115797"))
     _range_guide = build_gateway_range_guide(_gw_labels)
     _pkg_sn = package_row['show_name'] if 'show_name' in package_row.keys() else 1
@@ -903,6 +911,10 @@ def _show_renewal_gateways(target, uid, purchase_id, package_id, price, package_
         _lbl = setting_get("gw_tronpays_rial_display_name", "").strip() or "💳 درگاه کارت به کارت (TronPay)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:tronpays_rial:{purchase_id}:{package_id}"))
         _gw_labels.append(("tronpays_rial", _lbl))
+    if is_gateway_available("plisio", uid):
+        _lbl = setting_get("gw_plisio_display_name", "").strip() or "💎 پرداخت کریپتو (Plisio)"
+        kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:plisio:{purchase_id}:{package_id}"))
+        _gw_labels.append(("plisio", _lbl))
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"renew:{purchase_id}", icon_custom_emoji_id="5253997076169115797"))
     _range_guide = build_gateway_range_guide(_gw_labels)
     _pkg_sn_renew = package_row['show_name'] if 'show_name' in package_row.keys() else 1
@@ -1337,6 +1349,10 @@ def _show_pnlcfg_renewal_gateways(target, uid, config_id, package_id, price, pac
         _lbl = setting_get("gw_tronpays_rial_display_name", "").strip() or "💳 درگاه کارت به کارت (TronPay)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"mypnlcfgrpay:tronpays_rial:{config_id}:{package_id}"))
         _gw_labels.append(("tronpays_rial", _lbl))
+    if is_gateway_available("plisio", uid):
+        _lbl = setting_get("gw_plisio_display_name", "").strip() or "💎 پرداخت کریپتو (Plisio)"
+        kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"mypnlcfgrpay:plisio:{config_id}:{package_id}"))
+        _gw_labels.append(("plisio", _lbl))
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"mypnlcfg:renewconfirm:{config_id}",
            icon_custom_emoji_id="5253997076169115797"))
     _range_guide = build_gateway_range_guide(_gw_labels)
@@ -1392,6 +1408,10 @@ def _show_wallet_gateways(target, uid, amount):
         _lbl = setting_get("gw_tronpays_rial_display_name", "").strip() or "💳 درگاه کارت به کارت (TronPay)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:tronpays_rial"))
         _gw_labels.append(("tronpays_rial", _lbl))
+    if is_gateway_available("plisio", uid):
+        _lbl = setting_get("gw_plisio_display_name", "").strip() or "💎 پرداخت کریپتو (Plisio)"
+        kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:plisio"))
+        _gw_labels.append(("plisio", _lbl))
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
     _range_guide = build_gateway_range_guide(_gw_labels)
     sd = state_data(uid)
@@ -3863,7 +3883,162 @@ def _start_tronpays_rial_auto_verify(payment_id, invoice_id, uid, chat_id, messa
     t.start()
 
 
-def _dispatch_callback(call, uid, data):
+# ── Plisio auto-verify thread ─────────────────────────────────────────────────
+def _plisio_auto_verify(payment_id, txn_id, uid, chat_id, message_id, kind, package_id=None):
+    """Background thread: polls Plisio every 15s for up to 60 minutes."""
+    max_tries = 240  # 240 × 15s = 60 minutes
+    for attempt in range(max_tries):
+        time.sleep(15)
+        payment = get_payment(payment_id)
+        if not payment or payment["status"] != "pending":
+            return
+        ok, status = check_plisio_invoice(txn_id)
+        print(f"[Plisio auto-verify] attempt={attempt+1} payment={payment_id} ok={ok} status={status!r}")
+        if not ok or not is_plisio_paid(status):
+            if ok and is_plisio_failed(status):
+                # Invoice expired/failed — stop polling
+                break
+            continue
+        try:
+            if kind == "wallet_charge":
+                if not complete_payment(payment_id):
+                    return
+                update_balance(uid, payment["amount"])
+                state_clear(uid)
+                try:
+                    apply_gateway_bonus_if_needed(uid, "plisio", payment["amount"])
+                except Exception:
+                    pass
+                try:
+                    bot.edit_message_text(
+                        f"✅ پرداخت شما تأیید شد و کیف پول شارژ شد.\n\n💰 مبلغ: {fmt_price(payment['amount'])} تومان",
+                        chat_id, message_id, parse_mode="HTML",
+                        reply_markup=back_button("main"))
+                except Exception:
+                    bot.send_message(uid,
+                        f"✅ پرداخت شما تأیید شد و کیف پول شارژ شد.\n\n💰 مبلغ: {fmt_price(payment['amount'])} تومان",
+                        parse_mode="HTML", reply_markup=back_button("main"))
+
+            elif kind == "config_purchase":
+                pkg_row = get_package(package_id)
+                _qty_pl = int(payment["quantity"]) if "quantity" in payment.keys() else 1
+                if not complete_payment(payment_id):
+                    return
+                state_clear(uid)
+                try:
+                    bot.edit_message_text(
+                        "✅ پرداخت شما تأیید شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
+                        chat_id, message_id, parse_mode="HTML",
+                        reply_markup=back_button("main"))
+                except Exception:
+                    bot.send_message(uid,
+                        "✅ پرداخت شما تأیید شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
+                        parse_mode="HTML", reply_markup=back_button("main"))
+                purchase_ids, pending_ids = _deliver_bulk_configs(
+                    chat_id, uid, package_id,
+                    payment["amount"], "plisio", _qty_pl, payment_id,
+                    service_names=get_payment_service_names(payment_id)
+                )
+                try:
+                    apply_gateway_bonus_if_needed(uid, "plisio", payment["amount"])
+                except Exception:
+                    pass
+                _send_bulk_delivery_result(chat_id, uid, pkg_row,
+                                           purchase_ids, pending_ids, "Plisio")
+
+            elif kind == "renewal":
+                pkg_row = get_package(package_id)
+                cfg_id = payment["config_id"]
+                with get_conn() as conn:
+                    row = conn.execute("SELECT purchase_id FROM configs WHERE id=?", (cfg_id,)).fetchone()
+                pid = row["purchase_id"] if row else 0
+                item = get_purchase(pid) if pid else None
+                if not complete_payment(payment_id):
+                    return
+                state_clear(uid)
+                msg_text = (
+                    "✅ <b>درخواست تمدید ارسال شد</b>\n\n"
+                    "🔄 درخواست تمدید سرویس شما با موفقیت ثبت و برای پشتیبانی ارسال شد.\n"
+                    "⏳ لطفاً کمی صبر کنید، پس از انجام تمدید به شما اطلاع داده خواهد شد.\n\n"
+                    "🙏 از صبر و شکیبایی شما متشکریم."
+                )
+                try:
+                    bot.edit_message_text(msg_text, chat_id, message_id, parse_mode="HTML",
+                                          reply_markup=back_button("main"))
+                except Exception:
+                    bot.send_message(uid, msg_text, parse_mode="HTML", reply_markup=back_button("main"))
+                if item:
+                    admin_renewal_notify(uid, item, pkg_row, payment["amount"], "Plisio")
+                try:
+                    apply_gateway_bonus_if_needed(uid, "plisio", payment["amount"])
+                except Exception:
+                    pass
+
+            elif kind == "pnlcfg_renewal":
+                cfg_id_pl  = payment["config_id"]
+                pkg_id_pl  = payment["package_id"]
+                if not complete_payment(payment_id):
+                    return
+                state_clear(uid)
+                ok_pl, err_pl = _execute_pnlcfg_renewal(cfg_id_pl, pkg_id_pl, chat_id=uid, uid=uid)
+                if ok_pl:
+                    try:
+                        bot.send_message(uid, "✅ پرداخت تأیید و سرویس تمدید شد.",
+                                         parse_mode="HTML", reply_markup=back_button("my_configs"))
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        bot.send_message(uid,
+                            "✅ پرداخت تأیید شد اما تمدید سرویس با خطا مواجه شد.\nلطفاً با پشتیبانی ارتباط بگیرید.",
+                            parse_mode="HTML", reply_markup=back_button("my_configs"))
+                    except Exception:
+                        pass
+
+        except Exception as e:
+            print("PLISIO_AUTO_VERIFY_ERROR:", e)
+        return
+
+    # Timeout — show manual verify button
+    payment = get_payment(payment_id)
+    if payment and payment["status"] == "pending":
+        state_clear(uid)
+        if kind == "pnlcfg_renewal":
+            verify_cb = f"mypnlcfgrpay:plisio:verify:{payment_id}"
+        elif kind == "renewal":
+            verify_cb = f"rpay:plisio:verify:{payment_id}"
+        else:
+            verify_cb = f"pay:plisio:verify:{payment_id}"
+        timeout_msg = (
+            "⏰ <b>بررسی خودکار پرداخت پایان یافت</b>\n\n"
+            "وقتی پرداخت‌تون در Plisio تایید شد، دکمه <b>بررسی پرداخت</b> زیر را بزنید "
+            "تا پرداخت تأیید شده و ادامه عملیات انجام شود.\n\n"
+            "اگر مبلغ از حساب شما کسر شده و پرداخت تأیید نشده، لطفاً با پشتیبانی تماس بگیرید."
+        )
+        timeout_kb = types.InlineKeyboardMarkup()
+        timeout_kb.add(types.InlineKeyboardButton("🔍 بررسی پرداخت", callback_data=verify_cb))
+        try:
+            bot.edit_message_text(timeout_msg, chat_id, message_id, parse_mode="HTML",
+                                  reply_markup=timeout_kb)
+        except Exception:
+            try:
+                bot.send_message(uid, timeout_msg, parse_mode="HTML", reply_markup=timeout_kb)
+            except Exception:
+                pass
+
+
+def _start_plisio_auto_verify(payment_id, txn_id, uid, chat_id, message_id,
+                              kind, package_id=None):
+    t = threading.Thread(
+        target=_plisio_auto_verify,
+        args=(payment_id, txn_id, uid, chat_id, message_id, kind),
+        kwargs={"package_id": package_id},
+        daemon=True,
+    )
+    t.start()
+
+
+
     # ── License callbacks ────────────────────────────────────────────────────
     if data.startswith("license:"):
         from ..license_manager import (
@@ -4786,6 +4961,112 @@ def _dispatch_callback(call, uid, data):
             "renewal", package_id=package_id)
         return
 
+    # ── Plisio: renewal ───────────────────────────────────────────────────────
+    if data.startswith("rpay:plisio:verify:"):
+        payment_id = int(data.split(":")[3])
+        payment = get_payment(payment_id)
+        if not payment or payment["user_id"] != uid:
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        if payment["status"] != "pending":
+            bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+            return
+        txn_id_rv = payment["receipt_text"]
+        ok_rv, status_rv = check_plisio_invoice(txn_id_rv)
+        if not ok_rv:
+            bot.answer_callback_query(call.id, "خطا در بررسی وضعیت فاکتور.", show_alert=True)
+            return
+        if is_plisio_paid(status_rv):
+            if not complete_payment(payment_id):
+                bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+                return
+            package_row_rv = get_package(payment["package_id"])
+            cfg_id_rv = payment["config_id"]
+            with get_conn() as conn:
+                row_rv = conn.execute("SELECT purchase_id FROM configs WHERE id=?", (cfg_id_rv,)).fetchone()
+            purchase_id_rv = row_rv["purchase_id"] if row_rv else 0
+            item_rv = get_purchase(purchase_id_rv) if purchase_id_rv else None
+            bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد!")
+            send_or_edit(call,
+                "✅ <b>درخواست تمدید ارسال شد</b>\n\n"
+                "🔄 درخواست تمدید سرویس شما با موفقیت ثبت و برای پشتیبانی ارسال شد.\n"
+                "⏳ لطفاً کمی صبر کنید، پس از انجام تمدید به شما اطلاع داده خواهد شد.\n\n"
+                "🙏 از صبر و شکیبایی شما متشکریم.",
+                back_button("main"))
+            if item_rv:
+                admin_renewal_notify(uid, item_rv, package_row_rv, payment["amount"], "Plisio")
+            try:
+                apply_gateway_bonus_if_needed(uid, "plisio", payment["amount"])
+            except Exception:
+                pass
+            state_clear(uid)
+        else:
+            bot.answer_callback_query(call.id, "❌ پرداخت هنوز تأیید نشده. لطفاً ابتدا پرداخت را انجام دهید.", show_alert=True)
+        return
+
+    if data.startswith("rpay:plisio:") and not data.startswith("rpay:plisio:verify:"):
+        if not _check_invoice_valid(uid):
+            _show_invoice_expired(call)
+            return
+        parts = data.split(":")
+        purchase_id = int(parts[2])
+        package_id  = int(parts[3])
+        item = get_purchase(purchase_id)
+        package_row = get_package(package_id)
+        if not item or item["user_id"] != uid:
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        if not package_row:
+            bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
+            return
+        price = _get_state_price(uid, package_row, "renew_select_method")
+        if not is_gateway_in_range("plisio", price):
+            _rng = get_gateway_range_text("plisio")
+            bot.answer_callback_query(call.id,
+                f"⛔️ مبلغ {fmt_price(price)} تومان برای درگاه Plisio مجاز نیست.\n"
+                f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
+                show_alert=True)
+            return
+        payment_id = create_payment("renewal", uid, package_id, price, "plisio", status="pending",
+                                    config_id=item["config_id"])
+        _bot_username_rp = bot.get_me().username or ""
+        order_label_rp = (
+            f"تمدید {package_row['name']}"
+            if ('show_name' not in package_row.keys() or package_row['show_name'])
+            else f"تمدید {fmt_vol(package_row['volume_gb'])} | {fmt_dur(package_row['duration_days'])}"
+        )
+        success, result = create_plisio_invoice(price, payment_id, uid, _bot_username_rp, order_label_rp)
+        if not success:
+            err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                f"⚠️ <b>خطا در ایجاد فاکتور Plisio</b>\n\n<code>{esc(err_msg[:400])}</code>",
+                back_button(f"renew:{purchase_id}"))
+            return
+        txn_id_rp  = result.get("txn_id", "")
+        inv_url_rp = result.get("invoice_url", "")
+        with get_conn() as conn:
+            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (txn_id_rp, payment_id))
+        state_set(uid, "await_plisio_verify", payment_id=payment_id, txn_id=txn_id_rp,
+                  purchase_id=purchase_id)
+        text = (
+            "💎 <b>پرداخت کریپتو Plisio — تمدید</b>\n\n"
+            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n\n"
+            "از لینک زیر پرداخت را انجام دهید.\n\n"
+            "⏳ <b>تا یک ساعت</b> پرداخت به صورت خودکار بررسی می‌شود.\n"
+            "در غیر این صورت دکمه «بررسی پرداخت» را بزنید."
+        )
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("💎 پرداخت در Plisio", url=inv_url_rp))
+        kb.add(types.InlineKeyboardButton("🔍 بررسی پرداخت", callback_data=f"rpay:plisio:verify:{payment_id}"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, text, kb)
+        _start_plisio_auto_verify(
+            payment_id, txn_id_rp, uid,
+            call.message.chat.id, call.message.message_id,
+            "renewal", package_id=package_id)
+        return
+
     # ── Admin: Confirm renewal ────────────────────────────────────────────────
     if data.startswith("renew:confirm:"):
         if not admin_has_perm(uid, "approve_renewal"):
@@ -5600,6 +5881,123 @@ def _dispatch_callback(call, uid, data):
             "config_purchase", package_id=package_id)
         return
 
+    # ── Plisio: purchase ──────────────────────────────────────────────────────
+    if data.startswith("pay:plisio:verify:"):
+        payment_id = int(data.split(":")[3])
+        payment = get_payment(payment_id)
+        if not payment or payment["user_id"] != uid:
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        if payment["status"] != "pending":
+            bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+            return
+        txn_id_v = payment["receipt_text"]
+        ok_v, status_v = check_plisio_invoice(txn_id_v)
+        if not ok_v:
+            bot.answer_callback_query(call.id, "خطا در بررسی وضعیت فاکتور.", show_alert=True)
+            return
+        if is_plisio_paid(status_v):
+            if payment["kind"] == "wallet_charge":
+                if not complete_payment(payment_id):
+                    bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+                    return
+                update_balance(uid, payment["amount"])
+                try:
+                    apply_gateway_bonus_if_needed(uid, "plisio", payment["amount"])
+                except Exception:
+                    pass
+                bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد!")
+                send_or_edit(call, f"✅ پرداخت شما تأیید و کیف پول شارژ شد.\n\n💰 مبلغ: {fmt_price(payment['amount'])} تومان",
+                             back_button("main"))
+                state_clear(uid)
+            else:
+                package_id = payment["package_id"]
+                package_row = get_package(package_id)
+                _qty_pl = int(payment["quantity"]) if "quantity" in payment.keys() else 1
+                if not complete_payment(payment_id):
+                    bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+                    return
+                bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد!")
+                send_or_edit(call, "✅ پرداخت شما تأیید شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
+                             back_button("main"))
+                purchase_ids, pending_ids = _deliver_bulk_configs(
+                    call.message.chat.id, uid, package_id,
+                    payment["amount"], "plisio", _qty_pl, payment_id,
+                    service_names=get_payment_service_names(payment_id)
+                )
+                try:
+                    apply_gateway_bonus_if_needed(uid, "plisio", payment["amount"])
+                except Exception:
+                    pass
+                _send_bulk_delivery_result(call.message.chat.id, uid, package_row,
+                                           purchase_ids, pending_ids, "Plisio")
+                state_clear(uid)
+        else:
+            bot.answer_callback_query(call.id,
+                f"❌ پرداخت هنوز تأیید نشده. وضعیت: {status_v or 'نامشخص'}\n\nلطفاً ابتدا پرداخت را انجام دهید.",
+                show_alert=True)
+        return
+
+    if data.startswith("pay:plisio:"):
+        if not _check_invoice_valid(uid):
+            _show_invoice_expired(call)
+            return
+        package_id  = int(data.split(":")[2])
+        package_row = get_package(package_id)
+        if not package_row or not _pkg_has_stock(package_row, setting_get("preorder_mode", "0") == "1"):
+            bot.answer_callback_query(call.id, "موجودی این پکیج تمام شده است.", show_alert=True)
+            return
+        price        = _get_state_price(uid, package_row, "buy_select_method")
+        _qty_pl      = int(state_data(uid).get("quantity", 1) or 1)
+        if not is_gateway_in_range("plisio", price):
+            _rng = get_gateway_range_text("plisio")
+            bot.answer_callback_query(call.id,
+                f"⛔️ مبلغ {fmt_price(price)} تومان برای درگاه Plisio مجاز نیست.\n"
+                f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
+                show_alert=True)
+            return
+        payment_id = create_payment("config_purchase", uid, package_id, price, "plisio",
+                                    status="pending", quantity=_qty_pl)
+        _snames_pl = state_data(uid).get("service_names")
+        if _snames_pl:
+            set_payment_service_names(payment_id, _snames_pl)
+        _bot_username = bot.get_me().username or ""
+        order_label = (
+            f"خرید {package_row['name']}"
+            if ('show_name' not in package_row.keys() or package_row['show_name'])
+            else f"خرید {fmt_vol(package_row['volume_gb'])} | {fmt_dur(package_row['duration_days'])}"
+        )
+        success, result = create_plisio_invoice(price, payment_id, uid, _bot_username, order_label)
+        if not success:
+            err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                f"⚠️ <b>خطا در ایجاد فاکتور Plisio</b>\n\n<code>{esc(err_msg[:400])}</code>",
+                back_button(f"buy:p:{package_id}"))
+            return
+        txn_id  = result.get("txn_id", "")
+        inv_url = result.get("invoice_url", "")
+        with get_conn() as conn:
+            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (txn_id, payment_id))
+        state_set(uid, "await_plisio_verify", payment_id=payment_id, txn_id=txn_id)
+        text = (
+            "💎 <b>پرداخت کریپتو (Plisio)</b>\n\n"
+            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n\n"
+            "از لینک زیر پرداخت را انجام دهید.\n\n"
+            "⏳ <b>تا یک ساعت</b> پرداخت به صورت خودکار بررسی می‌شود.\n"
+            "در غیر این صورت دکمه «بررسی پرداخت» را بزنید."
+        )
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("💎 پرداخت در Plisio", url=inv_url))
+        kb.add(types.InlineKeyboardButton("🔍 بررسی پرداخت", callback_data=f"pay:plisio:verify:{payment_id}"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, text, kb)
+        _start_plisio_auto_verify(
+            payment_id, txn_id, uid,
+            call.message.chat.id, call.message.message_id,
+            "config_purchase", package_id=package_id)
+        return
+
     # ── Free test ─────────────────────────────────────────────────────────────
     if data == "test:start":
         _ft_mode = setting_get("free_test_mode", "everyone")
@@ -5935,6 +6333,55 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, text, kb)
         _start_tronpays_rial_auto_verify(
             payment_id, invoice_id, uid,
+            call.message.chat.id, call.message.message_id,
+            "wallet_charge")
+        return
+
+    if data == "wallet:charge:plisio":
+        if not _check_invoice_valid(uid):
+            _show_invoice_expired(call)
+            return
+        sd     = state_data(uid)
+        amount = sd.get("amount")
+        if not amount:
+            bot.answer_callback_query(call.id, "ابتدا مبلغ را وارد کنید.", show_alert=True)
+            return
+        if not is_gateway_in_range("plisio", amount):
+            _rng = get_gateway_range_text("plisio")
+            bot.answer_callback_query(call.id,
+                f"⛔️ مبلغ {fmt_price(amount)} تومان برای درگاه Plisio مجاز نیست.\n"
+                f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
+                show_alert=True)
+            return
+        payment_id   = create_payment("wallet_charge", uid, None, amount, "plisio", status="pending")
+        _bot_username_wc = bot.get_me().username or ""
+        success, result = create_plisio_invoice(amount, payment_id, uid, _bot_username_wc, "شارژ کیف پول")
+        if not success:
+            err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                f"⚠️ <b>خطا در ایجاد فاکتور Plisio</b>\n\n<code>{esc(err_msg[:400])}</code>",
+                back_button("wallet:charge"))
+            return
+        txn_id  = result.get("txn_id", "")
+        inv_url = result.get("invoice_url", "")
+        with get_conn() as conn:
+            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (txn_id, payment_id))
+        state_set(uid, "await_plisio_verify", payment_id=payment_id, txn_id=txn_id)
+        text = (
+            "💎 <b>شارژ کیف پول — Plisio</b>\n\n"
+            f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان\n\n"
+            "از لینک زیر پرداخت را انجام دهید.\n\n"
+            "⏳ <b>تا یک ساعت</b> پرداخت به صورت خودکار بررسی می‌شود.\n"
+            "در غیر این صورت دکمه «بررسی پرداخت» را بزنید."
+        )
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("💎 پرداخت در Plisio", url=inv_url))
+        kb.add(types.InlineKeyboardButton("🔍 بررسی پرداخت", callback_data=f"pay:plisio:verify:{payment_id}"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, text, kb)
+        _start_plisio_auto_verify(
+            payment_id, txn_id, uid,
             call.message.chat.id, call.message.message_id,
             "wallet_charge")
         return
@@ -7780,6 +8227,93 @@ def _dispatch_callback(call, uid, data):
                                  back_button("my_configs"))
                     return
                 _show_panel_config_detail(call, config_id_v, back_data="my_configs", is_user_view=True)
+            else:
+                bot.answer_callback_query(call.id, "❌ پرداخت هنوز تأیید نشده. لطفاً ابتدا پرداخت را انجام دهید.", show_alert=True)
+            return
+
+        # mypnlcfgrpay:plisio:{config_id}:{package_id}
+        if data.startswith("mypnlcfgrpay:plisio:") and not data.startswith("mypnlcfgrpay:plisio:verify:"):
+            if not _check_invoice_valid(uid):
+                _show_invoice_expired(call); return
+            parts = data.split(":")
+            config_id  = int(parts[2])
+            package_id = int(parts[3])
+            cfg = get_panel_config(config_id)
+            if not cfg or cfg["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            package_row = get_package(package_id)
+            if not package_row:
+                bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True); return
+            sd = state_data(uid)
+            price = sd.get("amount") or get_effective_price(uid, package_row)
+            if not is_gateway_in_range("plisio", price):
+                _rng = get_gateway_range_text("plisio")
+                bot.answer_callback_query(call.id,
+                    f"⛔️ مبلغ {fmt_price(price)} تومان برای درگاه Plisio مجاز نیست.\n"
+                    f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
+                    show_alert=True); return
+            payment_id = create_payment("pnlcfg_renewal", uid, package_id, price, "plisio",
+                                        status="pending", config_id=config_id)
+            _bot_username_pnl = bot.get_me().username or ""
+            order_label_pnl = (
+                f"تمدید {package_row['name']}"
+                if ('show_name' not in package_row.keys() or package_row['show_name'])
+                else f"تمدید {fmt_vol(package_row['volume_gb'])} | {fmt_dur(package_row['duration_days'])}"
+            )
+            success_pnl, result_pnl = create_plisio_invoice(price, payment_id, uid, _bot_username_pnl, order_label_pnl)
+            if not success_pnl:
+                err_pnl = result_pnl.get("error", "خطای ناشناخته") if isinstance(result_pnl, dict) else str(result_pnl)
+                bot.answer_callback_query(call.id)
+                send_or_edit(call,
+                    f"⚠️ <b>خطا در ایجاد فاکتور Plisio</b>\n\n<code>{esc(err_pnl[:400])}</code>",
+                    back_button(f"mypnlcfg:renewconfirm:{config_id}")); return
+            txn_id_pnl  = result_pnl.get("txn_id", "")
+            inv_url_pnl = result_pnl.get("invoice_url", "")
+            with get_conn() as conn:
+                conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (txn_id_pnl, payment_id))
+            state_set(uid, "await_pnlcfg_renewal_plisio_verify",
+                      payment_id=payment_id, txn_id=txn_id_pnl, config_id=config_id)
+            kb_pnl = types.InlineKeyboardMarkup()
+            kb_pnl.add(types.InlineKeyboardButton("💎 پرداخت در Plisio", url=inv_url_pnl))
+            kb_pnl.add(types.InlineKeyboardButton("🔍 بررسی پرداخت",
+                        callback_data=f"mypnlcfgrpay:plisio:verify:{payment_id}"))
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                "💎 <b>پرداخت کریپتو Plisio (تمدید)</b>\n\n"
+                f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n\n"
+                "⏳ پس از پرداخت، دکمه <b>بررسی پرداخت</b> را بزنید.",
+                kb_pnl)
+            _start_plisio_auto_verify(
+                payment_id, txn_id_pnl, uid,
+                call.message.chat.id, call.message.message_id,
+                "pnlcfg_renewal", package_id=package_id)
+            return
+
+        # mypnlcfgrpay:plisio:verify:{payment_id}
+        if data.startswith("mypnlcfgrpay:plisio:verify:"):
+            payment_id = int(data.split(":")[-1])
+            payment = get_payment(payment_id)
+            if not payment or payment["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            if payment["status"] != "pending":
+                bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True); return
+            txn_id_vp = payment["receipt_text"]
+            ok_vp, status_vp = check_plisio_invoice(txn_id_vp)
+            if not ok_vp:
+                bot.answer_callback_query(call.id, "خطا در بررسی وضعیت فاکتور.", show_alert=True); return
+            if is_plisio_paid(status_vp):
+                if not complete_payment(payment_id):
+                    bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True); return
+                config_id_vp  = payment["config_id"]
+                package_id_vp = payment["package_id"]
+                bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد! در حال تمدید…")
+                ok_r, err_r = _execute_pnlcfg_renewal(config_id_vp, package_id_vp, chat_id=uid, uid=uid)
+                state_clear(uid)
+                if not ok_r:
+                    send_or_edit(call, "❌ پرداخت انجام شد اما تمدید سرویس با خطا مواجه شد.\nلطفاً با پشتیبانی ارتباط بگیرید.",
+                                 back_button("my_configs"))
+                    return
+                _show_panel_config_detail(call, config_id_vp, back_data="my_configs", is_user_view=True)
             else:
                 bot.answer_callback_query(call.id, "❌ پرداخت هنوز تأیید نشده. لطفاً ابتدا پرداخت را انجام دهید.", show_alert=True)
             return
@@ -12739,6 +13273,7 @@ def _dispatch_callback(call, uid, data):
             ("tetrapay",         "💳 درگاه کارت به کارت (TetraPay)"),
             ("swapwallet_crypto","💳 درگاه کارت به کارت و ارز دیجیتال (SwapWallet)"),
             ("tronpays_rial",    "💳 درگاه کارت به کارت (TronPay)"),
+            ("plisio",           "💎 پرداخت کریپتو (Plisio)"),
         ]:
             enabled = setting_get(f"gw_{gw_key}_enabled", "0")
             status_icon = "🟢" if enabled == "1" else "🔴"
@@ -12956,6 +13491,7 @@ def _dispatch_callback(call, uid, data):
         "tetrapay":          "🏦 TetraPay",
         "swapwallet_crypto": "💎 SwapWallet",
         "tronpays_rial":     "💳 TronPays",
+        "plisio":            "💎 Plisio",
     }
 
     def _feebonus_text(gw):
@@ -13035,7 +13571,7 @@ def _dispatch_callback(call, uid, data):
         return kb2
 
     # feebonus entry for each gateway (adm:gw:<gw>:feebonus or adm:gw:card:feebonus)
-    for _gw_fb in ("card", "crypto", "tetrapay", "swapwallet_crypto", "tronpays_rial"):
+    for _gw_fb in ("card", "crypto", "tetrapay", "swapwallet_crypto", "tronpays_rial", "plisio"):
         if data == f"adm:gw:{_gw_fb}:feebonus":
             if not admin_has_perm(uid, "settings"):
                 bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
@@ -13497,7 +14033,112 @@ def _dispatch_callback(call, uid, data):
             back_button("adm:set:gw:tronpays_rial"))
         return
 
-    _GW_RANGE_LABELS = {"card": "💳 کارت به کارت", "crypto": "💎 ارز دیجیتال", "tetrapay": "🏦 TetraPay", "swapwallet": "💎 SwapWallet", "swapwallet_crypto": "💎 SwapWallet کریپتو", "tronpays_rial": "💳 TronPays"}
+    _GW_RANGE_LABELS = {"card": "💳 کارت به کارت", "crypto": "💎 ارز دیجیتال", "tetrapay": "🏦 TetraPay", "swapwallet": "💎 SwapWallet", "swapwallet_crypto": "💎 SwapWallet کریپتو", "tronpays_rial": "💳 TronPays", "plisio": "💎 Plisio"}
+
+    # ── Plisio admin settings ─────────────────────────────────────────────────
+    if data == "adm:set:gw:plisio":
+        enabled     = setting_get("gw_plisio_enabled", "0")
+        vis         = setting_get("gw_plisio_visibility", "public")
+        api_key     = setting_get("plisio_api_key", "")
+        range_en    = setting_get("gw_plisio_range_enabled", "0")
+        usd_rate    = setting_get("plisio_usd_rate", "60000")
+        src_cur     = setting_get("plisio_source_currency", "USD") or "USD"
+        allowed     = setting_get("plisio_allowed_psys_cids", "") or "همه ارزها"
+        expire_min  = setting_get("plisio_expire_min", "60") or "60"
+        pub_url     = setting_get("server_public_url", "") or "❌ ثبت نشده"
+        enabled_label = "🟢 فعال" if enabled == "1" else "🔴 غیرفعال"
+        vis_label     = "👥 عمومی" if vis == "public" else "🔒 کاربران امن"
+        range_label   = "🟢 فعال" if range_en == "1" else "🔴 غیرفعال"
+        display_name_pl = setting_get("gw_plisio_display_name", "")
+        name_display_pl = display_name_pl or "<i>پیش‌فرض: پرداخت کریپتو (Plisio)</i>"
+        kb = types.InlineKeyboardMarkup()
+        kb.row(
+            types.InlineKeyboardButton(f"وضعیت: {enabled_label}", callback_data="adm:gw:plisio:toggle"),
+            types.InlineKeyboardButton(f"نمایش: {vis_label}",     callback_data="adm:gw:plisio:vis"),
+        )
+        kb.add(types.InlineKeyboardButton(f"📊 بازه پرداختی: {range_label}", callback_data="adm:gw:plisio:range"))
+        kb.add(types.InlineKeyboardButton("🔑 تنظیم کلید API", callback_data="adm:set:plisio_key"))
+        kb.add(types.InlineKeyboardButton("💱 نرخ تبدیل دلار (تومان)", callback_data="adm:set:plisio_usd_rate"))
+        kb.add(types.InlineKeyboardButton("🏷 نام نمایشی درگاه", callback_data="adm:gw:plisio:set_name"))
+        kb.add(types.InlineKeyboardButton("🎁 بونس و کارمزد", callback_data="adm:gw:plisio:feebonus"))
+        kb.add(types.InlineKeyboardButton("🌐 تنظیم Server Public URL", callback_data="adm:set:server_public_url"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gateways", icon_custom_emoji_id="5253997076169115797"))
+        key_display = (f"<code>{esc(api_key[:8])}...{esc(api_key[-4:])}</code>"
+                       if api_key else "❌ <b>ثبت نشده</b>")
+        text = (
+            "💎 <b>درگاه Plisio (کریپتو)</b>\n\n"
+            f"وضعیت: {enabled_label}\n"
+            f"نمایش: {vis_label}\n"
+            f"نام نمایشی: {name_display_pl}\n\n"
+            f"🔑 کلید API: {key_display}\n"
+            f"💱 نرخ دلار: <b>{esc(usd_rate)}</b> تومان\n"
+            f"🌐 Server Public URL: <code>{esc(pub_url[:80])}</code>\n\n"
+            "📋 <b>راهنما:</b>\n"
+            "۱. در <a href='https://plisio.net'>plisio.net</a> ثبت‌نام کنید\n"
+            "۲. از پنل، کلید API را دریافت کنید\n"
+            "۳. آدرس عمومی سرور خود را ثبت کنید تا webhook کار کند"
+        )
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, text, kb)
+        return
+
+    if data == "adm:gw:plisio:toggle":
+        enabled = setting_get("gw_plisio_enabled", "0")
+        setting_set("gw_plisio_enabled", "0" if enabled == "1" else "1")
+        log_admin_action(uid, f"درگاه Plisio {'غیرفعال' if enabled == '1' else 'فعال'} شد")
+        bot.answer_callback_query(call.id, "تغییر یافت.")
+        _fake_call(call, "adm:set:gw:plisio")
+        return
+
+    if data == "adm:gw:plisio:vis":
+        vis = setting_get("gw_plisio_visibility", "public")
+        setting_set("gw_plisio_visibility", "secure" if vis == "public" else "public")
+        log_admin_action(uid, f"نمایش درگاه Plisio تغییر کرد")
+        bot.answer_callback_query(call.id, "تغییر یافت.")
+        _fake_call(call, "adm:set:gw:plisio")
+        return
+
+    if data == "adm:gw:plisio:set_name":
+        state_set(uid, "admin_set_gw_display_name", gw="plisio")
+        bot.answer_callback_query(call.id)
+        current = setting_get("gw_plisio_display_name", "")
+        send_or_edit(call,
+            f"🏷 <b>نام نمایشی درگاه Plisio</b>\n\n"
+            f"مقدار فعلی: <code>{esc(current or 'پیش‌فرض')}</code>\n\n"
+            "نام دلخواه را ارسال کنید.\n"
+            "برای بازگشت به پیش‌فرض، <code>-</code> ارسال کنید.",
+            back_button("adm:set:gw:plisio"))
+        return
+
+    if data == "adm:set:plisio_key":
+        state_set(uid, "admin_set_plisio_key")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "🔑 کلید API Plisio را ارسال کنید:", back_button("adm:set:gw:plisio"))
+        return
+
+    if data == "adm:set:plisio_usd_rate":
+        state_set(uid, "admin_set_plisio_usd_rate")
+        bot.answer_callback_query(call.id)
+        current = setting_get("plisio_usd_rate", "60000")
+        send_or_edit(call,
+            f"💱 <b>نرخ تبدیل دلار به تومان</b>\n\n"
+            f"مقدار فعلی: <b>{esc(current)}</b> تومان\n\n"
+            "نرخ جدید را به تومان وارد کنید (مثال: <code>60000</code>):",
+            back_button("adm:set:gw:plisio"))
+        return
+
+    if data == "adm:set:server_public_url":
+        state_set(uid, "admin_set_server_public_url")
+        bot.answer_callback_query(call.id)
+        current = setting_get("server_public_url", "")
+        send_or_edit(call,
+            "🌐 <b>آدرس عمومی سرور (Server Public URL)</b>\n\n"
+            f"مقدار فعلی: <code>{esc(current or 'ثبت نشده')}</code>\n\n"
+            "آدرس کامل سرور شما را وارد کنید (بدون / در انتها).\n"
+            "مثال: <code>https://myserver.example.com</code>\n\n"
+            "این آدرس برای Webhook درگاه‌هایی مثل Plisio استفاده می‌شود.",
+            back_button("adm:set:gw:plisio"))
+        return
 
     if data.startswith("adm:gw:") and data.endswith(":range"):
         gw_name = data.split(":")[2]

@@ -3141,6 +3141,39 @@ def universal_handler(message):
             bot.send_message(uid, f"✅ Callback URL ذخیره شد:\n<code>{val or 'https://example.com/'}</code>", reply_markup=back_button("adm:set:gw:tronpays_rial"))
             return
 
+        if sn == "admin_set_plisio_key" and is_admin(uid):
+            val = (message.text or "").strip()
+            if not val:
+                bot.send_message(uid, "⚠️ کلید API نمی‌تواند خالی باشد. لطفاً دوباره ارسال کنید:", reply_markup=back_button("adm:set:gw:plisio"))
+                return
+            setting_set("plisio_api_key", val)
+            log_admin_action(uid, "کلید API Plisio تغییر کرد")
+            state_clear(uid)
+            bot.send_message(uid, "✅ کلید API Plisio ذخیره شد.", reply_markup=back_button("adm:set:gw:plisio"))
+            return
+
+        if sn == "admin_set_plisio_usd_rate" and is_admin(uid):
+            val = (message.text or "").strip()
+            if not val.isdigit() or int(val) <= 0:
+                bot.send_message(uid, "⚠️ یک عدد مثبت وارد کنید (مثال: <code>60000</code>):", reply_markup=back_button("adm:set:gw:plisio"))
+                return
+            setting_set("plisio_usd_rate", val)
+            log_admin_action(uid, f"نرخ دلار Plisio به {val} تومان تغییر کرد")
+            state_clear(uid)
+            bot.send_message(uid, f"✅ نرخ تبدیل دلار به <b>{val}</b> تومان ذخیره شد.", parse_mode="HTML", reply_markup=back_button("adm:set:gw:plisio"))
+            return
+
+        if sn == "admin_set_server_public_url" and is_admin(uid):
+            val = (message.text or "").strip().rstrip("/")
+            if val and not (val.startswith("http://") or val.startswith("https://")):
+                bot.send_message(uid, "⚠️ URL باید با <code>https://</code> یا <code>http://</code> شروع شود:", reply_markup=back_button("adm:set:gw:plisio"))
+                return
+            setting_set("server_public_url", val)
+            log_admin_action(uid, f"Server Public URL تغییر کرد: {val}")
+            state_clear(uid)
+            bot.send_message(uid, f"✅ Server Public URL ذخیره شد:\n<code>{val}</code>", parse_mode="HTML", reply_markup=back_button("adm:set:gw:plisio"))
+            return
+
         if sn == "admin_gw_range_min" and is_admin(uid):
             gw = sd.get("gw", "")
             val = (message.text or "").strip()
