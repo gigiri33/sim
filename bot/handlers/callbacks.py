@@ -2584,7 +2584,9 @@ def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
             pass
 
     inbound_remark = pc["inbound_remark"] if "inbound_remark" in (pc.keys() if hasattr(pc, "keys") else {}) else ""
-    type_label    = inbound_remark or (package_row["type_name"] if "type_name" in (package_row.keys() if hasattr(package_row, "keys") else {}) else "")
+    pkg_type_name = package_row["type_name"] if "type_name" in (package_row.keys() if hasattr(package_row, "keys") else {}) else ""
+    # Prefer the service type defined in the package-type management section over the panel inbound's remark.
+    type_label    = pkg_type_name or inbound_remark
     show_pkg      = int(package_row["show_name"]) if "show_name" in package_row.keys() else 1
     pkg_line      = f"{ce('📦', '5258134813302332906')} پکیج: <b>{esc(package_row['name'])}</b>\n" if show_pkg else ""
     _expire_at    = pc["expire_at"] if "expire_at" in pc.keys() else ""
@@ -4676,6 +4678,19 @@ def _dispatch_callback(call, uid, data):
         if not package_row:
             bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
             return
+        # Phone gate for card_only mode
+        if setting_get("phone_mode", "disabled") == "card_only" and not get_phone_number(uid):
+            from telebot.types import ReplyKeyboardMarkup, KeyboardButton
+            state_set(uid, "waiting_for_phone_card")
+            bot.answer_callback_query(call.id)
+            kb_phone = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+            kb_phone.add(KeyboardButton("📱 ارسال شماره تلفن", request_contact=True))
+            bot.send_message(call.message.chat.id,
+                "📱 <b>ثبت شماره تلفن</b>\n\n"
+                "برای پرداخت کارت به کارت، ابتدا باید شماره تلفن خود را ثبت کنید.\n"
+                "با دکمه زیر شماره خود را ارسال کنید:",
+                parse_mode="HTML", reply_markup=kb_phone)
+            return
         _ci = pick_card_for_payment()
         if not _ci:
             bot.answer_callback_query(call.id, "اطلاعات پرداخت هنوز ثبت نشده است.", show_alert=True)
@@ -6141,6 +6156,19 @@ def _dispatch_callback(call, uid, data):
                 f"محدوده مجاز: {_rng}\n\n"
                 "لطفاً درگاه دیگری متناسب با این مبلغ انتخاب کنید.",
                 show_alert=True)
+            return
+        # Phone gate for card_only mode
+        if setting_get("phone_mode", "disabled") == "card_only" and not get_phone_number(uid):
+            from telebot.types import ReplyKeyboardMarkup, KeyboardButton
+            state_set(uid, "waiting_for_phone_card")
+            bot.answer_callback_query(call.id)
+            kb_phone = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+            kb_phone.add(KeyboardButton("📱 ارسال شماره تلفن", request_contact=True))
+            bot.send_message(call.message.chat.id,
+                "📱 <b>ثبت شماره تلفن</b>\n\n"
+                "برای پرداخت کارت به کارت، ابتدا باید شماره تلفن خود را ثبت کنید.\n"
+                "با دکمه زیر شماره خود را ارسال کنید:",
+                parse_mode="HTML", reply_markup=kb_phone)
             return
         _ci = pick_card_for_payment()
         if not _ci:
@@ -8030,6 +8058,19 @@ def _dispatch_callback(call, uid, data):
             package_row = get_package(package_id)
             if not package_row:
                 bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True); return
+            # Phone gate for card_only mode
+            if setting_get("phone_mode", "disabled") == "card_only" and not get_phone_number(uid):
+                from telebot.types import ReplyKeyboardMarkup, KeyboardButton
+                state_set(uid, "waiting_for_phone_card")
+                bot.answer_callback_query(call.id)
+                kb_phone = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+                kb_phone.add(KeyboardButton("📱 ارسال شماره تلفن", request_contact=True))
+                bot.send_message(call.message.chat.id,
+                    "📱 <b>ثبت شماره تلفن</b>\n\n"
+                    "برای پرداخت کارت به کارت، ابتدا باید شماره تلفن خود را ثبت کنید.\n"
+                    "با دکمه زیر شماره خود را ارسال کنید:",
+                    parse_mode="HTML", reply_markup=kb_phone)
+                return
             _ci = pick_card_for_payment()
             if not _ci:
                 bot.answer_callback_query(call.id, "اطلاعات پرداخت هنوز ثبت نشده است.", show_alert=True); return
