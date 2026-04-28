@@ -3152,6 +3152,28 @@ def universal_handler(message):
             bot.send_message(uid, "✅ کلید API Plisio ذخیره شد.", reply_markup=back_button("adm:set:gw:plisio"))
             return
 
+        if sn == "admin_set_nowpayments_key" and is_admin(uid):
+            val = (message.text or "").strip()
+            if not val:
+                bot.send_message(uid, "⚠️ کلید API نمی‌تواند خالی باشد. لطفاً دوباره ارسال کنید:", reply_markup=back_button("adm:set:gw:nowpayments"))
+                return
+            setting_set("nowpayments_api_key", val)
+            log_admin_action(uid, "کلید API NowPayments تغییر کرد")
+            state_clear(uid)
+            bot.send_message(uid, "✅ کلید API NowPayments ذخیره شد.", reply_markup=back_button("adm:set:gw:nowpayments"))
+            return
+
+        if sn == "admin_set_nowpayments_ipn" and is_admin(uid):
+            val = (message.text or "").strip()
+            if not val:
+                bot.send_message(uid, "⚠️ IPN Secret نمی‌تواند خالی باشد. لطفاً دوباره ارسال کنید:", reply_markup=back_button("adm:set:gw:nowpayments"))
+                return
+            setting_set("nowpayments_ipn_secret", val)
+            log_admin_action(uid, "IPN Secret NowPayments تغییر کرد")
+            state_clear(uid)
+            bot.send_message(uid, "✅ IPN Secret Key NowPayments ذخیره شد.", reply_markup=back_button("adm:set:gw:nowpayments"))
+            return
+
         if sn == "admin_set_server_public_url" and is_admin(uid):
             val = (message.text or "").strip().rstrip("/")
             if val == "-":

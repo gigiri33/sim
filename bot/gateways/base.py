@@ -8,7 +8,7 @@ from ..db import (
     get_gateway_fee_amount, get_gateway_bonus_amount, apply_gateway_fee,
 )
 
-_ALL_GATEWAYS = ("card", "crypto", "tetrapay", "swapwallet_crypto", "tronpays_rial", "plisio")
+_ALL_GATEWAYS = ("card", "crypto", "tetrapay", "swapwallet_crypto", "tronpays_rial", "plisio", "nowpayments")
 
 
 def is_gateway_available(gw_name, user_id, amount=None):
@@ -87,6 +87,16 @@ def get_gateway_range_text(gw_name):
                 if r_max:
                     return base + f" — حداکثر {int(r_max):,} تومان"
             return base
+    # NowPayments: show live USDT-based minimum (queried from API, fallback 5 USDT)
+    if gw_name == "nowpayments":
+        dyn_min = _nowpayments_dynamic_min_toman()
+        if dyn_min:
+            base = f"حداقل {dyn_min:,} تومان"
+            if setting_get("gw_nowpayments_range_enabled", "0") == "1":
+                r_max = setting_get("gw_nowpayments_range_max", "")
+                if r_max:
+                    return base + f" — حداکثر {int(r_max):,} تومان"
+            return base
     if setting_get(f"gw_{gw_name}_range_enabled", "0") != "1":
         return "بدون محدودیت مبلغی"
     r_min = setting_get(f"gw_{gw_name}_range_min", "")
@@ -126,11 +136,33 @@ def _plisio_dynamic_min_toman():
     return 0
 
 
+def _nowpayments_dynamic_min_toman():
+    """Return the live NowPayments min-amount (in toman) for USD→USDT-TRC20. Returns 0 on failure."""
+    try:
+        from .crypto import fetch_crypto_prices
+        from .nowpayments import get_nowpayments_min_usdt
+        prices = fetch_crypto_prices()
+        usdt_irt = prices.get("USDT", 0)
+        if not (usdt_irt and usdt_irt > 0):
+            return 0
+        min_usdt = get_nowpayments_min_usdt()
+        if min_usdt and min_usdt > 0:
+            return int(min_usdt * usdt_irt)
+    except Exception:
+        pass
+    return 0
+
+
 def is_gateway_in_range(gw_name, amount):
     """Return True if amount is within the gateway's allowed range (or range is disabled)."""
     # Plisio: always enforce live 5-USDT minimum regardless of range settings
     if gw_name == "plisio":
         dyn_min = _plisio_dynamic_min_toman()
+        if dyn_min and amount < dyn_min:
+            return False
+    # NowPayments: always enforce live API minimum regardless of range settings
+    if gw_name == "nowpayments":
+        dyn_min = _nowpayments_dynamic_min_toman()
         if dyn_min and amount < dyn_min:
             return False
     if setting_get(f"gw_{gw_name}_range_enabled", "0") != "1":

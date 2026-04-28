@@ -42,6 +42,10 @@ def _plisio_webhook_server():
         is_plisio_paid,
         get_plisio_webhook_port,
     )
+    from bot.gateways.nowpayments import (
+        verify_nowpayments_signature,
+        is_nowpayments_paid,
+    )
     from bot.helpers import fmt_price
     from bot.payments import apply_gateway_bonus_if_needed
 
@@ -112,8 +116,71 @@ def _plisio_webhook_server():
     def _plisio_fail(bot_username):
         return "❌ پرداخت ناموفق بود. به ربات تلگرام بازگردید.", 200
 
+    # ── NowPayments routes (sharing the same Flask app & port) ────────────
+    @_app.route("/nowpayments/<bot_username>/callback", methods=["POST"])
+    def _nowpayments_callback(bot_username):
+        try:
+            raw_body = request.get_data() or b""
+            sig = request.headers.get("x-nowpayments-sig", "") or request.headers.get("X-Nowpayments-Sig", "")
+            if not verify_nowpayments_signature(raw_body, sig):
+                print("NOWPAYMENTS_WEBHOOK: invalid signature")
+                return jsonify({"status": "error", "message": "invalid signature"}), 403
+            try:
+                data = json.loads(raw_body.decode("utf-8"))
+            except Exception:
+                return jsonify({"status": "error", "message": "invalid json"}), 400
+            order_id = data.get("order_id", "")
+            status   = (data.get("payment_status") or "").lower()
+            if not order_id:
+                return jsonify({"status": "ok"}), 200
+            try:
+                payment_id = int(order_id)
+            except (ValueError, TypeError):
+                return jsonify({"status": "ok"}), 200
+            payment = get_payment(payment_id)
+            if not payment or payment["status"] != "pending":
+                return jsonify({"status": "ok"}), 200
+            if not is_nowpayments_paid(status):
+                return jsonify({"status": "ok"}), 200
+
+            kind   = payment["kind"]
+            uid    = payment["user_id"]
+            amount = payment["amount"]
+
+            if kind == "wallet_charge":
+                if not complete_payment(payment_id):
+                    return jsonify({"status": "ok"}), 200
+                update_balance(uid, amount)
+                try:
+                    apply_gateway_bonus_if_needed(uid, "nowpayments", amount)
+                except Exception:
+                    pass
+                try:
+                    bot.send_message(
+                        uid,
+                        f"✅ پرداخت NowPayments شما تأیید شد و کیف پول شارژ شد.\n\n💰 مبلغ: {fmt_price(amount)} تومان",
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    pass
+            else:
+                # config_purchase / renewal / pnlcfg_renewal — defer to poller
+                # so the existing fulfillment pipeline handles delivery.
+                print(f"NOWPAYMENTS_WEBHOOK: paid notice for kind={kind} payment_id={payment_id} — deferring to poller")
+        except Exception as exc:
+            print("NOWPAYMENTS_WEBHOOK_ERROR:", exc)
+        return jsonify({"status": "ok"}), 200
+
+    @_app.route("/nowpayments/<bot_username>/success", methods=["GET", "POST"])
+    def _nowpayments_success(bot_username):
+        return "✅ پرداخت با موفقیت انجام شد. به ربات تلگرام بازگردید.", 200
+
+    @_app.route("/nowpayments/<bot_username>/cancel", methods=["GET", "POST"])
+    def _nowpayments_cancel(bot_username):
+        return "❌ پرداخت لغو شد. به ربات تلگرام بازگردید.", 200
+
     port = int(get_plisio_webhook_port())
-    print(f"🌐 Plisio webhook server starting on port {port}…")
+    print(f"🌐 Payment webhook server (Plisio + NowPayments) starting on port {port}…")
     _app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
 
