@@ -1069,74 +1069,93 @@ def _execute_pnlcfg_renewal(config_id, package_id, chat_id=None, uid=None):
 
     extra_gb   = float(pkg["volume_gb"] or 0)
     extra_days = int(pkg["duration_days"] or 0)
+    # volume_gb==0 means unlimited in 3x-ui (totalGB=0)
+    # duration_days==0 means unlimited (expiryTime=0)
+    pkg_unlimited_vol  = (extra_gb == 0)
+    pkg_unlimited_time = (extra_days == 0)
 
-    # ── Step 2: Add volume (if package has volume) ─────────────────────────────
     new_exp_ms  = None
     new_exp_str = None
 
-    if extra_gb > 0:
-        vol_err = None
-        _t0 = _time.time()
-        while True:
-            if _time.time() - _t_start > MAX_WAIT:
-                vol_err = "حداکثر زمان انتظار تمام شد"
-                break
+    # ── Step 2: Volume ────────────────────────────────────────────────────────
+    # • New pkg unlimited  → set totalGB = 0 (unlimited) regardless of old value
+    # • New pkg limited    → add extra_gb on top of current totalGB
+    vol_err = None
+    _t0 = _time.time()
+    while True:
+        if _time.time() - _t_start > MAX_WAIT:
+            vol_err = "حداکثر زمان انتظار تمام شد"
+            break
+        if pkg_unlimited_vol:
+            ok_v, res_v = pc_api._update_client(
+                cfg["inbound_id"], cfg["client_uuid"], {"totalGB": 0}
+            )
+        else:
             ok_v, res_v = pc_api.add_client_volume(
                 cfg["inbound_id"], cfg["client_uuid"], extra_gb
             )
-            if ok_v:
-                vol_err = None
+        if ok_v:
+            vol_err = None
+            break
+        vol_err = str(res_v)
+        elapsed = _time.time() - _t0
+        if _is_conn_err(vol_err):
+            _maybe_notify_waiting()
+            log.warning("_execute_pnlcfg_renewal: volume CONN_ERR (%.0fs elapsed), retry %ds: %s",
+                        elapsed, CONN_RETRY_DELAY, vol_err)
+            _time.sleep(CONN_RETRY_DELAY)
+        else:
+            log.warning("_execute_pnlcfg_renewal: volume failed (%.0fs elapsed): %s", elapsed, vol_err)
+            if elapsed + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:
                 break
-            vol_err = str(res_v)
-            elapsed = _time.time() - _t0
-            if _is_conn_err(vol_err):
-                _maybe_notify_waiting()
-                log.warning("_execute_pnlcfg_renewal: add_volume CONN_ERR (%.0fs elapsed), retry %ds: %s",
-                            elapsed, CONN_RETRY_DELAY, vol_err)
-                _time.sleep(CONN_RETRY_DELAY)
-            else:
-                log.warning("_execute_pnlcfg_renewal: add_volume failed (%.0fs elapsed): %s", elapsed, vol_err)
-                if elapsed + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:
-                    break
-                _time.sleep(FUNC_RETRY_DELAY)
-        if vol_err is not None:
-            _notify_panel_error(_uid, pkg, "add_volume (تمدید)", vol_err, config_id, cfg["panel_id"])
-            return False, "تمدید سرویس با خطا مواجه شد. لطفاً با پشتیبانی ارتباط بگیرید."
+            _time.sleep(FUNC_RETRY_DELAY)
+    if vol_err is not None:
+        _notify_panel_error(_uid, pkg, "volume (تمدید)", vol_err, config_id, cfg["panel_id"])
+        return False, "تمدید سرویس با خطا مواجه شد. لطفاً با پشتیبانی ارتباط بگیرید."
 
-    # ── Step 3: Add time (if package has duration) ─────────────────────────────
-    if extra_days > 0:
-        time_err = None
-        _t0 = _time.time()
-        while True:
-            if _time.time() - _t_start > MAX_WAIT:
-                time_err = "حداکثر زمان انتظار تمام شد"
-                break
+    # ── Step 3: Time ──────────────────────────────────────────────────────────
+    # • New pkg unlimited  → set expiryTime = 0 (unlimited) regardless of old value
+    # • New pkg limited    → add extra_days on top of current expiry
+    time_err = None
+    _t0 = _time.time()
+    while True:
+        if _time.time() - _t_start > MAX_WAIT:
+            time_err = "حداکثر زمان انتظار تمام شد"
+            break
+        if pkg_unlimited_time:
+            ok_t, res_t = pc_api._update_client(
+                cfg["inbound_id"], cfg["client_uuid"], {"expiryTime": 0}
+            )
+            if ok_t:
+                new_exp_ms = 0
+        else:
             ok_t, res_t = pc_api.add_client_time(
                 cfg["inbound_id"], cfg["client_uuid"], extra_days
             )
             if ok_t:
                 new_exp_ms = res_t
-                time_err   = None
+        if ok_t:
+            time_err = None
+            break
+        time_err = str(res_t)
+        elapsed = _time.time() - _t0
+        if _is_conn_err(time_err):
+            _maybe_notify_waiting()
+            log.warning("_execute_pnlcfg_renewal: time CONN_ERR (%.0fs elapsed), retry %ds: %s",
+                        elapsed, CONN_RETRY_DELAY, time_err)
+            _time.sleep(CONN_RETRY_DELAY)
+        else:
+            log.warning("_execute_pnlcfg_renewal: time failed (%.0fs elapsed): %s", elapsed, time_err)
+            if elapsed + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:
                 break
-            time_err = str(res_t)
-            elapsed = _time.time() - _t0
-            if _is_conn_err(time_err):
-                _maybe_notify_waiting()
-                log.warning("_execute_pnlcfg_renewal: add_time CONN_ERR (%.0fs elapsed), retry %ds: %s",
-                            elapsed, CONN_RETRY_DELAY, time_err)
-                _time.sleep(CONN_RETRY_DELAY)
-            else:
-                log.warning("_execute_pnlcfg_renewal: add_time failed (%.0fs elapsed): %s", elapsed, time_err)
-                if elapsed + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:
-                    break
-                _time.sleep(FUNC_RETRY_DELAY)
-        if time_err is not None:
-            _notify_panel_error(_uid, pkg, "add_time (تمدید)", time_err, config_id, cfg["panel_id"])
-            return False, "تمدید سرویس با خطا مواجه شد. لطفاً با پشتیبانی ارتباط بگیرید."
+            _time.sleep(FUNC_RETRY_DELAY)
+    if time_err is not None:
+        _notify_panel_error(_uid, pkg, "time (تمدید)", time_err, config_id, cfg["panel_id"])
+        return False, "تمدید سرویس با خطا مواجه شد. لطفاً با پشتیبانی ارتباط بگیرید."
 
-        if new_exp_ms:
-            import datetime as _datetime
-            new_exp_str = _datetime.datetime.utcfromtimestamp(new_exp_ms / 1000).strftime("%Y-%m-%d %H:%M:%S")
+    if new_exp_ms:
+        import datetime as _datetime
+        new_exp_str = _datetime.datetime.utcfromtimestamp(new_exp_ms / 1000).strftime("%Y-%m-%d %H:%M:%S")
 
     # ── Step 4: enable client (in case it was disabled/expired) ───────────────
     enable_err = None
@@ -1169,7 +1188,9 @@ def _execute_pnlcfg_renewal(config_id, package_id, chat_id=None, uid=None):
         return False, "تمدید سرویس با خطا مواجه شد. لطفاً با پشتیبانی ارتباط بگیرید."
 
     # ── Step 5: update DB ──────────────────────────────────────────────────────
-    if new_exp_str:
+    if pkg_unlimited_time:
+        _upf(config_id, "expire_at", "")   # blank = unlimited
+    elif new_exp_str:
         _upf(config_id, "expire_at", new_exp_str)
     _upf(config_id, "is_expired",  0)
     _upf(config_id, "is_disabled", 0)
