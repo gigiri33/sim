@@ -706,14 +706,23 @@ def _finish_card_payment_approval_core(payment_id, admin_note, approved):
                 apply_gateway_bonus_if_needed(user_id, payment["payment_method"] or "card", payment["amount"])
             except Exception:
                 pass
-            purchase_ids, pending_ids = _deliver_bulk_configs(
-                user_id, user_id, package_id,
-                payment["amount"], payment["payment_method"], _qty_card, payment_id,
-                service_names=get_payment_service_names(payment_id)
-            )
-            _send_bulk_delivery_result(user_id, user_id, package_row,
-                                       purchase_ids, pending_ids,
-                                       payment["payment_method"])
+            # Run delivery in a background thread so the approval callback returns
+            # immediately and Telegram does not retry the callback due to timeout.
+            _svc_names = get_payment_service_names(payment_id)
+            _pay_method = payment["payment_method"]
+            def _do_deliver():
+                try:
+                    purchase_ids, pending_ids = _deliver_bulk_configs(
+                        user_id, user_id, package_id,
+                        payment["amount"], _pay_method, _qty_card, payment_id,
+                        service_names=_svc_names,
+                    )
+                    _send_bulk_delivery_result(user_id, user_id, package_row,
+                                               purchase_ids, pending_ids,
+                                               _pay_method)
+                except Exception as _de:
+                    _log.error("background delivery failed for payment %s: %s", payment_id, _de)
+            _threading.Thread(target=_do_deliver, daemon=True).start()
             return True, notified
 
         elif payment["kind"] == "renewal":

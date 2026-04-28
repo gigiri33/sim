@@ -1856,6 +1856,7 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
     if config_source == "panel":
         panel_config_ids = []
         panel_client_names = []
+        panel_pending_ids = []
         failed_count = 0
         for i in range(quantity):
             desired_name = (service_names[i] if service_names and i < len(service_names) else None)
@@ -1867,20 +1868,21 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
                 panel_client_names.append(c_name or "")
             else:
                 failed_count += 1
-                # Refund the unit price to wallet regardless of original payment method
+                # Do NOT refund — create a pending order so admin can retry delivery
                 try:
-                    refund_amount = unit_price
-                    update_balance(uid, refund_amount)
-                    log.warning("[PANEL_DELIVERY] refunded %s to uid=%s after create failure", refund_amount, uid)
-                except Exception as _rf_exc:
-                    log.error("[PANEL_DELIVERY] refund failed for uid=%s: %s", uid, _rf_exc)
-                # Send only the simple error message to user (no technical details)
+                    p_id = create_pending_order(uid, package_id, payment_id, unit_price, payment_method, quantity=1)
+                    panel_pending_ids.append(p_id)
+                    log.warning("[PANEL_DELIVERY] create_panel_config failed for uid=%s, created pending_order %s instead of refunding", uid, p_id)
+                except Exception as _po_exc:
+                    log.error("[PANEL_DELIVERY] failed to create pending_order for uid=%s: %s", uid, _po_exc)
+                # Notify user that order is pending (not an error, not a refund)
                 try:
                     bot.send_message(
                         chat_id,
-                        "⚠️ <b>خطا در تحویل سرویس</b>\n\n"
-                        "متأسفانه در تحویل سرویس مشکلی پیش آمد و مبلغ به کیف پول شما بازگردانده شد.\n"
-                        "لطفاً با پشتیبانی تماس بگیرید.",
+                        "⏳ <b>سرویس شما در صف انتظار قرار گرفت</b>\n\n"
+                        "در حال حاضر امکان ساخت سرویس وجود ندارد.\n"
+                        "سفارش شما ثبت شد و به محض آماده شدن تحویل داده خواهد شد.\n"
+                        "لطفاً کمی صبر کنید.",
                         parse_mode="HTML",
                     )
                 except Exception:
@@ -1892,7 +1894,7 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
                     _pid = None
                 _notify_panel_error(
                     uid=uid, package_row=package_row,
-                    stage="ساخت کلاینت در پنل", detail=result,
+                    stage="ساخت کلاینت در پنل (سفارش معلق ایجاد شد)", detail=result,
                     panel_id=_pid,
                 )
         # Deliver each panel config
@@ -1920,7 +1922,7 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
                                           service_name=panel_client_names[_i] if _i < len(panel_client_names) else None)
                 except Exception:
                     pass
-        return panel_config_ids, []
+        return panel_config_ids, panel_pending_ids
 
     # ── Manual / stock-based packages (original logic) ────────────────────────
     purchase_ids  = []
@@ -2718,7 +2720,7 @@ def _send_bulk_delivery_result(chat_id, uid, package_row, purchase_ids, pending_
         config_source = "manual"
 
     if config_source == "panel":
-        if not purchase_ids:
+        if not purchase_ids and not pending_ids:
             try:
                 bot.send_message(
                     chat_id,
@@ -2729,6 +2731,22 @@ def _send_bulk_delivery_result(chat_id, uid, package_row, purchase_ids, pending_
                 )
             except Exception:
                 pass
+        elif pending_ids and not purchase_ids:
+            # All deliveries failed and became pending orders — already notified user in _deliver_bulk_configs
+            from ..ui.notifications import notify_pending_order_to_admins
+            for p_id in pending_ids:
+                try:
+                    notify_pending_order_to_admins(p_id, uid, package_row, package_row["price"], method_label)
+                except Exception:
+                    pass
+        elif pending_ids:
+            # Partial delivery failure — some became pending orders
+            from ..ui.notifications import notify_pending_order_to_admins
+            for p_id in pending_ids:
+                try:
+                    notify_pending_order_to_admins(p_id, uid, package_row, package_row["price"], method_label)
+                except Exception:
+                    pass
         return
 
     total = len(purchase_ids) + len(pending_ids)
@@ -5792,22 +5810,16 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id, "خرید با موفقیت انجام شد.")
         send_or_edit(call, "✅ پرداخت از کیف پول انجام شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
                      back_button("main"))
-        purchase_ids, pending_ids = _deliver_bulk_configs(
-            call.message.chat.id, uid, package_id, price, "wallet", quantity, payment_id,
-            service_names=_snames_wallet
-        )
-        if not purchase_ids and not pending_ids:
-            # Exceptional: refund and abort
-            update_balance(uid, price)
-            bot.send_message(uid,
-                "⚠️ <b>خطا در تحویل سرویس</b>\n\n"
-                "متأسفانه در تحویل سرویس مشکلی پیش آمد و مبلغ به کیف پول شما بازگردانده شد.\n"
-                "لطفاً با پشتیبانی تماس بگیرید.",
-                parse_mode="HTML", reply_markup=back_button("main"))
-            state_clear(uid)
-            return
-        _send_bulk_delivery_result(call.message.chat.id, uid, package_row,
-                                   purchase_ids, pending_ids, "کیف پول")
+        _chat_id_wallet = call.message.chat.id
+        _snames_wallet_final = _snames_wallet
+        def _do_wallet_deliver():
+            purchase_ids, pending_ids = _deliver_bulk_configs(
+                _chat_id_wallet, uid, package_id, price, "wallet", quantity, payment_id,
+                service_names=_snames_wallet_final
+            )
+            _send_bulk_delivery_result(_chat_id_wallet, uid, package_row,
+                                       purchase_ids, pending_ids, "کیف پول")
+        threading.Thread(target=_do_wallet_deliver, daemon=True).start()
         state_clear(uid)
         return
 
@@ -6010,17 +6022,22 @@ def _dispatch_callback(call, uid, data):
                 bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد!")
                 send_or_edit(call, "✅ پرداخت شما تأیید شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
                              back_button("main"))
-                purchase_ids, pending_ids = _deliver_bulk_configs(
-                    call.message.chat.id, uid, package_id,
-                    payment["amount"], "tetrapay", _qty_tp, payment_id,
-                    service_names=get_payment_service_names(payment_id)
-                )
-                try:
-                    apply_gateway_bonus_if_needed(uid, "tetrapay", payment["amount"])
-                except Exception:
-                    pass
-                _send_bulk_delivery_result(call.message.chat.id, uid, package_row,
-                                           purchase_ids, pending_ids, "TetraPay")
+                _chat_id_tp = call.message.chat.id
+                _amt_tp = payment["amount"]
+                _snames_tp_verify = get_payment_service_names(payment_id)
+                def _do_tetrapay_deliver():
+                    purchase_ids, pending_ids = _deliver_bulk_configs(
+                        _chat_id_tp, uid, package_id,
+                        _amt_tp, "tetrapay", _qty_tp, payment_id,
+                        service_names=_snames_tp_verify
+                    )
+                    try:
+                        apply_gateway_bonus_if_needed(uid, "tetrapay", _amt_tp)
+                    except Exception:
+                        pass
+                    _send_bulk_delivery_result(_chat_id_tp, uid, package_row,
+                                               purchase_ids, pending_ids, "TetraPay")
+                threading.Thread(target=_do_tetrapay_deliver, daemon=True).start()
                 state_clear(uid)
         else:
             _st = result.get("status", "") if isinstance(result, dict) else ""
@@ -6130,17 +6147,22 @@ def _dispatch_callback(call, uid, data):
                 bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد!")
                 send_or_edit(call, "✅ پرداخت شما تأیید شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
                              back_button("main"))
-                purchase_ids, pending_ids = _deliver_bulk_configs(
-                    call.message.chat.id, uid, package_id,
-                    payment["amount"], "tronpays_rial", _qty_tron, payment_id,
-                    service_names=get_payment_service_names(payment_id)
-                )
-                try:
-                    apply_gateway_bonus_if_needed(uid, "tronpays_rial", payment["amount"])
-                except Exception:
-                    pass
-                _send_bulk_delivery_result(call.message.chat.id, uid, package_row,
-                                           purchase_ids, pending_ids, "TronPays")
+                _chat_id_tron = call.message.chat.id
+                _amt_tron = payment["amount"]
+                _snames_tron_verify = get_payment_service_names(payment_id)
+                def _do_tronpays_deliver():
+                    purchase_ids, pending_ids = _deliver_bulk_configs(
+                        _chat_id_tron, uid, package_id,
+                        _amt_tron, "tronpays_rial", _qty_tron, payment_id,
+                        service_names=_snames_tron_verify
+                    )
+                    try:
+                        apply_gateway_bonus_if_needed(uid, "tronpays_rial", _amt_tron)
+                    except Exception:
+                        pass
+                    _send_bulk_delivery_result(_chat_id_tron, uid, package_row,
+                                               purchase_ids, pending_ids, "TronPays")
+                threading.Thread(target=_do_tronpays_deliver, daemon=True).start()
                 state_clear(uid)
         else:
             bot.answer_callback_query(call.id, "❌ پرداخت هنوز تأیید نشده. لطفاً ابتدا پرداخت را انجام دهید.", show_alert=True)
@@ -6255,17 +6277,22 @@ def _dispatch_callback(call, uid, data):
                 bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد!")
                 send_or_edit(call, "✅ پرداخت شما تأیید شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
                              back_button("main"))
-                purchase_ids, pending_ids = _deliver_bulk_configs(
-                    call.message.chat.id, uid, package_id,
-                    payment["amount"], "plisio", _qty_pl, payment_id,
-                    service_names=get_payment_service_names(payment_id)
-                )
-                try:
-                    apply_gateway_bonus_if_needed(uid, "plisio", payment["amount"])
-                except Exception:
-                    pass
-                _send_bulk_delivery_result(call.message.chat.id, uid, package_row,
-                                           purchase_ids, pending_ids, "Plisio")
+                _chat_id_pl = call.message.chat.id
+                _amt_pl = payment["amount"]
+                _snames_pl_verify = get_payment_service_names(payment_id)
+                def _do_plisio_deliver():
+                    purchase_ids, pending_ids = _deliver_bulk_configs(
+                        _chat_id_pl, uid, package_id,
+                        _amt_pl, "plisio", _qty_pl, payment_id,
+                        service_names=_snames_pl_verify
+                    )
+                    try:
+                        apply_gateway_bonus_if_needed(uid, "plisio", _amt_pl)
+                    except Exception:
+                        pass
+                    _send_bulk_delivery_result(_chat_id_pl, uid, package_row,
+                                               purchase_ids, pending_ids, "Plisio")
+                threading.Thread(target=_do_plisio_deliver, daemon=True).start()
                 state_clear(uid)
         else:
             bot.answer_callback_query(call.id,
@@ -6377,17 +6404,25 @@ def _dispatch_callback(call, uid, data):
             send_or_edit(call,
                 "✅ پرداخت شما تأیید شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
                 back_button("main"))
-            purchase_ids_v, pending_ids_v = _deliver_bulk_configs(
-                call.message.chat.id, uid, payment["package_id"],
-                payment["amount"], "nowpayments", _qty_npv, payment_id,
-                service_names=get_payment_service_names(payment_id)
-            )
-            try:
-                apply_gateway_bonus_if_needed(uid, "nowpayments", payment["amount"])
-            except Exception:
-                pass
-            _send_bulk_delivery_result(call.message.chat.id, uid, package_row_v,
-                                       purchase_ids_v, pending_ids_v, "NowPayments")
+            _chat_id_np = call.message.chat.id
+            _pkg_id_np = payment["package_id"]
+            _amt_np = payment["amount"]
+            _qty_npv_final = _qty_npv
+            _snames_np = get_payment_service_names(payment_id)
+            def _do_nowpayments_deliver():
+                package_row_v = get_package(_pkg_id_np)
+                purchase_ids_v, pending_ids_v = _deliver_bulk_configs(
+                    _chat_id_np, uid, _pkg_id_np,
+                    _amt_np, "nowpayments", _qty_npv_final, payment_id,
+                    service_names=_snames_np
+                )
+                try:
+                    apply_gateway_bonus_if_needed(uid, "nowpayments", _amt_np)
+                except Exception:
+                    pass
+                _send_bulk_delivery_result(_chat_id_np, uid, package_row_v,
+                                           purchase_ids_v, pending_ids_v, "NowPayments")
+            threading.Thread(target=_do_nowpayments_deliver, daemon=True).start()
             state_clear(uid)
         else:
             try:
@@ -6980,17 +7015,23 @@ def _dispatch_callback(call, uid, data):
                 bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد!")
                 send_or_edit(call, "✅ پرداخت شما تأیید شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
                              back_button("main"))
-                purchase_ids, pending_ids = _deliver_bulk_configs(
-                    call.message.chat.id, uid, package_id,
-                    payment["amount"], "swapwallet_crypto", _qty_sw, payment_id,
-                    service_names=get_payment_service_names(payment_id)
-                )
-                try:
-                    apply_gateway_bonus_if_needed(uid, "swapwallet_crypto", payment["amount"])
-                except Exception:
-                    pass
-                _send_bulk_delivery_result(call.message.chat.id, uid, package_row,
-                                           purchase_ids, pending_ids, "SwapWallet Crypto")
+                _chat_id_sw = call.message.chat.id
+                _amt_sw = payment["amount"]
+                _qty_sw_final = _qty_sw
+                _snames_sw = get_payment_service_names(payment_id)
+                def _do_swapwallet_deliver():
+                    purchase_ids, pending_ids = _deliver_bulk_configs(
+                        _chat_id_sw, uid, package_id,
+                        _amt_sw, "swapwallet_crypto", _qty_sw_final, payment_id,
+                        service_names=_snames_sw
+                    )
+                    try:
+                        apply_gateway_bonus_if_needed(uid, "swapwallet_crypto", _amt_sw)
+                    except Exception:
+                        pass
+                    _send_bulk_delivery_result(_chat_id_sw, uid, package_row,
+                                               purchase_ids, pending_ids, "SwapWallet Crypto")
+                threading.Thread(target=_do_swapwallet_deliver, daemon=True).start()
                 state_clear(uid)
         else:
             bot.answer_callback_query(call.id, "❌ پرداخت هنوز تأیید نشده. لطفاً ابتدا واریز را انجام دهید.", show_alert=True)
