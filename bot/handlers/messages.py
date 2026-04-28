@@ -4110,13 +4110,15 @@ def universal_handler(message):
             try:
                 if ok:
                     state_clear(uid)
-                    from ..db import add_panel as _add_panel
+                    from ..db import add_panel as _add_panel, adopt_all_orphaned_configs as _adopt
                     panel_id = _add_panel(name=pnl_name or "بدون نام", protocol=protocol,
                                           host=host, port=int(port or 2053), path=path,
                                           username=username, password=password,
                                           sub_url_base=sub_url_base)
                     from ..db import update_panel_status
                     update_panel_status(panel_id, "connected", "")
+                    _adopted = _adopt(panel_id)
+                    _adopted_note = f"\n\n📥 {_adopted} کانفیگ قدیمی به این پنل منتقل شدند." if _adopted else ""
                     from ..admin.renderers import _show_panel_detail
 
                     class _FakeCall:
@@ -4128,7 +4130,7 @@ def universal_handler(message):
                             self.data      = cb_data
                             self.id        = 0
 
-                    bot.send_message(uid, "✅ اتصال موفق! پنل ذخیره شد.")
+                    bot.send_message(uid, f"✅ اتصال موفق! پنل ذخیره شد.{_adopted_note}", parse_mode="HTML")
                     _show_panel_detail(_FakeCall(message, f"adm:pnl:detail:{panel_id}"), panel_id)
                 else:
                     state_set(uid, "pnl_add_save_fail",

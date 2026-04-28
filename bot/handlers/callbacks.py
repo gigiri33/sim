@@ -133,6 +133,7 @@ from ..db import (
     get_panel_client_package, get_panel_client_package_by_inbound,
     delete_panel_client_package,
     update_panel_client_package_samples, update_panel_client_package_field,
+    get_orphaned_panel_config_groups, reassign_panel_configs, adopt_all_orphaned_configs,
     get_panel_configs_by_cpkg, update_panel_config_texts,
     bulk_add_balance, bulk_zero_balance, bulk_set_status, count_users_by_filter,
     get_user_purchases_paged, get_user_panel_configs_paged,
@@ -17599,6 +17600,52 @@ def _dispatch_callback(call, uid, data):
         _show_admin_panels(call)
         return
 
+    if data.startswith("adm:pnl:adopt:") and data.count(":") == 3:
+        # adm:pnl:adopt:{new_panel_id}  — show list of orphaned panel_id groups
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+            return
+        new_panel_id = int(data.split(":")[-1])
+        p = get_panel(new_panel_id)
+        if not p:
+            bot.answer_callback_query(call.id, "پنل یافت نشد.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        orphans = get_orphaned_panel_config_groups()
+        if not orphans:
+            bot.answer_callback_query(call.id, "هیچ کانفیگ یتیمی وجود ندارد.", show_alert=True)
+            return
+        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+        kb = InlineKeyboardMarkup()
+        for o in orphans:
+            kb.add(InlineKeyboardButton(
+                f"🔁 پنل قدیمی #{o['panel_id']} — {o['count']} کانفیگ",
+                callback_data=f"adm:pnl:adoptok:{new_panel_id}:{o['panel_id']}",
+            ))
+        kb.add(InlineKeyboardButton("بازگشت", callback_data=f"adm:pnl:detail:{new_panel_id}",
+                                    icon_custom_emoji_id="5253997076169115797"))
+        send_or_edit(call,
+            f"📥 <b>جذب کانفیگ‌های یتیم</b>\n\n"
+            f"کانفیگ‌هایی که پنلشان حذف شده را انتخاب کنید تا به پنل "
+            f"<b>{esc(p['name'])}</b> منتقل شوند:",
+            kb)
+        return
+
+    if data.startswith("adm:pnl:adoptok:"):
+        # adm:pnl:adoptok:{new_panel_id}:{old_panel_id}  — execute reassign
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+            return
+        parts = data.split(":")
+        new_panel_id = int(parts[3])
+        old_panel_id = int(parts[4])
+        reassign_panel_configs(old_panel_id, new_panel_id)
+        p = get_panel(new_panel_id)
+        pname = p["name"] if p else str(new_panel_id)
+        bot.answer_callback_query(call.id, f"✅ کانفیگ‌های پنل #{old_panel_id} به {pname} منتقل شدند.")
+        _show_panel_detail(call, new_panel_id)
+        return
+
     if data.startswith("adm:pnl:recheck:"):
         if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
             bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
@@ -17647,7 +17694,11 @@ def _dispatch_callback(call, uid, data):
             sub_url_base=sd.get("sub_url_base", ""),
         )
         toggle_panel_active(panel_id, 0)
+        _adopted = adopt_all_orphaned_configs(panel_id)
+        _adopted_note = f"\n\n📥 {_adopted} کانفیگ قدیمی به این پنل منتقل شدند." if _adopted else ""
         bot.answer_callback_query(call.id, "پنل با وضعیت غیرفعال ذخیره شد.")
+        if _adopted_note:
+            bot.send_message(uid, f"✅ پنل ذخیره شد.{_adopted_note}", parse_mode="HTML")
         _show_panel_detail(call, panel_id)
         return
 
@@ -17679,7 +17730,9 @@ def _dispatch_callback(call, uid, data):
                                  host=host, port=int(port or 2053), path=path,
                                  username=username, password=password, sub_url_base="")
             update_panel_status(panel_id, "connected", "")
-            bot.send_message(uid, "✅ اتصال موفق! پنل ذخیره شد.")
+            _adopted = adopt_all_orphaned_configs(panel_id)
+            _adopted_note = f"\n📥 {_adopted} کانفیگ قدیمی به این پنل منتقل شدند." if _adopted else ""
+            bot.send_message(uid, f"✅ اتصال موفق! پنل ذخیره شد.{_adopted_note}", parse_mode="HTML")
             _show_panel_detail(call, panel_id)
         else:
             state_set(uid, "pnl_add_save_fail",

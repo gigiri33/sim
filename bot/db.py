@@ -3008,12 +3008,56 @@ def update_panel_config_field(config_id, field, value):
     _ALLOWED = {
         "client_uuid", "client_sub_url", "client_config_text",
         "expire_at", "is_expired", "auto_renew", "is_disabled",
-        "client_name", "package_id",
+        "client_name", "package_id", "panel_id",
     }
     if field not in _ALLOWED:
         raise ValueError(f"update_panel_config_field: field {field!r} not allowed")
     with get_conn() as conn:
         conn.execute(f"UPDATE panel_configs SET {field}=? WHERE id=?", (value, config_id))
+
+
+def get_orphaned_panel_config_groups():
+    """
+    Return list of dicts {panel_id, count} for panel_configs whose panel_id
+    no longer exists in the panels table (orphaned after panel deletion).
+    """
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT pc.panel_id, COUNT(*) AS cnt
+            FROM panel_configs pc
+            LEFT JOIN panels p ON pc.panel_id = p.id
+            WHERE p.id IS NULL
+            GROUP BY pc.panel_id
+            ORDER BY cnt DESC
+            """
+        ).fetchall()
+    return [{"panel_id": r["panel_id"], "count": r["cnt"]} for r in rows]
+
+
+def reassign_panel_configs(old_panel_id, new_panel_id):
+    """Move all panel_configs with old_panel_id to new_panel_id."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE panel_configs SET panel_id=? WHERE panel_id=?",
+            (int(new_panel_id), int(old_panel_id))
+        )
+
+
+def adopt_all_orphaned_configs(new_panel_id):
+    """
+    Reassign ALL orphaned panel_configs (whose panel no longer exists) to new_panel_id.
+    Returns the total number of configs adopted.
+    """
+    with get_conn() as conn:
+        cur = conn.execute(
+            """
+            UPDATE panel_configs SET panel_id=?
+            WHERE panel_id NOT IN (SELECT id FROM panels)
+            """,
+            (int(new_panel_id),)
+        )
+        return cur.rowcount
 
 
 def delete_panel_config(config_id):

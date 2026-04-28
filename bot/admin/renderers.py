@@ -441,10 +441,19 @@ def _show_panel_detail(call, panel_id):
     toggle_callback = f"adm:pnl:toggle:{panel_id}:{0 if is_active else 1}"
 
     from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    from ..db import get_orphaned_panel_config_groups
     kb = InlineKeyboardMarkup()
     kb.add(
         InlineKeyboardButton("📦 کلاینت پکیج‌ها", callback_data=f"adm:pnl:cpkgs:{panel_id}"),
     )
+    # Show adopt button only if there are orphaned configs
+    _orphans = get_orphaned_panel_config_groups()
+    if _orphans:
+        _total_orphaned = sum(o["count"] for o in _orphans)
+        kb.add(InlineKeyboardButton(
+            f"📥 جذب کانفیگ‌های یتیم ({_total_orphaned} کانفیگ)",
+            callback_data=f"adm:pnl:adopt:{panel_id}",
+        ))
     kb.row(
         InlineKeyboardButton("🔄 بررسی الان",  callback_data=f"adm:pnl:recheck:{panel_id}"),
         InlineKeyboardButton(toggle_label,      callback_data=toggle_callback),
