@@ -944,16 +944,6 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
             InlineKeyboardButton("⚡ تمدید فوری",  callback_data=f"mypnlcfg:renewwarn:{config_id}"),
             InlineKeyboardButton(ar_label,          callback_data=f"mypnlcfg:autorenew:{config_id}"),
         )
-        # ── Add-on purchase buttons (only for panel-created configs) ──────
-        _vol_en  = setting_get("addon_volume_enabled", "1") == "1"
-        _time_en = setting_get("addon_time_enabled",   "1") == "1"
-        _addon_row = []
-        if _vol_en:
-            _addon_row.append(InlineKeyboardButton("📦 خرید حجم",  callback_data=f"addon:vol:{config_id}"))
-        if _time_en:
-            _addon_row.append(InlineKeyboardButton("⏰ خرید زمان", callback_data=f"addon:time:{config_id}"))
-        if _addon_row:
-            kb.row(*_addon_row)
         kb.add(InlineKeyboardButton("بازگشت", callback_data=back_data,
                                     icon_custom_emoji_id="5253997076169115797"))
 

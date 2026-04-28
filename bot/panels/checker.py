@@ -108,25 +108,21 @@ def _check_panel_configs_expiry() -> None:
                                             username=panel["username"],
                                             password=panel["password"],
                                         )
-                                        client.reset_client_traffic(
-                                            cfg["inbound_id"], cfg["client_name"] or ""
-                                        )
-                                        dur_days = int(pkg["duration_days"] or 0)
-                                        if dur_days:
-                                            new_exp_dt  = datetime.utcnow() + timedelta(days=dur_days)
-                                            new_exp_str = new_exp_dt.strftime("%Y-%m-%d %H:%M:%S")
-                                            new_exp_ms  = int(new_exp_dt.timestamp() * 1000)
-                                        else:
-                                            new_exp_str = None
-                                            new_exp_ms  = 0
-                                        ok_r, _ = client.enable_client(
+                                        # Additive auto-renewal: ADD package volume + days to
+                                        # current totalGB / expiryTime. Consumed traffic is NOT reset.
+                                        ok_r, res_r = client.extend_client(
                                             inbound_id=cfg["inbound_id"],
                                             client_uuid=cfg["client_uuid"],
                                             email=cfg["client_name"] or "",
-                                            traffic_bytes=int((pkg["volume_gb"] or 0) * 1073741824),
-                                            expire_ms=new_exp_ms,
+                                            add_bytes=int((pkg["volume_gb"]    or 0) * 1073741824),
+                                            add_days =int( pkg["duration_days"] or 0),
                                         )
                                         if ok_r:
+                                            new_exp_ms = int(res_r.get("new_expiry_ms") or 0) if isinstance(res_r, dict) else 0
+                                            if new_exp_ms > 0:
+                                                new_exp_str = datetime.utcfromtimestamp(new_exp_ms / 1000).strftime("%Y-%m-%d %H:%M:%S")
+                                            else:
+                                                new_exp_str = None
                                             renew_ok = True
                                             update_panel_config_field(cfg["id"], "expire_at",  new_exp_str)
                                             update_panel_config_field(cfg["id"], "is_expired",  0)
