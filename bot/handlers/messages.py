@@ -43,11 +43,8 @@ from ..db import (
     bulk_add_balance, bulk_zero_balance, bulk_set_status, count_users_by_filter,
     set_user_restricted, check_and_release_restriction,
     get_wallet_pay_exceptions, add_wallet_pay_exception,
-<<<<<<< HEAD
     get_payment_card, get_payment_cards, add_payment_card, update_payment_card,
-=======
     add_referral_restriction,
->>>>>>> 74a4f3ed0d7f92775aa47d06000b98501cf55245
 )
 from ..gateways.base import is_gateway_available, is_card_info_complete, get_global_amount_range, get_gateway_range_text, is_gateway_in_range, build_gateway_range_guide
 from ..gateways.tetrapay import create_tetrapay_order, verify_tetrapay_order
