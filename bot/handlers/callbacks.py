@@ -626,7 +626,7 @@ def _get_state_price(uid, package_row, state_key):
             print(f"DEBUG: _get_state_price uid={uid} stored amount invalid={stored}, recalculating")
     price = get_effective_price(uid, package_row)
     if price is None or price < 0:
-        print(f"DEBUG: _get_state_price uid={uid} pkg={package_row.get('id')} computed invalid price={price}")
+        print(f"DEBUG: _get_state_price uid={uid} pkg={package_row['id']} computed invalid price={price}")
         price = int(package_row["price"] or 0)
     return price
 

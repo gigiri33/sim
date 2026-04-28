@@ -60,13 +60,13 @@ def get_effective_price(user_id, package_row):
     user = get_user(user_id)
     base = package_row["price"]
     if base is None or base < 0:
-        print(f"DEBUG: get_effective_price uid={user_id} pkg={package_row.get('id')} invalid base={base}, defaulting to 0")
+        print(f"DEBUG: get_effective_price uid={user_id} pkg={package_row['id']} invalid base={base}, defaulting to 0")
         base = 0
     if not user or not user["is_agent"]:
         return base
     cfg   = get_agency_price_config(user_id)
     mode  = cfg["price_mode"]
-    print(f"DEBUG: get_effective_price uid={user_id} pkg={package_row.get('id')} base={base} mode={mode} is_agent=True")
+    print(f"DEBUG: get_effective_price uid={user_id} pkg={package_row['id']} base={base} mode={mode} is_agent=True")
     if mode == "global":
         g_type = cfg["global_type"]
         g_val  = cfg["global_val"]
