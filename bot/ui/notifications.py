@@ -833,6 +833,8 @@ def _give_referral_reward(referrer_id, reward_prefix):
 def notify_referral_join(referrer_id, referee_id):
     """Send a join-referral log to admins (own/bot) and the referral_log topic.
     Also send a real-time notification to the inviter."""
+    if setting_get("referral_enabled", "1") != "1":
+        return
     referrer = get_user(referrer_id)
     referee  = get_user(referee_id)
     if not referrer or not referee:
@@ -1021,6 +1023,8 @@ def try_give_referral_start_reward_for_channel_join(referee_id: int) -> None:
     is currently on.  That way, turning the feature on later will correctly
     count already-joined referees.
     """
+    if setting_get("referral_enabled", "1") != "1":
+        return  # referral system fully disabled
     if not _channel_reward_required():
         return  # condition is start_only — reward already given at /start time
 
@@ -1064,6 +1068,8 @@ def check_and_give_referral_purchase_reward(buyer_user_id):
     Uses atomic SQL claim (try_claim_purchase_reward_batch) to prevent double-rewarding.
     Loops so multiple thresholds crossed in one purchase are all rewarded correctly.
     """
+    if setting_get("referral_enabled", "1") != "1":
+        return
     if setting_get("referral_purchase_reward_enabled", "0") != "1":
         return
     ref = get_referral_by_referee(buyer_user_id)

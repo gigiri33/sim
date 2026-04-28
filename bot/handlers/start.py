@@ -57,7 +57,7 @@ def start_handler(message):
         if len(parts) > 1 and parts[1].startswith("ref_"):
             try:
                 referrer_id = int(parts[1][4:])
-                if referrer_id != uid:
+                if referrer_id != uid and setting_get("referral_enabled", "1") == "1":
                     add_referral(referrer_id, uid)
                     from ..ui.notifications import (
                         check_and_give_referral_start_reward,
