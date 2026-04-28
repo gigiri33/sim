@@ -160,23 +160,20 @@ def send_to_topic(topic_key, text, parse_mode="HTML", reply_markup=None):
         return None
 
 
-def send_photo_to_topic(topic_key, photo, caption=None, reply_markup=None):
+def send_photo_to_topic(topic_key, photo, caption=None):
     """Send a photo to the specified topic. Silent on any error."""
-    if setting_get(f"notif_grp_{topic_key}", "1") != "1":
-        return None
     group_id = get_group_id()
     if not group_id:
-        return None
+        return
     thread_id = _get_topic_id(topic_key)
     if not thread_id:
-        return None
+        return
     try:
-        return bot.send_photo(group_id, photo,
+        bot.send_photo(group_id, photo,
                        message_thread_id=thread_id,
-                       caption=caption, parse_mode="HTML",
-                       reply_markup=reply_markup)
+                       caption=caption, parse_mode="HTML")
     except Exception:
-        return None
+        pass
 
 
 def send_document_to_topic(topic_key, document, caption=None, visible_file_name=None):

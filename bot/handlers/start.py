@@ -64,7 +64,6 @@ def start_handler(message):
                         try_give_referral_start_reward_for_channel_join,
                         notify_referral_join,
                         _channel_reward_required,
-                        send_captcha_prompt,
                     )
                     try:
                         notify_referral_join(referrer_id, uid)
@@ -77,16 +76,12 @@ def start_handler(message):
                         # treat the join as immediate (e.g. they joined before starting).
                         _invalidate_channel_cache(uid)
                         if check_channel_membership(uid):
-                            # Mark channel_joined and potentially give reward / show captcha
+                            # Mark channel_joined and potentially give reward now
                             try_give_referral_start_reward_for_channel_join(uid)
                         # else: reward deferred until user confirms channel membership
                     else:
-                        # start_only mode — give reward immediately (or show captcha first)
-                        captcha_enabled = setting_get("referral_captcha_enabled", "1") == "1"
-                        if captcha_enabled:
-                            send_captcha_prompt(uid)
-                        else:
-                            check_and_give_referral_start_reward(referrer_id)
+                        # start_only mode — give reward immediately
+                        check_and_give_referral_start_reward(referrer_id)
             except (ValueError, Exception):
                 pass
 

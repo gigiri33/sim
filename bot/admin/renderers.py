@@ -13,7 +13,6 @@ from ..db import (
     get_panel_configs, get_panel_configs_count, get_panel_config_full,
     get_panel_client_packages, get_panel_client_package,
     get_panel,
-    setting_get,
 )
 from ..helpers import esc, fmt_price, display_username, back_button
 from ..ui.keyboards import _btn, _raw_markup
@@ -226,18 +225,6 @@ def _show_admin_user_detail(call, user_id):
     agent_label  = "🤝 نمایندگی فعال" if row["is_agent"] else "❌ نمایندگی غیرفعال"
     phone = get_phone_number(row["user_id"])
     phone_line = f"📞 شماره تلفن: <code>{esc(phone)}</code>\n" if phone else "📞 شماره تلفن: ثبت نشده\n"
-    panel_renew = row["panel_renew_count"] if "panel_renew_count" in row.keys() else 0
-    credit_enabled = row["purchase_credit_enabled"] if "purchase_credit_enabled" in row.keys() else 0
-    credit_limit   = row["purchase_credit_limit"]   if "purchase_credit_limit"   in row.keys() else 0
-    admin_adj      = row["total_admin_adjusted"]     if "total_admin_adjusted"    in row.keys() else 0
-    if credit_enabled:
-        balance = row['balance']
-        used_credit = max(0, -balance) if balance < 0 else 0
-        credit_remaining = credit_limit - used_credit
-        credit_line = f"💳 اعتبار خرید: ✅ سقف: <b>{fmt_price(credit_limit)}</b> | مانده: <b>{fmt_price(credit_remaining)}</b> تومان\n"
-    else:
-        credit_line = "💳 اعتبار خرید: ❌ غیرفعال\n"
-    total_paid = row['total_direct_payments'] + max(0, admin_adj)
     text = (
         "👤 <b>اطلاعات کاربر</b>\n\n"
         f"📱 نام: {esc(row['full_name'])}\n"
@@ -245,13 +232,12 @@ def _show_admin_user_detail(call, user_id):
         f"🔢 آیدی: <code>{row['user_id']}</code>\n"
         f"{phone_line}"
         f"💰 موجودی: <b>{fmt_price(row['balance'])}</b> تومان\n"
-        f"{credit_line}"
         f"🛍 تعداد خرید: <b>{row['purchase_count']}</b>\n"
-        f"♻️ تعداد تمدیدها: <b>{row['renewal_count'] + panel_renew}</b>\n"
+        f"� تعداد تمدیدها: <b>{row['renewal_count']}</b>\n"
         f"💵 مجموع خرید: <b>{fmt_price(row['total_spent'])}</b> تومان\n"
         f"💳 مجموع تمدیدها: <b>{fmt_price(row['total_renewals'])}</b> تومان\n"
         f"💰 مجموع خرید‌ها: <b>{fmt_price(row['total_spent'] + row['total_renewals'])}</b> تومان\n"
-        f"💳 مجموع پرداخت: <b>{fmt_price(total_paid)}</b> تومان\n"
+        f"💳 مجموع پرداخت: <b>{fmt_price(row['total_direct_payments'])}</b> تومان\n"
         f"🕒 عضویت: {esc(row['joined_at'])}\n"
         f"وضعیت: {status_label}\n"
         f"نمایندگی: {agent_label}"
@@ -263,7 +249,6 @@ def _show_admin_user_detail(call, user_id):
         types.InlineKeyboardButton(f"🤝 نمایندگی",       callback_data=f"adm:usr:ag:{uid_t}"),
     )
     kb.add(types.InlineKeyboardButton("💰 موجودی",           callback_data=f"adm:usr:bal:{uid_t}"))
-    kb.add(types.InlineKeyboardButton("💳 اعتبار خرید",       callback_data=f"adm:credit:{uid_t}"))
     kb.add(types.InlineKeyboardButton("📦 کانفیگ‌ها",         callback_data=f"adm:usr:cfgs:{uid_t}"))
     kb.add(types.InlineKeyboardButton("👥 زیرمجموعه‌ها",      callback_data=f"adm:usr:refs:{uid_t}:0"))
     kb.add(types.InlineKeyboardButton("💰 قیمت نمایندگی کاربر", callback_data=f"adm:agcfg:{uid_t}"))
@@ -282,18 +267,6 @@ def _show_admin_user_detail_msg(chat_id, user_id):
     agent_label  = "🤝 نمایندگی فعال" if row["is_agent"] else "❌ نمایندگی غیرفعال"
     phone = get_phone_number(row["user_id"])
     phone_line = f"📞 شماره تلفن: <code>{esc(phone)}</code>\n" if phone else "📞 شماره تلفن: ثبت نشده\n"
-    panel_renew = row["panel_renew_count"] if "panel_renew_count" in row.keys() else 0
-    credit_enabled = row["purchase_credit_enabled"] if "purchase_credit_enabled" in row.keys() else 0
-    credit_limit   = row["purchase_credit_limit"]   if "purchase_credit_limit"   in row.keys() else 0
-    admin_adj      = row["total_admin_adjusted"]     if "total_admin_adjusted"    in row.keys() else 0
-    if credit_enabled:
-        balance = row['balance']
-        used_credit = max(0, -balance) if balance < 0 else 0
-        credit_remaining = credit_limit - used_credit
-        credit_line = f"💳 اعتبار خرید: ✅ سقف: <b>{fmt_price(credit_limit)}</b> | مانده: <b>{fmt_price(credit_remaining)}</b> تومان\n"
-    else:
-        credit_line = "💳 اعتبار خرید: ❌ غیرفعال\n"
-    total_paid = row['total_direct_payments'] + max(0, admin_adj)
     text = (
         "👤 <b>اطلاعات کاربر</b>\n\n"
         f"📱 نام: {esc(row['full_name'])}\n"
@@ -301,13 +274,12 @@ def _show_admin_user_detail_msg(chat_id, user_id):
         f"🔢 آیدی: <code>{row['user_id']}</code>\n"
         f"{phone_line}"
         f"💰 موجودی: <b>{fmt_price(row['balance'])}</b> تومان\n"
-        f"{credit_line}"
         f"🛍 تعداد خرید: <b>{row['purchase_count']}</b>\n"
-        f"♻️ تعداد تمدیدها: <b>{row['renewal_count'] + panel_renew}</b>\n"
+        f"� تعداد تمدیدها: <b>{row['renewal_count']}</b>\n"
         f"💵 مجموع خرید: <b>{fmt_price(row['total_spent'])}</b> تومان\n"
         f"💳 مجموع تمدیدها: <b>{fmt_price(row['total_renewals'])}</b> تومان\n"
         f"💰 مجموع خرید‌ها: <b>{fmt_price(row['total_spent'] + row['total_renewals'])}</b> تومان\n"
-        f"💳 مجموع پرداخت: <b>{fmt_price(total_paid)}</b> تومان\n"
+        f"💳 مجموع پرداخت: <b>{fmt_price(row['total_direct_payments'])}</b> تومان\n"
         f"🕒 عضویت: {esc(row['joined_at'])}\n"
         f"وضعیت: {status_label}\n"
         f"نمایندگی: {agent_label}"
@@ -319,7 +291,6 @@ def _show_admin_user_detail_msg(chat_id, user_id):
         types.InlineKeyboardButton(f"🤝 نمایندگی",       callback_data=f"adm:usr:ag:{uid_t}"),
     )
     kb.add(types.InlineKeyboardButton("💰 موجودی",           callback_data=f"adm:usr:bal:{uid_t}"))
-    kb.add(types.InlineKeyboardButton("💳 اعتبار خرید",       callback_data=f"adm:credit:{uid_t}"))
     kb.add(types.InlineKeyboardButton("📦 کانفیگ‌ها",         callback_data=f"adm:usr:cfgs:{uid_t}"))
     kb.add(types.InlineKeyboardButton("👥 زیرمجموعه‌ها",      callback_data=f"adm:usr:refs:{uid_t}:0"))
     kb.add(types.InlineKeyboardButton("💰 قیمت نمایندگی کاربر", callback_data=f"adm:agcfg:{uid_t}"))
@@ -412,8 +383,8 @@ def _show_panel_detail(call, panel_id):
     checked   = p["last_checked_at"] or "—"
     err_line  = f"\n⚠️ خطا: <code>{esc(p['last_error'])}</code>" if p["last_error"] else ""
 
-    uname_disp  = p['username'] if p['username'] else '—'
-    passwd_disp = p['password'] if p['password'] else '—'
+    uname_censored = p['username'][:2] + '***' if p['username'] else '—'
+    passwd_censored = '••••••••'
     try:
         sub_url_base_disp = p['sub_url_base'] or "<i>(ندارد — از آدرس پنل استفاده می‌شود)</i>"
     except (IndexError, KeyError):
@@ -427,8 +398,8 @@ def _show_panel_detail(call, panel_id):
         f"{icon} <b>{esc(p['name'])}</b>\n\n"
         f"🔗 آدرس:  <code>{p['protocol']}://{esc(p['host'])}:{p['port']}{esc(p['path'] or '')}</code>\n"
         f"📡 ساب:   {sub_url_base_disp}\n"
-        f"👤 نام کاربری: <code>{uname_disp}</code>\n"
-        f"🔑 رمز عبور:   <code>{passwd_disp}</code>\n"
+        f"👤 نام کاربری: <code>{uname_censored}</code>\n"
+        f"🔑 رمز عبور:   <code>{passwd_censored}</code>\n"
         f"📡 وضعیت: {status_label}\n"
         f"🕐 آخرین بررسی: {checked}"
         f"{err_line}\n\n"
@@ -941,19 +912,9 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
         # User view: send QR inline if possible, then show buttons
         ar_label = "♻️ تمدید خودکار: ✅" if auto_renew else "♻️ تمدید خودکار: ❌"
         kb.row(
-            InlineKeyboardButton("⚡ تمدید فوری",  callback_data=f"mypnlcfg:renewwarn:{config_id}"),
+            InlineKeyboardButton("⚡ تمدید فوری",  callback_data=f"mypnlcfg:renewconfirm:{config_id}"),
             InlineKeyboardButton(ar_label,          callback_data=f"mypnlcfg:autorenew:{config_id}"),
         )
-        # ── Add-on purchase buttons (only for panel-created configs) ──────
-        _vol_en  = setting_get("addon_volume_enabled", "1") == "1"
-        _time_en = setting_get("addon_time_enabled",   "1") == "1"
-        _addon_row = []
-        if _vol_en:
-            _addon_row.append(InlineKeyboardButton("📦 خرید حجم",  callback_data=f"addon:vol:{config_id}"))
-        if _time_en:
-            _addon_row.append(InlineKeyboardButton("⏰ خرید زمان", callback_data=f"addon:time:{config_id}"))
-        if _addon_row:
-            kb.row(*_addon_row)
         kb.add(InlineKeyboardButton("بازگشت", callback_data=back_data,
                                     icon_custom_emoji_id="5253997076169115797"))
 

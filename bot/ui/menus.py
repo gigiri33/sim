@@ -76,24 +76,12 @@ def show_profile(target, user_id):
     user = get_user(user_id)
     if not user:
         return
-    credit_enabled = user["purchase_credit_enabled"] if "purchase_credit_enabled" in user.keys() else 0
-    credit_limit   = user["purchase_credit_limit"]   if "purchase_credit_limit"   in user.keys() else 0
-    credit_line = ""
-    if credit_enabled:
-        balance = user['balance']
-        used_credit = max(0, -balance) if balance < 0 else 0
-        credit_remaining = credit_limit - used_credit
-        credit_line = (
-            f"\n{ce('💳', '5931368295545443065')} اعتبار خرید: <b>{fmt_price(credit_limit)}</b> تومان"
-            f"\n{ce('💳', '5931368295545443065')} مانده اعتبار: <b>{fmt_price(credit_remaining)}</b> تومان"
-        )
     text = (
         f"{ce('👤', '5373012449597335010')} <b>پروفایل کاربری</b>\n\n"
         f"{ce('📱', '5258011929993026890')} نام: {esc(user['full_name'])}\n"
         f"{ce('🆔', '6118316934766266392')} نام کاربری: {esc(display_username(user['username']))}\n"
         f"{ce('🔢', '5875335525136602241')} آیدی: <code>{user['user_id']}</code>\n\n"
         f"{ce('💰', '5375296873982604963')} موجودی: <b>{fmt_price(user['balance'])}</b> تومان"
-        f"{credit_line}"
     )
     if user["is_agent"]:
         text += f"\n\n{ce('🤝', '5287478403530767368')} <b>حساب نمایندگی فعال است</b>"

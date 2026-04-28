@@ -2,13 +2,9 @@
 """
 Gateway availability checks shared across all payment gateways.
 """
-from ..db import (
-    setting_get, get_user,
-    pick_card_for_payment,
-    get_gateway_fee_amount, get_gateway_bonus_amount, apply_gateway_fee,
-)
+from ..db import setting_get, get_user, get_payment_cards
 
-_ALL_GATEWAYS = ("card", "crypto", "tetrapay", "swapwallet_crypto", "tronpays_rial", "plisio")
+_ALL_GATEWAYS = ("card", "crypto", "tetrapay", "swapwallet_crypto", "tronpays_rial")
 
 
 def is_gateway_available(gw_name, user_id, amount=None):
@@ -77,16 +73,6 @@ def get_global_amount_range(user_id):
 def get_gateway_range_text(gw_name):
     """Return a short range description for a gateway, e.g. '۵۰۰,۰۰۰ تا ۱,۸۰۰,۰۰۰'.
     Returns '' if range is not enabled."""
-    # Plisio: show live 5-USDT minimum
-    if gw_name == "plisio":
-        dyn_min = _plisio_dynamic_min_toman()
-        if dyn_min:
-            base = f"حداقل {dyn_min:,} تومان (معادل ۵ USDT)"
-            if setting_get("gw_plisio_range_enabled", "0") == "1":
-                r_max = setting_get("gw_plisio_range_max", "")
-                if r_max:
-                    return base + f" — حداکثر {int(r_max):,} تومان"
-            return base
     if setting_get(f"gw_{gw_name}_range_enabled", "0") != "1":
         return "بدون محدودیت مبلغی"
     r_min = setting_get(f"gw_{gw_name}_range_min", "")
@@ -102,37 +88,12 @@ def get_gateway_range_text(gw_name):
 
 
 def is_card_info_complete():
-    """Return True if at least one active card is configured (new table or legacy settings)."""
-    from ..db import get_payment_cards
-    if get_payment_cards(active_only=True):
-        return True
-    return all([
-        setting_get("payment_card", ""),
-        setting_get("payment_bank", ""),
-        setting_get("payment_owner", ""),
-    ])
-
-
-def _plisio_dynamic_min_toman():
-    """Return the live 5-USDT minimum in toman using SwapWallet rates. Returns 0 on failure."""
-    try:
-        from .crypto import fetch_crypto_prices
-        prices = fetch_crypto_prices()
-        usdt_irt = prices.get("USDT", 0)
-        if usdt_irt and usdt_irt > 0:
-            return int(5 * usdt_irt)
-    except Exception:
-        pass
-    return 0
+    """Return True if at least one active card-to-card payment card exists."""
+    return bool(get_payment_cards(include_inactive=False))
 
 
 def is_gateway_in_range(gw_name, amount):
     """Return True if amount is within the gateway's allowed range (or range is disabled)."""
-    # Plisio: always enforce live 5-USDT minimum regardless of range settings
-    if gw_name == "plisio":
-        dyn_min = _plisio_dynamic_min_toman()
-        if dyn_min and amount < dyn_min:
-            return False
     if setting_get(f"gw_{gw_name}_range_enabled", "0") != "1":
         return True
     r_min = setting_get(f"gw_{gw_name}_range_min", "")

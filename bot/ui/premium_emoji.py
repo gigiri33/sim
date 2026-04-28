@@ -147,46 +147,33 @@ def extract_context_text(text: str, offset: int, length: int) -> str:
 
 # ── Serialization ──────────────────────────────────────────────────────────────
 
-# Entity types that carry user formatting and should be preserved.
-_FORMATTABLE_ENTITY_TYPES = frozenset({
-    "bold", "italic", "underline", "strikethrough", "code", "pre",
-    "spoiler", "custom_emoji", "text_link",
-})
-
-
 def serialize_premium_text(text: str, entities) -> str:
     """
-    Store text + formatting entities (bold, italic, custom_emoji, …) as JSON.
-    Falls back to returning plain text when there are no storable entities.
-    Backward-compatible: old plain-text values still work.
+    Store text + custom_emoji entities in a JSON string.
+    Falls back to returning plain text if no custom emojis are present
+    (backward-compatible: old plain-text values still work).
 
     entities: iterable of telebot MessageEntity objects (or None)
     """
     if not entities:
         return text
 
-    stored: list[dict] = []
+    custom: list[dict] = []
     for e in (entities or []):
-        if e.type not in _FORMATTABLE_ENTITY_TYPES:
-            continue
-        entry: dict = {
-            "type":   e.type,
-            "offset": e.offset,
-            "length": e.length,
-        }
         if e.type == "custom_emoji":
-            entry["emoji"]           = text[e.offset: e.offset + e.length]
-            entry["custom_emoji_id"] = e.custom_emoji_id
-        elif e.type == "text_link":
-            entry["url"] = getattr(e, "url", "") or ""
-        elif e.type == "pre":
-            entry["language"] = getattr(e, "language", "") or ""
-        stored.append(entry)
+            emoji_char = text[e.offset: e.offset + e.length]
+            custom.append({
+                "type":            "custom_emoji",
+                "offset":          e.offset,
+                "length":          e.length,
+                "emoji":           emoji_char,
+                "custom_emoji_id": e.custom_emoji_id,
+            })
 
-    if not stored:
+    if not custom:
         return text
 
-    return json.dumps({"text": text, "entities": stored}, ensure_ascii=False)
+    return json.dumps({"text": text, "entities": custom}, ensure_ascii=False)
 
 
 def deserialize_premium_text(data: str) -> dict:
@@ -259,8 +246,7 @@ def render_premium_text_entities(data: str):
     Return (text, entities | None) for direct sending without parse_mode.
 
     Use when you can pass entities= to bot.send_message() directly.
-    All stored entity types (bold, italic, custom_emoji, …) are restored.
-    The second value is None when there are no stored entities.
+    The second value is None when there are no custom emojis (plain text).
     """
     from telebot import types as tg_types  # late import — avoids circular dep
 
@@ -273,21 +259,14 @@ def render_premium_text_entities(data: str):
 
     entities: list = []
     for e in raw_ents:
-        etype = e.get("type")
-        if not etype:
-            continue
-        me = tg_types.MessageEntity(
-            type   = etype,
-            offset = e["offset"],
-            length = e["length"],
-        )
-        if etype == "custom_emoji":
-            me.custom_emoji_id = e["custom_emoji_id"]
-        elif etype == "text_link":
-            me.url = e.get("url", "")
-        elif etype == "pre":
-            me.language = e.get("language", "")
-        entities.append(me)
+        if e.get("type") == "custom_emoji":
+            me = tg_types.MessageEntity(
+                type             = "custom_emoji",
+                offset           = e["offset"],
+                length           = e["length"],
+                custom_emoji_id  = e["custom_emoji_id"],
+            )
+            entities.append(me)
 
     return text, (entities if entities else None)
 

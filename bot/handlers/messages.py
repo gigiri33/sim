@@ -12,14 +12,13 @@ from ..helpers import (
     is_admin, admin_has_perm, back_button,
     state_set, state_clear, state_name, state_data, parse_int, parse_volume, normalize_text_number,
     normalize_iranian_phone,
-    validate_service_name, normalize_service_name, generate_random_name, parse_bulk_names,
 )
 from ..db import (
     setting_get, setting_set,
     ensure_user, get_user, get_users, set_user_status,
     set_user_agent, update_balance, get_user_purchases, get_purchase,
     get_all_types, get_active_types, get_packages, get_package, add_package, update_package_field, delete_package,
-    add_type, update_type, update_type_description, delete_type, reorder_type,
+    add_type, update_type, update_type_description, delete_type,
     get_registered_packages_stock, get_configs_paginated, count_configs,
     expire_config, add_config,
     assign_config_to_user, reserve_first_config,
@@ -44,10 +43,11 @@ from ..db import (
     bulk_add_balance, bulk_zero_balance, bulk_set_status, count_users_by_filter,
     set_user_restricted, check_and_release_restriction,
     get_wallet_pay_exceptions, add_wallet_pay_exception,
+<<<<<<< HEAD
+    get_payment_card, get_payment_cards, add_payment_card, update_payment_card,
+=======
     add_referral_restriction,
-    add_payment_card, update_payment_card,
-    set_per_gb_price,
-    create_reseller_request, get_reseller_request,
+>>>>>>> 74a4f3ed0d7f92775aa47d06000b98501cf55245
 )
 from ..gateways.base import is_gateway_available, is_card_info_complete, get_global_amount_range, get_gateway_range_text, is_gateway_in_range, build_gateway_range_guide
 from ..gateways.tetrapay import create_tetrapay_order, verify_tetrapay_order
@@ -80,7 +80,7 @@ from .callbacks import (
     _wg_send_file_group, _wg_caption, _wg_service_name_from_filename,
     _qty_order_summary_text,
     _v2_name_from_config, _v2_name_from_sub, _v2_bulk_data_prompt,
-    _is_panel_package, _show_naming_prompt,
+    _get_random_card_for_payment, _prepare_gateway_payment, _build_card_payment_page,
 )
 
 
@@ -299,49 +299,9 @@ def universal_handler(message):
         channel_lock_message(message)
         return
 
-    # ── Referral captcha check ────────────────────────────────────────────────
-    # Checked before the phone gate so the answer is always processed.
-    # Only acts when there is a pending captcha AND the message is plain text.
-    if message.text and not message.text.startswith("/"):
-        from ..ui.notifications import (
-            has_pending_captcha, verify_and_process_captcha, complete_referral_after_captcha,
-            notify_referrer_captcha_failed,
-        )
-        if has_pending_captcha(uid):
-            answer_text = message.text.strip()
-            # Only consume the captcha if the message looks like a number; otherwise
-            # let it fall through to the normal message dispatcher (captcha stays pending).
-            if answer_text.lstrip("-").isdigit():
-                correct = verify_and_process_captcha(uid, answer_text)
-                if correct:
-                    bot.send_message(
-                        message.chat.id,
-                        "✅ <b>احراز هویت با موفقیت انجام شد.</b>\n\n"
-                        "دعوت شما به عنوان زیرمجموعه معتبر ثبت شد.",
-                        parse_mode="HTML",
-                    )
-                    try:
-                        complete_referral_after_captcha(uid)
-                    except Exception:
-                        pass
-                else:
-                    bot.send_message(
-                        message.chat.id,
-                        "❌ <b>پاسخ نادرست بود.</b>\n\n"
-                        "زیرمجموعه برای دعوت‌کننده ثبت نشد، اما می‌توانید از ربات استفاده کنید.",
-                        parse_mode="HTML",
-                    )
-                    try:
-                        notify_referrer_captcha_failed(uid)
-                    except Exception:
-                        pass
-                # Either way, let execution continue so the main menu is available
-                return
-
     # Phone gate — enforce for all incoming messages, not just /start
     sn = state_name(uid)
-    if not is_admin(uid) and sn not in ("waiting_for_phone", "waiting_for_phone_card",
-                                        "await_purchase_receipt", "await_renewal_receipt", "await_wallet_receipt"):
+    if not is_admin(uid) and sn not in ("waiting_for_phone", "waiting_for_phone_card"):
         from ..handlers.start import _phone_required_for_user, _send_phone_request
         if _phone_required_for_user(uid):
             _send_phone_request(message.chat.id, uid)
@@ -458,60 +418,6 @@ def universal_handler(message):
             )
             return
 
-        # ── Analytics date input ─────────────────────────────────────────────
-        def _parse_jalali_date(text):
-            """Parse 'YYYY/MM/DD' or 'YYYY-MM-DD' jalali string → 'YYYY-MM-DD'."""
-            import re as _re
-            text = (text or "").strip()
-            m = _re.fullmatch(r"(\d{4})[/\-](\d{1,2})[/\-](\d{1,2})", text)
-            if not m:
-                return None
-            return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
-
-        if sn == "admin_stats_date" and is_admin(uid):
-            raw = (message.text or "").strip()
-            jdate = _parse_jalali_date(raw)
-            state_clear(uid)
-            if not jdate:
-                bot.send_message(uid, "⚠️ تاریخ معتبر وارد کنید. مثال: <code>1403/06/15</code>", parse_mode="HTML")
-                return
-            from ..admin.analytics import _report_type_kb, _period_label
-            label = _period_label("custom_day", custom_start=jdate)
-            text = f"📊 <b>آمار — {label}</b>\n\nنوع گزارش را انتخاب کنید:"
-            kb = _report_type_kb("custom_day", jdate, None)
-            bot.send_message(uid, text, parse_mode="HTML", reply_markup=kb)
-            return
-
-        if sn == "admin_stats_range_start" and is_admin(uid):
-            raw = (message.text or "").strip()
-            jdate = _parse_jalali_date(raw)
-            if not jdate:
-                bot.send_message(uid, "⚠️ تاریخ معتبر وارد کنید. مثال: <code>1403/06/01</code>", parse_mode="HTML")
-                return
-            state_set(uid, "admin_stats_range_end", range_start=jdate)
-            kb = types.InlineKeyboardMarkup()
-            kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:stats", icon_custom_emoji_id="5253997076169115797"))
-            bot.send_message(uid,
-                "📆 تاریخ پایان بازه را وارد کنید (جلالی):\n\n"
-                "مثال: <code>1403/06/30</code>", parse_mode="HTML",
-                reply_markup=kb)
-            return
-
-        if sn == "admin_stats_range_end" and is_admin(uid):
-            raw = (message.text or "").strip()
-            jdate_end = _parse_jalali_date(raw)
-            jdate_start = sd.get("range_start", "")
-            state_clear(uid)
-            if not jdate_end or not jdate_start:
-                bot.send_message(uid, "⚠️ تاریخ معتبر وارد کنید.", parse_mode="HTML")
-                return
-            from ..admin.analytics import _report_type_kb, _period_label
-            label = _period_label("custom", custom_start=jdate_start, custom_end=jdate_end)
-            text = f"📊 <b>آمار — {label}</b>\n\nنوع گزارش را انتخاب کنید:"
-            kb = _report_type_kb("custom", jdate_start, jdate_end)
-            bot.send_message(uid, text, parse_mode="HTML", reply_markup=kb)
-            return
-
         # ── Broadcast ─────────────────────────────────────────────────────────
         def _bc_send(target_id):
             """Copy message to target (supports text, photo, video, etc.)."""
@@ -611,23 +517,50 @@ def universal_handler(message):
                     )
                     return
                 final_phone = normalized if normalized else phone_raw
+                print(f"DEBUG: waiting_for_phone_card uid={uid} phone={final_phone}")
                 set_phone_number(uid, final_phone)
                 pending_pkg_id = sd.get("pending_package_id")
                 state_clear(uid)
                 from telebot.types import ReplyKeyboardRemove
                 bot.send_message(
                     message.chat.id,
-                    f"✅ شماره <code>{final_phone}</code> ثبت شد. در حال ادامه خرید...",
+                    f"✅ شماره <code>{final_phone}</code> ثبت شد. در حال ادامه پرداخت...",
                     parse_mode="HTML",
                     reply_markup=ReplyKeyboardRemove(),
                 )
+                # Bug 1 fix: auto-resume card payment instead of dropping to main menu
                 if pending_pkg_id:
-                    bot.send_message(
-                        message.chat.id,
-                        "🛒 اکنون می‌توانید پرداخت خود را ادامه دهید.",
-                        parse_mode="HTML",
-                    )
-                    show_main_menu(message)
+                    try:
+                        pkg_id = int(pending_pkg_id)
+                        package_row = get_package(pkg_id)
+                        if not package_row:
+                            raise ValueError(f"package {pkg_id} not found")
+                        from ..payments import get_effective_price
+                        price = get_effective_price(uid, package_row)
+                        if not price or price <= 0:
+                            raise ValueError(f"invalid price={price} for pkg={pkg_id}")
+                        print(f"DEBUG: phone_card resume pkg={pkg_id} price={price} uid={uid}")
+                        card_row = _get_random_card_for_payment()
+                        if not card_row:
+                            bot.send_message(
+                                message.chat.id,
+                                "⚠️ اطلاعات کارت بانکی در دسترس نیست. لطفاً با پشتیبانی تماس بگیرید.",
+                                parse_mode="HTML",
+                            )
+                            show_main_menu(message)
+                            return
+                        payment_id = create_payment(
+                            "config_purchase", uid, pkg_id, price, "card",
+                            status="pending", quantity=1
+                        )
+                        _, final_amount = _prepare_gateway_payment("card", price, payment_id)
+                        state_set(uid, "await_purchase_receipt", payment_id=payment_id)
+                        text, kb = _build_card_payment_page(card_row, price, final_amount)
+                        bot.send_message(message.chat.id, text, parse_mode="HTML", reply_markup=kb)
+                        return
+                    except Exception as _phone_resume_err:
+                        print(f"DEBUG: phone_card auto-resume failed uid={uid}: {_phone_resume_err}")
+                show_main_menu(message)
             else:
                 bot.send_message(
                     message.chat.id,
@@ -832,59 +765,6 @@ def universal_handler(message):
                       unit_price=unit_price, quantity=qty, kind="config_purchase")
             summary = _qty_order_summary_text(package_row, unit_price, qty)
             bot.send_message(uid, summary, parse_mode="HTML")
-            # Naming step for panel packages
-            if _is_panel_package(package_row):
-                _show_naming_prompt(message, package_id, qty)
-                return
-            if setting_get("discount_codes_enabled", "0") == "1":
-                if _show_discount_prompt(message, total):
-                    return
-            _show_purchase_gateways(message, uid, package_id, total, package_row)
-            return
-
-        # ── Custom service name (single) ──────────────────────────────────────
-        if sn == "await_service_name":
-            raw        = (message.text or "").strip()
-            normalized = normalize_service_name(raw)
-            package_id = sd.get("package_id")
-            unit_price = int(sd.get("unit_price", 0) or 0)
-            package_row = get_package(package_id) if package_id else None
-            if not package_row or not unit_price:
-                state_clear(uid)
-                bot.send_message(uid, "⚠️ خطا در اطلاعات سفارش. لطفاً دوباره شروع کنید.", reply_markup=kb_main(uid))
-                return
-            # Fallback to random if invalid
-            if not validate_service_name(normalized):
-                chosen_name = generate_random_name()
-            else:
-                chosen_name = normalized
-            total = unit_price * 1
-            state_set(uid, "buy_select_method",
-                      package_id=package_id, amount=total, original_amount=total,
-                      unit_price=unit_price, quantity=1, kind="config_purchase",
-                      service_names=[chosen_name])
-            if setting_get("discount_codes_enabled", "0") == "1":
-                if _show_discount_prompt(message, total):
-                    return
-            _show_purchase_gateways(message, uid, package_id, total, package_row)
-            return
-
-        # ── Custom service names (bulk) ───────────────────────────────────────
-        if sn == "await_bulk_service_names":
-            package_id = sd.get("package_id")
-            unit_price = int(sd.get("unit_price", 0) or 0)
-            quantity   = int(sd.get("quantity", 1) or 1)
-            package_row = get_package(package_id) if package_id else None
-            if not package_row or not unit_price:
-                state_clear(uid)
-                bot.send_message(uid, "⚠️ خطا در اطلاعات سفارش. لطفاً دوباره شروع کنید.", reply_markup=kb_main(uid))
-                return
-            chosen_names = parse_bulk_names(message.text or "", quantity)
-            total = unit_price * quantity
-            state_set(uid, "buy_select_method",
-                      package_id=package_id, amount=total, original_amount=total,
-                      unit_price=unit_price, quantity=quantity, kind="config_purchase",
-                      service_names=chosen_names)
             if setting_get("discount_codes_enabled", "0") == "1":
                 if _show_discount_prompt(message, total):
                     return
@@ -941,124 +821,9 @@ def universal_handler(message):
             bot.send_message(uid, "✅ تخفیف ثبت شد.", reply_markup=kb_main(uid))
             return
 
-        # ── Addon discount code (separate from regular discount flow) ──────────
-        if sn == "await_addon_discount":
-            from ..db import (
-                validate_discount_code as _vdc,
-                get_addon_price as _gap,
-                get_panel_config as _gcfg2,
-                get_package as _gpkg2,
-            )
-            from ..handlers.callbacks import _show_addon_invoice
-            code       = (message.text or "").strip().upper()
-            addon_type = sd.get("prev_addon_type", "volume")
-            config_id  = sd.get("prev_addon_config")
-            original_amount = int(sd.get("original_amount", sd.get("subtotal", 0)))
-            _user2      = get_user(uid)
-            _is_agent2  = bool(_user2 and _user2["is_agent"])
-            usage_scope = f"addon_{addon_type}"
-            ok2, row2, disc2, final2, err2 = _vdc(
-                code, uid, original_amount,
-                is_agent=_is_agent2, package_id=None, usage_scope=usage_scope,
-            )
-            if not ok2:
-                kb = types.InlineKeyboardMarkup()
-                kb.add(types.InlineKeyboardButton("بدون تخفیف", callback_data=f"addon:nodisc:{config_id}:{addon_type}"))
-                bot.send_message(uid,
-                    f"{err2}\n\nمجدداً کد تخفیف وارد کنید یا ادامه دهید.",
-                    reply_markup=kb)
-                return
-            prev = f"addon_{'vol' if addon_type == 'volume' else 'time'}_flow"
-            unit_price = int(sd.get("unit_price", 0))
-            new_sd = {k: v for k, v in sd.items()
-                      if k not in ("prev_addon_type", "prev_addon_config", "original_amount")}
-            new_sd.update({
-                "discount_amount": disc2,
-                "final_amount": final2,
-                "discount_code_id": row2["id"],
-                "subtotal": original_amount,
-            })
-            state_set(uid, prev, **new_sd)
-            bot.send_message(uid, f"✅ کد تخفیف اعمال شد! مبلغ تخفیف: <b>{fmt_price(disc2)} تومان</b>")
-            _show_addon_invoice(message, uid, addon_type)
-            return
-
-        # ── User: Custom volume amount ─────────────────────────────────────────
-        if sn == "addon_vol_custom":
-            from ..db import get_addon_price as _gap2, get_panel_config as _gcfg3, get_package as _gpkg3
-            from ..handlers.callbacks import _show_addon_invoice as _sai
-            config_id = sd.get("config_id")
-            try:
-                gb = float((message.text or "").replace(",", "."))
-                if gb <= 0:
-                    raise ValueError
-            except (ValueError, TypeError):
-                bot.send_message(uid, "⚠️ مقدار معتبر وارد کنید (مثال: 5 یا 2.5)")
-                return
-            cfg3  = _gcfg3(config_id)
-            pkg3  = _gpkg3(cfg3["package_id"]) if cfg3 else None
-            if not pkg3:
-                bot.send_message(uid, "⚠️ سرویس یافت نشد.")
-                return
-            pr = _gap2(pkg3["type_id"], "volume")
-            _usr3 = get_user(uid)
-            _agt3 = bool(_usr3 and _usr3["is_agent"])
-            unit_price = None
-            if pr:
-                if _agt3 and pr["reseller_unit_price"] is not None:
-                    unit_price = pr["reseller_unit_price"]
-                elif pr["normal_unit_price"] is not None:
-                    unit_price = pr["normal_unit_price"]
-            if unit_price is None:
-                bot.send_message(uid, "قیمت این افزودنی تعیین نشده است.")
-                return
-            subtotal = int(gb * unit_price)
-            state_set(uid, "addon_vol_flow",
-                      config_id=config_id, unit_price=unit_price,
-                      amount_gb=gb, subtotal=subtotal, discount_amount=0, final_amount=subtotal)
-            _sai(message, uid, "volume")
-            return
-
-        # ── User: Custom time amount ───────────────────────────────────────────
-        if sn == "addon_time_custom":
-            from ..db import get_addon_price as _gap4, get_panel_config as _gcfg4, get_package as _gpkg4
-            from ..handlers.callbacks import _show_addon_invoice as _sai2
-            config_id = sd.get("config_id")
-            val4 = parse_int(message.text or "")
-            if val4 is None or val4 <= 0:
-                bot.send_message(uid, "⚠️ عدد صحیح مثبت وارد کنید.")
-                return
-            cfg4  = _gcfg4(config_id)
-            pkg4  = _gpkg4(cfg4["package_id"]) if cfg4 else None
-            if not pkg4:
-                bot.send_message(uid, "⚠️ سرویس یافت نشد.")
-                return
-            pr4 = _gap4(pkg4["type_id"], "time")
-            _usr4 = get_user(uid)
-            _agt4 = bool(_usr4 and _usr4["is_agent"])
-            unit_price4 = None
-            if pr4:
-                if _agt4 and pr4["reseller_unit_price"] is not None:
-                    unit_price4 = pr4["reseller_unit_price"]
-                elif pr4["normal_unit_price"] is not None:
-                    unit_price4 = pr4["normal_unit_price"]
-            if unit_price4 is None:
-                bot.send_message(uid, "قیمت این افزودنی تعیین نشده است.")
-                return
-            subtotal4 = val4 * unit_price4
-            state_set(uid, "addon_time_flow",
-                      config_id=config_id, unit_price=unit_price4,
-                      amount_days=val4, subtotal=subtotal4, discount_amount=0, final_amount=subtotal4)
-            _sai2(message, uid, "time")
-            return
-
-
+        # ── Wallet receipt ─────────────────────────────────────────────────────
         if sn == "await_wallet_receipt":
             payment_id  = sd.get("payment_id")
-            if not payment_id:
-                state_clear(uid)
-                bot.send_message(uid, "⚠️ اطلاعات پرداخت یافت نشد. لطفاً دوباره از منو اقدام کنید.", reply_markup=kb_main(uid))
-                return
             file_id     = None
             text_value  = (message.caption or message.text or "").strip()
             if message.photo:
@@ -1073,12 +838,7 @@ def universal_handler(message):
                 bot.send_message(uid,
                     "⚠️ لطفاً هش تراکنش را به صورت متن، یا تصویر/فایل رسید را ارسال کنید.")
                 return
-            try:
-                update_payment_receipt(payment_id, file_id, text_value.strip())
-            except Exception as _e:
-                print(f"[wallet_receipt] update_payment_receipt failed: {_e}")
-                bot.send_message(uid, "⚠️ خطایی در ثبت رسید رخ داد. لطفاً دوباره تلاش کنید.", reply_markup=kb_main(uid))
-                return
+            update_payment_receipt(payment_id, file_id, text_value.strip())
             state_clear(uid)
             bot.send_message(uid, "✅ رسید شما ارسال شد. لطفاً تا تأیید ادمین صبر کنید.",
                              reply_markup=kb_main(uid))
@@ -1091,10 +851,6 @@ def universal_handler(message):
         # ── Purchase receipt ───────────────────────────────────────────────────
         if sn == "await_purchase_receipt":
             payment_id  = sd.get("payment_id")
-            if not payment_id:
-                state_clear(uid)
-                bot.send_message(uid, "⚠️ اطلاعات پرداخت یافت نشد. لطفاً دوباره از منو اقدام کنید.", reply_markup=kb_main(uid))
-                return
             file_id     = None
             text_value  = (message.caption or message.text or "").strip()
             if message.photo:
@@ -1105,12 +861,7 @@ def universal_handler(message):
                 bot.send_message(uid,
                     "⚠️ لطفاً هش تراکنش را به صورت متن، یا تصویر/فایل رسید را ارسال کنید.")
                 return
-            try:
-                update_payment_receipt(payment_id, file_id, text_value.strip())
-            except Exception as _e:
-                print(f"[purchase_receipt] update_payment_receipt failed: {_e}")
-                bot.send_message(uid, "⚠️ خطایی در ثبت رسید رخ داد. لطفاً دوباره تلاش کنید.", reply_markup=kb_main(uid))
-                return
+            update_payment_receipt(payment_id, file_id, text_value.strip())
             state_clear(uid)
             bot.send_message(uid, "✅ رسید شما ارسال شد. لطفاً تا تأیید ادمین صبر کنید.",
                              reply_markup=kb_main(uid))
@@ -1123,10 +874,6 @@ def universal_handler(message):
         # ── Renewal receipt ────────────────────────────────────────────────────
         if sn == "await_renewal_receipt":
             payment_id  = sd.get("payment_id")
-            if not payment_id:
-                state_clear(uid)
-                bot.send_message(uid, "⚠️ اطلاعات پرداخت یافت نشد. لطفاً دوباره از منو اقدام کنید.", reply_markup=kb_main(uid))
-                return
             file_id     = None
             text_value  = (message.caption or message.text or "").strip()
             if message.photo:
@@ -1137,12 +884,7 @@ def universal_handler(message):
                 bot.send_message(uid,
                     "⚠️ لطفاً هش تراکنش را به صورت متن، یا تصویر/فایل رسید را ارسال کنید.")
                 return
-            try:
-                update_payment_receipt(payment_id, file_id, text_value.strip())
-            except Exception as _e:
-                print(f"[renewal_receipt] update_payment_receipt failed: {_e}")
-                bot.send_message(uid, "⚠️ خطایی در ثبت رسید رخ داد. لطفاً دوباره تلاش کنید.", reply_markup=kb_main(uid))
-                return
+            update_payment_receipt(payment_id, file_id, text_value.strip())
             state_clear(uid)
             bot.send_message(uid, "✅ رسید تمدید شما ارسال شد. لطفاً تا تأیید ادمین صبر کنید.",
                              reply_markup=kb_main(uid))
@@ -1497,18 +1239,6 @@ def universal_handler(message):
             update_type_description(sd["type_id"], _spt(desc, entities))
             state_clear(uid)
             bot.send_message(uid, "✅ توضیحات با موفقیت ویرایش شد.")
-            _show_admin_types(message)
-            return
-
-        if sn == "admin_edit_type_order" and is_admin(uid):
-            val = (message.text or "").strip()
-            if not val.isdigit() or int(val) < 1:
-                bot.send_message(uid, "⚠️ یک عدد صحیح مثبت وارد کنید.", reply_markup=back_button(f"admin:type:edit:{sd['type_id']}"))
-                return
-            reorder_type(sd["type_id"], int(val))
-            log_admin_action(uid, f"جایگاه نوع #{sd['type_id']} به {val} تغییر کرد")
-            state_clear(uid)
-            bot.send_message(uid, f"✅ جایگاه با موفقیت به <b>{val}</b> تغییر کرد.", parse_mode="HTML")
             _show_admin_types(message)
             return
 
@@ -2983,6 +2713,88 @@ def universal_handler(message):
             bot.send_message(uid, "✅ شماره کارت ذخیره شد.", reply_markup=back_button("adm:set:gw:card"))
             return
 
+        if sn == "admin_add_card_number" and is_admin(uid):
+            card_number = normalize_text_number(message.text or "").replace(" ", "")
+            if not card_number.isdigit() or len(card_number) < 12:
+                bot.send_message(uid, "⚠️ شماره کارت معتبر وارد کنید.", reply_markup=back_button("adm:cards"))
+                return
+            state_set(uid, "admin_add_card_bank", card_number=card_number)
+            bot.send_message(uid, "🏦 نام بانک را ارسال کنید:", reply_markup=back_button("adm:cards"))
+            return
+
+        if sn == "admin_add_card_bank" and is_admin(uid):
+            bank_name = (message.text or "").strip()
+            if not bank_name:
+                bot.send_message(uid, "⚠️ نام بانک نمی تواند خالی باشد.", reply_markup=back_button("adm:cards"))
+                return
+            state_set(uid, "admin_add_card_owner", card_number=sd.get("card_number", ""), bank_name=bank_name)
+            bot.send_message(uid, "👤 نام صاحب کارت را ارسال کنید:", reply_markup=back_button("adm:cards"))
+            return
+
+        if sn == "admin_add_card_owner" and is_admin(uid):
+            owner_name = (message.text or "").strip()
+            card_number = sd.get("card_number", "")
+            bank_name = sd.get("bank_name", "")
+            if not owner_name:
+                bot.send_message(uid, "⚠️ نام صاحب کارت نمی تواند خالی باشد.", reply_markup=back_button("adm:cards"))
+                return
+            add_payment_card(card_number, bank_name, owner_name, is_active=1)
+            active_cards = get_payment_cards(include_inactive=False)
+            if active_cards:
+                first = active_cards[0]
+                setting_set("payment_card", first["card_number"] or "")
+                setting_set("payment_bank", first["bank_name"] or "")
+                setting_set("payment_owner", first["owner_name"] or "")
+            log_admin_action(uid, "کارت جدید ثبت شد")
+            state_clear(uid)
+            bot.send_message(uid, "✅ کارت جدید ذخیره شد.", reply_markup=back_button("adm:cards"))
+            return
+
+        if sn == "admin_edit_card_number" and is_admin(uid):
+            card_number = normalize_text_number(message.text or "").replace(" ", "")
+            if not card_number.isdigit() or len(card_number) < 12:
+                bot.send_message(uid, "⚠️ شماره کارت معتبر وارد کنید.", reply_markup=back_button("adm:cards"))
+                return
+            state_set(uid, "admin_edit_card_bank", card_id=sd.get("card_id"), card_number=card_number)
+            bot.send_message(uid, "🏦 نام بانک را ارسال کنید:", reply_markup=back_button("adm:cards"))
+            return
+
+        if sn == "admin_edit_card_bank" and is_admin(uid):
+            bank_name = (message.text or "").strip()
+            if not bank_name:
+                bot.send_message(uid, "⚠️ نام بانک نمی تواند خالی باشد.", reply_markup=back_button("adm:cards"))
+                return
+            state_set(uid, "admin_edit_card_owner",
+                      card_id=sd.get("card_id"),
+                      card_number=sd.get("card_number", ""),
+                      bank_name=bank_name)
+            bot.send_message(uid, "👤 نام صاحب کارت را ارسال کنید:", reply_markup=back_button("adm:cards"))
+            return
+
+        if sn == "admin_edit_card_owner" and is_admin(uid):
+            owner_name = (message.text or "").strip()
+            card_id = int(sd.get("card_id") or 0)
+            if not owner_name or not card_id:
+                bot.send_message(uid, "⚠️ اطلاعات کارت ناقص است.", reply_markup=back_button("adm:cards"))
+                return
+            row_before = get_payment_card(card_id)
+            if not row_before:
+                state_clear(uid)
+                bot.send_message(uid, "❌ کارت موردنظر یافت نشد.", reply_markup=back_button("adm:cards"))
+                return
+            update_payment_card(card_id, sd.get("card_number", ""), sd.get("bank_name", ""), owner_name)
+            if row_before["is_active"]:
+                active_cards = get_payment_cards(include_inactive=False)
+                if active_cards:
+                    first = active_cards[0]
+                    setting_set("payment_card", first["card_number"] or "")
+                    setting_set("payment_bank", first["bank_name"] or "")
+                    setting_set("payment_owner", first["owner_name"] or "")
+            log_admin_action(uid, f"کارت #{card_id} ویرایش شد")
+            state_clear(uid)
+            bot.send_message(uid, "✅ کارت ویرایش شد.", reply_markup=back_button("adm:cards"))
+            return
+
         if sn == "admin_set_bank" and is_admin(uid):
             setting_set("payment_bank", (message.text or "").strip())
             log_admin_action(uid, "نام بانک تغییر کرد")
@@ -2995,85 +2807,6 @@ def universal_handler(message):
             log_admin_action(uid, "نام صاحب کارت تغییر کرد")
             state_clear(uid)
             bot.send_message(uid, "✅ نام صاحب کارت ذخیره شد.", reply_markup=back_button("adm:set:gw:card"))
-            return
-
-        if sn == "admin_card_add_number" and is_admin(uid):
-            raw = normalize_text_number((message.text or "").strip())
-            if not raw or len(raw) < 16:
-                bot.send_message(uid, "⚠️ شماره کارت معتبر وارد کنید (حداقل ۱۶ رقم).",
-                                 reply_markup=back_button("adm:gw:card:cards"))
-                return
-            state_set(uid, "admin_card_add_bank", card_number=raw)
-            bot.send_message(uid, "🏦 نام بانک را ارسال کنید:", reply_markup=back_button("adm:gw:card:cards"))
-            return
-
-        if sn == "admin_card_add_bank" and is_admin(uid):
-            bank = (message.text or "").strip()
-            state_set(uid, "admin_card_add_holder", card_number=sd["card_number"], bank_name=bank)
-            bot.send_message(uid, "👤 نام صاحب کارت را ارسال کنید:", reply_markup=back_button("adm:gw:card:cards"))
-            return
-
-        if sn == "admin_card_add_holder" and is_admin(uid):
-            holder = (message.text or "").strip()
-            add_payment_card(sd["card_number"], sd.get("bank_name", ""), holder)
-            log_admin_action(uid, f"کارت جدید اضافه شد: {sd['card_number']}")
-            state_clear(uid)
-            bot.send_message(uid, "✅ کارت با موفقیت اضافه شد.", reply_markup=back_button("adm:gw:card:cards"))
-            return
-
-        if sn == "admin_card_edit_number" and is_admin(uid):
-            card_id = sd["card_id"]
-            raw = normalize_text_number((message.text or "").strip())
-            if not raw or len(raw) < 16:
-                bot.send_message(uid, "⚠️ شماره کارت معتبر وارد کنید.",
-                                 reply_markup=back_button(f"adm:gw:card:cards:cfg:{card_id}"))
-                return
-            state_set(uid, "admin_card_edit_bank", card_id=card_id, card_number=raw)
-            bot.send_message(uid, "🏦 نام بانک جدید را ارسال کنید:",
-                             reply_markup=back_button(f"adm:gw:card:cards:cfg:{card_id}"))
-            return
-
-        if sn == "admin_card_edit_bank" and is_admin(uid):
-            bank = (message.text or "").strip()
-            state_set(uid, "admin_card_edit_holder", card_id=sd["card_id"],
-                      card_number=sd["card_number"], bank_name=bank)
-            bot.send_message(uid, "👤 نام صاحب کارت جدید را ارسال کنید:",
-                             reply_markup=back_button(f"adm:gw:card:cards:cfg:{sd['card_id']}"))
-            return
-
-        if sn == "admin_card_edit_holder" and is_admin(uid):
-            holder = (message.text or "").strip()
-            update_payment_card(sd["card_id"], sd["card_number"], sd.get("bank_name", ""), holder)
-            log_admin_action(uid, f"کارت {sd['card_id']} ویرایش شد")
-            state_clear(uid)
-            bot.send_message(uid, "✅ مشخصات کارت به‌روزرسانی شد.",
-                             reply_markup=back_button(f"adm:gw:card:cards:cfg:{sd['card_id']}"))
-            return
-
-        if sn == "admin_gw_set_fee_val" and is_admin(uid):
-            gw = sd.get("gw", "")
-            val = parse_int(normalize_text_number(message.text or ""))
-            fee_type = setting_get(f"gw_{gw}_fee_type", "fixed")
-            if not val or val <= 0 or (fee_type == "pct" and val > 100):
-                bot.send_message(uid, "⚠️ مقدار نامعتبر است.", reply_markup=back_button(f"adm:gw:{gw}:fee"))
-                return
-            setting_set(f"gw_{gw}_fee_value", str(val))
-            log_admin_action(uid, f"کارمزد درگاه {gw}: {val}")
-            state_clear(uid)
-            bot.send_message(uid, f"✅ مقدار کارمزد تنظیم شد: {val}", reply_markup=back_button(f"adm:gw:{gw}:fee"))
-            return
-
-        if sn == "admin_gw_set_bonus_val" and is_admin(uid):
-            gw = sd.get("gw", "")
-            val = parse_int(normalize_text_number(message.text or ""))
-            bonus_type = setting_get(f"gw_{gw}_bonus_type", "fixed")
-            if not val or val <= 0 or (bonus_type == "pct" and val > 100):
-                bot.send_message(uid, "⚠️ مقدار نامعتبر است.", reply_markup=back_button(f"adm:gw:{gw}:bonus"))
-                return
-            setting_set(f"gw_{gw}_bonus_value", str(val))
-            log_admin_action(uid, f"بونس درگاه {gw}: {val}")
-            state_clear(uid)
-            bot.send_message(uid, f"✅ مقدار بونس تنظیم شد: {val}", reply_markup=back_button(f"adm:gw:{gw}:bonus"))
             return
 
         if sn == "admin_set_crypto_wallet" and is_admin(uid):
@@ -3141,28 +2874,6 @@ def universal_handler(message):
             bot.send_message(uid, f"✅ Callback URL ذخیره شد:\n<code>{val or 'https://example.com/'}</code>", reply_markup=back_button("adm:set:gw:tronpays_rial"))
             return
 
-        if sn == "admin_set_plisio_key" and is_admin(uid):
-            val = (message.text or "").strip()
-            if not val:
-                bot.send_message(uid, "⚠️ کلید API نمی‌تواند خالی باشد. لطفاً دوباره ارسال کنید:", reply_markup=back_button("adm:set:gw:plisio"))
-                return
-            setting_set("plisio_api_key", val)
-            log_admin_action(uid, "کلید API Plisio تغییر کرد")
-            state_clear(uid)
-            bot.send_message(uid, "✅ کلید API Plisio ذخیره شد.", reply_markup=back_button("adm:set:gw:plisio"))
-            return
-
-        if sn == "admin_set_server_public_url" and is_admin(uid):
-            val = (message.text or "").strip().rstrip("/")
-            if val and not (val.startswith("http://") or val.startswith("https://")):
-                bot.send_message(uid, "⚠️ URL باید با <code>https://</code> یا <code>http://</code> شروع شود:", reply_markup=back_button("adm:set:gw:plisio"))
-                return
-            setting_set("server_public_url", val)
-            log_admin_action(uid, f"Server Public URL تغییر کرد: {val}")
-            state_clear(uid)
-            bot.send_message(uid, f"✅ Server Public URL ذخیره شد:\n<code>{val}</code>", parse_mode="HTML", reply_markup=back_button("adm:set:gw:plisio"))
-            return
-
         if sn == "admin_gw_range_min" and is_admin(uid):
             gw = sd.get("gw", "")
             val = (message.text or "").strip()
@@ -3192,6 +2903,30 @@ def universal_handler(message):
             state_clear(uid)
             log_admin_action(uid, f"بازه پرداختی درگاه {gw} تنظیم شد")
             bot.send_message(uid, "✅ بازه پرداختی ذخیره شد.", reply_markup=back_button(f"adm:gw:{gw}:range"))
+            return
+
+        if sn == "admin_gw_fee_value" and is_admin(uid):
+            gw = sd.get("gw", "")
+            val = parse_int(normalize_text_number(message.text or ""))
+            if val is None or val < 0:
+                bot.send_message(uid, "⚠️ عدد معتبر (صفر یا بیشتر) وارد کنید.", reply_markup=back_button(f"adm:gw:{gw}:adj"))
+                return
+            setting_set(f"gw_{gw}_fee_value", str(val))
+            log_admin_action(uid, f"مقدار کارمزد درگاه {gw} به {val} تغییر کرد")
+            state_clear(uid)
+            bot.send_message(uid, "✅ مقدار کارمزد ذخیره شد.", reply_markup=back_button(f"adm:gw:{gw}:adj"))
+            return
+
+        if sn == "admin_gw_bonus_value" and is_admin(uid):
+            gw = sd.get("gw", "")
+            val = parse_int(normalize_text_number(message.text or ""))
+            if val is None or val < 0:
+                bot.send_message(uid, "⚠️ عدد معتبر (صفر یا بیشتر) وارد کنید.", reply_markup=back_button(f"adm:gw:{gw}:adj"))
+                return
+            setting_set(f"gw_{gw}_bonus_value", str(val))
+            log_admin_action(uid, f"مقدار بونس درگاه {gw} به {val} تغییر کرد")
+            state_clear(uid)
+            bot.send_message(uid, "✅ مقدار بونس ذخیره شد.", reply_markup=back_button(f"adm:gw:{gw}:adj"))
             return
 
         if sn == "admin_set_channel" and is_admin(uid):
@@ -3399,11 +3134,6 @@ def universal_handler(message):
                 return
             delta = amount if sn == "admin_bal_add" else -amount
             update_balance(target_user_id, delta)
-            try:
-                from ..db import update_admin_adjusted
-                update_admin_adjusted(target_user_id, delta)
-            except Exception:
-                pass
             state_clear(uid)
             action_label = "اضافه" if delta > 0 else "کاهش"
             kb = types.InlineKeyboardMarkup()
@@ -3481,100 +3211,7 @@ def universal_handler(message):
                 reply_markup=kb_admin_panel())
             return
 
-        if sn == "admin_agcfg_pergb_val" and is_admin(uid):
-            target_user_id = sd["target_user_id"]
-            type_id        = sd.get("type_id")
-            val            = parse_int(message.text or "")
-            if val is None or val < 0:
-                bot.send_message(uid, "⚠️ عدد معتبر (مثبت یا صفر) وارد کنید.")
-                return
-            set_per_gb_price(target_user_id, type_id, val)
-            state_clear(uid)
-            log_admin_action(uid, f"قیمت هر گیگ دسته #{type_id} نماینده {target_user_id}: {fmt_price(val)} تومان")
-            bot.send_message(uid,
-                f"✅ قیمت هر گیگ دسته #{type_id}: <b>{fmt_price(val)} تومان</b> تنظیم شد.",
-                reply_markup=kb_admin_panel())
-            return
-
-        if sn == "admin_resreq_reject_reason" and is_admin(uid):
-            from ..db import reject_reseller_request as _rr_reject, get_reseller_request_by_id as _rr_get
-            from ..db import delete_agency_request_messages as _del_arm, get_agency_request_messages as _get_arm
-            req_id     = sd.get("req_id")
-            target_uid = sd.get("target_uid")
-            reason     = (message.text or "").strip()
-            req        = _rr_get(req_id)
-            if req:
-                _rr_reject(req_id, uid)
-                for row in _get_arm(target_uid):
-                    try:
-                        bot.edit_message_reply_markup(row["chat_id"], row["message_id"], reply_markup=None)
-                    except Exception:
-                        pass
-                _del_arm(target_uid)
-                try:
-                    notify_msg = "❌ <b>درخواست نمایندگی شما رد شد.</b>"
-                    if reason:
-                        notify_msg += f"\n\n💬 دلیل: {esc(reason)}"
-                    bot.send_message(target_uid, notify_msg, parse_mode="HTML")
-                except Exception:
-                    pass
-                log_admin_action(uid, f"درخواست نمایندگی #{req_id} (کاربر {target_uid}) رد شد: {reason}")
-            state_clear(uid)
-            bot.send_message(uid, f"❌ درخواست #{req_id} رد شد.", reply_markup=kb_admin_panel())
-            return
-
-        if sn == "admin_set_resreq_min_wallet" and is_admin(uid):
-            val = parse_int(message.text or "")
-            if val is None or val < 0:
-                bot.send_message(uid, "⚠️ عدد معتبر (0 یا بیشتر) وارد کنید.")
-                return
-            setting_set("agency_request_min_wallet", str(val))
-            state_clear(uid)
-            log_admin_action(uid, f"حداقل موجودی درخواست نمایندگی: {fmt_price(val)} تومان")
-            bot.send_message(uid,
-                f"✅ حداقل موجودی درخواست نمایندگی: <b>{fmt_price(val)} تومان</b> تنظیم شد.",
-                reply_markup=kb_admin_panel())
-            return
-
-        if sn == "admin_set_credit_limit" and is_admin(uid):
-            from ..db import set_user_purchase_credit as _set_credit, get_user as _get_user
-            target_user_id = sd.get("target_user_id")
-            val = parse_int(message.text or "")
-            if val is None or val < 0:
-                bot.send_message(uid, "⚠️ عدد معتبر (0 یا بیشتر) وارد کنید.")
-                return
-            existing = _get_user(target_user_id)
-            credit_enabled = existing["purchase_credit_enabled"] if existing and "purchase_credit_enabled" in existing.keys() else 0
-            _set_credit(target_user_id, credit_enabled, val)
-            state_clear(uid)
-            log_admin_action(uid, f"سقف اعتبار کاربر {target_user_id}: {fmt_price(val)} تومان")
-            bot.send_message(uid,
-                f"✅ سقف اعتبار کاربر <code>{target_user_id}</code>: <b>{fmt_price(val)} تومان</b> تنظیم شد.",
-                reply_markup=kb_admin_panel())
-            return
-
-        # ── Admin: Addon unit price ────────────────────────────────────────────
-        if sn == "admin_addon_price_set" and is_admin(uid):
-            from ..db import set_addon_price as _set_ap
-            addon_type = sd.get("addon_type")
-            type_id    = sd.get("type_id")
-            role       = sd.get("role")  # 'normal' | 'res'
-            val = parse_int(message.text or "")
-            if val is None or val < 0:
-                bot.send_message(uid, "⚠️ عدد معتبر (0 یا بیشتر) وارد کنید.")
-                return
-            db_role = "normal" if role == "normal" else "reseller"
-            _set_ap(type_id, addon_type, db_role, val)
-            state_clear(uid)
-            unit = "گیگابایت" if addon_type == "volume" else "روز"
-            role_fa = "کاربران عادی" if role == "normal" else "نمایندگان"
-            log_admin_action(uid, f"قیمت افزودنی {addon_type} نوع {type_id} ({role_fa}): {fmt_price(val)} تومان/{unit}")
-            bot.send_message(uid,
-                f"✅ قیمت تنظیم شد: <b>{fmt_price(val)} تومان / {unit}</b> ({role_fa})",
-                reply_markup=kb_admin_panel())
-            return
-
-
+        # ── Admin: Default agency discount % ──────────────────────────────────
         if sn == "admin_set_default_discount_pct" and is_admin(uid):
             val = parse_int(message.text or "")
             if val is None or val < 0 or val > 100:
@@ -3739,13 +3376,6 @@ def universal_handler(message):
             user = get_user(uid)
             bot.send_message(uid, "✅ درخواست نمایندگی شما ارسال شد.\n⏳ لطفاً منتظر بررسی ادمین باشید.",
                              reply_markup=kb_main(uid))
-            # Save to reseller_requests table
-            req_id = create_reseller_request(
-                uid,
-                user["username"] if user else None,
-                user["full_name"] if user else str(uid),
-                req_text if req_text != "بدون متن" else None
-            )
             text = (
                 f"🤝 <b>درخواست نمایندگی جدید</b>\n\n"
                 f"👤 نام: {esc(user['full_name'])}\n"
@@ -3755,8 +3385,8 @@ def universal_handler(message):
             )
             admin_kb = types.InlineKeyboardMarkup()
             admin_kb.row(
-                types.InlineKeyboardButton("✅ تأیید", callback_data=f"adm:resreq:approve:{req_id}"),
-                types.InlineKeyboardButton("❌ رد", callback_data=f"adm:resreq:reject:{req_id}"),
+                types.InlineKeyboardButton("✅ تأیید", callback_data=f"agency:approve_now:{uid}"),
+                types.InlineKeyboardButton("❌ رد", callback_data=f"agency:reject_now:{uid}"),
             )
             for admin_id in ADMIN_IDS:
                 try:

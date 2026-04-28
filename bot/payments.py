@@ -17,7 +17,7 @@ from .db import (
     assign_config_to_user, get_conn, create_pending_order, get_purchase,
     get_all_admin_users,
     save_payment_admin_message, get_payment_admin_messages, delete_payment_admin_messages,
-    get_per_gb_price, get_payment_service_names,
+    setting_get, get_payment_cards,
 )
 from .helpers import esc, fmt_price, display_username, back_button, now_str
 import time
@@ -31,47 +31,12 @@ import string
 _pay_lock   = _threading.Lock()
 _pay_in_fly: set = set()   # payment IDs currently being processed
 from .gateways.base import is_gateway_available, is_card_info_complete, get_gateway_range_text, is_gateway_in_range, build_gateway_range_guide
-from .gateways.base import get_gateway_bonus_amount as _gw_bonus_amt
 from .gateways.crypto import fetch_crypto_prices
 from .bot_instance import bot
 from .ui.helpers import send_or_edit
 from .ui.keyboards import _btn, _raw_markup
 from .ui.premium_emoji import ce
 from .group_manager import send_to_topic, send_photo_to_topic
-
-# ── Gateway label display for bonus text ──────────────────────────────────────
-_GW_DISPLAY_NAMES = {
-    "card":              "کارت به کارت",
-    "crypto":            "ارز دیجیتال",
-    "tetrapay":          "TetraPay",
-    "swapwallet_crypto": "SwapWallet",
-    "tronpays_rial":     "TronPays",
-}
-
-
-def apply_gateway_bonus_if_needed(user_id: int, gw_name: str, payment_amount: int) -> int:
-    """Credit wallet bonus and notify user if this gateway has a bonus configured.
-
-    Returns the bonus amount credited (0 if none).
-    This function is intentionally side-effect-free when bonus is not enabled.
-    """
-    from .db import get_gateway_bonus_amount, update_balance
-    bonus = get_gateway_bonus_amount(gw_name, payment_amount)
-    if bonus <= 0:
-        return 0
-    update_balance(user_id, bonus)
-    gw_display = _GW_DISPLAY_NAMES.get(gw_name, gw_name)
-    try:
-        bot.send_message(
-            user_id,
-            f"🎁 <b>هدیه پرداخت</b>\n\n"
-            f"به دلیل پرداخت از طریق درگاه <b>{gw_display}</b>، "
-            f"مبلغ <b>{fmt_price(bonus)} تومان</b> به عنوان هدیه به کیف پول شما اضافه شد. 🎉",
-            parse_mode="HTML",
-        )
-    except Exception:
-        pass
-    return bonus
 
 # ── Price cache (60 s TTL) — both selection and payment info share the same data
 _PRICES_CACHE: dict = {}
@@ -90,87 +55,149 @@ def _get_prices() -> dict:
 
 
 # ── Pricing ────────────────────────────────────────────────────────────────────
-def calculate_effective_order_price(user_id, package_row, quantity=1):
-    """
-    Returns a dict with:
-      original_unit_price  – package base price
-      unit_price           – effective price per unit after reseller discount
-      quantity             – quantity requested
-      subtotal             – unit_price * quantity
-      discount_amount      – total discount vs original (0 for regular users)
-      final_amount         – same as subtotal (kept as alias)
-      pricing_mode         – 'normal'|'global_pct'|'global_fixed'|'type_pct'|'type_fixed'|'package'|'per_gb'
-    """
-    base = package_row["price"]
+def get_effective_price(user_id, package_row):
+    """Return discounted price for agents, else regular price."""
     user = get_user(user_id)
+    base = package_row["price"]
+    if base is None or base < 0:
+        print(f"DEBUG: get_effective_price uid={user_id} pkg={package_row.get('id')} invalid base={base}, defaulting to 0")
+        base = 0
     if not user or not user["is_agent"]:
-        subtotal = base * quantity
-        return {
-            "original_unit_price": base,
-            "unit_price": base,
-            "quantity": quantity,
-            "subtotal": subtotal,
-            "discount_amount": 0,
-            "final_amount": subtotal,
-            "pricing_mode": "normal",
-        }
-
-    cfg  = get_agency_price_config(user_id)
-    mode = cfg["price_mode"]
-
+        return base
+    cfg   = get_agency_price_config(user_id)
+    mode  = cfg["price_mode"]
+    print(f"DEBUG: get_effective_price uid={user_id} pkg={package_row.get('id')} base={base} mode={mode} is_agent=True")
     if mode == "global":
         g_type = cfg["global_type"]
         g_val  = cfg["global_val"]
         if g_type == "pct":
-            unit_price = max(0, base - round(base * g_val / 100))
-            pricing_mode = "global_pct"
+            result = max(0, base - round(base * g_val / 100))
         else:
-            unit_price = max(0, base - g_val)
-            pricing_mode = "global_fixed"
+            result = max(0, base - g_val)
+        print(f"DEBUG: get_effective_price global mode g_type={g_type} g_val={g_val} result={result}")
+        return result
     elif mode == "type":
         type_id = package_row["type_id"]
         td = get_agency_type_discount(user_id, type_id)
         if td:
             if td["discount_type"] == "pct":
-                unit_price = max(0, base - round(base * td["discount_value"] / 100))
-                pricing_mode = "type_pct"
+                result = max(0, base - round(base * td["discount_value"] / 100))
             else:
-                unit_price = max(0, base - td["discount_value"])
-                pricing_mode = "type_fixed"
-        else:
-            unit_price = base
-            pricing_mode = "type_fixed"
-    elif mode == "per_gb":
-        type_id = package_row["type_id"]
-        pgb = get_per_gb_price(user_id, type_id)
-        if pgb is not None:
-            volume_gb = (package_row["volume_gb"] or 0)
-            unit_price = max(0, int(pgb * volume_gb))
-            pricing_mode = "per_gb"
-        else:
-            unit_price = base
-            pricing_mode = "normal"
+                result = max(0, base - td["discount_value"])
+            print(f"DEBUG: get_effective_price type mode type_id={type_id} result={result}")
+            return result
+        print(f"DEBUG: get_effective_price type mode type_id={type_id} no discount found, using base={base}")
+        return base
     else:  # package (default)
         ap = get_agency_price(user_id, package_row["id"])
-        unit_price = ap if ap is not None else base
-        pricing_mode = "package"
+        result = ap if ap is not None else base
+        print(f"DEBUG: get_effective_price package mode pkg={package_row['id']} ap={ap} result={result}")
+        return result
 
-    subtotal = unit_price * quantity
-    discount_amount = (base - unit_price) * quantity
+
+_GW_DEFAULTS = {
+    "card": "کارت به کارت",
+    "crypto": "ارز دیجیتال",
+    "tetrapay": "درگاه کارت به کارت (TetraPay)",
+    "swapwallet_crypto": "درگاه کارت به کارت و ارز دیجیتال (SwapWallet)",
+    "tronpays_rial": "درگاه کارت به کارت (TronPay)",
+}
+
+
+def get_gateway_display_name(gateway_key):
+    custom = setting_get(f"gw_{gateway_key}_display_name", "").strip()
+    return custom or _GW_DEFAULTS.get(gateway_key, gateway_key)
+
+
+def _normalize_adjustment_type(raw_value):
+    return raw_value if raw_value in ("none", "fixed", "percent") else "none"
+
+
+def _normalize_adjustment_value(raw_value):
+    try:
+        return max(0, int(raw_value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _compute_adjustment_amount(base_amount, adjustment_type, adjustment_value):
+    if base_amount <= 0 or adjustment_value <= 0:
+        return 0
+    if adjustment_type == "fixed":
+        return adjustment_value
+    if adjustment_type == "percent":
+        return max(0, round(base_amount * adjustment_value / 100))
+    return 0
+
+
+def get_gateway_payment_breakdown(gateway_key, base_amount):
+    fee_type = _normalize_adjustment_type(setting_get(f"gw_{gateway_key}_fee_type", "none"))
+    fee_value = _normalize_adjustment_value(setting_get(f"gw_{gateway_key}_fee_value", "0"))
+    bonus_type = _normalize_adjustment_type(setting_get(f"gw_{gateway_key}_bonus_type", "none"))
+    bonus_value = _normalize_adjustment_value(setting_get(f"gw_{gateway_key}_bonus_value", "0"))
+    fee_amount = _compute_adjustment_amount(base_amount, fee_type, fee_value)
+    bonus_amount = _compute_adjustment_amount(base_amount, bonus_type, bonus_value)
     return {
-        "original_unit_price": base,
-        "unit_price": unit_price,
-        "quantity": quantity,
-        "subtotal": subtotal,
-        "discount_amount": max(0, discount_amount),
-        "final_amount": subtotal,
-        "pricing_mode": pricing_mode,
+        "base_amount": max(0, int(base_amount or 0)),
+        "fee_type": fee_type,
+        "fee_value": fee_value,
+        "fee_amount": fee_amount,
+        "bonus_type": bonus_type,
+        "bonus_value": bonus_value,
+        "bonus_amount": bonus_amount,
+        "payable_amount": max(0, int(base_amount or 0)) + fee_amount,
     }
 
 
-def get_effective_price(user_id, package_row):
-    """Return discounted price for agents, else regular price."""
-    return calculate_effective_order_price(user_id, package_row)["unit_price"]
+def get_gateway_bonus_label(gateway_key, base_amount=None):
+    breakdown = get_gateway_payment_breakdown(gateway_key, base_amount or 0)
+    if breakdown["bonus_type"] == "none" or breakdown["bonus_value"] <= 0:
+        return ""
+    if breakdown["bonus_type"] == "fixed":
+        return f"{fmt_price(breakdown['bonus_value'])} تومان هدیه"
+    if base_amount:
+        return f"{fmt_price(breakdown['bonus_amount'])} تومان هدیه"
+    return f"{breakdown['bonus_value']}٪ هدیه"
+
+
+def format_gateway_method_label(gateway_key, base_amount=None):
+    label = get_gateway_display_name(gateway_key)
+    bonus_label = get_gateway_bonus_label(gateway_key, base_amount)
+    if bonus_label:
+        return f"{label} ({bonus_label})"
+    return label
+
+
+def get_payment_paid_amount(payment_row):
+    if payment_row and payment_row["final_amount"] and payment_row["final_amount"] > 0:
+        return int(payment_row["final_amount"])
+    return int(payment_row["amount"] if payment_row else 0)
+
+
+def get_random_active_payment_card():
+    active_cards = list(get_payment_cards(include_inactive=False))
+    if not active_cards:
+        return None
+    return random.choice(active_cards)
+
+
+def apply_gateway_bonus(user_id, payment_row):
+    if not payment_row:
+        return 0
+    breakdown = get_gateway_payment_breakdown(payment_row["payment_method"], payment_row["amount"])
+    bonus_amount = breakdown["bonus_amount"]
+    if bonus_amount <= 0:
+        return 0
+    update_balance(user_id, bonus_amount)
+    return bonus_amount
+
+
+def build_gateway_bonus_message(payment_row):
+    bonus_amount = get_gateway_payment_breakdown(payment_row["payment_method"], payment_row["amount"])["bonus_amount"]
+    if bonus_amount <= 0:
+        return ""
+    gateway_name = get_gateway_display_name(payment_row["payment_method"])
+    return f"به دلیل پرداخت با درگاه {gateway_name}، {fmt_price(bonus_amount)} تومان به کیف پول شما اضافه شد"
 
 
 # ── Payment method selection ───────────────────────────────────────────────────
@@ -184,8 +211,6 @@ def show_payment_method_selection(target, uid, context_data):
 
     _gw_labels = []
     rows = []
-    from .db import setting_get as _sg
-
     # Gateway emoji mapping: gateway_key -> (default_label, emoji_id)
     _GW_DEFAULTS = {
         "card":              ("کارت به کارت",                                "5796315849241403403"),
@@ -198,13 +223,8 @@ def show_payment_method_selection(target, uid, context_data):
     def _add_gw(key, cb, extra_check=True):
         if not (is_gateway_available(key, uid) and extra_check):
             return
-        default_lbl, eid = _GW_DEFAULTS[key]
-        custom_lbl = _sg(f"gw_{key}_display_name", "").strip()
-        lbl = custom_lbl or default_lbl
-        # Show bonus hint if this gateway has a bonus configured
-        bonus = _gw_bonus_amt(key, amount)
-        if bonus > 0:
-            lbl += f" ({fmt_price(bonus)} هدیه 🎁)"
+        _, eid = _GW_DEFAULTS[key]
+        lbl = format_gateway_method_label(key, amount)
         rows.append([_btn(lbl, callback_data=cb, emoji_id=eid)])
         _gw_labels.append((key, lbl))
 
@@ -301,21 +321,6 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
                 f"\n\n{ce('🔑', '5330115548900501467')} <b>کامنت:</b> <code>{comment_code}</code>\n\n"
                 f"{ce('⚠️', '5314346928660554905')} <b>هنگام پرداخت حتماً مقدار کامنت را دقیقاً وارد کنید، در غیر این صورت رسید شما تأیید نخواهد شد.</b>"
             )
-            # Save the comment code to the DB so admins can see it
-            if payment_id:
-                try:
-                    from .db import update_payment_crypto_comment
-                    update_payment_crypto_comment(payment_id, comment_code)
-                except Exception:
-                    pass
-
-        # Save the coin amount to the DB so admin notification always shows it
-        if payment_id and coin_amount_str and symbol:
-            try:
-                from .db import update_payment_crypto_amount
-                update_payment_crypto_amount(payment_id, f"{coin_amount_str} {symbol}")
-            except Exception:
-                pass
 
         text = (
             f"{ce('💎', '5471952986970267163')} <b>پرداخت با {esc(label)}</b>\n\n"
@@ -410,29 +415,23 @@ def send_payment_to_admins(payment_id):
             f"\n👥 تعداد کاربر: {'نامحدود' if not (package_row['max_users'] if 'max_users' in package_row.keys() else 0) else str(package_row['max_users']) + ' کاربره'}"
         )
     # Crypto equivalent line (shown only for crypto payments)
-    # Prefer the value stored in DB at payment time; fall back to live price
     crypto_line = ""
     if coin_key:
-        _pay_dict = dict(payment)
-        _stored_amt = _pay_dict.get("crypto_amount")
-        if _stored_amt:
-            crypto_line = f"\n💱 معادل ارزی: <code>{esc(_stored_amt)}</code>"
-        else:
-            symbol = CRYPTO_API_SYMBOLS.get(coin_key, "")
-            if symbol:
-                prices = _get_prices()
-                if symbol in prices and prices[symbol] > 0:
-                    coin_amount = payment["amount"] / prices[symbol]
-                    crypto_line = f"\n💱 معادل ارزی: <code>{coin_amount:.6f} {symbol}</code>"
+        symbol = CRYPTO_API_SYMBOLS.get(coin_key, "")
+        if symbol:
+            prices = _get_prices()
+            if symbol in prices and prices[symbol] > 0:
+                coin_amount = payment["amount"] / prices[symbol]
+                crypto_line = f"\n💱 معادل ارزی: <code>{coin_amount:.6f} {symbol}</code>"
 
-    # Crypto comment code shown to admin (for verification)
+    # TON anti-fraud info for admin
     ton_fraud_line = ""
-    if coin_key:
+    if coin_key == "ton":
         _pay_dict = dict(payment)
         _comment = _pay_dict.get("crypto_comment")
         _tx_hash = _pay_dict.get("crypto_tx_hash")
         if _comment:
-            ton_fraud_line += f"\n🔑 کد کامنت: <code>{esc(_comment)}</code>"
+            ton_fraud_line += f"\n🔑 کد واریز (Comment): <code>{esc(_comment)}</code>"
         if _tx_hash:
             ton_fraud_line += f"\n🔗 هش تراکنش: <code>{esc(_tx_hash)}</code>"
     text = (
@@ -451,53 +450,41 @@ def send_payment_to_admins(payment_id):
     )
     kb = types.InlineKeyboardMarkup()
     kb.row(
-        types.InlineKeyboardButton("✅ تأیید", callback_data=f"adm:pay:apc:{payment_id}"),
-        types.InlineKeyboardButton("❌ رد",    callback_data=f"adm:pay:rjc:plain:{payment_id}"),
-    )
-    kb.row(
-        types.InlineKeyboardButton("✅💬 تأیید با توضیح", callback_data=f"adm:pay:ap:{payment_id}"),
-        types.InlineKeyboardButton("❌💬 رد با توضیح",    callback_data=f"adm:pay:rj:{payment_id}"),
+        types.InlineKeyboardButton("✅ تأیید", callback_data=f"adm:pay:ap:{payment_id}"),
+        types.InlineKeyboardButton("❌ رد",    callback_data=f"adm:pay:rj:{payment_id}"),
     )
 
     file_id = payment["receipt_file_id"]
 
     def _send_to_one(target_id):
         """Send payment notification to a single admin/sub-admin.
-
-        Sends ONE unified message:
-        - If there is a receipt photo/document: send_photo/send_document with the
-          full info text as caption (max 1024 chars). All approve/reject buttons
-          are attached to that single message so admin can act without scrolling.
-        - If no media: send text+buttons as a single message.
-
+        
+        Strategy:
+        - If there is a receipt photo/document: send it FIRST, then the text
+          with approve/reject buttons (so admin sees photo before the approval request).
+        - If no media: send the text+buttons as a single message.
+        
         Returns the tracked Message (the one that holds the approve/reject buttons).
         """
         try:
+            # If there's a receipt image/document, send it FIRST (photo before approval text)
             if file_id:
-                # Telegram caption max is 1024 chars
-                caption = text if len(text) <= 1024 else text[:1021] + "..."
                 try:
-                    tracked_msg = bot.send_photo(
-                        target_id, file_id,
-                        caption=caption, reply_markup=kb, parse_mode="HTML",
-                    )
+                    bot.send_photo(target_id, file_id,
+                                   caption="🖼 رسید کاربر",
+                                   parse_mode="HTML")
                 except Exception:
                     try:
-                        tracked_msg = bot.send_document(
-                            target_id, file_id,
-                            caption=caption, reply_markup=kb, parse_mode="HTML",
-                        )
+                        bot.send_document(target_id, file_id,
+                                          caption="📎 رسید کاربر",
+                                          parse_mode="HTML")
                     except Exception:
-                        # Media send failed — fall back to text-only message
-                        tracked_msg = bot.send_message(
-                            target_id, text, reply_markup=kb, parse_mode="HTML",
-                            disable_web_page_preview=True,
-                        )
-            else:
-                tracked_msg = bot.send_message(
-                    target_id, text, reply_markup=kb, parse_mode="HTML",
-                    disable_web_page_preview=True,
-                )
+                        pass  # Media forward failure is non-critical
+            # Then send the full info text with the approve/reject buttons
+            tracked_msg = bot.send_message(
+                target_id, text, reply_markup=kb, parse_mode="HTML",
+                disable_web_page_preview=True,
+            )
             return tracked_msg
         except Exception as e:
             print(f"[send_payment_to_admins] FAILED target={target_id} payment={payment_id} error={e}")
@@ -520,12 +507,12 @@ def send_payment_to_admins(payment_id):
         if msg:
             save_payment_admin_message(payment_id, sub_id, msg.message_id)
 
-    # Group topic: unified message (photo+caption+buttons or text+buttons)
-    if file_id:
-        caption = text if len(text) <= 1024 else text[:1021] + "..."
-        send_photo_to_topic("payment_approval", file_id, caption=caption, reply_markup=kb)
-    else:
-        send_to_topic("payment_approval", text, reply_markup=kb)
+    # Group topic: send text first, then photo separately if present
+    grp_msg = send_to_topic("payment_approval", text, reply_markup=kb)
+    if file_id and grp_msg:
+        send_photo_to_topic("payment_approval", file_id, caption="🖼 رسید کاربر")
+    elif file_id:
+        send_photo_to_topic("payment_approval", file_id, caption=text[:1024])
 
 
 # ── Card payment approval / rejection ─────────────────────────────────────────
@@ -668,12 +655,18 @@ def _finish_card_payment_approval_core(payment_id, admin_note, approved):
             if not complete_payment(payment_id):
                 return False, True  # already processed
             update_balance(user_id, payment["amount"])
-            notified = _safe_send(user_id, f"{ce('✅', '5900157489759916320')} واریزی شما تأیید شد.\n\n{esc(admin_note)}")
-            # Apply gateway bonus if configured
-            try:
-                apply_gateway_bonus_if_needed(user_id, payment["payment_method"] or "card", payment["amount"])
-            except Exception:
-                pass
+            bonus_amount = apply_gateway_bonus(user_id, payment)
+            bonus_msg = build_gateway_bonus_message(payment)
+            paid_amount = get_payment_paid_amount(payment)
+            notified = _safe_send(
+                user_id,
+                f"{ce('✅', '5900157489759916320')} واریزی شما تأیید شد.\n\n"
+                f"💳 مبلغ پرداختی: <b>{fmt_price(paid_amount)}</b> تومان\n"
+                f"💰 مبلغ شارژ کیف پول: <b>{fmt_price(payment['amount'])}</b> تومان"
+                + (f"\n🎁 {esc(bonus_msg)}" if bonus_msg else "")
+                + (f"\n\n{esc(admin_note)}" if admin_note else ""),
+                parse_mode="HTML",
+            )
             user_row = get_user(user_id)
             receipt_note = payment["receipt_text"] if payment["receipt_text"] else ""
             pay_method   = payment["payment_method"] if payment["payment_method"] else "—"
@@ -682,9 +675,11 @@ def _finish_card_payment_approval_core(payment_id, admin_note, approved):
                 f"{ce('💳', '5931368295545443065')} <b>شارژ کیف‌پول تأیید شد</b>\n\n"
                 f"{ce('👤', '5373012449597335010')} {esc(user_row['full_name'] if user_row else str(user_id))}\n"
                 f"🆔 <code>{user_id}</code>\n"
-                f"{ce('💰', '5794002949222964817')} مبلغ: <b>{fmt_price(payment['amount'])}</b> تومان\n"
+                f"{ce('💰', '5794002949222964817')} مبلغ شارژ: <b>{fmt_price(payment['amount'])}</b> تومان\n"
+                f"💳 مبلغ پرداختی: <b>{fmt_price(paid_amount)}</b> تومان\n"
                 f"💳 روش پرداخت: {esc(pay_method)}\n"
                 f"🧾 شناسه تراکنش: <code>{pay_id_txt}</code>\n"
+                + (f"🎁 بونس: <b>{fmt_price(bonus_amount)}</b> تومان\n" if bonus_amount > 0 else "")
                 + (f"📝 توضیحات: {esc(receipt_note)}\n" if receipt_note else "")
                 + f"🕐 زمان: {now_str()[:16]}"
             )
@@ -698,18 +693,15 @@ def _finish_card_payment_approval_core(payment_id, admin_note, approved):
             _qty_card = int(payment["quantity"]) if "quantity" in payment.keys() else 1
             if not complete_payment(payment_id):
                 return False, True  # already processed
+            bonus_amount = apply_gateway_bonus(user_id, payment)
             notified = _safe_send(user_id,
                 f"{ce('✅', '5900157489759916320')} واریزی شما تأیید شد.\n\n{esc(admin_note)}\n\n"
-                "⏳ کانفیگ‌های شما در حال آماده‌سازی هستند...")
-            # Apply gateway bonus if configured
-            try:
-                apply_gateway_bonus_if_needed(user_id, payment["payment_method"] or "card", payment["amount"])
-            except Exception:
-                pass
+                "⏳ کانفیگ‌های شما در حال آماده‌سازی هستند..."
+                + (f"\n\n🎁 {esc(build_gateway_bonus_message(payment))}" if bonus_amount > 0 else ""),
+                parse_mode="HTML")
             purchase_ids, pending_ids = _deliver_bulk_configs(
                 user_id, user_id, package_id,
-                payment["amount"], payment["payment_method"], _qty_card, payment_id,
-                service_names=get_payment_service_names(payment_id)
+                payment["amount"], payment["payment_method"], _qty_card, payment_id
             )
             _send_bulk_delivery_result(user_id, user_id, package_row,
                                        purchase_ids, pending_ids,
@@ -722,12 +714,14 @@ def _finish_card_payment_approval_core(payment_id, admin_note, approved):
             config_id   = payment["config_id"]
             if not complete_payment(payment_id):
                 return True, True  # already processed by another path
+            bonus_amount = apply_gateway_bonus(user_id, payment)
             notified = _safe_send(
                 user_id,
                 "✅ <b>درخواست تمدید ارسال شد</b>\n\n"
                 "🔄 درخواست تمدید سرویس شما با موفقیت ثبت و برای پشتیبانی ارسال شد.\n"
                 "⏳ لطفاً کمی صبر کنید، پس از انجام تمدید به شما اطلاع داده خواهد شد.\n\n"
-                "🙏 از صبر و شکیبایی شما متشکریم.",
+                "🙏 از صبر و شکیبایی شما متشکریم."
+                + (f"\n\n🎁 {esc(build_gateway_bonus_message(payment))}" if bonus_amount > 0 else ""),
                 parse_mode="HTML",
             )
             with get_conn() as conn:
@@ -747,13 +741,15 @@ def _finish_card_payment_approval_core(payment_id, admin_note, approved):
             package_id      = payment["package_id"]
             if not complete_payment(payment_id):
                 return True, True  # already processed
+            bonus_amount = apply_gateway_bonus(user_id, payment)
             ok_r, err_r = _exec_pnlr(panel_config_id, package_id, uid=user_id)
             if ok_r:
                 notified = _safe_send(
                     user_id,
                     "✅ <b>تمدید سرویس انجام شد!</b>\n\n"
                     "🔄 پرداخت شما تأیید و سرویس با موفقیت تمدید شد.\n\n"
-                    "🙏 از اعتماد شما سپاسگزاریم.",
+                    "🙏 از اعتماد شما سپاسگزاریم."
+                    + (f"\n\n🎁 {esc(build_gateway_bonus_message(payment))}" if bonus_amount > 0 else ""),
                     parse_mode="HTML",
                 )
             else:

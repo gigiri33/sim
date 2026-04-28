@@ -4,4 +4,3 @@ pillow
 python-dotenv
 jdatetime
 requests
-flask
