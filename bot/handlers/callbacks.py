@@ -13453,7 +13453,10 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gw:card", icon_custom_emoji_id="5253997076169115797"))
         cards_count = len(cards)
         active_count = sum(1 for c in cards if c["is_active"])
-        bot.answer_callback_query(call.id)
+        try:
+            bot.answer_callback_query(call.id)
+        except Exception:
+            pass
         send_or_edit(call,
             f"💳 <b>مدیریت کارت‌ها</b>\n\n"
             f"تعداد کارت‌ها: <b>{cards_count}</b>\n"
@@ -13500,9 +13503,12 @@ def _dispatch_callback(call, uid, data):
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("✏️ ویرایش مشخصات کارت", callback_data=f"adm:gw:card:cards:edit:{card_id}"))
         kb.add(types.InlineKeyboardButton(toggle_lbl, callback_data=f"adm:gw:card:cards:toggle:{card_id}"))
-        kb.add(types.InlineKeyboardButton("🗑 حذف کارت", callback_data=f"adm:gw:card:cards:del:{card_id}"))
+        kb.add(types.InlineKeyboardButton("🗑 حذف کارت", callback_data=f"adm:gw:card:cards:delask:{card_id}"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:gw:card:cards", icon_custom_emoji_id="5253997076169115797"))
-        bot.answer_callback_query(call.id)
+        try:
+            bot.answer_callback_query(call.id)
+        except Exception:
+            pass
         send_or_edit(call,
             f"💳 <b>تنظیمات کارت</b>\n\n"
             f"شماره: <code>{esc(card['card_number'])}</code>\n"
@@ -13513,18 +13519,80 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data.startswith("adm:gw:card:cards:toggle:"):
-        card_id = int(data.split(":")[-1])
-        new_state = toggle_payment_card_active(card_id)
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        try:
+            card_id = int(data.split(":")[-1])
+        except ValueError:
+            bot.answer_callback_query(call.id, "شناسه کارت نامعتبر است.", show_alert=True)
+            return
+        card = get_payment_card(card_id)
+        if not card:
+            bot.answer_callback_query(call.id, "کارت یافت نشد.", show_alert=True)
+            return
+        try:
+            new_state = toggle_payment_card_active(card_id)
+        except Exception as e:
+            print(f"[card toggle] error: {e}")
+            bot.answer_callback_query(call.id, f"خطا: {e}", show_alert=True)
+            return
         log_admin_action(uid, f"کارت {card_id} {'فعال' if new_state else 'غیرفعال'} شد")
-        bot.answer_callback_query(call.id, "✅ وضعیت کارت تغییر یافت.")
+        try:
+            bot.answer_callback_query(call.id, "✅ وضعیت کارت تغییر یافت.")
+        except Exception:
+            pass
         _fake_call(call, f"adm:gw:card:cards:cfg:{card_id}")
         return
 
+    if data.startswith("adm:gw:card:cards:delask:"):
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        try:
+            card_id = int(data.split(":")[-1])
+        except ValueError:
+            bot.answer_callback_query(call.id, "شناسه کارت نامعتبر است.", show_alert=True)
+            return
+        card = get_payment_card(card_id)
+        if not card:
+            bot.answer_callback_query(call.id, "کارت یافت نشد.", show_alert=True)
+            return
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("✅ بله، حذف شود", callback_data=f"adm:gw:card:cards:del:{card_id}"))
+        kb.add(types.InlineKeyboardButton("❌ انصراف", callback_data=f"adm:gw:card:cards:cfg:{card_id}"))
+        try:
+            bot.answer_callback_query(call.id)
+        except Exception:
+            pass
+        send_or_edit(call,
+            f"⚠️ <b>تأیید حذف کارت</b>\n\n"
+            f"شماره: <code>{esc(card['card_number'])}</code>\n"
+            f"بانک: {esc(card['bank_name'] or '—')}\n\n"
+            "آیا از حذف این کارت مطمئن هستید؟",
+            kb)
+        return
+
     if data.startswith("adm:gw:card:cards:del:"):
-        card_id = int(data.split(":")[-1])
-        delete_payment_card(card_id)
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        try:
+            card_id = int(data.split(":")[-1])
+        except ValueError:
+            bot.answer_callback_query(call.id, "شناسه کارت نامعتبر است.", show_alert=True)
+            return
+        try:
+            delete_payment_card(card_id)
+        except Exception as e:
+            print(f"[card delete] error: {e}")
+            bot.answer_callback_query(call.id, f"خطا: {e}", show_alert=True)
+            return
         log_admin_action(uid, f"کارت {card_id} حذف شد")
-        bot.answer_callback_query(call.id, "🗑 کارت حذف شد.")
+        try:
+            bot.answer_callback_query(call.id, "🗑 کارت حذف شد.")
+        except Exception:
+            pass
         _fake_call(call, "adm:gw:card:cards")
         return
 
