@@ -56,15 +56,12 @@ from ..db import (
     has_pending_rewards, get_unclaimed_rewards, mark_rewards_claimed, mark_reward_claimed_by_id,
     get_locked_channels, add_locked_channel, remove_locked_channel_by_id,
     wallet_pay_enabled_for, get_wallet_pay_exceptions, add_wallet_pay_exception, remove_wallet_pay_exception,
-<<<<<<< HEAD
     get_payment_cards, get_payment_card,
     add_payment_card, update_payment_card, set_payment_card_active, delete_payment_card,
-=======
     get_referral_restriction, add_referral_restriction,
     remove_referral_restriction_by_id, remove_referral_restriction_by_user,
     toggle_referral_restriction_type, get_referral_restrictions_paged,
     set_user_restricted as _set_user_restricted_db,
->>>>>>> 74a4f3ed0d7f92775aa47d06000b98501cf55245
 )
 from ..gateways.base import is_gateway_available, is_card_info_complete, get_gateway_range_text, is_gateway_in_range, build_gateway_range_guide
 from ..gateways.crypto import fetch_crypto_prices
