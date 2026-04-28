@@ -37,7 +37,11 @@ def _plisio_webhook_server():
         print("⚠️ Flask not installed — Plisio webhook disabled. Run: pip install flask")
         return
 
-    from bot.gateways.plisio import verify_plisio_json_callback, is_plisio_paid
+    from bot.gateways.plisio import (
+        verify_plisio_json_callback,
+        is_plisio_paid,
+        get_plisio_webhook_port,
+    )
     from bot.helpers import fmt_price
     from bot.payments import apply_gateway_bonus_if_needed
 
@@ -50,6 +54,7 @@ def _plisio_webhook_server():
             if not data:
                 return jsonify({"status": "error", "message": "empty body"}), 400
             if not verify_plisio_json_callback(dict(data)):
+                print("PLISIO_WEBHOOK: invalid signature for txn", data.get("txn_id"))
                 return jsonify({"status": "error", "message": "invalid signature"}), 403
             order_number = data.get("order_number", "")
             status       = data.get("status", "")
@@ -63,43 +68,51 @@ def _plisio_webhook_server():
             if not payment or payment["status"] != "pending":
                 return jsonify({"status": "ok"}), 200
             if not is_plisio_paid(status):
+                # Not yet paid — ack so Plisio stops retrying for this status
                 return jsonify({"status": "ok"}), 200
-            if not complete_payment(payment_id):
-                return jsonify({"status": "ok"}), 200
+
+            kind   = payment["kind"]
             uid    = payment["user_id"]
             amount = payment["amount"]
-            kind   = payment["kind"]
+
             if kind == "wallet_charge":
+                # Wallet charges are simple: complete + credit balance here.
+                if not complete_payment(payment_id):
+                    return jsonify({"status": "ok"}), 200
                 update_balance(uid, amount)
                 try:
                     apply_gateway_bonus_if_needed(uid, "plisio", amount)
                 except Exception:
                     pass
                 try:
-                    from bot.ui.helpers import send_or_edit
-                    from bot.helpers import back_button
-                    bot.send_message(uid,
+                    bot.send_message(
+                        uid,
                         f"✅ پرداخت Plisio شما تأیید شد و کیف پول شارژ شد.\n\n💰 مبلغ: {fmt_price(amount)} تومان",
-                        parse_mode="HTML")
+                        parse_mode="HTML",
+                    )
                 except Exception:
                     pass
             else:
-                # config_purchase / renewal / pnlcfg_renewal — let the polling thread handle it
-                # by doing nothing here; complete_payment was already called so polling stops
-                pass
+                # config_purchase / renewal / pnlcfg_renewal:
+                # Do NOT call complete_payment here — let the existing polling
+                # thread observe the paid status and run the full fulfillment
+                # pipeline (delivers config, sends message, etc.).
+                # The webhook simply acknowledges receipt; polling will catch up
+                # within its next interval.
+                print(f"PLISIO_WEBHOOK: paid notice for kind={kind} payment_id={payment_id} — deferring to poller")
         except Exception as exc:
             print("PLISIO_WEBHOOK_ERROR:", exc)
         return jsonify({"status": "ok"}), 200
 
-    @_app.route("/plisio/<bot_username>/success")
+    @_app.route("/plisio/<bot_username>/success", methods=["GET", "POST"])
     def _plisio_success(bot_username):
         return "✅ پرداخت با موفقیت انجام شد. به ربات تلگرام بازگردید.", 200
 
-    @_app.route("/plisio/<bot_username>/fail")
+    @_app.route("/plisio/<bot_username>/fail", methods=["GET", "POST"])
     def _plisio_fail(bot_username):
         return "❌ پرداخت ناموفق بود. به ربات تلگرام بازگردید.", 200
 
-    port = int(setting_get("plisio_webhook_port", "5050") or "5050")
+    port = int(get_plisio_webhook_port())
     print(f"🌐 Plisio webhook server starting on port {port}…")
     _app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 

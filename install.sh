@@ -61,7 +61,43 @@ ensure_safe_cwd() { cd / 2>/dev/null || true; }
 install_prereqs() {
   info "Installing prerequisites..."
   apt-get update -y
-  apt-get install -y git python3 python3-venv python3-pip curl
+  apt-get install -y git python3 python3-venv python3-pip curl iptables
+}
+
+# ─────────────────────── firewall (Plisio webhook port) ─────────────────────
+
+open_firewall_port() {
+  # Open inbound TCP port for Plisio webhook callbacks.
+  # Tries (in order): ufw, firewalld, iptables. Silent on failure so install
+  # never aborts because of firewall config.
+  local PORT="$1"
+  [[ -n "$PORT" ]] || return 0
+  info "Opening firewall port ${PORT}/tcp for Plisio webhook…"
+
+  # ufw (Debian/Ubuntu)
+  if command -v ufw >/dev/null 2>&1; then
+    ufw allow "${PORT}/tcp" >/dev/null 2>&1 || true
+  fi
+
+  # firewalld (RHEL/Fedora/CentOS)
+  if command -v firewall-cmd >/dev/null 2>&1; then
+    firewall-cmd --permanent --add-port="${PORT}/tcp" >/dev/null 2>&1 || true
+    firewall-cmd --reload >/dev/null 2>&1 || true
+  fi
+
+  # iptables (always, as final fallback)
+  if command -v iptables >/dev/null 2>&1; then
+    if ! iptables -C INPUT -p tcp --dport "$PORT" -j ACCEPT >/dev/null 2>&1; then
+      iptables -I INPUT -p tcp --dport "$PORT" -j ACCEPT >/dev/null 2>&1 || true
+    fi
+    # Persist rule across reboots if iptables-persistent / netfilter-persistent is installed
+    if command -v netfilter-persistent >/dev/null 2>&1; then
+      netfilter-persistent save >/dev/null 2>&1 || true
+    elif [[ -d /etc/iptables ]]; then
+      iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+    fi
+  fi
+  ok "Firewall: TCP ${PORT} allowed (where supported)."
 }
 
 # ─────────────────────── helpers for name/time ───────────────────────────
@@ -171,14 +207,22 @@ configure_env() {
   read -r -p "$(echo -e "${B}📂 Database name [Seamless.db]: ${N}")" INPUT_DB
   INPUT_DB="${INPUT_DB:-Seamless.db}"
 
+  # ── Plisio webhook port: unique per instance (5050 + (instance-1)) ──────
+  local PLISIO_PORT=$((5050 + INSTANCE_NUM - 1))
+
   cat > "$DIR/.env" << ENVEOF
 BOT_TOKEN=${INPUT_TOKEN}
 ADMIN_IDS=${INPUT_ADMIN}
 DB_NAME=${INPUT_DB}
+PLISIO_WEBHOOK_PORT=${PLISIO_PORT}
 ENVEOF
   chmod 600 "$DIR/.env"
   echo ""
   ok "Configuration saved to $DIR/.env"
+  echo -e "${Y}🌐 Plisio webhook port for this bot: ${B}${PLISIO_PORT}${N}"
+
+  # Open this port on the firewall so Plisio's IPN can reach the bot
+  open_firewall_port "$PLISIO_PORT"
 }
 
 configure_iran_worker() {

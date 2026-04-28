@@ -6,6 +6,7 @@ API docs: https://plisio.net/documentation
 import hashlib
 import hmac
 import json
+import os
 
 import requests
 
@@ -65,20 +66,37 @@ def get_effective_public_base_url() -> str:
     ip = detect_public_ip()
     if not ip:
         return ""
-    port = (setting_get("plisio_webhook_port", "5050") or "5050").strip() or "5050"
+    port = get_plisio_webhook_port()
     return f"http://{ip}:{port}"
 
 
+def get_plisio_webhook_port() -> str:
+    """Resolve webhook port: env var (PLISIO_WEBHOOK_PORT) > DB setting > 5050."""
+    p = (os.getenv("PLISIO_WEBHOOK_PORT", "") or "").strip()
+    if not p:
+        p = (setting_get("plisio_webhook_port", "") or "").strip()
+    if not p or not p.isdigit():
+        p = "5050"
+    return p
+
+
 def get_plisio_callback_urls(bot_username: str) -> dict:
-    """Build callback URLs for a Plisio invoice. Uses configured public URL or auto-detected public IP."""
+    """
+    Build callback URLs for a Plisio invoice.
+    Each URL has ``?json=true`` appended — REQUIRED by Plisio for non-PHP
+    integrations (otherwise Plisio sends PHP-serialized form data and the
+    HMAC signature scheme is different).
+    Each bot uses a unique path segment with its Telegram username so
+    multiple bots can share one server.
+    """
     base = get_effective_public_base_url()
     if not base:
         return {}
     slug = normalize_bot_username(bot_username)
     return {
-        "callback_url":         f"{base}/plisio/{slug}/callback",
-        "success_callback_url": f"{base}/plisio/{slug}/success",
-        "fail_callback_url":    f"{base}/plisio/{slug}/fail",
+        "callback_url":         f"{base}/plisio/{slug}/callback?json=true",
+        "success_callback_url": f"{base}/plisio/{slug}/success?json=true",
+        "fail_callback_url":    f"{base}/plisio/{slug}/fail?json=true",
     }
 
 
@@ -195,11 +213,14 @@ def check_plisio_invoice(txn_id: str):
 
 def verify_plisio_json_callback(data: dict) -> bool:
     """
-    Verify a Plisio IPN POST callback using HMAC-SHA1.
+    Verify a Plisio IPN JSON POST callback using HMAC-SHA1.
 
-    Pops ``verify_hash`` from *data* (mutates the dict), JSON-encodes the
-    remaining fields (sorted keys, no extra spaces), computes HMAC-SHA1
-    keyed with the API key, and compares with the received hash.
+    Per the official Plisio JSON example (Node.js), the signature is computed
+    over ``JSON.stringify(payload)`` where the payload preserves the key
+    order from the received request (NOT sorted) and ``verify_hash`` is
+    removed. Python ``dict`` (3.7+) preserves insertion order, and
+    ``json.dumps`` with ``separators=(',', ':')`` matches
+    ``JSON.stringify`` exactly.
 
     Returns ``True`` if the signature is valid.
     """
@@ -211,8 +232,8 @@ def verify_plisio_json_callback(data: dict) -> bool:
     if not received_hash:
         return False
 
-    payload  = json.dumps(data, sort_keys=True, separators=(",", ":"))
-    expected = hmac.new(api_key.encode(), payload.encode(), hashlib.sha1).hexdigest()
+    payload  = json.dumps(data, separators=(",", ":"), ensure_ascii=False)
+    expected = hmac.new(api_key.encode(), payload.encode("utf-8"), hashlib.sha1).hexdigest()
     return hmac.compare_digest(expected, received_hash)
 
 
