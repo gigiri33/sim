@@ -14100,7 +14100,22 @@ def _dispatch_callback(call, uid, data):
         vis         = setting_get("gw_plisio_visibility", "public")
         api_key     = setting_get("plisio_api_key", "")
         range_en    = setting_get("gw_plisio_range_enabled", "0")
-        pub_url     = setting_get("server_public_url", "") or "❌ ثبت نشده"
+        pub_url_set = (setting_get("server_public_url", "") or "").strip()
+        if pub_url_set:
+            pub_url_display = pub_url_set
+            pub_url_source  = "🟢 ثبت‌شده توسط ادمین"
+        else:
+            try:
+                from ..gateways.plisio import get_effective_public_base_url
+                auto_url = get_effective_public_base_url()
+            except Exception:
+                auto_url = ""
+            if auto_url:
+                pub_url_display = auto_url
+                pub_url_source  = "🤖 تشخیص خودکار از IP عمومی سرور"
+            else:
+                pub_url_display = "❌ تشخیص داده نشد"
+                pub_url_source  = "—"
         enabled_label = "🟢 فعال" if enabled == "1" else "🔴 غیرفعال"
         vis_label     = "👥 عمومی" if vis == "public" else "🔒 کاربران امن"
         range_label   = "🟢 فعال" if range_en == "1" else "🔴 غیرفعال"
@@ -14115,7 +14130,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("🔑 تنظیم کلید API", callback_data="adm:set:plisio_key"))
         kb.add(types.InlineKeyboardButton("🏷 نام نمایشی درگاه", callback_data="adm:gw:plisio:set_name"))
         kb.add(types.InlineKeyboardButton("🎁 بونس و کارمزد", callback_data="adm:gw:plisio:feebonus"))
-        kb.add(types.InlineKeyboardButton("🌐 تنظیم Server Public URL", callback_data="adm:set:server_public_url"))
+        kb.add(types.InlineKeyboardButton("🌐 تنظیم Server Public URL (اختیاری)", callback_data="adm:set:server_public_url"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gateways", icon_custom_emoji_id="5253997076169115797"))
         key_display = (f"<code>{esc(api_key[:8])}...{esc(api_key[-4:])}</code>"
                        if api_key else "❌ <b>ثبت نشده</b>")
@@ -14125,11 +14140,12 @@ def _dispatch_callback(call, uid, data):
             f"نمایش: {vis_label}\n"
             f"نام نمایشی: {name_display_pl}\n\n"
             f"🔑 کلید API: {key_display}\n"
-            f"🌐 Server Public URL: <code>{esc(pub_url[:80])}</code>\n\n"
+            f"🌐 Server Public URL: <code>{esc(pub_url_display[:80])}</code>\n"
+            f"   منبع: {pub_url_source}\n\n"
             "📋 <b>راهنما:</b>\n"
             "۱. در <a href='https://plisio.net'>plisio.net</a> ثبت‌نام کنید\n"
             "۲. از پنل، کلید API را دریافت کنید\n"
-            "۳. آدرس عمومی سرور خود را ثبت کنید تا webhook کار کند"
+            "۳. آدرس عمومی به‌صورت خودکار از IP سرور تشخیص داده می‌شود — نیازی به تنظیم در سایت Plisio نیست؛ Webhook هر فاکتور به‌صورت خودکار ثبت می‌شود."
         )
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
@@ -14173,12 +14189,24 @@ def _dispatch_callback(call, uid, data):
         state_set(uid, "admin_set_server_public_url")
         bot.answer_callback_query(call.id)
         current = setting_get("server_public_url", "")
+        try:
+            from ..gateways.plisio import get_effective_public_base_url
+            auto_url = get_effective_public_base_url() if not current else ""
+        except Exception:
+            auto_url = ""
+        auto_line = (
+            f"\n🤖 <b>آدرس تشخیص‌داده‌شدهٔ خودکار:</b> <code>{esc(auto_url)}</code>\n"
+            "اگر این آدرس درست است، نیازی به تنظیم دستی نیست — کافیست همین صفحه را ببندید."
+            if auto_url else ""
+        )
         send_or_edit(call,
             "🌐 <b>آدرس عمومی سرور (Server Public URL)</b>\n\n"
-            f"مقدار فعلی: <code>{esc(current or 'ثبت نشده')}</code>\n\n"
-            "آدرس کامل سرور شما را وارد کنید (بدون / در انتها).\n"
-            "مثال: <code>https://myserver.example.com</code>\n\n"
-            "این آدرس برای Webhook درگاه‌هایی مثل Plisio استفاده می‌شود.",
+            f"مقدار فعلی: <code>{esc(current or 'ثبت نشده — تشخیص خودکار فعال است')}</code>\n"
+            f"{auto_line}\n\n"
+            "این مقدار <b>اختیاری</b> است. اگر دامنه یا HTTPS دارید می‌توانید آدرس کامل را وارد کنید "
+            "(بدون / در انتها). مثال: <code>https://myserver.example.com</code>\n\n"
+            "اگر خالی بماند، ربات به‌صورت خودکار از IP عمومی سرور و پورت Webhook استفاده می‌کند.\n"
+            "برای پاک کردن مقدار فعلی، <code>-</code> ارسال کنید.",
             back_button("adm:set:gw:plisio"))
         return
 
@@ -16588,10 +16616,14 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id, "در حال بررسی…")
         try:
             from ..panels.client import PanelClient
+            try:
+                _pname = p["name"]
+            except Exception:
+                _pname = ""
             ok, err = _panel_connect_with_retry(
                 uid=uid, protocol=p["protocol"], host=p["host"], port=p["port"],
                 path=p["path"] or "", username=p["username"], password=p["password"],
-                panel_name=p.get("name", ""), panel_id=panel_id, notify_chat_id=uid,
+                panel_name=_pname or "", panel_id=panel_id, notify_chat_id=uid,
             )
             status = "connected" if ok else "disconnected"
             update_panel_status(panel_id, status, err or "")

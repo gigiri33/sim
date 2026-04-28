@@ -14,15 +14,64 @@ from .crypto import fetch_crypto_prices
 
 PLISIO_BASE_URL = "https://api.plisio.net/api/v1"
 
+# Cached auto-detected public IP (per-process)
+_CACHED_PUBLIC_IP: str | None = None
+
 
 def normalize_bot_username(bot_username: str) -> str:
     """Strip leading @ from bot username."""
     return bot_username.lstrip("@")
 
 
+def detect_public_ip() -> str:
+    """
+    Auto-detect this server's public IPv4 address.
+    Tries multiple providers for robustness. Result is cached per-process.
+    Returns empty string on failure.
+    """
+    global _CACHED_PUBLIC_IP
+    if _CACHED_PUBLIC_IP:
+        return _CACHED_PUBLIC_IP
+    for url in (
+        "https://api.ipify.org",
+        "https://ifconfig.me/ip",
+        "https://api.my-ip.io/ip",
+        "https://ipv4.icanhazip.com",
+    ):
+        try:
+            r = requests.get(url, timeout=5)
+            ip = (r.text or "").strip()
+            # very basic IPv4 sanity check
+            parts = ip.split(".")
+            if len(parts) == 4 and all(p.isdigit() and 0 <= int(p) <= 255 for p in parts):
+                _CACHED_PUBLIC_IP = ip
+                return ip
+        except Exception:
+            continue
+    return ""
+
+
+def get_effective_public_base_url() -> str:
+    """
+    Return the base URL to use for Plisio callbacks.
+    Priority:
+      1. ``server_public_url`` setting (if admin has set one)
+      2. Auto-detected ``http://<public_ip>:<plisio_webhook_port>``
+    Returns empty string if neither is available.
+    """
+    base = (setting_get("server_public_url", "") or "").strip().rstrip("/")
+    if base:
+        return base
+    ip = detect_public_ip()
+    if not ip:
+        return ""
+    port = (setting_get("plisio_webhook_port", "5050") or "5050").strip() or "5050"
+    return f"http://{ip}:{port}"
+
+
 def get_plisio_callback_urls(bot_username: str) -> dict:
-    """Build callback URLs for a Plisio invoice (only used when server_public_url is set)."""
-    base = (setting_get("server_public_url", "") or "").rstrip("/")
+    """Build callback URLs for a Plisio invoice. Uses configured public URL or auto-detected public IP."""
+    base = get_effective_public_base_url()
     if not base:
         return {}
     slug = normalize_bot_username(bot_username)

@@ -105,9 +105,8 @@ def _plisio_webhook_server():
 
 
 def _start_plisio_webhook_server():
-    pub_url = (setting_get("server_public_url", "") or "").strip()
-    if not pub_url:
-        return  # Webhook not configured — skip
+    # Always start the webhook listener — callback URL is auto-detected
+    # from the server's public IP if `server_public_url` is not set.
     t = threading.Thread(target=_plisio_webhook_server, daemon=True)
     t.start()
 

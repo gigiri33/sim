@@ -3154,13 +3154,18 @@ def universal_handler(message):
 
         if sn == "admin_set_server_public_url" and is_admin(uid):
             val = (message.text or "").strip().rstrip("/")
+            if val == "-":
+                val = ""
             if val and not (val.startswith("http://") or val.startswith("https://")):
                 bot.send_message(uid, "⚠️ URL باید با <code>https://</code> یا <code>http://</code> شروع شود:", reply_markup=back_button("adm:set:gw:plisio"))
                 return
             setting_set("server_public_url", val)
-            log_admin_action(uid, f"Server Public URL تغییر کرد: {val}")
+            log_admin_action(uid, f"Server Public URL تغییر کرد: {val or '(پاک شد — تشخیص خودکار)'}")
             state_clear(uid)
-            bot.send_message(uid, f"✅ Server Public URL ذخیره شد:\n<code>{val}</code>", parse_mode="HTML", reply_markup=back_button("adm:set:gw:plisio"))
+            if val:
+                bot.send_message(uid, f"✅ Server Public URL ذخیره شد:\n<code>{val}</code>", parse_mode="HTML", reply_markup=back_button("adm:set:gw:plisio"))
+            else:
+                bot.send_message(uid, "✅ Server Public URL پاک شد. از این پس آدرس به‌صورت خودکار از IP عمومی سرور تشخیص داده می‌شود.", reply_markup=back_button("adm:set:gw:plisio"))
             return
 
         if sn == "admin_gw_range_min" and is_admin(uid):
