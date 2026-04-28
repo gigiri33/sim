@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 import json
 import logging
 import time
@@ -95,7 +95,6 @@ from ..gateways.plisio import (
 from ..gateways.nowpayments import (
     create_nowpayments_invoice, check_nowpayments_invoice,
     is_nowpayments_paid, is_nowpayments_pending, is_nowpayments_failed,
-    get_nowpayments_enabled_currencies,
 )
 from ..ui.helpers import send_or_edit, check_channel_membership, channel_lock_message
 from ..ui.helpers import _invalidate_channel_cache
@@ -141,7 +140,7 @@ from ..db import (
 )
 
 
-# -- OpenVPN helpers (shared with messages.py) ---------------------------------
+# ── OpenVPN helpers (shared with messages.py) ─────────────────────────────────
 
 def _fmt_users_label(max_users):
     if not max_users or max_users == 0:
@@ -153,7 +152,7 @@ def _fmt_users_label(max_users):
     return f"{max_users} کاربره"
 
 
-# -- V2Ray helpers -------------------------------------------------------------
+# ── V2Ray helpers ─────────────────────────────────────────────────────────────
 
 def _v2_name_from_sub(sub_url: str) -> str:
     """Extract service name from the last path segment of a subscription URL.
@@ -202,7 +201,7 @@ def _v2_name_from_config(cfg_text: str, prefix: str = "", suffix: str = "") -> s
     if cfg_text.startswith("vmess://"):
         if "#" not in cfg_text:
             return _v2_name_from_vmess(cfg_text)
-        # Has a #tag � use the tag (normal path below), but fall back to ps if empty
+        # Has a #tag — use the tag (normal path below), but fall back to ps if empty
         raw_tag = cfg_text.rsplit("#", 1)[1].strip()
         if not raw_tag:
             return _v2_name_from_vmess(cfg_text)
@@ -242,7 +241,7 @@ def _v2_bulk_data_prompt(mode: int) -> str:
     """Return the instruction message for the admin based on bulk V2Ray mode."""
     if mode == 1:  # config+sub interleaved (few)
         return (
-            "?? <b>??? ???? V2Ray � ?????? + ??? (????? ????? ??)</b>\n\n"
+            "📋 <b>ثبت عمده V2Ray — کانفیگ + ساب (مناسب تعداد کم)</b>\n\n"
             "کانفیگ‌ها و ساب‌ها را به‌صورت <b>یکی در میان</b> وارد کنید:\n\n"
             "💡 فرمت:\n"
             "<code>vless://abc...#name1\n"
@@ -254,7 +253,7 @@ def _v2_bulk_data_prompt(mode: int) -> str:
         )
     if mode == 3:  # config only
         return (
-            "?? <b>??? ???? V2Ray � ?????? ????</b>\n\n"
+            "📋 <b>ثبت عمده V2Ray — کانفیگ تنها</b>\n\n"
             "همه کانفیگ‌ها را ارسال کنید. هر خط یک کانفیگ:\n\n"
             "💡 مثال:\n"
             "<code>vless://abc...#name1\n"
@@ -263,7 +262,7 @@ def _v2_bulk_data_prompt(mode: int) -> str:
         )
     if mode == 4:  # sub only
         return (
-            "?? <b>??? ???? V2Ray � ??? ????</b>\n\n"
+            "📋 <b>ثبت عمده V2Ray — ساب تنها</b>\n\n"
             "همه لینک‌های ساب را ارسال کنید. هر خط یک ساب:\n\n"
             "💡 مثال:\n"
             "<code>http://s1.example.com:2096/sub/token1\n"
@@ -271,9 +270,9 @@ def _v2_bulk_data_prompt(mode: int) -> str:
             "نام سرویس هر ساب به‌صورت خودکار از انتهای لینک استخراج می‌شود.\n\n"
             "📎 یا می‌توانید محتوا را در یک فایل <b>.txt</b> ارسال کنید."
         )
-    if mode == 2:  # config+sub separated (many) � step 1: configs
+    if mode == 2:  # config+sub separated (many) — step 1: configs
         return (
-            "?? <b>??? ???? V2Ray � ?????? + ??? (????? ????? ????) � ????? ???</b>\n\n"
+            "📋 <b>ثبت عمده V2Ray — کانفیگ + ساب (مناسب تعداد زیاد) — مرحله اول</b>\n\n"
             "ابتدا <b>همه کانفیگ‌ها</b> را ارسال کنید (هر خط یک کانفیگ):\n\n"
             "💡 مثال:\n"
             "<code>vless://abc...#name1\n"
@@ -370,7 +369,7 @@ def _ovpn_deliver_bulk_diff(admin_id, pkg_row, acct_files, accounts):
         parse_mode="HTML", reply_markup=kb_admin_panel())
 
 
-# -- WireGuard helpers ---------------------------------------------------------
+# ── WireGuard helpers ─────────────────────────────────────────────────────────
 
 def _wg_service_name_from_filename(filename):
     """Strip extension from filename to get service name."""
@@ -601,13 +600,13 @@ def _render_bulk_page(call, uid):
 
     kind_labels = {"av": "🟢 موجود", "sl": "🔴 فروخته", "ex": "❌ منقضی"}
     heading = (
-        f"?? <b>?????? ????? � {kind_labels.get(kind, '')}</b>\n\n"
+        f"☑️ <b>انتخاب گروهی — {kind_labels.get(kind, '')}</b>\n\n"
         f"✅ {len(selected)} مورد انتخاب شده | صفحه {page+1}/{total_pages} از {total} کانفیگ"
     )
     send_or_edit(call, heading, kb)
 
 
-# -- Per-user callback serialisation ------------------------------------------
+# ── Per-user callback serialisation ──────────────────────────────────────────
 # Prevents a user from triggering the same handler multiple times concurrently
 # by rapid-clicking.  Only one callback per user is processed at a time;
 # additional clicks while the lock is held are silently answered and dropped.
@@ -647,7 +646,7 @@ def _get_state_price(uid, package_row, state_key):
     return get_effective_price(uid, package_row)
 
 
-# -- Invoice expiry helpers -----------------------------------------------------
+# ── Invoice expiry helpers ─────────────────────────────────────────────────────
 
 def _invoice_expiry_minutes() -> int:
     """Return configured invoice expiry duration in minutes (default 30)."""
@@ -693,7 +692,7 @@ def _check_invoice_valid(uid: int) -> bool:
     sn = state_name(uid)
     # Only enforce expiry when in a recognised invoice-bearing state.
     # If the state is something else (or None), the timestamp may belong to
-    # a completely different flow � allow the payment through.
+    # a completely different flow — allow the payment through.
     _INVOICE_STATES = {
         "buy_select_method", "renew_select_method", "wallet_charge_method",
     }
@@ -702,13 +701,13 @@ def _check_invoice_valid(uid: int) -> bool:
     sd = state_data(uid)
     created_at = sd.get("invoice_created_at")
     if not created_at:
-        return True  # no timestamp yet � backward-compatible, allow
+        return True  # no timestamp yet — backward-compatible, allow
     elapsed = time.time() - float(created_at)
     limit = _invoice_expiry_minutes() * 60
     valid = elapsed <= limit
     if not valid:
         log.warning(
-            "_check_invoice_valid: uid=%s EXPIRED � elapsed=%.0fs limit=%.0fs state=%s",
+            "_check_invoice_valid: uid=%s EXPIRED — elapsed=%.0fs limit=%.0fs state=%s",
             uid, elapsed, limit, sn
         )
     return valid
@@ -754,7 +753,7 @@ def _br_ok(p, is_agent: bool) -> bool:
     """Return True if the package is visible/purchasable for this user type."""
     br = p["buyer_role"] if "buyer_role" in p.keys() else "all"
     if br == "nobody":
-        return False  # hidden � only for referral gifts, not regular purchase
+        return False  # hidden — only for referral gifts, not regular purchase
     if br == "agents" and not is_agent:
         return False
     if br == "public" and is_agent:
@@ -781,7 +780,7 @@ def _show_discount_prompt(call, amount=None):
     user = get_user(uid)
     is_agent = bool(user and user["is_agent"])
     if not has_eligible_discount_codes(is_agent):
-        # No eligible codes � skip this step entirely, return False so caller can proceed
+        # No eligible codes — skip this step entirely, return False so caller can proceed
         return False
     kb = types.InlineKeyboardMarkup()
     kb.row(
@@ -959,10 +958,8 @@ def _show_renewal_gateways(target, uid, purchase_id, package_id, price, package_
 
 def _execute_pnlcfg_renewal(config_id, package_id, chat_id=None, uid=None):
     """
-    Execute panel config renewal in **additive** mode:
-    the package's volume_gb and duration_days are ADDED to the client's
-    current totalGB and expiryTime (consumed traffic is preserved).
-    Retries indefinitely on connection errors (up to 30 minutes).
+    Execute panel config renewal: reset traffic + enable_client with new expiry.
+    Retries indefinitely on connection errors (up to 8 hours).
     On non-connection failures retries up to 3 minutes then gives up.
     Returns (True, None) on success or (False, user_friendly_msg) on fatal failure.
     Admins are notified via _notify_panel_error on any fatal failure.
@@ -971,7 +968,7 @@ def _execute_pnlcfg_renewal(config_id, package_id, chat_id=None, uid=None):
     from ..db import get_panel_config as _get_pcfg, update_panel_config_field as _upf
     from ..db import get_panel as _get_pnl, get_package as _get_pkg3
     from ..panels.client import PanelClient
-    from datetime import datetime as _dt
+    from datetime import datetime as _dt, timedelta as _td
 
     cfg = _get_pcfg(config_id)
     if not cfg:
@@ -1000,11 +997,11 @@ def _execute_pnlcfg_renewal(config_id, package_id, chat_id=None, uid=None):
             "econnreset", "broken pipe", "reset by peer",
         ])
 
-    CONN_RETRY_DELAY   = 15
-    FUNC_RETRY_TIMEOUT = 90
+    CONN_RETRY_DELAY   = 30
+    FUNC_RETRY_TIMEOUT = 180
     FUNC_RETRY_DELAY   = 15
-    MAX_WAIT           = 1800   # 30-minute hard cap
-    PERIODIC_INTERVAL  = 120
+    MAX_WAIT           = 28800  # 8-hour hard cap
+    PERIODIC_INTERVAL  = 300
 
     _t_start          = _time.time()
     _waiting_notified = False
@@ -1042,12 +1039,12 @@ def _execute_pnlcfg_renewal(config_id, package_id, chat_id=None, uid=None):
             except Exception:
                 pass
 
-    # -- Step 1: login ---------------------------------------------------------
+    # ── Step 1: login ─────────────────────────────────────────────────────────
     login_err = None
     _t0 = _time.time()
     while True:
         if _time.time() - _t_start > MAX_WAIT:
-            login_err = "?????? ???? ?????? (30 ?????) ???? ??"
+            login_err = "حداکثر زمان انتظار (8 ساعت) تمام شد"
             break
         ok, login_err = pc_api.login()
         if ok:
@@ -1069,51 +1066,75 @@ def _execute_pnlcfg_renewal(config_id, package_id, chat_id=None, uid=None):
         _notify_panel_error(_uid, pkg, "login (تمدید)", login_err, config_id, cfg["panel_id"])
         return False, "تمدید سرویس با خطا مواجه شد. لطفاً با پشتیبانی ارتباط بگیرید."
 
-    # -- Step 2: extend client (ADD volume + days) -----------------------------
-    # Renewal semantics: keep the client's current consumed traffic (no reset)
-    # and ADD the package's volume_gb and duration_days to whatever the client
-    # already has on the panel. Unlimited stays unlimited.
-    add_bytes = int((pkg["volume_gb"]     or 0) * 1073741824)
-    add_days  = int(pkg["duration_days"]  or 0)
+    # ── Step 2: reset traffic ──────────────────────────────────────────────────
+    reset_err = None
+    _t0 = _time.time()
+    while True:
+        if _time.time() - _t_start > MAX_WAIT:
+            reset_err = "حداکثر زمان انتظار تمام شد"
+            break
+        ok_rt, err_rt = pc_api.reset_client_traffic(cfg["inbound_id"], cfg["client_name"] or "")
+        if ok_rt:
+            reset_err = None
+            break
+        reset_err = str(err_rt)
+        elapsed = _time.time() - _t0
+        if _is_conn_err(reset_err):
+            _maybe_notify_waiting()
+            log.warning("_execute_pnlcfg_renewal: reset_traffic CONN_ERR (%.0fs elapsed), retry in %ds: %s",
+                        elapsed, CONN_RETRY_DELAY, reset_err)
+            _time.sleep(CONN_RETRY_DELAY)
+        else:
+            log.warning("_execute_pnlcfg_renewal: reset_traffic failed (%.0fs elapsed): %s", elapsed, reset_err)
+            if elapsed + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:
+                break
+            _time.sleep(FUNC_RETRY_DELAY)
+    if reset_err is not None:
+        _notify_panel_error(_uid, pkg, "reset_traffic (تمدید)", reset_err, config_id, cfg["panel_id"])
+        return False, "تمدید سرویس با خطا مواجه شد. لطفاً با پشتیبانی ارتباط بگیرید."
+
+    # ── Step 3: enable_client with new expiry ─────────────────────────────────
+    dur_days = int(pkg["duration_days"] or 0)
+    if dur_days:
+        new_exp_dt  = _dt.utcnow() + _td(days=dur_days)
+        new_exp_str = new_exp_dt.strftime("%Y-%m-%d %H:%M:%S")
+        new_exp_ms  = int(new_exp_dt.timestamp() * 1000)
+    else:
+        new_exp_str = None
+        new_exp_ms  = 0
 
     enable_err = None
-    extend_res = None
     _t0 = _time.time()
     while True:
         if _time.time() - _t_start > MAX_WAIT:
             enable_err = "حداکثر زمان انتظار تمام شد"
             break
-        ok_e, res_e = pc_api.extend_client(
+        ok_e, res_e = pc_api.enable_client(
             inbound_id=cfg["inbound_id"], client_uuid=cfg["client_uuid"],
             email=cfg["client_name"] or "",
-            add_bytes=add_bytes, add_days=add_days,
+            traffic_bytes=int((pkg["volume_gb"] or 0) * 1073741824),
+            expire_ms=new_exp_ms,
         )
         if ok_e:
             enable_err = None
-            extend_res = res_e if isinstance(res_e, dict) else None
             break
         enable_err = str(res_e)
         elapsed = _time.time() - _t0
         if _is_conn_err(enable_err):
             _maybe_notify_waiting()
-            log.warning("_execute_pnlcfg_renewal: extend_client CONN_ERR (%.0fs elapsed), retry in %ds: %s",
+            log.warning("_execute_pnlcfg_renewal: enable_client CONN_ERR (%.0fs elapsed), retry in %ds: %s",
                         elapsed, CONN_RETRY_DELAY, enable_err)
             _time.sleep(CONN_RETRY_DELAY)
         else:
-            log.warning("_execute_pnlcfg_renewal: extend_client failed (%.0fs elapsed): %s", elapsed, enable_err)
+            log.warning("_execute_pnlcfg_renewal: enable_client failed (%.0fs elapsed): %s", elapsed, enable_err)
             if elapsed + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:
                 break
             _time.sleep(FUNC_RETRY_DELAY)
     if enable_err is not None:
-        _notify_panel_error(_uid, pkg, "extend_client (تمدید)", enable_err, config_id, cfg["panel_id"])
+        _notify_panel_error(_uid, pkg, "enable_client (تمدید)", enable_err, config_id, cfg["panel_id"])
         return False, "تمدید سرویس با خطا مواجه شد. لطفاً با پشتیبانی ارتباط بگیرید."
 
-    # -- Step 3: update DB ------------------------------------------------------
-    new_exp_ms = int(extend_res.get("new_expiry_ms") or 0) if extend_res else 0
-    if new_exp_ms > 0:
-        new_exp_str = _dt.utcfromtimestamp(new_exp_ms / 1000).strftime("%Y-%m-%d %H:%M:%S")
-    else:
-        new_exp_str = None
+    # ── Step 4: update DB ──────────────────────────────────────────────────────
     _upf(config_id, "expire_at",  new_exp_str)
     _upf(config_id, "is_expired",  0)
     _upf(config_id, "is_disabled", 0)
@@ -1146,14 +1167,14 @@ def _execute_pnlcfg_delete(config_id, chat_id, uid, admin_id):
         return
 
     cfg = dict(cfg)
-    client_name = cfg.get("client_name") or "�"
+    client_name = cfg.get("client_name") or "—"
     panel = _get_pnl(cfg["panel_id"])
 
-    CONN_RETRY_DELAY   = 15
-    FUNC_RETRY_TIMEOUT = 90
+    CONN_RETRY_DELAY   = 30
+    FUNC_RETRY_TIMEOUT = 180
     FUNC_RETRY_DELAY   = 15
-    MAX_WAIT           = 1800   # 30-minute hard cap
-    PERIODIC_INTERVAL  = 120
+    MAX_WAIT           = 28800  # 8 hours
+    PERIODIC_INTERVAL  = 300
 
     _t_start          = _time.time()
     _waiting_notified = False
@@ -1201,7 +1222,7 @@ def _execute_pnlcfg_delete(config_id, chat_id, uid, admin_id):
             except Exception:
                 pass
 
-    # -- Step 1: Delete from panel (if panel info available) ------------------
+    # ── Step 1: Delete from panel (if panel info available) ──────────────────
     if panel and cfg.get("client_uuid"):
         pc_api = PanelClient(
             protocol=panel["protocol"], host=panel["host"], port=panel["port"],
@@ -1213,7 +1234,7 @@ def _execute_pnlcfg_delete(config_id, chat_id, uid, admin_id):
         _t0 = _time.time()
         while True:
             if _time.time() - _t_start > MAX_WAIT:
-                login_err = "?????? ???? ?????? (30 ?????) ???? ??"
+                login_err = "حداکثر زمان انتظار (8 ساعت) تمام شد"
                 break
             ok, login_err = pc_api.login()
             if ok:
@@ -1291,17 +1312,17 @@ def _execute_pnlcfg_delete(config_id, chat_id, uid, admin_id):
                 bot.send_message(
                     admin_id,
                     f"✅ کانفیگ <b>{esc(client_name)}</b> از دیتابیس ربات حذف شد\n"
-                    "(??? ?? ??? ?????? ??? � ???? ?? ??????)",
+                    "(حذف از پنل ناموفق بود — بالا را ببینید)",
                     parse_mode="HTML",
                 )
             except Exception:
                 pass
             return
 
-    # -- Step 2: Delete from DB ------------------------------------------------
+    # ── Step 2: Delete from DB ────────────────────────────────────────────────
     _del_pcfg(config_id)
 
-    # -- Step 3: Notify admin of success ---------------------------------------
+    # ── Step 3: Notify admin of success ───────────────────────────────────────
     try:
         bot.send_message(
             admin_id,
@@ -1435,7 +1456,7 @@ def _show_wallet_gateways(target, uid, amount):
     send_or_edit(target, text, kb)
 
 
-# -- Bulk/Quantity Purchase Helpers ---------------------------------------------
+# ── Bulk/Quantity Purchase Helpers ─────────────────────────────────────────────
 
 def _show_qty_prompt(call, package_row, unit_price):
     """Show the quantity-selection prompt to the user."""
@@ -1490,7 +1511,7 @@ def _qty_order_summary_text(package_row, unit_price, quantity):
     )
 
 
-# -- Admin add-on price list renderer -----------------------------------------
+# ── Admin add-on price list renderer ─────────────────────────────────────────
 
 def _render_addon_price_list(call_or_target, addon_type):
     """Render the admin panel for setting per-unit addon prices for all panel types."""
@@ -1538,7 +1559,7 @@ def _render_addon_price_list(call_or_target, addon_type):
     send_or_edit(call_or_target, text, kb)
 
 
-# -- Addon flow helpers --------------------------------------------------------
+# ── Addon flow helpers ────────────────────────────────────────────────────────
 
 def _get_addon_unit_price(cfg_row, addon_type):
     """Resolve effective per-unit price for an addon (volume/time) given the config row.
@@ -1578,7 +1599,7 @@ def _show_addon_invoice(target, uid, addon_type):
 
     # Get type_name via joined query if possible
     from ..db import get_all_types as _gt
-    type_name = "�"
+    type_name = "—"
     if pkg:
         all_types = _gt()
         for t in all_types:
@@ -1742,9 +1763,9 @@ def _panel_connect_with_retry(uid, protocol, host, port, path, username, passwor
     from ..panels.client import PanelClient as _PC
 
     CONN_RETRY_DELAY   = 15    # seconds between retries on connection error
-    FUNC_RETRY_TIMEOUT = 90    # 90s cap for non-connection errors before giving up
+    FUNC_RETRY_TIMEOUT = 120   # 2 min cap for non-connection errors before giving up
     FUNC_RETRY_DELAY   = 10
-    ADMIN_NOTIFY_AFTER = 120   # 2 minutes before alerting admin
+    ADMIN_NOTIFY_AFTER = 300   # 5 minutes before alerting admin
 
     def _is_conn_err(e):
         s = str(e).lower()
@@ -1771,7 +1792,7 @@ def _panel_connect_with_retry(uid, protocol, host, port, path, username, passwor
             _admin_notified = True
             _label = f"<b>{esc(str(panel_name))}</b>" if panel_name else f"<code>{esc(str(host))}:{port}</code>"
             _text  = (
-                "?? <b>??? ?? ????? ???? � ????? ????? ????? ????</b>\n\n"
+                "⚠️ <b>پنل در دسترس نیست — بررسی اتصال ادامه دارد</b>\n\n"
                 f"🖥 پنل: {_label}\n"
                 f"👤 ادمین: <code>{uid}</code>\n\n"
                 "ربات به‌طور خودکار در حال تلاش مجدد است."
@@ -1789,7 +1810,7 @@ def _panel_connect_with_retry(uid, protocol, host, port, path, username, passwor
             if notify_chat_id:
                 try:
                     bot.send_message(notify_chat_id,
-                        "? ??? ??? ?? ? ????? ?? ????? ????. ?? ???? ??? ???? ????? ???????�",
+                        "⏳ پنل بیش از ۵ دقیقه در دسترس نیست. در صورت رفع مشکل ادامه می‌دهیم…",
                         parse_mode="HTML")
                 except Exception:
                     pass
@@ -1826,7 +1847,7 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
     package_row   = get_package(package_id)
     unit_price    = max(0, total_amount // quantity) if quantity > 0 else total_amount
 
-    # -- Panel-based packages --------------------------------------------------
+    # ── Panel-based packages ──────────────────────────────────────────────────
     try:
         config_source = package_row["config_source"] or "manual"
     except (IndexError, KeyError):
@@ -1835,77 +1856,43 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
     if config_source == "panel":
         panel_config_ids = []
         panel_client_names = []
-        pending_panel_ids = []
         failed_count = 0
-        OUTER_RETRIES      = 3    # extra outer attempts after _create_panel_config exhausts its own retries
-        OUTER_RETRY_DELAY  = 30   # seconds between outer attempts
         for i in range(quantity):
             desired_name = (service_names[i] if service_names and i < len(service_names) else None)
-            # Outer retry loop � each call to _create_panel_config already retries
-            # for up to 3 minutes internally; this outer loop tries again from scratch
-            # up to OUTER_RETRIES more times if the panel is still flaky.
-            ok = False
-            result = None
-            pc_id = None
-            c_name = None
-            for _outer_attempt in range(1 + OUTER_RETRIES):
-                ok, result, pc_id, c_name = _create_panel_config(
-                    uid, package_id, payment_id, chat_id=chat_id, desired_name=desired_name
-                )
-                if ok:
-                    break
-                if _outer_attempt < OUTER_RETRIES:
-                    log.warning(
-                        "[PANEL_DELIVERY] outer attempt %d/%d failed for uid=%s pkg=%s, "
-                        "retrying in %ds. err=%s",
-                        _outer_attempt + 1, 1 + OUTER_RETRIES,
-                        uid, package_id, OUTER_RETRY_DELAY, result,
-                    )
-                    time.sleep(OUTER_RETRY_DELAY)
+            ok, result, pc_id, c_name = _create_panel_config(
+                uid, package_id, payment_id, chat_id=chat_id, desired_name=desired_name
+            )
             if ok:
                 panel_config_ids.append(pc_id)
                 panel_client_names.append(c_name or "")
             else:
                 failed_count += 1
-                # -- Panel delivery failed � do NOT refund automatically. --------
-                # Instead, create a pending_order so the admin can fulfill it
-                # manually (same mechanism used when manual stock runs out).
-                # The user is told their service is queued, and the admin is
-                # notified with full technical details.
+                # Refund the unit price to wallet regardless of original payment method
                 try:
-                    p_id = create_pending_order(
-                        uid, package_id, payment_id, unit_price, payment_method, quantity=1
-                    )
-                    log.warning(
-                        "[PANEL_DELIVERY] create_client failed for uid=%s pkg=%s � "
-                        "pending_order #%s created instead of refund. err=%s",
-                        uid, package_id, p_id, result,
-                    )
-                    pending_panel_ids.append(p_id)
-                except Exception as _po_exc:
-                    log.error("[PANEL_DELIVERY] create_pending_order also failed for uid=%s: %s", uid, _po_exc)
-                    p_id = None
-                # Notify user: order is in queue, no money lost
+                    refund_amount = unit_price
+                    update_balance(uid, refund_amount)
+                    log.warning("[PANEL_DELIVERY] refunded %s to uid=%s after create failure", refund_amount, uid)
+                except Exception as _rf_exc:
+                    log.error("[PANEL_DELIVERY] refund failed for uid=%s: %s", uid, _rf_exc)
+                # Send only the simple error message to user (no technical details)
                 try:
                     bot.send_message(
                         chat_id,
-                        "? <b>????? ??? ?? ?? ????? ???? ????</b>\n\n"
-                        "?? ???? ?????? ???? ?? ?????? ?? ???? ????? ?? ??? ???? ????? ???.\n"
-                        "???????? ?? ???? ??? ????? ??? ?? ????? ??????.\n\n"
-                        "?? ???? ??????? ??? ??? ??? ? ??? ???????.",
+                        "⚠️ <b>خطا در تحویل سرویس</b>\n\n"
+                        "متأسفانه در تحویل سرویس مشکلی پیش آمد و مبلغ به کیف پول شما بازگردانده شد.\n"
+                        "لطفاً با پشتیبانی تماس بگیرید.",
                         parse_mode="HTML",
                     )
                 except Exception:
                     pass
-                # Notify admins with full technical details + pending order info
+                # Notify admins with full technical details
                 try:
                     _pid = package_row["panel_id"] if "panel_id" in (package_row.keys() if hasattr(package_row, "keys") else {}) else None
                 except Exception:
                     _pid = None
                 _notify_panel_error(
                     uid=uid, package_row=package_row,
-                    stage="???? ?????? ?? ??? � ????? ???? ????? ??",
-                    detail=f"{result}\n\n?? pending_order #{p_id} ????? ?? � ???? ???? ????? ???? ???.",
+                    stage="ساخت کلاینت در پنل", detail=result,
                     panel_id=_pid,
                 )
         # Deliver each panel config
@@ -1933,10 +1920,9 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
                                           service_name=panel_client_names[_i] if _i < len(panel_client_names) else None)
                 except Exception:
                     pass
-        # pending_panel_ids holds pending_order ids created for failed deliveries
-        return panel_config_ids, pending_panel_ids
+        return panel_config_ids, []
 
-    # -- Manual / stock-based packages (original logic) ------------------------
+    # ── Manual / stock-based packages (original logic) ────────────────────────
     purchase_ids  = []
     pending_ids   = []
 
@@ -1944,7 +1930,7 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
         # Reserve one config at a time
         cfg_id = reserve_first_config(package_id)
         if not cfg_id:
-            # No stock � create a pending order for this slot
+            # No stock — create a pending order for this slot
             p_id = create_pending_order(uid, package_id, payment_id, unit_price, payment_method, quantity=1)
             pending_ids.append(p_id)
             continue
@@ -1975,19 +1961,19 @@ def _build_config_from_template(cpkg, client_uuid, client_name):
 
     Only two dynamic parts are replaced:
       1. The UUID in the URL body (regex, first occurrence).
-      2. The #fragment � if cpkg['sample_client_name'] is non-empty and is found
+      2. The #fragment — if cpkg['sample_client_name'] is non-empty and is found
          inside the decoded fragment, ONLY that substring is replaced with
          client_name, preserving any prefix / suffix (e.g. ⚕️TUN_-NAME-main).
          If sample_client_name is empty or not found, the entire fragment is
          replaced with client_name (safe backward-compat fallback).
 
-    Everything else (domain, port, path, host header, query params order, �)
-    is taken verbatim from the template � the panel IP is never used.
+    Everything else (domain, port, path, host header, query params order, …)
+    is taken verbatim from the template — the panel IP is never used.
     """
     import re as _re
     import urllib.parse as _up
 
-    # sqlite3.Row doesn't support .get() � normalise to dict
+    # sqlite3.Row doesn't support .get() — normalise to dict
     if not isinstance(cpkg, dict):
         cpkg = dict(cpkg)
 
@@ -2000,7 +1986,7 @@ def _build_config_from_template(cpkg, client_uuid, client_name):
         _re.IGNORECASE
     )
 
-    # Step 1: replace UUID (only first occurrence � the one right after the scheme)
+    # Step 1: replace UUID (only first occurrence — the one right after the scheme)
     config = _UUID_RE.sub(client_uuid, tmpl, count=1)
 
     # Step 2: replace the fragment while preserving template prefix/suffix
@@ -2010,13 +1996,13 @@ def _build_config_from_template(cpkg, client_uuid, client_name):
 
         sample_name = (cpkg.get("sample_client_name") or "").strip()
         if sample_name and sample_name in frag_decoded:
-            # Replace ONLY the sample name portion � prefix/suffix stays intact
+            # Replace ONLY the sample name portion — prefix/suffix stays intact
             new_frag = frag_decoded.replace(sample_name, client_name, 1)
         else:
             # Fallback: replace entire fragment
             new_frag = client_name
 
-        # Re-encode so special chars (emojis, /, �) are preserved correctly
+        # Re-encode so special chars (emojis, /, …) are preserved correctly
         new_frag_encoded = _up.quote(new_frag, safe="")
         config = base_part + "#" + new_frag_encoded
     else:
@@ -2039,7 +2025,7 @@ def _build_sub_from_template(cpkg, sub_id):
       sub_id   : 3721ec6100d94a4b
       result   : http://stareh.parhiiz.top:2096/sub/3721ec6100d94a4b
     """
-    # sqlite3.Row doesn't support .get() � normalise to dict
+    # sqlite3.Row doesn't support .get() — normalise to dict
     if not isinstance(cpkg, dict):
         cpkg = dict(cpkg)
 
@@ -2051,7 +2037,7 @@ def _build_sub_from_template(cpkg, sub_id):
     if "/" in tmpl:
         base = tmpl.rsplit("/", 1)[0]
         return f"{base}/{sub_id}"
-    # Degenerate case � just append
+    # Degenerate case — just append
     return f"{tmpl}/{sub_id}"
 
 
@@ -2076,7 +2062,7 @@ def _rebuild_panel_configs_for_cpkg(cpkg_id):
         log.warning("[TEMPLATE_REBUILD] cpkg %s not found", cpkg_id)
         return 0
 
-    # sqlite3.Row doesn't support .get() � normalise to dict
+    # sqlite3.Row doesn't support .get() — normalise to dict
     if not isinstance(cpkg, dict):
         cpkg = dict(cpkg)
 
@@ -2133,7 +2119,7 @@ def _build_config_from_inbound(inbound, client_uuid, client_name, panel, real_po
         network  = (ss.get("network") or "tcp").lower()
         security = (ss.get("security") or "none").lower()
 
-        # -- ExternalProxy (CDN / FluxTunnel / Cloudflare, etc.) --------------
+        # ── ExternalProxy (CDN / FluxTunnel / Cloudflare, etc.) ──────────────
         # 3x-ui stores externalProxy as a JSON string or list in the inbound.
         # If present, the first entry's dest+port override the connection address/port.
         ext_proxy_addr = None
@@ -2272,11 +2258,11 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
     if not panel:
         return False, "پنل مرتبط یافت نشد", None, None
 
-    # Load client package template � first try explicit link, then auto-detect by panel+inbound
+    # Load client package template — first try explicit link, then auto-detect by panel+inbound
     cpkg = get_panel_client_package(cpkg_id) if cpkg_id else None
     if not cpkg:
         cpkg = get_panel_client_package_by_inbound(panel_id, panel_inbound)
-    # sqlite3.Row doesn't support .get() � normalise to dict
+    # sqlite3.Row doesn't support .get() — normalise to dict
     if cpkg is not None and not isinstance(cpkg, dict):
         cpkg = dict(cpkg)
 
@@ -2290,7 +2276,7 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
         sub_url_base=panel["sub_url_base"] if panel["sub_url_base"] else "",
     )
 
-    # -- Connection-error detector ---------------------------------------------
+    # ── Connection-error detector ─────────────────────────────────────────────
     def _is_conn_err(e):
         s = str(e).lower()
         return any(x in s for x in [
@@ -2301,15 +2287,15 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
             "econnreset", "broken pipe", "reset by peer",
         ])
 
-    CONN_RETRY_DELAY   = 15    # seconds between retries when server is down
-    FUNC_RETRY_TIMEOUT = 90    # 90s timeout for non-connection errors
+    CONN_RETRY_DELAY   = 30    # seconds between retries when server is down
+    FUNC_RETRY_TIMEOUT = 180   # 3 min timeout for non-connection errors
     FUNC_RETRY_DELAY   = 15
-    MAX_WAIT           = 1800  # 30-minute absolute hard cap
+    MAX_WAIT           = 28800 # 8-hour absolute hard cap
 
     _t_start           = time.time()
     _waiting_notified  = False
     _last_periodic     = 0.0
-    PERIODIC_INTERVAL  = 120   # notify user every 2 minutes while waiting
+    PERIODIC_INTERVAL  = 300   # notify user every 5 minutes while waiting
 
     def _maybe_notify_waiting():
         nonlocal _waiting_notified, _last_periodic
@@ -2345,12 +2331,12 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
             except Exception:
                 pass
 
-    # -- Step 1: login ---------------------------------------------------------
+    # ── Step 1: login ─────────────────────────────────────────────────────────
     login_err = None
     _t0 = time.time()
     while True:
         if time.time() - _t_start > MAX_WAIT:
-            login_err = "?????? ???? ?????? (30 ?????) ???? ??"
+            login_err = "حداکثر زمان انتظار (8 ساعت) تمام شد"
             break
         ok, login_err = client.login()
         if ok:
@@ -2371,7 +2357,7 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
     if login_err is not None:
         return False, f"اتصال به پنل ناموفق: {login_err}", None, None
 
-    # -- Step 2: fetch inbound -------------------------------------------------
+    # ── Step 2: fetch inbound ─────────────────────────────────────────────────
     inbound_remark = ""
     real_port    = 0
     inbound = None
@@ -2384,7 +2370,7 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
         if inbound:
             break
         elapsed = time.time() - _t0
-        # find_inbound doesn't return an error string � re-login to check connectivity
+        # find_inbound doesn't return an error string — re-login to check connectivity
         _ok_chk, _chk_err = client.login()
         if not _ok_chk and _is_conn_err(_chk_err):
             _maybe_notify_waiting()
@@ -2422,7 +2408,7 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
         expire_ms  = 0
         expire_str = None
 
-    # -- Step 3: create client -------------------------------------------------
+    # ── Step 3: create client ─────────────────────────────────────────────────
     result = None
     create_err = None
     _t0 = time.time()
@@ -2430,7 +2416,7 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
     _MAX_DUP_RETRIES = 3      # after this many suffix attempts, fall back to full random
     while True:
         if time.time() - _t_start > MAX_WAIT:
-            create_err = "?????? ???? ?????? (30 ?????) ???? ??"
+            create_err = "حداکثر زمان انتظار (8 ساعت) تمام شد"
             break
         ok, result = client.create_client(inbound_id, client_name, traffic_bytes, expire_ms)
         if ok:
@@ -2465,29 +2451,29 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
         return False, f"خطا در ساخت کلاینت: {create_err}", None, None
 
     client_uuid, sub_id = result
-    # Default sub URL from panel � may be overridden by template below
+    # Default sub URL from panel — may be overridden by template below
     sub_url = client.get_sub_url(client_uuid)
 
     config_text = None
 
-    # -- Step 4a: Build config from client package template (preferred path) --
+    # ── Step 4a: Build config from client package template (preferred path) ──
     # Uses _build_config_from_template which:
-    #   � replaces ONLY the UUID in the URL body
-    #   � in the #fragment, replaces only cpkg['sample_client_name'] with
-    #     client_name � preserving emoji prefix / -main suffix etc.
-    #   � keeps domain, port, host header, path, query params from template
+    #   • replaces ONLY the UUID in the URL body
+    #   • in the #fragment, replaces only cpkg['sample_client_name'] with
+    #     client_name — preserving emoji prefix / -main suffix etc.
+    #   • keeps domain, port, host header, path, query params from template
     if cpkg and cpkg["sample_config"]:
         config_text = _build_config_from_template(cpkg, client_uuid, client_name)
         log.info("_create_panel_config: built config from template for uid=%s", uid)
 
-    # -- Step 4b: Build sub URL from template (always, when available) --------
-    # NOT limited to sub_only/both � the sub URL is stored in DB regardless of
+    # ── Step 4b: Build sub URL from template (always, when available) ────────
+    # NOT limited to sub_only/both — the sub URL is stored in DB regardless of
     # delivery_mode and must be correct for future reference / re-renders.
     # The panel's path prefix (e.g. /emadhb/) is NEVER injected here.
     if cpkg and cpkg["sample_sub_url"]:
         sub_url = _build_sub_from_template(cpkg, sub_id) or sub_url
 
-    # -- Step 4c: Fetch from panel API (fallback when no config template) -----
+    # ── Step 4c: Fetch from panel API (fallback when no config template) ─────
     if not config_text and delivery_mode in ("config_only", "both"):
         fetch_ok, fetch_result = client.fetch_client_config(sub_id)
         if fetch_ok and fetch_result:
@@ -2500,7 +2486,7 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
         else:
             log.warning("_create_panel_config: sub fetch failed (%s), building from streamSettings", fetch_result)
 
-    # -- Step 4d: Build from streamSettings (last fallback) -------------------
+    # ── Step 4d: Build from streamSettings (last fallback) ───────────────────
     if not config_text:
         config_text = _build_config_from_inbound(
             inbound=inbound,
@@ -2540,7 +2526,7 @@ def _deliver_panel_config_to_user(chat_id, panel_config_id, package_row):
         log.error("[PANEL_DELIVERY] panel_config %s not found in DB", panel_config_id)
         _notify_panel_error(
             uid=chat_id, package_row=package_row,
-            stage="????? ?????? � ????? ?? ??????? ???? ???",
+            stage="تحویل کانفیگ — رکورد در دیتابیس یافت نشد",
             detail=f"panel_config_id={panel_config_id}",
             panel_config_id=panel_config_id,
         )
@@ -2554,22 +2540,22 @@ def _deliver_panel_config_to_user(chat_id, panel_config_id, package_row):
             pass
         return
 
-    # -- Pull raw values first (needed for emergency fallback) -----------------
+    # ── Pull raw values first (needed for emergency fallback) ─────────────────
     raw_config_text = pc["client_config_text"] or ""
     raw_sub_url     = pc["client_sub_url"] or ""
 
     try:
         _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc)
     except Exception as _inner_exc:
-        # Something went wrong in the rendering/QR path � send plain-text fallback
+        # Something went wrong in the rendering/QR path — send plain-text fallback
         log.error("[PANEL_DELIVERY] inner delivery failed for pc=%s: %s", panel_config_id, _inner_exc, exc_info=True)
         _notify_panel_error(
             uid=chat_id, package_row=package_row,
-            stage="????? ?????? � ???? ????? ???????",
+            stage="تحویل کانفیگ — خطای داخلی رندرینگ",
             detail=str(_inner_exc),
             panel_config_id=panel_config_id,
         )
-        # Emergency plain-text fallback � send the config to user without formatting
+        # Emergency plain-text fallback — send the config to user without formatting
         try:
             fallback_lines = ["🎉 <b>سرویس شما آماده است!</b>\n"]
             if raw_config_text.strip():
@@ -2586,7 +2572,7 @@ def _deliver_panel_config_to_user(chat_id, panel_config_id, package_row):
 
 
 def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
-    """Inner delivery � builds message with premium emoji + QR and sends it."""
+    """Inner delivery — builds message with premium emoji + QR and sends it."""
     from ..helpers import fmt_vol, fmt_dur
     import io as _io
     import qrcode as _qrcode
@@ -2666,7 +2652,7 @@ def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
         _notify_panel_error(
             uid=chat_id,
             package_row=package_row,
-            stage="????? ?????? � ????? ???? ???",
+            stage="تحویل کانفیگ — محتوا یافت نشد",
             detail=f"{reason} | config_id={panel_config_id} | mode={delivery_mode}",
             panel_config_id=panel_config_id,
         )
@@ -2790,7 +2776,7 @@ def _send_bulk_delivery_result(chat_id, uid, package_row, purchase_ids, pending_
                 pass
 
 
-# -- Voucher helpers ------------------------------------------------------------
+# ── Voucher helpers ────────────────────────────────────────────────────────────
 import random
 
 
@@ -2894,7 +2880,7 @@ def _render_voucher_batch_detail(call, uid, batch_id):
         f"🎁 نوع هدیه: {gift_fa}\n"
         f"📊 کل: {total_count} | استفاده شده: {used_count} | مانده: {remain}\n"
         f"📅 ایجاد: {batch['created_at'][:16]}\n\n"
-        "---------------------\n"
+        "─────────────────────\n"
     )
     code_lines = []
     for vc in codes:
@@ -2906,7 +2892,7 @@ def _render_voucher_batch_detail(call, uid, batch_id):
             )
         else:
             code_lines.append(f"❌ <code>{vc['code']}</code>")
-    # Telegram message limit 4096 chars � split if needed
+    # Telegram message limit 4096 chars — split if needed
     MAX_MSG = 3800
     full_codes_text = "\n".join(code_lines)
     combined = text + full_codes_text
@@ -3053,7 +3039,7 @@ def _render_pending_receipts_page(call, uid, page):
     header = (
         f"📋 <b>رسیدهای بررسی نشده</b>\n"
         f"صفحه {page + 1} از {total_pages} | تعداد کل: {total}\n"
-        "-----------------------------\n"
+        "─────────────────────────────\n"
     )
     lines = []
     kb = types.InlineKeyboardMarkup(row_width=3)
@@ -3145,7 +3131,7 @@ def _render_discount_scope_selection(call, uid, edit_code_id=None):
         for item in items:
             check = "✅" if item["id"] in selected else "⬜"
             kb.add(types.InlineKeyboardButton(
-                f"{check} {item['type_name']} � {item['name']}",
+                f"{check} {item['type_name']} — {item['name']}",
                 callback_data=f"{toggle_cb}:{item['id']}"
             ))
     sel_count = len(selected)
@@ -3162,7 +3148,7 @@ def _render_discount_code_detail(call, uid, code_id):
         bot.answer_callback_query(call.id, "کد تخفیف پیدا نشد.", show_alert=True)
         return
     disc_type_fa = "درصد" if row["discount_type"] == "pct" else "مبلغ ثابت"
-    disc_val_fa = f"{row['discount_value']}%" if row["discount_type"] == "pct" else f"{fmt_price(row['discount_value'])} ?????"
+    disc_val_fa = f"{row['discount_value']}٪" if row["discount_type"] == "pct" else f"{fmt_price(row['discount_value'])} تومان"
     max_total = str(row["max_uses_total"]) if row["max_uses_total"] > 0 else "نامحدود"
     max_per = str(row["max_uses_per_user"]) if row["max_uses_per_user"] > 0 else "نامحدود"
     actual_uses = row["actual_uses"]
@@ -3190,7 +3176,7 @@ def _render_discount_code_detail(call, uid, code_id):
                 scope_fa += f" ({', '.join(names)})"
     text = (
         f"🎟 <b>کد تخفیف: {esc(row['code'])}</b>\n\n"
-        f"?? ??? ?????: {disc_type_fa} � {disc_val_fa}\n"
+        f"💰 نوع تخفیف: {disc_type_fa} — {disc_val_fa}\n"
         f"📊 استفاده شده: {actual_uses} / {max_total}\n"
         f"👤 هر کاربر: {max_per} بار\n"
         f"🎯 دسترسی: {audience_fa}\n"
@@ -3220,7 +3206,7 @@ def _render_discount_code_detail(call, uid, code_id):
 
 
 
-# -- Module-level helper: build package edit panel text + keyboard ------------
+# ── Module-level helper: build package edit panel text + keyboard ────────────
 def _pkg_edit_text_kb(package_row):
     _BR_LABELS = {"all": "همه", "agents": "فقط نمایندگان", "public": "فقط کاربران عادی", "nobody": "هیچ‌کس (فقط هدیه)"}
     _DM_LABELS = {"config_only": "فقط کانفیگ", "sub_only": "فقط ساب", "both": "کانفیگ + ساب"}
@@ -3228,7 +3214,7 @@ def _pkg_edit_text_kb(package_row):
     show_name_val = package_row["show_name"] if "show_name" in package_row.keys() else 1
     show_name_lbl = "👁 نمایش نام به کاربر: ✅ بله" if show_name_val else "👁 نمایش نام به کاربر: ❌ خیر"
     pkg_active    = package_row["active"] if "active" in package_row.keys() else 1
-    pkg_status_label = "? ???? � ???? ???? ???????" if pkg_active else "? ??????? � ???? ???? ????"
+    pkg_status_label = "✅ فعال — کلیک برای غیرفعال" if pkg_active else "❌ غیرفعال — کلیک برای فعال"
     buyer_role    = package_row["buyer_role"] if "buyer_role" in package_row.keys() else "all"
     br_label      = _BR_LABELS.get(buyer_role, "همه")
     try:
@@ -3251,9 +3237,9 @@ def _pkg_edit_text_kb(package_row):
     kb.add(types.InlineKeyboardButton("📌 جایگاه نمایش",  callback_data=f"admin:pkg:ef:position:{package_id}"))
     kb.add(types.InlineKeyboardButton("👥 محدودیت کاربر", callback_data=f"admin:pkg:ef:maxusers:{package_id}"))
     kb.add(types.InlineKeyboardButton(show_name_lbl,      callback_data=f"admin:pkg:toggle_sn:{package_id}"))
-    kb.add(types.InlineKeyboardButton(f"?? ????????: {br_label} � ?????", callback_data=f"admin:pkg:set_br:{package_id}"))
+    kb.add(types.InlineKeyboardButton(f"🔑 خریداران: {br_label} — تغییر", callback_data=f"admin:pkg:set_br:{package_id}"))
     src_lbl = "ثبت دستی" if config_source == "manual" else f"پنل #{panel_id} اینباند {panel_port}"
-    kb.add(types.InlineKeyboardButton(f"?? ???? ??????: {src_lbl} � ?????", callback_data=f"admin:pkg:src:{package_id}"))
+    kb.add(types.InlineKeyboardButton(f"🔌 منبع کانفیگ: {src_lbl} — تغییر", callback_data=f"admin:pkg:src:{package_id}"))
     kb.add(types.InlineKeyboardButton(pkg_status_label, callback_data=f"admin:pkg:toggleactive:{package_id}"))
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:types", icon_custom_emoji_id="5253997076169115797"))
     cur_pos      = package_row["position"] if "position" in package_row.keys() else 0
@@ -3281,7 +3267,7 @@ def _pkg_edit_text_kb(package_row):
     return text, kb
 
 
-# -- Per-admin search cache for user config list --------------------------------
+# ── Per-admin search cache for user config list ────────────────────────────────
 _admin_usr_cfg_search: dict = {}
 
 
@@ -3335,7 +3321,7 @@ def _show_admin_user_configs(call, admin_uid, target_id, page=0, search=None):
     kb.add(types.InlineKeyboardButton("➕ افزودن کانفیگ", callback_data=f"adm:usr:acfg:{target_id}"))
 
     if active_search:
-        q_display = active_search[:18] + ("�" if len(active_search) > 18 else "")
+        q_display = active_search[:18] + ("…" if len(active_search) > 18 else "")
         kb.row(
             types.InlineKeyboardButton(f"🔍 {q_display}", callback_data=f"adm:usr:cfgsrch:{target_id}"),
             types.InlineKeyboardButton("❌ پاک کردن", callback_data=f"adm:usr:cfgclr:{target_id}"),
@@ -3355,7 +3341,7 @@ def _show_admin_user_configs(call, admin_uid, target_id, page=0, search=None):
         if pc["is_expired"]:
             marker = " ⌛"
         elif int(pc["is_disabled"] or 0):
-            marker = " ⌛"
+            marker = " ⛔"
         else:
             marker = ""
         name = pc["client_name"] or pc["package_name"] or f"#{pc['id']}"
@@ -3404,7 +3390,7 @@ def on_callback(call):
             if check_channel_membership(uid):
                 bot.answer_callback_query(call.id, "✅ عضویت تأیید شد!")
                 # If this user came via a referral link, trigger their referrer's start reward
-                # (or show captcha if captcha is enabled � in that case, skip menu).
+                # (or show captcha if captcha is enabled — in that case, skip menu).
                 has_referral_captcha = False
                 try:
                     from ..ui.notifications import (
@@ -3416,7 +3402,7 @@ def on_callback(call):
                 except Exception:
                     pass
                 if has_referral_captcha:
-                    # Captcha prompt was just sent � do NOT show menu yet.
+                    # Captcha prompt was just sent — do NOT show menu yet.
                     return
                 # Phone gate check
                 from ..handlers.start import _phone_required_for_user, _send_phone_request
@@ -3453,7 +3439,7 @@ def on_callback(call):
     try:
         ensure_user(call.from_user)
 
-        # -- Bot status gate (off / update) -----------------------------------
+        # ── Bot status gate (off / update) ───────────────────────────────────
         # Applies to ALL callbacks from non-admins, including old inline menus.
         # Admin callbacks pass through unconditionally.
         if not is_admin(uid):
@@ -3473,7 +3459,7 @@ def on_callback(call):
                 )
                 return
 
-        # -- Stale callback guard ---------------------------------------------
+        # ── Stale callback guard ─────────────────────────────────────────────
         # If the inline button is from a message older than 48 h and it's a
         # payment/purchase action, warn the user and abort to avoid double-pay.
         _STALE_SENSITIVE = (
@@ -3499,7 +3485,7 @@ def on_callback(call):
             channel_lock_message(call)
             return
 
-        # Phone gate � enforce for all callbacks except phone-collection itself
+        # Phone gate — enforce for all callbacks except phone-collection itself
         if not is_admin(uid) and data not in ("check_channel",):
             from ..handlers.start import _phone_required_for_user, _send_phone_request
             if _phone_required_for_user(uid):
@@ -3507,7 +3493,7 @@ def on_callback(call):
                 _send_phone_request(call.message.chat.id, uid)
                 return
 
-        # -- Layer 9: License enforcement in callback dispatcher ---------------
+        # ── Layer 9: License enforcement in callback dispatcher ───────────────
         # Allow license-related callbacks and admin panel always
         _LICENSE_PASSTHROUGH = {
             "nav:main", "admin:panel", "license:activate", "license:status",
@@ -3535,12 +3521,12 @@ def on_callback(call):
                     import datetime as _dt
                     _exp = _dt.datetime.fromtimestamp(_until, tz=_dt.timezone.utc).astimezone(
                         _dt.timezone(_dt.timedelta(hours=3, minutes=30)))
-                    _dur_txt = f"?? {_exp.strftime('%Y/%m/%d � %H:%M')} ?????????? ?? ???? ??????? ????."
+                    _dur_txt = f"تا {_exp.strftime('%Y/%m/%d — %H:%M')} نمی‌توانید از ربات استفاده کنید."
                 else:
                     _dur_txt = "برای همیشه نمی‌توانید از ربات استفاده کنید."
                 bot.answer_callback_query(
                     call.id,
-                    f"?? ?????? ????? ??? � {_dur_txt}",
+                    f"🚫 دسترسی محدود شده — {_dur_txt}",
                     show_alert=True
                 )
                 return
@@ -3600,11 +3586,11 @@ def _swapwallet_error_inline(call, err_msg):
             pass
 
 
-# -- TetraPay auto-verify thread -----------------------------------------------
+# ── TetraPay auto-verify thread ───────────────────────────────────────────────
 def _tetrapay_auto_verify(payment_id, authority, uid, chat_id, message_id, kind,
                           package_id=None):
     """Background thread: polls TetraPay every 15s for up to 60 minutes."""
-    max_tries = 240  # 240 � 15s = 60 minutes
+    max_tries = 240  # 240 × 15s = 60 minutes
     for attempt in range(max_tries):
         time.sleep(15)
         payment = get_payment(payment_id)
@@ -3614,7 +3600,7 @@ def _tetrapay_auto_verify(payment_id, authority, uid, chat_id, message_id, kind,
         print(f"[TetraPay auto-verify] attempt={attempt+1} payment={payment_id} ok={success} result={result!r}")
         if not success:
             continue
-        # Payment confirmed � process it
+        # Payment confirmed — process it
         try:
             if kind == "wallet_charge":
                 if not complete_payment(payment_id):  # atomic: only one thread wins
@@ -3727,7 +3713,7 @@ def _tetrapay_auto_verify(payment_id, authority, uid, chat_id, message_id, kind,
             print("TETRAPAY_AUTO_VERIFY_ERROR:", e)
         return  # Processed (success or error)
 
-    # Timeout � not verified after 60 minutes
+    # Timeout — not verified after 60 minutes
     payment = get_payment(payment_id)
     if payment and payment["status"] == "pending":
         state_clear(uid)
@@ -3766,11 +3752,11 @@ def _start_tetrapay_auto_verify(payment_id, authority, uid, chat_id, message_id,
     t.start()
 
 
-# -- TronPays Rial auto-verify thread ------------------------------------------
+# ── TronPays Rial auto-verify thread ──────────────────────────────────────────
 def _tronpays_rial_auto_verify(payment_id, invoice_id, uid, chat_id, message_id, kind,
                                package_id=None):
     """Background thread: polls TronPays every 15s for up to 60 minutes."""
-    max_tries = 240  # 240 � 15s = 60 minutes
+    max_tries = 240  # 240 × 15s = 60 minutes
     for attempt in range(max_tries):
         time.sleep(15)
         payment = get_payment(payment_id)
@@ -3919,10 +3905,10 @@ def _start_tronpays_rial_auto_verify(payment_id, invoice_id, uid, chat_id, messa
     t.start()
 
 
-# -- Plisio auto-verify thread -------------------------------------------------
+# ── Plisio auto-verify thread ─────────────────────────────────────────────────
 def _plisio_auto_verify(payment_id, txn_id, uid, chat_id, message_id, kind, package_id=None):
     """Background thread: polls Plisio every 15s for up to 15 minutes."""
-    max_tries = 60  # 60 � 15s = 15 minutes
+    max_tries = 60  # 60 × 15s = 15 minutes
     for attempt in range(max_tries):
         time.sleep(15)
         payment = get_payment(payment_id)
@@ -3932,7 +3918,7 @@ def _plisio_auto_verify(payment_id, txn_id, uid, chat_id, message_id, kind, pack
         print(f"[Plisio auto-verify] attempt={attempt+1} payment={payment_id} ok={ok} status={status!r}")
         if not ok or not is_plisio_paid(status):
             if ok and is_plisio_failed(status):
-                # Invoice expired/failed � stop polling
+                # Invoice expired/failed — stop polling
                 break
             continue
         try:
@@ -4035,7 +4021,7 @@ def _plisio_auto_verify(payment_id, txn_id, uid, chat_id, message_id, kind, pack
             print("PLISIO_AUTO_VERIFY_ERROR:", e)
         return
 
-    # Timeout � show manual verify button
+    # Timeout — show manual verify button
     payment = get_payment(payment_id)
     if payment and payment["status"] == "pending":
         state_clear(uid)
@@ -4074,10 +4060,10 @@ def _start_plisio_auto_verify(payment_id, txn_id, uid, chat_id, message_id,
     t.start()
 
 
-# -- NowPayments auto-verify thread --------------------------------------------
+# ── NowPayments auto-verify thread ────────────────────────────────────────────
 def _nowpayments_auto_verify(payment_id, invoice_id, uid, chat_id, message_id, kind, package_id=None):
     """Background thread: polls NowPayments every 15s for up to 15 minutes."""
-    max_tries = 60  # 60 � 15s = 15 minutes
+    max_tries = 60  # 60 × 15s = 15 minutes
     for attempt in range(max_tries):
         time.sleep(15)
         payment = get_payment(payment_id)
@@ -4228,7 +4214,7 @@ def _start_nowpayments_auto_verify(payment_id, invoice_id, uid, chat_id, message
 
 
 def _dispatch_callback(call, uid, data):
-    # -- License callbacks ----------------------------------------------------
+    # ── License callbacks ────────────────────────────────────────────────────
     if data.startswith("license:"):
         from ..license_manager import (
             is_limited_mode, get_license_status_text, check_license, _invalidate_cache,
@@ -4367,11 +4353,11 @@ def _dispatch_callback(call, uid, data):
                 pkg_id = row["package_id"]
                 if not pkg_id:
                     failed_config += 1
-                    continue  # leave unclaimed � admin must fix package config
+                    continue  # leave unclaimed — admin must fix package config
                 available = get_available_configs_for_package(int(pkg_id))
                 if not available:
                     failed_config += 1
-                    continue  # leave unclaimed � no stock; user can retry later
+                    continue  # leave unclaimed — no stock; user can retry later
                 cfg = available[0]
                 try:
                     purchase_id = assign_config_to_user(
@@ -4440,7 +4426,7 @@ def _dispatch_callback(call, uid, data):
         bot.send_photo(call.message.chat.id, banner_photo, caption=caption, parse_mode="HTML")
         return
 
-    # -- Discount code flow ---------------------------------------------------
+    # ── Discount code flow ───────────────────────────────────────────────────
     if data == "disc:yes":
         sn = state_name(uid)
         sd = state_data(uid)
@@ -4491,7 +4477,7 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id, "درخواستی برای ادامه پیدا نشد.", show_alert=True)
         return
 
-    # -- Agency request --------------------------------------------------------
+    # ── Agency request ────────────────────────────────────────────────────────
     if data == "agency:request":
         user = get_user(uid)
         if user and user["is_agent"]:
@@ -4726,7 +4712,7 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data == "my_configs:search":
-        # Enter search mode � ask user to type a query
+        # Enter search mode — ask user to type a query
         state_set(uid, "my_cfgs_search")
         bot.answer_callback_query(call.id)
         kb = types.InlineKeyboardMarkup()
@@ -4734,9 +4720,9 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call,
             "🔍 <b>جست‌وجو در کانفیگ‌ها</b>\n\n"
             "متن مورد نظر را ارسال کنید:\n"
-            "� ??? ??????\n"
-            "� ??? ?????? (config link)\n"
-            "� ???? ???????????\n\n"
+            "• نام کانفیگ\n"
+            "• متن کانفیگ (config link)\n"
+            "• لینک ساب‌اسکرایب\n\n"
             "<i>برای لغو دکمه لغو را بزنید.</i>",
             kb)
         return
@@ -4757,7 +4743,7 @@ def _dispatch_callback(call, uid, data):
         deliver_purchase_message(call.message.chat.id, purchase_id)
         return
 
-    # -- Renewal flow ----------------------------------------------------------
+    # ── Renewal flow ──────────────────────────────────────────────────────────
     if data.startswith("renew:") and not data.startswith("renew:p:") and not data.startswith("renew:confirm:"):
         if setting_get("shop_open", "1") == "0" and not is_admin(uid):
             bot.answer_callback_query(call.id, "⛔ فروشگاه موقتاً تعطیل است. تمدید امکان‌پذیر نیست.", show_alert=True)
@@ -4816,7 +4802,7 @@ def _dispatch_callback(call, uid, data):
         return
 
 
-    # -- Renewal payment handlers ----------------------------------------------
+    # ── Renewal payment handlers ──────────────────────────────────────────────
     if data.startswith("rpay:wallet:"):
         parts = data.split(":")
         purchase_id = int(parts[2])
@@ -5043,11 +5029,11 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data.startswith("rpay:tetrapay:verify:"):
-        # NOTE: this block is now unreachable (handled above) � kept as safety guard
+        # NOTE: this block is now unreachable (handled above) — kept as safety guard
         bot.answer_callback_query(call.id)
         return
 
-    # -- TronPays Rial: renewal ------------------------------------------------
+    # ── TronPays Rial: renewal ────────────────────────────────────────────────
     if data.startswith("rpay:tronpays_rial:verify:"):
         payment_id = int(data.split(":")[3])
         payment = get_payment(payment_id)
@@ -5146,11 +5132,11 @@ def _dispatch_callback(call, uid, data):
         state_set(uid, "await_renewal_tronpays_rial_verify", payment_id=payment_id,
                   invoice_id=invoice_id, purchase_id=purchase_id)
         text = (
-            "?? <b>?????? ????? (TronPays) � ?????</b>\n\n"
+            "💳 <b>پرداخت ریالی (TronPays) — تمدید</b>\n\n"
             f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n\n"
             "از لینک زیر پرداخت را انجام دهید.\n\n"
             "⏳ <b>تا یک ساعت</b> پرداخت به صورت خودکار بررسی می‌شود.\n"
-            "?? ??? ??? ???? ???? �????? ??????� ?? ?????."
+            "در غیر این صورت دکمه «بررسی پرداخت» را بزنید."
         )
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("💳 پرداخت از درگاه TronPays", url=invoice_url))
@@ -5163,7 +5149,7 @@ def _dispatch_callback(call, uid, data):
             "renewal", package_id=package_id)
         return
 
-    # -- Plisio: renewal -------------------------------------------------------
+    # ── Plisio: renewal ───────────────────────────────────────────────────────
     if data.startswith("rpay:plisio:verify:"):
         payment_id = int(data.split(":")[3])
         payment = get_payment(payment_id)
@@ -5254,12 +5240,12 @@ def _dispatch_callback(call, uid, data):
                   purchase_id=purchase_id)
         short_id_rp = str(payment_id)
         text_rp = (
-            "?? <b>?????? ?????? Plisio � ?????</b>\n\n"
+            "💎 <b>پرداخت کریپتو Plisio — تمدید</b>\n\n"
             f"🛒 کد پیگیری: <code>{short_id_rp}</code>\n"
             f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n"
             f"💱 معادل: <b>{amount_usdt_rp:.4f} USDT</b>\n\n"
             "❌ این فاکتور <b>۱ ساعت</b> اعتبار دارد\n"
-            "?? ?? ?????? ???? �? ????? ??????� ?? ?????."
+            "پس از واریز، دکمه «✅ بررسی پرداخت» را بزنید."
         )
         kb_rp = types.InlineKeyboardMarkup()
         kb_rp.add(types.InlineKeyboardButton("💎 پرداخت در Plisio", url=inv_url_rp))
@@ -5273,7 +5259,7 @@ def _dispatch_callback(call, uid, data):
             "renewal", package_id=package_id)
         return
 
-    # -- NowPayments: renewal --------------------------------------------------
+    # ── NowPayments: renewal ──────────────────────────────────────────────────
     if data.startswith("rpay:nowpayments:verify:"):
         payment_id = int(data.split(":")[3])
         payment = get_payment(payment_id)
@@ -5338,16 +5324,14 @@ def _dispatch_callback(call, uid, data):
         if not _check_invoice_valid(uid):
             _show_invoice_expired(call)
             return
-        # rpay:nowpayments:{purchase_id}:{pkg_id} or rpay:nowpayments:{purchase_id}:{pkg_id}:cur:{cur}
         parts = data.split(":")
         purchase_id = int(parts[2])
         package_id  = int(parts[3])
-        _chosen_cur_rnp = parts[5] if len(parts) >= 6 and parts[4] == "cur" else None
         item = get_purchase(purchase_id)
         package_row = get_package(package_id)
         if not item or item["user_id"] != uid:
             try:
-                bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
             except Exception:
                 pass
             return
@@ -5362,35 +5346,12 @@ def _dispatch_callback(call, uid, data):
             _rng = get_gateway_range_text("nowpayments")
             try:
                 bot.answer_callback_query(call.id,
-                    f"مبلغ {fmt_price(price)} خارج از محدوده مجاز درگاه NowPayments است.\n"
+                    f"⛔️ مبلغ {fmt_price(price)} تومان برای درگاه NowPayments مجاز نیست.\n"
                     f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
                     show_alert=True)
             except Exception:
                 pass
             return
-        _np_enabled_rnp = get_nowpayments_enabled_currencies()
-        if not _chosen_cur_rnp and len(_np_enabled_rnp) > 1:
-            _NP_CUR_LABELS = {
-                "usdttrc20": "💵 USDT (TRC20 - ترون)", "usdterc20": "💵 USDT (ERC20 - اتریوم)",
-                "usdtbsc": "💵 USDT (BEP20 - BSC)", "usdtton": "💵 USDT (TON)",
-                "btc": "₿ Bitcoin (BTC)", "eth": "⟠ Ethereum (ETH)",
-                "trx": "🔷 TRX (ترون)", "ton": "💎 TON", "ltc": "🔵 Litecoin (LTC)", "bnbbsc": "🟡 BNB (BSC)",
-            }
-            kb_cur_rnp = types.InlineKeyboardMarkup(row_width=1)
-            for _c in _np_enabled_rnp:
-                kb_cur_rnp.add(types.InlineKeyboardButton(
-                    _NP_CUR_LABELS.get(_c, _c.upper()),
-                    callback_data=f"rpay:nowpayments:{purchase_id}:{package_id}:cur:{_c}"))
-            kb_cur_rnp.add(types.InlineKeyboardButton("بازگشت", callback_data=f"renew:{purchase_id}", icon_custom_emoji_id="5253997076169115797"))
-            try:
-                bot.answer_callback_query(call.id)
-            except Exception:
-                pass
-            send_or_edit(call,
-                "🪙 <b>انتخاب ارز پرداخت</b>\n\nلطفاً ارز مورد نظر برای پرداخت را انتخاب کنید:",
-                kb_cur_rnp)
-            return
-        _sel_cur_rnp = _chosen_cur_rnp or (_np_enabled_rnp[0] if _np_enabled_rnp else "usdttrc20")
         payment_id = create_payment("renewal", uid, package_id, price, "nowpayments", status="pending",
                                     config_id=item["config_id"])
         _bot_username_rnp = bot.get_me().username or ""
@@ -5399,8 +5360,7 @@ def _dispatch_callback(call, uid, data):
             if ('show_name' not in package_row.keys() or package_row['show_name'])
             else f"تمدید {fmt_vol(package_row['volume_gb'])} | {fmt_dur(package_row['duration_days'])}"
         )
-        success_rnp, result_rnp = create_nowpayments_invoice(price, payment_id, uid, _bot_username_rnp, order_label_rnp,
-                                                             pay_currency=_sel_cur_rnp)
+        success_rnp, result_rnp = create_nowpayments_invoice(price, payment_id, uid, _bot_username_rnp, order_label_rnp)
         if not success_rnp:
             err_msg = result_rnp.get("error", "خطای ناشناخته") if isinstance(result_rnp, dict) else str(result_rnp)
             try:
@@ -5408,7 +5368,7 @@ def _dispatch_callback(call, uid, data):
             except Exception:
                 pass
             send_or_edit(call,
-                f"❌ <b>خطا در ایجاد فاکتور NowPayments</b>\n\n<code>{esc(err_msg[:400])}</code>",
+                f"⚠️ <b>خطا در ایجاد فاکتور NowPayments</b>\n\n<code>{esc(err_msg[:400])}</code>",
                 back_button(f"renew:{purchase_id}"))
             return
         invoice_id_rnp  = result_rnp.get("invoice_id", "")
@@ -5420,17 +5380,17 @@ def _dispatch_callback(call, uid, data):
                   purchase_id=purchase_id)
         short_id_rnp = str(payment_id)
         text_rnp = (
-            "💎 <b>فاکتور پرداخت NowPayments — تمدید</b>\n\n"
-            f"🔢 شماره سفارش: <code>{short_id_rnp}</code>\n"
+            "💎 <b>پرداخت کریپتو NowPayments — تمدید</b>\n\n"
+            f"🛒 کد پیگیری: <code>{short_id_rnp}</code>\n"
             f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n"
-            f"🪙 مبلغ کریپتو: <b>{amount_usdt_rnp:.6f} {_sel_cur_rnp.upper()}</b>\n\n"
-            "⏳ لینک پرداخت <b>۶۰ دقیقه</b> معتبر است\n"
-            "🔁 پس از پرداخت روی «بررسی پرداخت» بزنید."
+            f"💱 معادل: <b>{amount_usdt_rnp:.4f} USDT</b>\n\n"
+            "❌ این فاکتور <b>۱ ساعت</b> اعتبار دارد\n"
+            "پس از واریز، دکمه «✅ بررسی پرداخت» را بزنید."
         )
         kb_rnp = types.InlineKeyboardMarkup()
-        kb_rnp.add(types.InlineKeyboardButton("💳 پرداخت در NowPayments", url=inv_url_rnp))
-        kb_rnp.add(types.InlineKeyboardButton("🔄 بررسی پرداخت", callback_data=f"rpay:nowpayments:verify:{payment_id}"))
-        kb_rnp.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"renew:{purchase_id}"))
+        kb_rnp.add(types.InlineKeyboardButton("💎 پرداخت در NowPayments", url=inv_url_rnp))
+        kb_rnp.add(types.InlineKeyboardButton("✅ بررسی پرداخت", callback_data=f"rpay:nowpayments:verify:{payment_id}"))
+        kb_rnp.add(types.InlineKeyboardButton("⬅️ بازگشت", callback_data=f"renew:{purchase_id}"))
         try:
             bot.answer_callback_query(call.id)
         except Exception:
@@ -5442,7 +5402,7 @@ def _dispatch_callback(call, uid, data):
             "renewal", package_id=package_id)
         return
 
-    # -- Admin: Confirm renewal ------------------------------------------------
+    # ── Admin: Confirm renewal ────────────────────────────────────────────────
     if data.startswith("renew:confirm:"):
         if not admin_has_perm(uid, "approve_renewal"):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
@@ -5482,7 +5442,7 @@ def _dispatch_callback(call, uid, data):
                 "از اعتماد شما سپاسگزاریم. 🙏")
         except Exception:
             pass
-        # Renewal log � find the payment method from the original admin message
+        # Renewal log — find the payment method from the original admin message
         renewal_method = ""
         try:
             orig_text = call.message.text or call.message.caption or ""
@@ -5513,7 +5473,7 @@ def _dispatch_callback(call, uid, data):
             pass
         return
 
-    # -- Buy flow --------------------------------------------------------------
+    # ── Buy flow ──────────────────────────────────────────────────────────────
     if data == "buy:start":
         # Check purchase rules
         if setting_get("purchase_rules_enabled", "0") == "1":
@@ -5689,7 +5649,7 @@ def _dispatch_callback(call, uid, data):
         if not package_row:
             bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
             return
-        # -- Buyer role enforcement --------------------------------------------
+        # ── Buyer role enforcement ────────────────────────────────────────────
         buyer_role = package_row["buyer_role"] if "buyer_role" in package_row.keys() else "all"
         if buyer_role == "nobody":
             bot.answer_callback_query(call.id,
@@ -5734,8 +5694,8 @@ def _dispatch_callback(call, uid, data):
         _show_purchase_gateways(call, uid, package_id, price, package_row)
         return
 
-    # -- Naming step for panel packages ----------------------------------------
-    # buy:naming:show:{package_id}:{quantity}  � back button: re-show naming prompt
+    # ── Naming step for panel packages ────────────────────────────────────────
+    # buy:naming:show:{package_id}:{quantity}  — back button: re-show naming prompt
     if data.startswith("buy:naming:show:"):
         parts      = data.split(":")
         package_id = int(parts[3])
@@ -6002,19 +5962,19 @@ def _dispatch_callback(call, uid, data):
     if data == "pm:back":
         bot.answer_callback_query(call.id)
 
-    # -- Crypto copy buttons use CopyTextButton (Bot API 7.0) -----------------
-    # No callback handlers needed � buttons copy directly to clipboard.
+    # ── Crypto copy buttons use CopyTextButton (Bot API 7.0) ─────────────────
+    # No callback handlers needed — buttons copy directly to clipboard.
         show_main_menu(call)
         return
 
-    # -- Invoice expired restart -----------------------------------------------
+    # ── Invoice expired restart ───────────────────────────────────────────────
     if data == "invoice:restart":
         bot.answer_callback_query(call.id)
         state_clear(uid)
         show_main_menu(call)
         return
 
-    # -- TetraPay --------------------------------------------------------------
+    # ── TetraPay ──────────────────────────────────────────────────────────────
     if data.startswith("pay:tetrapay:verify:"):
         payment_id = int(data.split(":")[3])
         payment = get_payment(payment_id)
@@ -6130,7 +6090,7 @@ def _dispatch_callback(call, uid, data):
             "config_purchase", package_id=package_id)
         return
 
-    # -- TronPays Rial: purchase -----------------------------------------------
+    # ── TronPays Rial: purchase ───────────────────────────────────────────────
     if data.startswith("pay:tronpays_rial:verify:"):
         payment_id = int(data.split(":")[3])
         payment = get_payment(payment_id)
@@ -6243,7 +6203,7 @@ def _dispatch_callback(call, uid, data):
             f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n\n"
             "از لینک زیر پرداخت را انجام دهید.\n\n"
             "⏳ <b>تا یک ساعت</b> پرداخت به صورت خودکار بررسی می‌شود.\n"
-            "?? ??? ??? ???? ???? �????? ??????� ?? ?????."
+            "در غیر این صورت دکمه «بررسی پرداخت» را بزنید."
         )
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("💳 پرداخت از درگاه TronPays", url=invoice_url))
@@ -6256,7 +6216,7 @@ def _dispatch_callback(call, uid, data):
             "config_purchase", package_id=package_id)
         return
 
-    # -- Plisio: purchase ------------------------------------------------------
+    # ── Plisio: purchase ──────────────────────────────────────────────────────
     if data.startswith("pay:plisio:verify:"):
         payment_id = int(data.split(":")[3])
         payment = get_payment(payment_id)
@@ -6363,7 +6323,7 @@ def _dispatch_callback(call, uid, data):
             f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n"
             f"💱 معادل: <b>{amount_usdt:.4f} USDT</b>\n\n"
             "❌ این فاکتور <b>۱ ساعت</b> اعتبار دارد\n"
-            "?? ?? ?????? ???? �? ????? ??????� ?? ?????."
+            "پس از واریز، دکمه «✅ بررسی پرداخت» را بزنید."
         )
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("💎 پرداخت در Plisio", url=inv_url))
@@ -6377,7 +6337,7 @@ def _dispatch_callback(call, uid, data):
             "config_purchase", package_id=package_id)
         return
 
-    # -- NowPayments: purchase -------------------------------------------------
+    # ── NowPayments: purchase ─────────────────────────────────────────────────
     if data.startswith("pay:nowpayments:verify:"):
         payment_id = int(data.split(":")[3])
         payment = get_payment(payment_id)
@@ -6442,10 +6402,7 @@ def _dispatch_callback(call, uid, data):
         if not _check_invoice_valid(uid):
             _show_invoice_expired(call)
             return
-        # Parse: pay:nowpayments:{pkg_id} or pay:nowpayments:{pkg_id}:cur:{currency}
-        _parts_np = data.split(":")
-        package_id   = int(_parts_np[2])
-        _chosen_cur  = _parts_np[4] if len(_parts_np) >= 5 and _parts_np[3] == "cur" else None
+        package_id  = int(data.split(":")[2])
         package_row = get_package(package_id)
         if not package_row or not _pkg_has_stock(package_row, setting_get("preorder_mode", "0") == "1"):
             try:
@@ -6459,36 +6416,12 @@ def _dispatch_callback(call, uid, data):
             _rng = get_gateway_range_text("nowpayments")
             try:
                 bot.answer_callback_query(call.id,
-                    f"مبلغ {fmt_price(price)} خارج از محدوده مجاز درگاه NowPayments است.\n"
+                    f"⛔️ مبلغ {fmt_price(price)} تومان برای درگاه NowPayments مجاز نیست.\n"
                     f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
                     show_alert=True)
             except Exception:
                 pass
             return
-        # If currency not chosen yet and more than one option, show currency picker
-        _np_enabled = get_nowpayments_enabled_currencies()
-        if not _chosen_cur and len(_np_enabled) > 1:
-            _NP_CUR_LABELS = {
-                "usdttrc20": "💵 USDT (TRC20 - ترون)", "usdterc20": "💵 USDT (ERC20 - اتریوم)",
-                "usdtbsc": "💵 USDT (BEP20 - BSC)", "usdtton": "💵 USDT (TON)",
-                "btc": "₿ Bitcoin (BTC)", "eth": "⟠ Ethereum (ETH)",
-                "trx": "🔷 TRX (ترون)", "ton": "💎 TON", "ltc": "🔵 Litecoin (LTC)", "bnbbsc": "🟡 BNB (BSC)",
-            }
-            kb_cur = types.InlineKeyboardMarkup(row_width=1)
-            for _c in _np_enabled:
-                kb_cur.add(types.InlineKeyboardButton(
-                    _NP_CUR_LABELS.get(_c, _c.upper()),
-                    callback_data=f"pay:nowpayments:{package_id}:cur:{_c}"))
-            kb_cur.add(types.InlineKeyboardButton("بازگشت", callback_data=f"buy:p:{package_id}", icon_custom_emoji_id="5253997076169115797"))
-            try:
-                bot.answer_callback_query(call.id)
-            except Exception:
-                pass
-            send_or_edit(call,
-                "🪙 <b>انتخاب ارز پرداخت</b>\n\nلطفاً ارز مورد نظر برای پرداخت را انتخاب کنید:",
-                kb_cur)
-            return
-        _sel_cur = _chosen_cur or (_np_enabled[0] if _np_enabled else "usdttrc20")
         payment_id = create_payment("config_purchase", uid, package_id, price, "nowpayments",
                                     status="pending", quantity=_qty_np)
         _snames_np = state_data(uid).get("service_names")
@@ -6500,8 +6433,7 @@ def _dispatch_callback(call, uid, data):
             if ('show_name' not in package_row.keys() or package_row['show_name'])
             else f"خرید {fmt_vol(package_row['volume_gb'])} | {fmt_dur(package_row['duration_days'])}"
         )
-        success_np, result_np = create_nowpayments_invoice(price, payment_id, uid, _bot_username_np, order_label_np,
-                                                           pay_currency=_sel_cur)
+        success_np, result_np = create_nowpayments_invoice(price, payment_id, uid, _bot_username_np, order_label_np)
         if not success_np:
             err_msg = result_np.get("error", "خطای ناشناخته") if isinstance(result_np, dict) else str(result_np)
             try:
@@ -6509,7 +6441,7 @@ def _dispatch_callback(call, uid, data):
             except Exception:
                 pass
             send_or_edit(call,
-                f"❌ <b>خطا در ایجاد فاکتور NowPayments</b>\n\n<code>{esc(err_msg[:400])}</code>",
+                f"⚠️ <b>خطا در ایجاد فاکتور NowPayments</b>\n\n<code>{esc(err_msg[:400])}</code>",
                 back_button(f"buy:p:{package_id}"))
             return
         invoice_id_np  = result_np.get("invoice_id", "")
@@ -6520,17 +6452,17 @@ def _dispatch_callback(call, uid, data):
         state_set(uid, "await_nowpayments_verify", payment_id=payment_id, invoice_id=invoice_id_np)
         short_id_np = str(payment_id)
         text_np = (
-            "💎 <b>فاکتور پرداخت (NowPayments)</b>\n\n"
-            f"🔢 شماره سفارش: <code>{short_id_np}</code>\n"
+            "💎 <b>پرداخت کریپتو (NowPayments)</b>\n\n"
+            f"🛒 کد پیگیری: <code>{short_id_np}</code>\n"
             f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n"
-            f"🪙 مبلغ کریپتو: <b>{amount_usdt_np:.6f} {_sel_cur.upper()}</b>\n\n"
-            "⏳ لینک پرداخت <b>۶۰ دقیقه</b> معتبر است\n"
-            "🔁 پس از پرداخت روی «بررسی پرداخت» بزنید."
+            f"💱 معادل: <b>{amount_usdt_np:.4f} USDT</b>\n\n"
+            "❌ این فاکتور <b>۱ ساعت</b> اعتبار دارد\n"
+            "پس از واریز، دکمه «✅ بررسی پرداخت» را بزنید."
         )
         kb_np = types.InlineKeyboardMarkup()
-        kb_np.add(types.InlineKeyboardButton("💳 پرداخت در NowPayments", url=inv_url_np))
-        kb_np.add(types.InlineKeyboardButton("🔄 بررسی پرداخت", callback_data=f"pay:nowpayments:verify:{payment_id}"))
-        kb_np.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"buy:p:{package_id}"))
+        kb_np.add(types.InlineKeyboardButton("💎 پرداخت در NowPayments", url=inv_url_np))
+        kb_np.add(types.InlineKeyboardButton("✅ بررسی پرداخت", callback_data=f"pay:nowpayments:verify:{payment_id}"))
+        kb_np.add(types.InlineKeyboardButton("⬅️ بازگشت", callback_data=f"buy:p:{package_id}"))
         try:
             bot.answer_callback_query(call.id)
         except Exception:
@@ -6542,7 +6474,7 @@ def _dispatch_callback(call, uid, data):
             "config_purchase", package_id=package_id)
         return
 
-    # -- Free test -------------------------------------------------------------
+    # ── Free test ─────────────────────────────────────────────────────────────
     if data == "test:start":
         _ft_mode = setting_get("free_test_mode", "everyone")
         user = get_user(uid)
@@ -6640,7 +6572,7 @@ def _dispatch_callback(call, uid, data):
         deliver_purchase_message(call.message.chat.id, purchase_id)
         return
 
-    # -- Wallet charge ---------------------------------------------------------
+    # ── Wallet charge ─────────────────────────────────────────────────────────
     if data == "wallet:charge":
         if setting_get("shop_open", "1") not in ("1", "2"):
             kb = types.InlineKeyboardMarkup()
@@ -6781,7 +6713,7 @@ def _dispatch_callback(call, uid, data):
             "wallet_charge")
         return
 
-    # -- SwapWallet Crypto (network selection) ---------------------------------
+    # ── SwapWallet Crypto (network selection) ─────────────────────────────────
     if data == "wallet:charge:swapwallet_crypto":
         if not _check_invoice_valid(uid):
             _show_invoice_expired(call)
@@ -6807,10 +6739,10 @@ def _dispatch_callback(call, uid, data):
         state_set(uid, "swcrypto_network_select", kind="wallet_charge", amount=amount)
         kb = types.InlineKeyboardMarkup()
         if len(_active_nets) == 1:
-            # Skip selection � go directly with the only available network
+            # Skip selection — go directly with the only available network
             net = _active_nets[0][0]
             state_set(uid, "swcrypto_network_select", kind="wallet_charge", amount=amount)
-            # Emit synthetic callback � handled by swcrypto:net: branch below (force inline)
+            # Emit synthetic callback — handled by swcrypto:net: branch below (force inline)
             _swc_sd = state_data(uid)
             _swc_sd["_auto_net"] = net
             order_id = f"swc-{uid}-{int(datetime.now().timestamp())}"
@@ -6877,11 +6809,11 @@ def _dispatch_callback(call, uid, data):
             conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id, payment_id))
         state_set(uid, "await_tronpays_rial_verify", payment_id=payment_id, invoice_id=invoice_id)
         text = (
-            "?? <b>???? ??? ??? � TronPays</b>\n\n"
+            "💳 <b>شارژ کیف پول — TronPays</b>\n\n"
             f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان\n\n"
             "از لینک زیر پرداخت را انجام دهید.\n\n"
             "⏳ <b>تا یک ساعت</b> پرداخت به صورت خودکار بررسی می‌شود.\n"
-            "?? ??? ??? ???? ???? �????? ??????� ?? ?????."
+            "در غیر این صورت دکمه «بررسی پرداخت» را بزنید."
         )
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("💳 پرداخت از درگاه TronPays", url=invoice_url))
@@ -6928,12 +6860,12 @@ def _dispatch_callback(call, uid, data):
         state_set(uid, "await_plisio_verify", payment_id=payment_id, txn_id=txn_id_wc)
         short_id_wc = str(payment_id)
         text_wc = (
-            "?? <b>???? ??? ??? � Plisio</b>\n\n"
+            "💎 <b>شارژ کیف پول — Plisio</b>\n\n"
             f"🛒 کد پیگیری: <code>{short_id_wc}</code>\n"
             f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان\n"
             f"💱 معادل: <b>{amount_usdt_wc:.4f} USDT</b>\n\n"
             "❌ این فاکتور <b>۱ ساعت</b> اعتبار دارد\n"
-            "?? ?? ?????? ???? �? ????? ??????� ?? ?????."
+            "پس از واریز، دکمه «✅ بررسی پرداخت» را بزنید."
         )
         kb_wc = types.InlineKeyboardMarkup()
         kb_wc.add(types.InlineKeyboardButton("💎 پرداخت در Plisio", url=inv_url_wc))
@@ -6955,7 +6887,7 @@ def _dispatch_callback(call, uid, data):
         amount = sd.get("amount")
         if not amount:
             try:
-                bot.answer_callback_query(call.id, "مبلغ کیف پول تنظیم نشده.", show_alert=True)
+                bot.answer_callback_query(call.id, "ابتدا مبلغ را وارد کنید.", show_alert=True)
             except Exception:
                 pass
             return
@@ -6963,127 +6895,51 @@ def _dispatch_callback(call, uid, data):
             _rng = get_gateway_range_text("nowpayments")
             try:
                 bot.answer_callback_query(call.id,
-                    f"مبلغ {fmt_price(amount)} خارج از محدوده مجاز درگاه NowPayments است.\n"
+                    f"⛔️ مبلغ {fmt_price(amount)} تومان برای درگاه NowPayments مجاز نیست.\n"
                     f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
                     show_alert=True)
             except Exception:
                 pass
             return
-        _np_enabled_wcn = get_nowpayments_enabled_currencies()
-        if len(_np_enabled_wcn) > 1:
-            _NP_CUR_LABELS = {
-                "usdttrc20": "💵 USDT (TRC20 - ترون)", "usdterc20": "💵 USDT (ERC20 - اتریوم)",
-                "usdtbsc": "💵 USDT (BEP20 - BSC)", "usdtton": "💵 USDT (TON)",
-                "btc": "₿ Bitcoin (BTC)", "eth": "⟠ Ethereum (ETH)",
-                "trx": "🔷 TRX (ترون)", "ton": "💎 TON", "ltc": "🔵 Litecoin (LTC)", "bnbbsc": "🟡 BNB (BSC)",
-            }
-            kb_cur_wcn = types.InlineKeyboardMarkup(row_width=1)
-            for _c in _np_enabled_wcn:
-                kb_cur_wcn.add(types.InlineKeyboardButton(
-                    _NP_CUR_LABELS.get(_c, _c.upper()),
-                    callback_data=f"wallet:charge:nowpayments:cur:{_c}"))
-            kb_cur_wcn.add(types.InlineKeyboardButton("بازگشت", callback_data="wallet:charge", icon_custom_emoji_id="5253997076169115797"))
+        payment_id_wcn = create_payment("wallet_charge", uid, None, amount, "nowpayments", status="pending")
+        _bot_username_wcn = bot.get_me().username or ""
+        success_wcn, result_wcn = create_nowpayments_invoice(amount, payment_id_wcn, uid, _bot_username_wcn, "شارژ کیف پول")
+        if not success_wcn:
+            err_msg = result_wcn.get("error", "خطای ناشناخته") if isinstance(result_wcn, dict) else str(result_wcn)
             try:
                 bot.answer_callback_query(call.id)
             except Exception:
                 pass
             send_or_edit(call,
-                "🪙 <b>انتخاب ارز پرداخت</b>\n\nلطفاً ارز مورد نظر برای شارژ کیف پول را انتخاب کنید:",
-                kb_cur_wcn)
+                f"⚠️ <b>خطا در ایجاد فاکتور NowPayments</b>\n\n<code>{esc(err_msg[:400])}</code>",
+                back_button("wallet:charge"))
             return
-        # Single currency - proceed directly
-        _sel_cur_wcn = _np_enabled_wcn[0] if _np_enabled_wcn else "usdttrc20"
-        _pay_wcn_id = create_payment("wallet_charge", uid, None, amount, "nowpayments", status="pending")
-        _bot_un_wcn = bot.get_me().username or ""
-        _succ_wcn, _res_wcn = create_nowpayments_invoice(amount, _pay_wcn_id, uid, _bot_un_wcn,
-                                                         "شارژ کیف پول", pay_currency=_sel_cur_wcn)
-        if not _succ_wcn:
-            _em_wcn = _res_wcn.get("error", "خطای ناشناخته") if isinstance(_res_wcn, dict) else str(_res_wcn)
-            try:
-                bot.answer_callback_query(call.id)
-            except Exception:
-                pass
-            send_or_edit(call, f"❌ <b>خطا در ایجاد فاکتور NowPayments</b>\n\n<code>{esc(_em_wcn[:400])}</code>",
-                         back_button("wallet:charge"))
-            return
-        _inv_id_wcn  = _res_wcn.get("invoice_id", "")
-        _inv_url_wcn = _res_wcn.get("invoice_url", "")
-        _amt_u_wcn   = _res_wcn.get("amount_usdt", 0)
+        invoice_id_wcn  = result_wcn.get("invoice_id", "")
+        inv_url_wcn     = result_wcn.get("invoice_url", "")
+        amount_usdt_wcn = result_wcn.get("amount_usdt", 0)
         with get_conn() as conn:
-            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (_inv_id_wcn, _pay_wcn_id))
-        state_set(uid, "await_nowpayments_verify", payment_id=_pay_wcn_id, invoice_id=_inv_id_wcn)
-        _kb_wcn = types.InlineKeyboardMarkup()
-        _kb_wcn.add(types.InlineKeyboardButton("💳 پرداخت در NowPayments", url=_inv_url_wcn))
-        _kb_wcn.add(types.InlineKeyboardButton("🔄 بررسی پرداخت", callback_data=f"pay:nowpayments:verify:{_pay_wcn_id}"))
-        _kb_wcn.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="wallet:charge"))
+            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id_wcn, payment_id_wcn))
+        state_set(uid, "await_nowpayments_verify", payment_id=payment_id_wcn, invoice_id=invoice_id_wcn)
+        short_id_wcn = str(payment_id_wcn)
+        text_wcn = (
+            "💎 <b>شارژ کیف پول — NowPayments</b>\n\n"
+            f"🛒 کد پیگیری: <code>{short_id_wcn}</code>\n"
+            f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان\n"
+            f"💱 معادل: <b>{amount_usdt_wcn:.4f} USDT</b>\n\n"
+            "❌ این فاکتور <b>۱ ساعت</b> اعتبار دارد\n"
+            "پس از واریز، دکمه «✅ بررسی پرداخت» را بزنید."
+        )
+        kb_wcn = types.InlineKeyboardMarkup()
+        kb_wcn.add(types.InlineKeyboardButton("💎 پرداخت در NowPayments", url=inv_url_wcn))
+        kb_wcn.add(types.InlineKeyboardButton("✅ بررسی پرداخت", callback_data=f"pay:nowpayments:verify:{payment_id_wcn}"))
+        kb_wcn.add(types.InlineKeyboardButton("⬅️ بازگشت", callback_data="wallet:charge"))
         try:
             bot.answer_callback_query(call.id)
         except Exception:
             pass
-        send_or_edit(call,
-            "💎 <b>شارژ کیف پول — NowPayments</b>\n\n"
-            f"🔢 شماره سفارش: <code>{str(_pay_wcn_id)}</code>\n"
-            f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان\n"
-            f"🪙 مبلغ کریپتو: <b>{_amt_u_wcn:.6f} {_sel_cur_wcn.upper()}</b>\n\n"
-            "⏳ لینک پرداخت <b>۶۰ دقیقه</b> معتبر است\n"
-            "🔁 پس از پرداخت روی «بررسی پرداخت» بزنید.",
-            _kb_wcn)
+        send_or_edit(call, text_wcn, kb_wcn)
         _start_nowpayments_auto_verify(
-            _pay_wcn_id, _inv_id_wcn, uid,
-            call.message.chat.id, call.message.message_id,
-            "wallet_charge")
-        return
-
-    if data.startswith("wallet:charge:nowpayments:cur:"):
-        if not _check_invoice_valid(uid):
-            _show_invoice_expired(call)
-            return
-        sd     = state_data(uid)
-        amount = sd.get("amount")
-        if not amount:
-            try:
-                bot.answer_callback_query(call.id, "مبلغ کیف پول تنظیم نشده.", show_alert=True)
-            except Exception:
-                pass
-            return
-        _sel_cur_wcn2 = data.split(":")[-1].strip().lower()
-        _pay_wcn2_id = create_payment("wallet_charge", uid, None, amount, "nowpayments", status="pending")
-        _bot_un_wcn2 = bot.get_me().username or ""
-        _succ_wcn2, _res_wcn2 = create_nowpayments_invoice(amount, _pay_wcn2_id, uid, _bot_un_wcn2,
-                                                           "شارژ کیف پول", pay_currency=_sel_cur_wcn2)
-        if not _succ_wcn2:
-            _em_wcn2 = _res_wcn2.get("error", "خطای ناشناخته") if isinstance(_res_wcn2, dict) else str(_res_wcn2)
-            try:
-                bot.answer_callback_query(call.id)
-            except Exception:
-                pass
-            send_or_edit(call, f"❌ <b>خطا در ایجاد فاکتور NowPayments</b>\n\n<code>{esc(_em_wcn2[:400])}</code>",
-                         back_button("wallet:charge"))
-            return
-        _inv_id_wcn2  = _res_wcn2.get("invoice_id", "")
-        _inv_url_wcn2 = _res_wcn2.get("invoice_url", "")
-        _amt_u_wcn2   = _res_wcn2.get("amount_usdt", 0)
-        with get_conn() as conn:
-            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (_inv_id_wcn2, _pay_wcn2_id))
-        state_set(uid, "await_nowpayments_verify", payment_id=_pay_wcn2_id, invoice_id=_inv_id_wcn2)
-        _kb_wcn2 = types.InlineKeyboardMarkup()
-        _kb_wcn2.add(types.InlineKeyboardButton("💳 پرداخت در NowPayments", url=_inv_url_wcn2))
-        _kb_wcn2.add(types.InlineKeyboardButton("🔄 بررسی پرداخت", callback_data=f"pay:nowpayments:verify:{_pay_wcn2_id}"))
-        _kb_wcn2.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="wallet:charge"))
-        try:
-            bot.answer_callback_query(call.id)
-        except Exception:
-            pass
-        send_or_edit(call,
-            "💎 <b>شارژ کیف پول — NowPayments</b>\n\n"
-            f"🔢 شماره سفارش: <code>{str(_pay_wcn2_id)}</code>\n"
-            f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان\n"
-            f"🪙 مبلغ کریپتو: <b>{_amt_u_wcn2:.6f} {_sel_cur_wcn2.upper()}</b>\n\n"
-            "⏳ لینک پرداخت <b>۶۰ دقیقه</b> معتبر است\n"
-            "🔁 پس از پرداخت روی «بررسی پرداخت» بزنید.",
-            _kb_wcn2)
-        _start_nowpayments_auto_verify(
-            _pay_wcn2_id, _inv_id_wcn2, uid,
+            payment_id_wcn, invoice_id_wcn, uid,
             call.message.chat.id, call.message.message_id,
             "wallet_charge")
         return
@@ -7168,7 +7024,7 @@ def _dispatch_callback(call, uid, data):
                   quantity=_qty_sw_init)
         kb = types.InlineKeyboardMarkup()
         if len(_active_nets2) == 1:
-            # Only one network � auto-select and go directly to payment
+            # Only one network — auto-select and go directly to payment
             net = _active_nets2[0][0]
             order_id = f"swc-{uid}-{int(datetime.now().timestamp())}"
             success, result = create_swapwallet_crypto_invoice(price, order_id, net, "پرداخت کریپتو")
@@ -7273,7 +7129,7 @@ def _dispatch_callback(call, uid, data):
                   amount=price, config_id=item["config_id"])
         kb = types.InlineKeyboardMarkup()
         if len(_active_nets3) == 1:
-            # Only one network � auto-select and go directly to payment
+            # Only one network — auto-select and go directly to payment
             net = _active_nets3[0][0]
             order_id = f"swc-{uid}-{int(datetime.now().timestamp())}"
             success, result = create_swapwallet_crypto_invoice(price, order_id, net, "پرداخت کریپتو")
@@ -7299,7 +7155,7 @@ def _dispatch_callback(call, uid, data):
             send_or_edit(call, "💎 <b>پرداخت کریپتو (SwapWallet)</b>\n\nشبکه مورد نظر را انتخاب کنید:", kb)
         return
 
-    # -- SwapWallet Crypto: network selected ? create invoice -----------------
+    # ── SwapWallet Crypto: network selected → create invoice ─────────────────
     if data.startswith("swcrypto:net:"):
         network = data.split(":")[2]
         sd      = state_data(uid)
@@ -7351,7 +7207,7 @@ def _dispatch_callback(call, uid, data):
                                     result=result, payment_id=payment_id, verify_cb=verify_cb)
         return
 
-    # -- Admin panel ------------------------------------------------------------
+    # ── Admin panel ────────────────────────────────────────────────────────────
     if not is_admin(uid):
         # Non-admin shouldn't reach admin callbacks, just ignore
         if data.startswith("admin:") or data.startswith("adm:"):
@@ -7363,7 +7219,7 @@ def _dispatch_callback(call, uid, data):
         footer = ""
         if uid in ADMIN_IDS:
             footer = (
-                "\n\n----------------\n"
+                "\n\n────────────────\n"
                 "💡 <b>Seamless Premium</b>\n"
                 "👨‍💻 Developer: @EmadHabibnia"
             )
@@ -7375,7 +7231,7 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, text, kb_admin_panel(uid))
         return
 
-    # -- Admin: Stats / Analytics -----------------------------------------------
+    # ── Admin: Stats / Analytics ───────────────────────────────────────────────
     if data == "admin:stats":
         if not (uid in ADMIN_IDS or admin_has_perm(uid, "view_users")):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
@@ -7517,7 +7373,7 @@ def _dispatch_callback(call, uid, data):
         show_manual_service_detail(call, purchase_id, back_cb)
         return
 
-    # -- Admin: Types ----------------------------------------------------------
+    # ── Admin: Types ──────────────────────────────────────────────────────────
     if data == "admin:types":
         if not admin_has_perm(uid, "types_packages"):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
@@ -7549,7 +7405,7 @@ def _dispatch_callback(call, uid, data):
         if row["description"]:
             kb.add(types.InlineKeyboardButton("🗑 حذف توضیحات", callback_data=f"admin:type:deldesc:{type_id}"))
         is_active = row["is_active"] if "is_active" in row.keys() else 1
-        status_label = "? ???? � ???? ???? ???????" if is_active else "? ??????? � ???? ???? ????"
+        status_label = "✅ فعال — کلیک برای غیرفعال" if is_active else "❌ غیرفعال — کلیک برای فعال"
         kb.add(types.InlineKeyboardButton(status_label, callback_data=f"admin:type:toggleactive:{type_id}"))
         kb.add(types.InlineKeyboardButton("📦 ویرایش پکیج‌ها", callback_data=f"admin:type:pkgs:{type_id}"))
         kb.add(types.InlineKeyboardButton(f"🔢 جایگاه (فعلاً {_cur_pos} از {_total})", callback_data=f"admin:type:sortorder:{type_id}"))
@@ -7795,8 +7651,8 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call,
             "🔌 <b>منبع کانفیگ</b>\n\n"
             "کانفیگ‌های این پکیج چطور تامین می‌شوند?\n\n"
-            "� <b>??? ????</b> � ?????? ?? ?? ??? ?????? ????? ????\n"
-            "� <b>????? ?? ???</b> � ?? ?? ????? ?????? ??????? ?????? ?? ??? ????? ??????",
+            "• <b>ثبت دستی</b> — کانفیگ را از بخش موجودی آپلود کنید\n"
+            "• <b>اتصال به پنل</b> — پس از خرید، کانفیگ به‌صورت خودکار در پنل ساخته می‌شود",
             kb_cs)
         return
 
@@ -7978,10 +7834,10 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call,
             f"📦 <b>{esc(package_row['name'])}</b>\n\n"
             "👥 چه کسانی بتوانند این پکیج را بخرند؟\n\n"
-            "� <b>???</b> � ?? ??????? ????? ?? ?????????\n"
-            "� <b>??? ?????????</b> � ??? ??????? ???????\n"
-            "� <b>??? ??????? ????</b> � ??? ??????? ??????????\n"
-            "� <b>??????</b> � ???? ?? ???? ???? ????? ???? ???????? ??? ???? ????? ????", kb)
+            "• <b>همه</b> — هم کاربران عادی، هم نمایندگان\n"
+            "• <b>فقط نمایندگان</b> — فقط کاربران نماینده\n"
+            "• <b>فقط کاربران عادی</b> — فقط کاربران غیرنماینده\n"
+            "• <b>هیچ‌کس</b> — پکیج در خرید عادی نمایش داده نمی‌شود، فقط برای تحویل هدیه", kb)
         return
 
     if data.startswith("admin:pkg:br:"):
@@ -8064,7 +7920,7 @@ def _dispatch_callback(call, uid, data):
         _show_admin_types(call)
         return
 
-    # -- Admin: Package config_source edit -------------------------------------
+    # ── Admin: Package config_source edit ─────────────────────────────────────
     if data.startswith("admin:pkg:src:"):
         package_id  = int(data.split(":")[3])
         package_row = get_package(package_id)
@@ -8196,7 +8052,7 @@ def _dispatch_callback(call, uid, data):
 
 
 
-    # -- Admin: Panel Configs list ----------------------------------------------
+    # ── Admin: Panel Configs list ──────────────────────────────────────────────
     if data == "admin:panel_configs":
         if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
             bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
@@ -8239,13 +8095,13 @@ def _dispatch_callback(call, uid, data):
             _show_panel_config_pkg(call, package_id)
             return
 
-        # admin:pcfg:d:{config_id}  � detail view
+        # admin:pcfg:d:{config_id}  — detail view
         if data.startswith("admin:pcfg:d:"):
             config_id = int(data.split(":")[-1])
             _show_panel_config_detail(call, config_id, back_data="admin:panel_configs")
             return
 
-        # admin:pcfg:qrc:{config_id}  � QR for config
+        # admin:pcfg:qrc:{config_id}  — QR for config
         if data.startswith("admin:pcfg:qrc:"):
             config_id = int(data.split(":")[-1])
             cfg = get_panel_config(config_id)
@@ -8263,7 +8119,7 @@ def _dispatch_callback(call, uid, data):
                 bot.answer_callback_query(call.id, "کانفیگ موجود نیست.", show_alert=True)
             return
 
-        # admin:pcfg:qrs:{config_id}  � QR for subscription
+        # admin:pcfg:qrs:{config_id}  — QR for subscription
         if data.startswith("admin:pcfg:qrs:"):
             config_id = int(data.split(":")[-1])
             cfg = get_panel_config(config_id)
@@ -8281,7 +8137,7 @@ def _dispatch_callback(call, uid, data):
                 bot.answer_callback_query(call.id, "لینک ساب موجود نیست.", show_alert=True)
             return
 
-        # admin:pcfg:autorenew:{config_id}  � toggle auto-renew
+        # admin:pcfg:autorenew:{config_id}  — toggle auto-renew
         if data.startswith("admin:pcfg:autorenew:"):
             config_id = int(data.split(":")[-1])
             cfg = get_panel_config(config_id)
@@ -8294,7 +8150,7 @@ def _dispatch_callback(call, uid, data):
             _show_panel_config_detail(call, config_id, back_data="admin:panel_configs")
             return
 
-        # admin:pcfg:toggle:{config_id}  � enable/disable on panel
+        # admin:pcfg:toggle:{config_id}  — enable/disable on panel
         if data.startswith("admin:pcfg:toggle:"):
             config_id = int(data.split(":")[-1])
             cfg = get_panel_config(config_id)
@@ -8304,7 +8160,7 @@ def _dispatch_callback(call, uid, data):
             if not panel:
                 bot.answer_callback_query(call.id, "پنل یافت نشد.", show_alert=True); return
             cur_disabled = int(cfg.get("is_disabled") or 0)
-            send_or_edit(call, "? ?? ??? ?????? ?? ???�")
+            send_or_edit(call, "⏳ در حال ارتباط با پنل…")
             from ..panels.client import PanelClient
             pc_api = PanelClient(
                 protocol=panel["protocol"], host=panel["host"], port=panel["port"],
@@ -8333,7 +8189,7 @@ def _dispatch_callback(call, uid, data):
             _show_panel_config_detail(call, config_id, back_data="admin:panel_configs")
             return
 
-        # admin:pcfg:rsub:{config_id}  � regenerate subscription link
+        # admin:pcfg:rsub:{config_id}  — regenerate subscription link
         if data.startswith("admin:pcfg:rsub:"):
             config_id = int(data.split(":")[-1])
             cfg = get_panel_config(config_id)
@@ -8351,7 +8207,7 @@ def _dispatch_callback(call, uid, data):
                 bot.answer_callback_query(call.id, "قالب ساب در cpkg تنظیم نشده.", show_alert=True); return
             # Update panel
             if panel:
-                send_or_edit(call, "? ?? ??? ?????? ?? ???�")
+                send_or_edit(call, "⏳ در حال ارتباط با پنل…")
                 from ..panels.client import PanelClient
                 pc_api = PanelClient(
                     protocol=panel["protocol"], host=panel["host"], port=panel["port"],
@@ -8369,7 +8225,7 @@ def _dispatch_callback(call, uid, data):
             _show_panel_config_detail(call, config_id, back_data="admin:panel_configs")
             return
 
-        # admin:pcfg:ruuid:{config_id}  � regenerate UUID / config
+        # admin:pcfg:ruuid:{config_id}  — regenerate UUID / config
         if data.startswith("admin:pcfg:ruuid:"):
             config_id = int(data.split(":")[-1])
             cfg = get_panel_config(config_id)
@@ -8384,7 +8240,7 @@ def _dispatch_callback(call, uid, data):
             new_uuid   = str(_uuid.uuid4())
             new_sub_id = new_uuid.replace("-", "")[:16]
             new_sub    = _build_sub_from_template(cpkg_d, new_sub_id) if cpkg_d.get("sample_sub_url") else cfg["client_sub_url"]
-            send_or_edit(call, "? ?? ??? ?????? ?? ???�")
+            send_or_edit(call, "⏳ در حال ارتباط با پنل…")
             from ..panels.client import PanelClient
             pc_api = PanelClient(
                 protocol=panel["protocol"], host=panel["host"], port=panel["port"],
@@ -8432,7 +8288,7 @@ def _dispatch_callback(call, uid, data):
             _show_panel_config_detail(call, config_id, back_data="admin:panel_configs")
             return
 
-        # admin:pcfg:renew:{config_id}  � manual renew: show package list
+        # admin:pcfg:renew:{config_id}  — manual renew: show package list
         if data.startswith("admin:pcfg:renew:") and not data.startswith("admin:pcfg:renewok:"):
             config_id = int(data.split(":")[-1])
             cfg = get_panel_config_full(config_id)
@@ -8469,28 +8325,33 @@ def _dispatch_callback(call, uid, data):
             panel = get_panel(cfg["panel_id"])
             if not panel:
                 bot.answer_callback_query(call.id, "پنل یافت نشد.", show_alert=True); return
-            send_or_edit(call, "? ?? ??? ????? ??? ???�")
+            send_or_edit(call, "⏳ در حال تمدید روی پنل…")
             from ..panels.client import PanelClient
             pc_api = PanelClient(
                 protocol=panel["protocol"], host=panel["host"], port=panel["port"],
                 path=panel["path"] or "", username=panel["username"], password=panel["password"]
             )
-            # Additive renewal: ADD pkg.volume_gb to current totalGB and pkg.duration_days
-            # to current expiryTime. Consumed traffic is NOT reset.
-            ok_renew, res_renew = pc_api.extend_client(
-                inbound_id=cfg["inbound_id"], client_uuid=cfg["client_uuid"],
-                email=cfg["client_name"] or "",
-                add_bytes=int((pkg["volume_gb"]    or 0) * 1073741824),
-                add_days =int( pkg["duration_days"] or 0),
-            )
-            if not ok_renew:
-                send_or_edit(call, f"❌ خطا در بروزرسانی پنل:\n<code>{esc(str(res_renew))}</code>",
-                             back_button(f"admin:pcfg:d:{config_id}")); return
-            new_exp_ms = int(res_renew.get("new_expiry_ms") or 0) if isinstance(res_renew, dict) else 0
-            if new_exp_ms > 0:
-                new_exp_str = datetime.utcfromtimestamp(new_exp_ms / 1000).strftime("%Y-%m-%d %H:%M:%S")
+            # Reset traffic
+            pc_api.reset_client_traffic(cfg["inbound_id"], cfg["client_name"] or "")
+            # Calculate new expiry
+            dur_days = int(pkg["duration_days"] or 0)
+            if dur_days:
+                new_exp_dt = datetime.utcnow() + timedelta(days=dur_days)
+                new_exp_str = new_exp_dt.strftime("%Y-%m-%d %H:%M:%S")
+                new_exp_ms  = int(new_exp_dt.timestamp() * 1000)
             else:
                 new_exp_str = None
+                new_exp_ms  = 0
+            # Update on panel: set new expiryTime + re-enable
+            ok_renew, err_renew = pc_api.enable_client(
+                inbound_id=cfg["inbound_id"], client_uuid=cfg["client_uuid"],
+                email=cfg["client_name"] or "",
+                traffic_bytes=int((pkg["volume_gb"] or 0) * 1073741824),
+                expire_ms=new_exp_ms,
+            )
+            if not ok_renew:
+                send_or_edit(call, f"❌ خطا در بروزرسانی پنل:\n<code>{esc(str(err_renew))}</code>",
+                             back_button(f"admin:pcfg:d:{config_id}")); return
             # Update DB
             update_panel_config_field(config_id, "expire_at",  new_exp_str)
             update_panel_config_field(config_id, "is_expired",  0)
@@ -8499,7 +8360,7 @@ def _dispatch_callback(call, uid, data):
             _show_panel_config_detail(call, config_id, back_data="admin:panel_configs")
             return
 
-        # admin:pcfg:del:{config_id}  � confirm deletion
+        # admin:pcfg:del:{config_id}  — confirm deletion
         if data.startswith("admin:pcfg:del:") and not data.startswith("admin:pcfg:delok:"):
             config_id = int(data.split(":")[-1])
             cfg = get_panel_config(config_id)
@@ -8541,7 +8402,7 @@ def _dispatch_callback(call, uid, data):
             except Exception:
                 pass
             # Notify admin that delete is queued
-            client_name = cfg.get("client_name") or "�"
+            client_name = cfg.get("client_name") or "—"
             bot.send_message(
                 call.message.chat.id,
                 f"⏳ <b>درخواست حذف کانفیگ ثبت شد</b>\n\n"
@@ -8578,7 +8439,7 @@ def _dispatch_callback(call, uid, data):
 
         return
 
-    # -- User: My Panel Configs -------------------------------------------------
+    # ── User: My Panel Configs ─────────────────────────────────────────────────
     if data.startswith("mypnlcfg:") or data.startswith("mypnlcfgrpay:"):
         from ..admin.renderers import _show_panel_config_detail
 
@@ -8593,7 +8454,7 @@ def _dispatch_callback(call, uid, data):
                                       is_user_view=True)
             return
 
-        # mypnlcfg:renewwarn:{config_id}  � confirmation warning before quick renewal
+        # mypnlcfg:renewwarn:{config_id}  — confirmation warning before quick renewal
         if data.startswith("mypnlcfg:renewwarn:"):
             config_id = int(data.split(":")[-1])
             cfg = get_panel_config(config_id)
@@ -8610,7 +8471,7 @@ def _dispatch_callback(call, uid, data):
                 kb)
             return
 
-        # mypnlcfg:renewconfirm:{config_id}  � show package list for panel config renewal
+        # mypnlcfg:renewconfirm:{config_id}  — show package list for panel config renewal
         if data.startswith("mypnlcfg:renewconfirm:"):
             config_id = int(data.split(":")[-1])
             cfg = get_panel_config(config_id)
@@ -8650,7 +8511,7 @@ def _dispatch_callback(call, uid, data):
                     f"{agent_note}", kb)
             return
 
-        # mypnlcfg:renewp:{config_id}:{package_id}  � show payment gateways for selected package
+        # mypnlcfg:renewp:{config_id}:{package_id}  — show payment gateways for selected package
         if data.startswith("mypnlcfg:renewp:"):
             parts = data.split(":")
             config_id  = int(parts[2])
@@ -8670,7 +8531,7 @@ def _dispatch_callback(call, uid, data):
             _show_pnlcfg_renewal_gateways(call, uid, config_id, package_id, price, package_row, cfg)
             return
 
-        # -- Panel config renewal payment handlers -----------------------------
+        # ── Panel config renewal payment handlers ─────────────────────────────
 
         # mypnlcfgrpay:wallet:{config_id}:{package_id}
         if data.startswith("mypnlcfgrpay:wallet:"):
@@ -8692,7 +8553,7 @@ def _dispatch_callback(call, uid, data):
             update_balance(uid, -price)
             create_payment("pnlcfg_renewal", uid, package_id, price, "wallet",
                            status="completed", config_id=config_id)
-            bot.answer_callback_query(call.id, "? ?? ??? ?????�")
+            bot.answer_callback_query(call.id, "⏳ در حال تمدید…")
             ok_r, err_r = _execute_pnlcfg_renewal(config_id, package_id, chat_id=uid, uid=uid)
             state_clear(uid)
             if not ok_r:
@@ -8929,7 +8790,7 @@ def _dispatch_callback(call, uid, data):
                     bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True); return
                 config_id_v  = payment["config_id"]
                 package_id_v = payment["package_id"]
-                bot.answer_callback_query(call.id, "? ?????? ????? ??! ?? ??? ?????�")
+                bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد! در حال تمدید…")
                 ok_r, err_r = _execute_pnlcfg_renewal(config_id_v, package_id_v, chat_id=uid, uid=uid)
                 state_clear(uid)
                 if not ok_r:
@@ -8997,7 +8858,7 @@ def _dispatch_callback(call, uid, data):
                 f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n"
                 f"💱 معادل: <b>{amount_usdt_pnl:.4f} USDT</b>\n\n"
                 "❌ این فاکتور <b>۱ ساعت</b> اعتبار دارد\n"
-                "?? ?? ?????? ???? �? ????? ??????� ?? ?????.",
+                "پس از واریز، دکمه «✅ بررسی پرداخت» را بزنید.",
                 kb_pnl)
             _start_plisio_auto_verify(
                 payment_id, txn_id_pnl, uid,
@@ -9022,7 +8883,7 @@ def _dispatch_callback(call, uid, data):
                     bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True); return
                 config_id_vp  = payment["config_id"]
                 package_id_vp = payment["package_id"]
-                bot.answer_callback_query(call.id, "? ?????? ????? ??! ?? ??? ?????�")
+                bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد! در حال تمدید…")
                 ok_r, err_r = _execute_pnlcfg_renewal(config_id_vp, package_id_vp, chat_id=uid, uid=uid)
                 state_clear(uid)
                 if not ok_r:
@@ -9041,11 +8902,10 @@ def _dispatch_callback(call, uid, data):
             parts = data.split(":")
             config_id  = int(parts[2])
             package_id = int(parts[3])
-            _chosen_cur_pnp = parts[5] if len(parts) >= 6 and parts[4] == "cur" else None
             cfg = get_panel_config(config_id)
             if not cfg or cfg["user_id"] != uid:
                 try:
-                    bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+                    bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
                 except Exception:
                     pass
                 return
@@ -9062,36 +8922,12 @@ def _dispatch_callback(call, uid, data):
                 _rng = get_gateway_range_text("nowpayments")
                 try:
                     bot.answer_callback_query(call.id,
-                        f"مبلغ {fmt_price(price)} خارج از محدوده مجاز درگاه NowPayments است.\n"
+                        f"⛔️ مبلغ {fmt_price(price)} تومان برای درگاه NowPayments مجاز نیست.\n"
                         f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
                         show_alert=True)
                 except Exception:
                     pass
                 return
-            _np_enabled_pnp = get_nowpayments_enabled_currencies()
-            if not _chosen_cur_pnp and len(_np_enabled_pnp) > 1:
-                _NP_CUR_LABELS = {
-                    "usdttrc20": "💵 USDT (TRC20 - ترون)", "usdterc20": "💵 USDT (ERC20 - اتریوم)",
-                    "usdtbsc": "💵 USDT (BEP20 - BSC)", "usdtton": "💵 USDT (TON)",
-                    "btc": "₿ Bitcoin (BTC)", "eth": "⟠ Ethereum (ETH)",
-                    "trx": "🔷 TRX (ترون)", "ton": "💎 TON", "ltc": "🔵 Litecoin (LTC)", "bnbbsc": "🟡 BNB (BSC)",
-                }
-                kb_cur_pnp = types.InlineKeyboardMarkup(row_width=1)
-                for _c in _np_enabled_pnp:
-                    kb_cur_pnp.add(types.InlineKeyboardButton(
-                        _NP_CUR_LABELS.get(_c, _c.upper()),
-                        callback_data=f"mypnlcfgrpay:nowpayments:{config_id}:{package_id}:cur:{_c}"))
-                kb_cur_pnp.add(types.InlineKeyboardButton("بازگشت", callback_data=f"mypnlcfg:renewconfirm:{config_id}",
-                                                          icon_custom_emoji_id="5253997076169115797"))
-                try:
-                    bot.answer_callback_query(call.id)
-                except Exception:
-                    pass
-                send_or_edit(call,
-                    "🪙 <b>انتخاب ارز پرداخت</b>\n\nلطفاً ارز مورد نظر برای پرداخت را انتخاب کنید:",
-                    kb_cur_pnp)
-                return
-            _sel_cur_pnp = _chosen_cur_pnp or (_np_enabled_pnp[0] if _np_enabled_pnp else "usdttrc20")
             payment_id = create_payment("pnlcfg_renewal", uid, package_id, price, "nowpayments",
                                         status="pending", config_id=config_id)
             _bot_username_pnp = bot.get_me().username or ""
@@ -9100,8 +8936,7 @@ def _dispatch_callback(call, uid, data):
                 if ('show_name' not in package_row.keys() or package_row['show_name'])
                 else f"تمدید {fmt_vol(package_row['volume_gb'])} | {fmt_dur(package_row['duration_days'])}"
             )
-            success_pnp, result_pnp = create_nowpayments_invoice(price, payment_id, uid, _bot_username_pnp,
-                                                                  order_label_pnp, pay_currency=_sel_cur_pnp)
+            success_pnp, result_pnp = create_nowpayments_invoice(price, payment_id, uid, _bot_username_pnp, order_label_pnp)
             if not success_pnp:
                 err_pnp = result_pnp.get("error", "خطای ناشناخته") if isinstance(result_pnp, dict) else str(result_pnp)
                 try:
@@ -9109,7 +8944,7 @@ def _dispatch_callback(call, uid, data):
                 except Exception:
                     pass
                 send_or_edit(call,
-                    f"❌ <b>خطا در ایجاد فاکتور NowPayments</b>\n\n<code>{esc(err_pnp[:400])}</code>",
+                    f"⚠️ <b>خطا در ایجاد فاکتور NowPayments</b>\n\n<code>{esc(err_pnp[:400])}</code>",
                     back_button(f"mypnlcfg:renewconfirm:{config_id}"))
                 return
             invoice_id_pnp  = result_pnp.get("invoice_id", "")
@@ -9121,21 +8956,21 @@ def _dispatch_callback(call, uid, data):
                       payment_id=payment_id, invoice_id=invoice_id_pnp, config_id=config_id)
             short_id_pnp = str(payment_id)
             kb_pnp = types.InlineKeyboardMarkup()
-            kb_pnp.add(types.InlineKeyboardButton("💳 پرداخت در NowPayments", url=inv_url_pnp))
-            kb_pnp.add(types.InlineKeyboardButton("🔄 بررسی پرداخت",
+            kb_pnp.add(types.InlineKeyboardButton("💎 پرداخت در NowPayments", url=inv_url_pnp))
+            kb_pnp.add(types.InlineKeyboardButton("✅ بررسی پرداخت",
                         callback_data=f"mypnlcfgrpay:nowpayments:verify:{payment_id}"))
-            kb_pnp.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"mypnlcfg:renewconfirm:{config_id}"))
+            kb_pnp.add(types.InlineKeyboardButton("⬅️ بازگشت", callback_data=f"mypnlcfg:renewconfirm:{config_id}"))
             try:
                 bot.answer_callback_query(call.id)
             except Exception:
                 pass
             send_or_edit(call,
-                "💎 <b>فاکتور پرداخت NowPayments (تمدید پنل)</b>\n\n"
-                f"🔢 شماره سفارش: <code>{short_id_pnp}</code>\n"
+                "💎 <b>پرداخت کریپتو NowPayments (تمدید)</b>\n\n"
+                f"🛒 کد پیگیری: <code>{short_id_pnp}</code>\n"
                 f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n"
-                f"🪙 مبلغ کریپتو: <b>{amount_usdt_pnp:.6f} {_sel_cur_pnp.upper()}</b>\n\n"
-                "⏳ لینک پرداخت <b>۶۰ دقیقه</b> معتبر است\n"
-                "🔁 پس از پرداخت روی «بررسی پرداخت» بزنید.",
+                f"💱 معادل: <b>{amount_usdt_pnp:.4f} USDT</b>\n\n"
+                "❌ این فاکتور <b>۱ ساعت</b> اعتبار دارد\n"
+                "پس از واریز، دکمه «✅ بررسی پرداخت» را بزنید.",
                 kb_pnp)
             _start_nowpayments_auto_verify(
                 payment_id, invoice_id_pnp, uid,
@@ -9177,7 +9012,7 @@ def _dispatch_callback(call, uid, data):
                 config_id_vp  = payment["config_id"]
                 package_id_vp = payment["package_id"]
                 try:
-                    bot.answer_callback_query(call.id, "? ?????? ????? ??! ?? ??? ?????�")
+                    bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد! در حال تمدید…")
                 except Exception:
                     pass
                 ok_r, err_r = _execute_pnlcfg_renewal(config_id_vp, package_id_vp, chat_id=uid, uid=uid)
@@ -9267,7 +9102,7 @@ def _dispatch_callback(call, uid, data):
                     bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True); return
                 config_id_sv  = payment["config_id"]
                 package_id_sv = payment["package_id"]
-                bot.answer_callback_query(call.id, "? ?????? ????? ??! ?? ??? ?????�")
+                bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد! در حال تمدید…")
                 ok_r, err_r = _execute_pnlcfg_renewal(config_id_sv, package_id_sv, chat_id=uid, uid=uid)
                 state_clear(uid)
                 if not ok_r:
@@ -9442,10 +9277,10 @@ def _dispatch_callback(call, uid, data):
                 if row["is_expired"]:
                     marker = " ⌛"
                 elif int(row["is_disabled"] or 0):
-                    marker = " ⌛"
+                    marker = " ⛔"
                 else:
                     marker = " 🟢"
-                name = esc(row["client_name"] or row["package_name"] or "�")
+                name = esc(row["client_name"] or row["package_name"] or "—")
                 kb.add(types.InlineKeyboardButton(f"{name}{marker}", callback_data=f"mypnlcfg:d:{row['id']}"))
             if total_pages > 1:
                 nav = []
@@ -9464,7 +9299,7 @@ def _dispatch_callback(call, uid, data):
             send_or_edit(call, header, kb)
             return
 
-    # -- User: Volume add-on --------------------------------------------------
+    # ── User: Volume add-on ──────────────────────────────────────────────────
     if data.startswith("addon:vol:") and len(data.split(":")) == 3:
         config_id = int(data.split(":")[2])
         cfg = get_panel_config(config_id)
@@ -9522,7 +9357,7 @@ def _dispatch_callback(call, uid, data):
         _show_addon_invoice(call, uid, "volume")
         return
 
-    # -- User: Time add-on ----------------------------------------------------
+    # ── User: Time add-on ────────────────────────────────────────────────────
     if data.startswith("addon:time:") and len(data.split(":")) == 3:
         config_id = int(data.split(":")[2])
         cfg = get_panel_config(config_id)
@@ -9579,7 +9414,7 @@ def _dispatch_callback(call, uid, data):
         _show_addon_invoice(call, uid, "time")
         return
 
-    # -- User: Addon discount code --------------------------------------------
+    # ── User: Addon discount code ────────────────────────────────────────────
     if data.startswith("addon:disc:"):
         # addon:disc:{config_id}:{addon_type}
         parts      = data.split(":")
@@ -9613,7 +9448,7 @@ def _dispatch_callback(call, uid, data):
         _show_addon_invoice(call, uid, addon_type)
         return
 
-    # -- User: Addon payment --------------------------------------------------
+    # ── User: Addon payment ──────────────────────────────────────────────────
     if data.startswith("addon:pay:"):
         # addon:pay:{config_id}:{addon_type}:{method}
         parts      = data.split(":")
@@ -9659,7 +9494,7 @@ def _dispatch_callback(call, uid, data):
             return
 
         if method == "card":
-            # Card payment � store current state and show card info
+            # Card payment — store current state and show card info
             from ..db import pick_card_for_payment as _pick_card
             card = _pick_card()
             if not card:
@@ -9729,14 +9564,14 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, "🔌 پروتکل کانفیگ را انتخاب کنید:", kb)
         return
 
-    # -- Protocol selector -----------------------------------------------------
+    # ── Protocol selector ─────────────────────────────────────────────────────
     if data.startswith("adm:cfg:proto:"):
         parts      = data.split(":")
         proto      = parts[3]           # v2ray | ovpn | wg
         package_id = int(parts[4])
         package_row = get_package(package_id)
 
-        # -- V2Ray: new structured flow ----------------------------------------
+        # ── V2Ray: new structured flow ────────────────────────────────────────
         if proto == "v2ray":
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("📝 ثبت تکی",    callback_data=f"adm:v2:single:{package_id}"))
@@ -9746,7 +9581,7 @@ def _dispatch_callback(call, uid, data):
             send_or_edit(call, "📝 روش ثبت کانفیگ V2Ray را انتخاب کنید:", kb)
             return
 
-        # -- OpenVPN -----------------------------------------------------------
+        # ── OpenVPN ───────────────────────────────────────────────────────────
         if proto == "ovpn":
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("📝 ثبت تکی",   callback_data=f"adm:ovpn:single:{package_id}"))
@@ -9756,7 +9591,7 @@ def _dispatch_callback(call, uid, data):
             send_or_edit(call, "📝 روش ثبت کانفیگ OpenVPN را انتخاب کنید:", kb)
             return
 
-        # -- WireGuard ---------------------------------------------------------
+        # ── WireGuard ─────────────────────────────────────────────────────────
         if proto == "wg":
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("📝 ثبت تکی",    callback_data=f"adm:wg:single:{package_id}"))
@@ -9769,7 +9604,7 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id, "پروتکل ناشناخته", show_alert=True)
         return
 
-    # -- OpenVPN � Single -----------------------------------------------------
+    # ── OpenVPN — Single ─────────────────────────────────────────────────────
     if data.startswith("adm:ovpn:single:"):
         package_id = int(data.split(":")[3])
         state_set(uid, "ovpn_single_file", package_id=package_id)
@@ -9779,11 +9614,11 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call,
             "📎 <b>ثبت تکی OpenVPN</b>\n\n"
             "فایل یا فایل‌های <code>.ovpn</code> را ارسال کنید.\n"
-            "??? ??? ???? ?????? ??? ?? ???? ??????? � ??? ????? ?? ?? ????? ?? ??? ????? ???????.\n\n"
+            "اگر چند فایل دارید، همه را یکجا بفرستید — همه متعلق به یک اکانت در نظر گرفته می‌شوند.\n\n"
             "⚠️ فقط فرمت <b>.ovpn</b> پذیرفته می‌شود.", kb)
         return
 
-    # -- OpenVPN � Bulk (shared vs different files) ----------------------------
+    # ── OpenVPN — Bulk (shared vs different files) ────────────────────────────
     if data.startswith("adm:ovpn:bulk:"):
         rest       = data[len("adm:ovpn:bulk:"):]
 
@@ -9809,7 +9644,7 @@ def _dispatch_callback(call, uid, data):
             kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:ovpn:bulk:{package_id}", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call,
-                "?? <b>??? ??????? OpenVPN � ???? ?????</b>\n\n"
+                "📎 <b>ثبت دسته‌ای OpenVPN — فایل مشترک</b>\n\n"
                 "فایل یا فایل‌های <code>.ovpn</code> مشترک را ارسال کنید.\n"
                 "اگر چند فایل مشترک دارید همه را بفرستید.\n\n"
                 "وقتی تمام فایل‌ها را فرستادید دکمه ✅ را بزنید.",
@@ -9828,7 +9663,7 @@ def _dispatch_callback(call, uid, data):
             kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:ovpn:bulk:{package_id}", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call,
-                "?? <b>??? ??????? OpenVPN � ???? ??????</b>\n\n"
+                "🔢 <b>ثبت دسته‌ای OpenVPN — فایل متفاوت</b>\n\n"
                 "چند اکانت می‌خواهید ثبت کنید؟\n"
                 "عدد را تایپ کنید:", kb)
             return
@@ -9836,7 +9671,7 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id, "مسیر ناشناخته", show_alert=True)
         return
 
-    # -- OpenVPN � shared files done, ask about inquiry ------------------------
+    # ── OpenVPN — shared files done, ask about inquiry ────────────────────────
     if data.startswith("adm:ovpn:sharedok:"):
         package_id = int(data.split(":")[3])
         sd = state_data(uid)
@@ -9854,7 +9689,7 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, "🔗 آیا اکانت‌ها <b>لینک استعلام حجم</b> دارند؟", kb)
         return
 
-    # -- OpenVPN � shared: has inquiry or not ---------------------------------
+    # ── OpenVPN — shared: has inquiry or not ─────────────────────────────────
     if data.startswith("adm:ovpn:shinq:"):
         parts      = data.split(":")
         yn         = parts[3]
@@ -9867,7 +9702,7 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id)
         if has_inq:
             fmt_text = (
-                "?? <b>??????? ???????? � ???? ????? (?? ???? ???????)</b>\n\n"
+                "📋 <b>اطلاعات اکانت‌ها — فایل مشترک (با لینک استعلام)</b>\n\n"
                 "هر اکانت <b>۳ خط</b>:\n"
                 "خط ۱: username\n"
                 "خط ۲: password\n"
@@ -9878,8 +9713,8 @@ def _dispatch_callback(call, uid, data):
             )
         else:
             fmt_text = (
-                "?? <b>??????? ???????? � ???? ????? (???? ???? ???????)</b>\n\n"
-                "هر اکانت <b>۳ خط</b>:\n"
+                "📋 <b>اطلاعات اکانت‌ها — فایل مشترک (بدون لینک استعلام)</b>\n\n"
+                "هر اکانت <b>۲ خط</b>:\n"
                 "خط ۱: username\n"
                 "خط ۲: password\n\n"
                 "💡 مثال:\n"
@@ -9890,9 +9725,9 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, fmt_text, kb)
         return
 
-    # -- OpenVPN � diff: per-account files done, ask inquiry ------------------
+    # ── OpenVPN — diff: per-account files done, ask inquiry ──────────────────
     if data.startswith("adm:ovpn:diffok:"):
-        # adm:ovpn:diffok:{pkg_id}:{account_idx}  � all files for that account received
+        # adm:ovpn:diffok:{pkg_id}:{account_idx}  — all files for that account received
         parts      = data.split(":")
         package_id = int(parts[3])
         acct_idx   = int(parts[4])
@@ -9931,7 +9766,7 @@ def _dispatch_callback(call, uid, data):
             bot.send_message(uid, "🔗 آیا اکانت‌ها <b>لینک استعلام حجم</b> دارند؟", reply_markup=kb)
         return
 
-    # -- OpenVPN � diff: has inquiry or not -----------------------------------
+    # ── OpenVPN — diff: has inquiry or not ───────────────────────────────────
     if data.startswith("adm:ovpn:dinq:"):
         parts      = data.split(":")
         yn         = parts[3]
@@ -9944,7 +9779,7 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id)
         if has_inq:
             fmt_text = (
-                "?? <b>??????? ???????? � ???? ?????? (?? ???? ???????)</b>\n\n"
+                "📋 <b>اطلاعات اکانت‌ها — فایل متفاوت (با لینک استعلام)</b>\n\n"
                 "هر اکانت <b>۳ خط</b> به ترتیب:\n"
                 "خط ۱: username\n"
                 "خط ۲: password\n"
@@ -9955,8 +9790,8 @@ def _dispatch_callback(call, uid, data):
             )
         else:
             fmt_text = (
-                "?? <b>??????? ???????? � ???? ?????? (???? ???? ???????)</b>\n\n"
-                "هر اکانت <b>۳ خط</b> به ترتیب:\n"
+                "📋 <b>اطلاعات اکانت‌ها — فایل متفاوت (بدون لینک استعلام)</b>\n\n"
+                "هر اکانت <b>۲ خط</b> به ترتیب:\n"
                 "خط ۱: username\n"
                 "خط ۲: password\n\n"
                 "💡 مثال:\n"
@@ -9967,7 +9802,7 @@ def _dispatch_callback(call, uid, data):
         bot.send_message(uid, fmt_text, reply_markup=kb)
         return
 
-    # -- OpenVPN � Single: files done, ask username ----------------------------
+    # ── OpenVPN — Single: files done, ask username ────────────────────────────
     if data.startswith("adm:ovpn:single_done:"):
         package_id = int(data.split(":")[3])
         sd = state_data(uid)
@@ -9980,7 +9815,7 @@ def _dispatch_callback(call, uid, data):
         bot.send_message(uid, "👤 <b>Username</b> اکانت را وارد کنید:", parse_mode="HTML")
         return
 
-    # -- OpenVPN � Single: skip inquiry link ----------------------------------
+    # ── OpenVPN — Single: skip inquiry link ──────────────────────────────────
     if data.startswith("adm:ovpn:sinq_skip:"):
         package_id = int(data.split(":")[3])
         sd = state_data(uid)
@@ -9988,7 +9823,7 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id)
         return
 
-    # -- WireGuard � Single ----------------------------------------------------
+    # ── WireGuard — Single ────────────────────────────────────────────────────
     if data.startswith("adm:wg:single:"):
         package_id = int(data.split(":")[3])
         state_set(uid, "wg_single_file", package_id=package_id, wg_files=[], wg_names=[])
@@ -9998,11 +9833,11 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call,
             "📎 <b>ثبت تکی WireGuard</b>\n\n"
             "فایل یا فایل‌های کانفیگ WireGuard را ارسال کنید.\n"
-            "??? ??? ???? ?????? ??? ?? ??????? � ??? ????? ?? ?? ?????? ?? ??? ????? ???????.\n\n"
+            "اگر چند فایل دارید، همه را بفرستید — همه متعلق به یک کانفیگ در نظر گرفته می‌شوند.\n\n"
             "نام سرویس به صورت خودکار از نام فایل خوانده می‌شود.", kb)
         return
 
-    # -- WireGuard � Single: files done ---------------------------------------
+    # ── WireGuard — Single: files done ───────────────────────────────────────
     if data.startswith("adm:wg:single_done:"):
         package_id = int(data.split(":")[3])
         sd = state_data(uid)
@@ -10022,7 +9857,7 @@ def _dispatch_callback(call, uid, data):
             reply_markup=skip_kb, parse_mode="HTML")
         return
 
-    # -- WireGuard � Single: skip inquiry -------------------------------------
+    # ── WireGuard — Single: skip inquiry ─────────────────────────────────────
     if data.startswith("adm:wg:sinq_skip:"):
         package_id = int(data.split(":")[3])
         sd = state_data(uid)
@@ -10030,7 +9865,7 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id)
         return
 
-    # -- WireGuard � Bulk ------------------------------------------------------
+    # ── WireGuard — Bulk ──────────────────────────────────────────────────────
     if data.startswith("adm:wg:bulk:"):
         rest = data[len("adm:wg:bulk:"):]
 
@@ -10056,7 +9891,7 @@ def _dispatch_callback(call, uid, data):
             kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:wg:bulk:{package_id}", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call,
-                "?? <b>??? ??????? WireGuard � ???? ?????</b>\n\n"
+                "📎 <b>ثبت دسته‌ای WireGuard — فایل مشترک</b>\n\n"
                 "فایل یا فایل‌های مشترک WireGuard را ارسال کنید.\n"
                 "وقتی تمام فایل‌ها را فرستادید دکمه ✅ را بزنید.", kb)
             done_kb = types.InlineKeyboardMarkup()
@@ -10072,7 +9907,7 @@ def _dispatch_callback(call, uid, data):
             kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:wg:bulk:{package_id}", icon_custom_emoji_id="5253997076169115797"))
             bot.answer_callback_query(call.id)
             send_or_edit(call,
-                "?? <b>??? ??????? WireGuard � ???? ??????</b>\n\n"
+                "🔢 <b>ثبت دسته‌ای WireGuard — فایل متفاوت</b>\n\n"
                 "چند کانفیگ می‌خواهید ثبت کنید؟\n"
                 "عدد را تایپ کنید:", kb)
             return
@@ -10080,7 +9915,7 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id, "مسیر ناشناخته", show_alert=True)
         return
 
-    # -- WireGuard � Shared files done, ask inquiry ----------------------------
+    # ── WireGuard — Shared files done, ask inquiry ────────────────────────────
     if data.startswith("adm:wg:sharedok:"):
         package_id = int(data.split(":")[3])
         sd = state_data(uid)
@@ -10100,7 +9935,7 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, "🔗 آیا کانفیگ‌ها <b>لینک استعلام حجم</b> دارند؟", kb)
         return
 
-    # -- WireGuard � Shared: with/without inquiry ------------------------------
+    # ── WireGuard — Shared: with/without inquiry ──────────────────────────────
     if data.startswith("adm:wg:shinq:"):
         parts      = data.split(":")
         yn         = parts[3]
@@ -10115,7 +9950,7 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id)
         if has_inq:
             fmt_text = (
-                "?? <b>???????? ??????? � ???? ?????</b>\n\n"
+                "📋 <b>لینک‌های استعلام — فایل مشترک</b>\n\n"
                 "هر خط یک لینک استعلام برای یک کانفیگ:\n\n"
                 "💡 مثال:\n"
                 "<code>http://panel.com/sub/1\n"
@@ -10133,7 +9968,7 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, fmt_text, kb)
         return
 
-    # -- WireGuard � Diff: per-config files done -------------------------------
+    # ── WireGuard — Diff: per-config files done ───────────────────────────────
     if data.startswith("adm:wg:diffok:"):
         parts      = data.split(":")
         package_id = int(parts[3])
@@ -10179,7 +10014,7 @@ def _dispatch_callback(call, uid, data):
             bot.send_message(uid, "🔗 آیا کانفیگ‌ها <b>لینک استعلام حجم</b> دارند؟", reply_markup=kb)
         return
 
-    # -- WireGuard � Diff: with/without inquiry --------------------------------
+    # ── WireGuard — Diff: with/without inquiry ────────────────────────────────
     if data.startswith("adm:wg:dinq:"):
         parts      = data.split(":")
         yn         = parts[3]
@@ -10193,7 +10028,7 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id)
         if has_inq:
             fmt_text = (
-                "?? <b>???????? ??????? � ???? ??????</b>\n\n"
+                "📋 <b>لینک‌های استعلام — فایل متفاوت</b>\n\n"
                 "هر خط یک لینک استعلام به ترتیب کانفیگ‌ها:\n\n"
                 "💡 مثال:\n"
                 "<code>http://panel.com/sub/1\n"
@@ -10214,7 +10049,7 @@ def _dispatch_callback(call, uid, data):
         bot.send_message(uid, fmt_text, reply_markup=kb)
         return
 
-    # -- V2Ray: Single ---------------------------------------------------------
+    # ── V2Ray: Single ─────────────────────────────────────────────────────────
     # adm:v2:single:{pkg_id}  → choose single-registration mode
     if data.startswith("adm:v2:single:"):
         package_id = int(data.split(":")[3])
@@ -10263,7 +10098,7 @@ def _dispatch_callback(call, uid, data):
             back_button(f"adm:v2:single:{package_id}"))
         return
 
-    # -- V2Ray: Bulk -----------------------------------------------------------
+    # ── V2Ray: Bulk ───────────────────────────────────────────────────────────
     # adm:v2:bulk:{pkg_id}  → choose bulk-registration mode
     if data.startswith("adm:v2:bulk:"):
         rest = data[len("adm:v2:bulk:"):]
@@ -10276,11 +10111,11 @@ def _dispatch_callback(call, uid, data):
                       package_id=package_id, type_id=package_row["type_id"])
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton(
-                "1?? ?????? + ??? � ????? ????? ??",
+                "1️⃣ کانفیگ + ساب — مناسب تعداد کم",
                 callback_data=f"adm:v2:bm:1:{package_id}"
             ))
             kb.add(types.InlineKeyboardButton(
-                "2?? ?????? + ??? � ????? ????? ????",
+                "2️⃣ کانفیگ + ساب — مناسب تعداد زیاد",
                 callback_data=f"adm:v2:bm:2:{package_id}"
             ))
             kb.add(types.InlineKeyboardButton(
@@ -10296,10 +10131,10 @@ def _dispatch_callback(call, uid, data):
             send_or_edit(call,
                 "📋 <b>ثبت دسته‌ای V2Ray</b>\n\n"
                 "نوع کانفیگ‌هایی که می‌خواهید ثبت کنید را انتخاب کنید:\n\n"
-                "1?? <b>?????? + ??? � ????? ??</b>\n"
+                "1️⃣ <b>کانفیگ + ساب — تعداد کم</b>\n"
                 "   هر کانفیگ یک ساب جداگانه دارد و تعداد کمی هستند (زیر ~۳۰).\n"
                 "   کانفیگ و ساب را یکی در میان وارد می‌کنید.\n\n"
-                "2?? <b>?????? + ??? � ????? ????</b>\n"
+                "2️⃣ <b>کانفیگ + ساب — تعداد زیاد</b>\n"
                 "   هر کانفیگ یک ساب جداگانه دارد و تعداد زیادی هستند.\n"
                 "   ابتدا همه کانفیگ‌ها، سپس همه ساب‌ها را جداگانه ارسال می‌کنید.\n\n"
                 "3️⃣ <b>کانفیگ تنها</b>\n"
@@ -10324,7 +10159,7 @@ def _dispatch_callback(call, uid, data):
                 "✂️ <b>پسوند حذفی از نام کانفیگ</b>\n\n"
                 "اگر انتهای نام کانفیگ‌ها متن اضافه‌ای دارد که نمی‌خواهید نمایش داده شود، اینجا وارد کنید.\n\n"
                 "💡 مثال: <code>-main</code>\n\n"
-                "??? ?????? ?????? ???? �???? ?????� ?? ?????.", kb)
+                "اگر پسوندی ندارید دکمه «بدون پسوند» را بزنید.", kb)
             return
 
         if rest.startswith("suf:skip:"):
@@ -10360,8 +10195,8 @@ def _dispatch_callback(call, uid, data):
                 "✂️ <b>پیشوند حذفی از نام کانفیگ</b>\n\n"
                 "اگر ابتدای نام کانفیگ‌ها متن اضافه‌ای (مثل ریمارک اینباند) دارد که نمی‌خواهید در نام سرویس باشد، اینجا وارد کنید.\n\n"
                 "💡 مثال: <code>⚕️TUN_-</code>\n\n"
-                "??? ??????? ?????? ???? �???? ??????� ?? ?????.", kb)
-        else:  # mode 4: sub only � no prefix/suffix needed
+                "اگر پیشوندی ندارید دکمه «بدون پیشوند» را بزنید.", kb)
+        else:  # mode 4: sub only — no prefix/suffix needed
             state_set(uid, "v2_bulk_data",
                       package_id=package_id, type_id=s.get("type_id", 0),
                       mode=4, prefix="", suffix="")
@@ -10369,7 +10204,7 @@ def _dispatch_callback(call, uid, data):
             send_or_edit(call, prompt, back_button(f"adm:v2:bulk:{package_id}"))
         return
 
-    # -- V2Ray Mode 2 Bulk: Step 2 � receive subs after configs ---------------
+    # ── V2Ray Mode 2 Bulk: Step 2 — receive subs after configs ───────────────
     # adm:v2:bm2subs:{pkg_id}  (button sent after config-block received)
     if data.startswith("adm:v2:bm2subs:"):
         package_id = int(data.split(":")[3])
@@ -10390,7 +10225,7 @@ def _dispatch_callback(call, uid, data):
             reply_markup=back_button(f"adm:v2:bulk:{package_id}"))
         return
 
-    # -- Legacy: adm:cfg:single / adm:cfg:bulk (redirect) ---------------------
+    # ── Legacy: adm:cfg:single / adm:cfg:bulk (redirect) ─────────────────────
     if data.startswith("adm:cfg:single:"):
         package_id = int(data.split(":")[3])
         bot.answer_callback_query(call.id)
@@ -10514,7 +10349,7 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, "🔗 آیا کانفیگ‌ها <b>لینک استعلام</b> هم دارند؟", kb)
         return
 
-    # -- Admin: Stock / Config management -------------------------------------
+    # ── Admin: Stock / Config management ─────────────────────────────────────
     if data == "admin:stock":
         if not (admin_has_perm(uid, "view_configs") or admin_has_perm(uid, "register_config") or admin_has_perm(uid, "manage_configs")):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
@@ -10556,7 +10391,7 @@ def _dispatch_callback(call, uid, data):
             elif c["sold_to"]:
                 mark = "🔴"
             else:
-                mark = "🔴"
+                mark = "🟢"
             svc = urllib.parse.unquote(c["service_name"] or "")
             kb.add(types.InlineKeyboardButton(f"{mark} {svc}", callback_data=f"adm:stk:cfg:{c['id']}"))
         nav_row = []
@@ -10670,7 +10505,7 @@ def _dispatch_callback(call, uid, data):
                 if remaining > 0:
                     send_or_edit(call,
                         f"⚠️ <b>{remaining}</b> سفارش در انتظار وجود دارد ولی موجودی کافی نیست.\n\n"
-                        "???? ??? ?????? ???? ??? ???? �??? ?????? ????� ?????.",
+                        "برای ثبت کانفیگ جدید روی دکمه «ثبت کانفیگ جدید» بزنید.",
                         back_button(f"adm:stk:pk:{package_id}"))
                 else:
                     send_or_edit(call, "✅ هیچ سفارش در انتظاری وجود ندارد.",
@@ -10773,7 +10608,7 @@ def _dispatch_callback(call, uid, data):
             elif c["sold_to"]:
                 mark = "🔴"
             else:
-                mark = "🔴"
+                mark = "🟢"
             svc = urllib.parse.unquote(c["service_name"] or "")
             kb.add(types.InlineKeyboardButton(f"{mark} {svc}", callback_data=f"adm:stk:cfg:{c['id']}"))
         # Pagination
@@ -10826,7 +10661,7 @@ def _dispatch_callback(call, uid, data):
         elif _has_sub:
             _reg_mode = "ساب تنها"
         else:
-            _reg_mode = "�"
+            _reg_mode = "—"
         text = (
             f"🔮 نام سرویس: <b>{esc(urllib.parse.unquote(row['service_name'] or ''))}</b>\n"
             f"🧩 نوع سرویس: {esc(row['type_name'])}\n"
@@ -10998,7 +10833,7 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, "✅ کانفیگ با موفقیت حذف شد.", back)
         return
 
-    # -- Admin: Bulk select � All packages entry (must be before blk: check) --
+    # ── Admin: Bulk select — All packages entry (must be before blk: check) ──
     if data.startswith("adm:stk:blkA:"):
         kind = data.split(":")[3]  # av / sl / ex
         if not (admin_has_perm(uid, "manage_configs") or uid in ADMIN_IDS):
@@ -11009,7 +10844,7 @@ def _dispatch_callback(call, uid, data):
         _render_bulk_page(call, uid)
         return
 
-    # -- Admin: Bulk select � Per-package entry --------------------------------
+    # ── Admin: Bulk select — Per-package entry ────────────────────────────────
     if data.startswith("adm:stk:blk:"):
         parts  = data.split(":")
         kind   = parts[3]         # av / sl / ex
@@ -11022,7 +10857,7 @@ def _dispatch_callback(call, uid, data):
         _render_bulk_page(call, uid)
         return
 
-    # -- Admin: Bulk select � Toggle individual config -------------------------
+    # ── Admin: Bulk select — Toggle individual config ─────────────────────────
     if data.startswith("adm:stk:btog:"):
         cfg_id   = int(data.split(":")[3])
         sd       = state_data(uid)
@@ -11040,7 +10875,7 @@ def _dispatch_callback(call, uid, data):
         _render_bulk_page(call, uid)
         return
 
-    # -- Admin: Bulk select � Select all on current page -----------------------
+    # ── Admin: Bulk select — Select all on current page ───────────────────────
     if data == "adm:stk:bsall":
         sd       = state_data(uid)
         sel_raw  = sd.get("selected", "")
@@ -11054,7 +10889,7 @@ def _dispatch_callback(call, uid, data):
         _render_bulk_page(call, uid)
         return
 
-    # -- Admin: Bulk select � Deselect current page ----------------------------
+    # ── Admin: Bulk select — Deselect current page ────────────────────────────
     if data == "adm:stk:bclr":
         sd       = state_data(uid)
         sel_raw  = sd.get("selected", "")
@@ -11069,7 +10904,7 @@ def _dispatch_callback(call, uid, data):
         _render_bulk_page(call, uid)
         return
 
-    # -- Admin: Bulk select � Clear all selections -----------------------------
+    # ── Admin: Bulk select — Clear all selections ─────────────────────────────
     if data == "adm:stk:bclrall":
         sd = state_data(uid)
         state_set(uid, "stk_bulk",
@@ -11080,7 +10915,7 @@ def _dispatch_callback(call, uid, data):
         _render_bulk_page(call, uid)
         return
 
-    # -- Admin: Bulk select � Navigate pages -----------------------------------
+    # ── Admin: Bulk select — Navigate pages ───────────────────────────────────
     if data.startswith("adm:stk:bnav:"):
         new_page = int(data.split(":")[3])
         sd = state_data(uid)
@@ -11092,7 +10927,7 @@ def _dispatch_callback(call, uid, data):
         _render_bulk_page(call, uid)
         return
 
-    # -- Admin: Bulk select � Execute delete -----------------------------------
+    # ── Admin: Bulk select — Execute delete ───────────────────────────────────
     if data == "adm:stk:bdel":
         sd      = state_data(uid)
         sel_raw = sd.get("selected", "")
@@ -11108,7 +10943,7 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, f"✅ <b>{len(ids)}</b> کانفیگ با موفقیت حذف شد.", back_button("admin:stock"))
         return
 
-    # -- Admin: Bulk select � Execute expire -----------------------------------
+    # ── Admin: Bulk select — Execute expire ───────────────────────────────────
     if data == "adm:stk:bexp":
         sd      = state_data(uid)
         sel_raw = sd.get("selected", "")
@@ -11124,7 +10959,7 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, f"✅ <b>{len(ids)}</b> کانفیگ منقضی اعلام شد.", back_button("admin:stock"))
         return
 
-    # -- Admin: Bulk select � Cancel / back ------------------------------------
+    # ── Admin: Bulk select — Cancel / back ────────────────────────────────────
     if data == "adm:stk:bcanc":
         sd     = state_data(uid)
         kind   = sd.get("kind", "av")
@@ -11138,7 +10973,7 @@ def _dispatch_callback(call, uid, data):
             _fake_call(call, f"adm:stk:all:{kind}:0")
         return
 
-    # -- Admin: Stock Search ---------------------------------------------------
+    # ── Admin: Stock Search ───────────────────────────────────────────────────
     if data == "adm:stk:search":
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("🔗 لینک استعلام", callback_data="adm:stk:srch:link"))
@@ -11167,7 +11002,7 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, "🔮 نام سرویس (یا بخشی از آن) را ارسال کنید:", back_button("adm:stk:search"))
         return
 
-    # -- Admin: Users ----------------------------------------------------------
+    # ── Admin: Users ──────────────────────────────────────────────────────────
     if data == "admin:users":
         if not (admin_has_perm(uid, "view_users") or admin_has_perm(uid, "full_users") or
                 any(admin_has_perm(uid, p) for p in PERM_USER_FULL)):
@@ -11199,21 +11034,21 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id)
         return
 
-    # -- Admin: User search ----------------------------------------------------
+    # ── Admin: User search ────────────────────────────────────────────────────
     if data == "adm:usr:search":
         state_set(uid, "admin_user_search")
         bot.answer_callback_query(call.id)
         send_or_edit(call,
             "🔍 <b>جستجوی کاربر</b>\n\n"
             "می‌توانید بر اساس موارد زیر جستجو کنید:\n"
-            "� <b>???? ????</b> (????: <code>123456789</code>)\n"
-            "� <b>??? ??????</b> (????: <code>@username</code>)\n"
-            "� <b>??? ?????</b> (????: <code>???</code>)\n\n"
+            "• <b>آیدی عددی</b> (مثال: <code>123456789</code>)\n"
+            "• <b>نام کاربری</b> (مثال: <code>@username</code>)\n"
+            "• <b>نام اکانت</b> (مثال: <code>علی</code>)\n\n"
             "مقدار جستجو را ارسال کنید:",
             back_button("admin:users"))
         return
 
-    # -- Admin: Bulk user operations ------------------------------------------
+    # ── Admin: Bulk user operations ──────────────────────────────────────────
     if data == "adm:usr:bulk":
         if not (uid in ADMIN_IDS or admin_has_perm(uid, "full_users")):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
@@ -11305,7 +11140,7 @@ def _dispatch_callback(call, uid, data):
             kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:bulk:op:{op}",
                                               icon_custom_emoji_id="5253997076169115797"))
             send_or_edit(call,
-                f"?? <b>?????? ???????</b> � ???? {page+1}/{total_pages}\n"
+                f"🔎 <b>انتخاب کاربران</b> — صفحه {page+1}/{total_pages}\n"
                 f"✅ {len(selected)} نفر انتخاب شده\n\nکلیک کنید تا انتخاب/لغو شود:",
                 kb)
             return
@@ -11334,7 +11169,7 @@ def _dispatch_callback(call, uid, data):
             }
             kb2 = types.InlineKeyboardMarkup()
             kb2.add(types.InlineKeyboardButton(
-                f"? ????? � ???? ??? {count} ?????",
+                f"✅ تایید — اجرا روی {count} کاربر",
                 callback_data=f"adm:bulk:exec:{op}:{filt}:0"))
             kb2.add(types.InlineKeyboardButton("لغو", callback_data="adm:usr:bulk",
                                                icon_custom_emoji_id="5253997076169115797"))
@@ -11390,13 +11225,13 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:bulk:op:{op}",
                                           icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call,
-            f"?? <b>?????? ???????</b> � ???? {page+1}/{total_pages}\n"
+            f"🔎 <b>انتخاب کاربران</b> — صفحه {page+1}/{total_pages}\n"
             f"✅ {len(selected)} نفر انتخاب شده:",
             kb)
         return
 
     if data.startswith("adm:bulk:confirm:"):
-        # Confirm after manual pick � ask for amount if needed
+        # Confirm after manual pick — ask for amount if needed
         if not (uid in ADMIN_IDS or admin_has_perm(uid, "full_users")):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
             return
@@ -11427,7 +11262,7 @@ def _dispatch_callback(call, uid, data):
             sel_str = ",".join(str(x) for x in selected[:50])
             kb2 = types.InlineKeyboardMarkup()
             kb2.add(types.InlineKeyboardButton(
-                f"? ????? � ???? ??? {count} ?????",
+                f"✅ تایید — اجرا روی {count} کاربر",
                 callback_data=f"adm:bulk:exec:{op}:pick:{sel_str}"))
             kb2.add(types.InlineKeyboardButton("لغو", callback_data="adm:usr:bulk",
                                                icon_custom_emoji_id="5253997076169115797"))
@@ -11456,7 +11291,7 @@ def _dispatch_callback(call, uid, data):
             user_ids = []
             amount   = int(amount_or_sel) if amount_or_sel.isdigit() else 0
 
-        bot.answer_callback_query(call.id, "? ?? ??? ????�")
+        bot.answer_callback_query(call.id, "⏳ در حال اجرا…")
         state_clear(uid)
 
         count = 0
@@ -11478,7 +11313,7 @@ def _dispatch_callback(call, uid, data):
                 result_msg = f"✅ {count} کاربر ناامن شدند."
             elif op == "set_restricted":
                 count = bulk_set_status(filter_type, user_ids, "restricted")
-                result_msg = f"✅ {count} کاربر ناامن شدند."
+                result_msg = f"✅ {count} کاربر محدود شدند."
             else:
                 result_msg = "❌ عملیات ناشناخته."
         except Exception as _e:
@@ -11491,7 +11326,7 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, result_msg, kb_back)
         return
 
-    # -- Admin: Admins management ----------------------------------------------
+    # ── Admin: Admins management ──────────────────────────────────────────────
     if data == "admin:admins":
         if uid not in ADMIN_IDS:
             bot.answer_callback_query(call.id, "فقط اونر می‌تواند ادمین‌ها را مدیریت کند.", show_alert=True)
@@ -11649,7 +11484,7 @@ def _dispatch_callback(call, uid, data):
         # Build human-readable permission list for notification
         perms_labels = {k: v for k, v in ADMIN_PERMS}
         active_perm_names = [perms_labels.get(k, k) for k, v in perms.items() if v]
-        perm_text = "\n".join(f"� {p}" for p in active_perm_names) or "� ???? ?????? �"
+        perm_text = "\n".join(f"• {p}" for p in active_perm_names) or "— بدون دسترسی —"
         if edit_mode:
             update_admin_permissions(target_id, perms)
             log_admin_action(uid, f"دسترسی‌های ادمین {target_id} به‌روزرسانی شد")
@@ -11695,7 +11530,7 @@ def _dispatch_callback(call, uid, data):
                 label = "ناامن"
             elif current == "unsafe":
                 new_status = "restricted"
-                label = "ناامن"
+                label = "محدود"
             else:
                 new_status = "safe"
                 label = "امن"
@@ -11970,7 +11805,7 @@ def _dispatch_callback(call, uid, data):
             pass
         return
 
-    # -- Admin: Agents management ----------------------------------------------
+    # ── Admin: Agents management ──────────────────────────────────────────────
     if data == "admin:agents":
         if not admin_has_perm(uid, "agency"):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
@@ -11982,7 +11817,7 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id)
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton(
-            f"{req_icon} ??????? ???????? � {req_label}",
+            f"{req_icon} درخواست نمایندگی — {req_label}",
             callback_data="adm:agt:toggle"))
         kb.add(types.InlineKeyboardButton("📋 درخواست‌های بررسی نشده", callback_data="adm:resreq:list:0"))
         kb.add(types.InlineKeyboardButton("💰 حداقل موجودی درخواست", callback_data="adm:resreq:minwallet"))
@@ -12039,7 +11874,7 @@ def _dispatch_callback(call, uid, data):
         req_label = "روشن" if req_flag == "1" else "خاموش"
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton(
-            f"{req_icon} ??????? ???????? � {req_label}",
+            f"{req_icon} درخواست نمایندگی — {req_label}",
             callback_data="adm:agt:toggle"))
         kb.add(types.InlineKeyboardButton("📋 درخواست‌های بررسی نشده", callback_data="adm:resreq:list:0"))
         kb.add(types.InlineKeyboardButton("💰 حداقل موجودی درخواست", callback_data="adm:resreq:minwallet"))
@@ -12076,7 +11911,7 @@ def _dispatch_callback(call, uid, data):
         agents = get_agencies()
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton(
-            f"{req_icon} ??????? ???????? � {req_label}",
+            f"{req_icon} درخواست نمایندگی — {req_label}",
             callback_data="adm:agt:toggle"))
         kb.add(types.InlineKeyboardButton("📋 درخواست‌های بررسی نشده", callback_data="adm:resreq:list:0"))
         kb.add(types.InlineKeyboardButton("💰 حداقل موجودی درخواست", callback_data="adm:resreq:minwallet"))
@@ -12099,7 +11934,7 @@ def _dispatch_callback(call, uid, data):
             kb)
         return
 
-    # -- Admin: Purchase Credit ------------------------------------------------
+    # ── Admin: Purchase Credit ────────────────────────────────────────────────
     if data.startswith("adm:credit:") and data.split(":")[2].isdigit():
         parts     = data.split(":")
         target_id = int(parts[2])
@@ -12164,7 +11999,7 @@ def _dispatch_callback(call, uid, data):
             back_button(f"adm:credit:{target_id}"))
         return
 
-    # -- Admin: Reseller Requests ----------------------------------------------
+    # ── Admin: Reseller Requests ──────────────────────────────────────────────
     if data.startswith("adm:resreq:list:"):
         if not admin_has_perm(uid, "agency") and not admin_has_perm(uid, "full_users"):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
@@ -12181,8 +12016,8 @@ def _dispatch_callback(call, uid, data):
         text = f"📋 <b>درخواست‌های بررسی نشده</b> ({total} عدد)\n\n"
         kb = types.InlineKeyboardMarkup()
         for r in rows:
-            uname = r["username"] or "�"
-            if uname != "�" and not uname.startswith("@"):
+            uname = r["username"] or "—"
+            if uname != "—" and not uname.startswith("@"):
                 uname = f"@{uname}"
             btn_label = f"👤 {r['full_name'] or r['user_id']} | {uname}"
             kb.add(types.InlineKeyboardButton(btn_label, callback_data=f"adm:resreq:view:{r['id']}"))
@@ -12206,13 +12041,13 @@ def _dispatch_callback(call, uid, data):
         if not req:
             bot.answer_callback_query(call.id, "درخواست یافت نشد.", show_alert=True)
             return
-        uname = req["username"] or "�"
-        if uname != "�" and not uname.startswith("@"):
+        uname = req["username"] or "—"
+        if uname != "—" and not uname.startswith("@"):
             uname = f"@{uname}"
         desc = esc(req["description"] or "بدون متن")
         text = (
             f"🤝 <b>درخواست نمایندگی</b> #{req_id}\n\n"
-            f"?? ???: {esc(req['full_name'] or '�')}\n"
+            f"👤 نام: {esc(req['full_name'] or '—')}\n"
             f"⚡️ نام کاربری: {uname}\n"
             f"🆔 آیدی: <code>{req['user_id']}</code>\n"
             f"📅 تاریخ: {req['created_at']}\n\n"
@@ -12336,9 +12171,9 @@ def _dispatch_callback(call, uid, data):
             back_button("admin:agents"))
         return
 
-    # -- Agency price config (3-mode) ------------------------------------------
+    # ── Agency price config (3-mode) ──────────────────────────────────────────
     if data.startswith("adm:agcfg:") and data.count(":") == 2:
-        # adm:agcfg:{target_id}  � show mode selector
+        # adm:agcfg:{target_id}  — show mode selector
         parts     = data.split(":")
         target_id = int(parts[2])
         if not admin_has_perm(uid, "agency") and not admin_has_perm(uid, "full_users"):
@@ -12375,12 +12210,12 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data.startswith("adm:agcfg:global:") and data.count(":") == 3:
-        # adm:agcfg:global:{target_id}  � choose pct or toman
+        # adm:agcfg:global:{target_id}  — choose pct or toman
         target_id = int(data.split(":")[3])
         cfg = get_agency_price_config(target_id)
         g_type = cfg["global_type"]
         g_val  = cfg["global_val"]
-        cur_label = f"{'????' if g_type == 'pct' else '?????'} � ????? ????: {g_val}"
+        cur_label = f"{'درصد' if g_type == 'pct' else 'تومان'} — مقدار فعلی: {g_val}"
         kb = types.InlineKeyboardMarkup()
         kb.row(
             types.InlineKeyboardButton("📊 درصد", callback_data=f"adm:agcfg:glb:pct:{target_id}"),
@@ -12410,7 +12245,7 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data.startswith("adm:agcfg:type:") and data.count(":") == 3:
-        # adm:agcfg:type:{target_id}  � show types list
+        # adm:agcfg:type:{target_id}  — show types list
         target_id = int(data.split(":")[3])
         types_list = get_all_types()
         if not types_list:
@@ -12438,13 +12273,13 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data.startswith("adm:agcfg:td:") and data.count(":") == 4:
-        # adm:agcfg:td:{target_id}:{type_id}  � choose pct or toman for this type
+        # adm:agcfg:td:{target_id}:{type_id}  — choose pct or toman for this type
         parts     = data.split(":")
         target_id = int(parts[3])
         type_id   = int(parts[4])
         type_row  = get_type(type_id) if hasattr(__import__('bot.db', fromlist=['get_type']), 'get_type') else None
         td = get_agency_type_discount(target_id, type_id)
-        cur_label = f"{'????' if td['discount_type']=='pct' else '?????'} � {td['discount_value']}" if td else "????? ????"
+        cur_label = f"{'درصد' if td['discount_type']=='pct' else 'تومان'} — {td['discount_value']}" if td else "تنظیم نشده"
         kb = types.InlineKeyboardMarkup()
         kb.row(
             types.InlineKeyboardButton("📊 درصد", callback_data=f"adm:agcfg:tdt:{target_id}:{type_id}:pct"),
@@ -12475,7 +12310,7 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data.startswith("adm:agcfg:pkg:"):
-        # adm:agcfg:pkg:{target_id}  � show packages (existing flow)
+        # adm:agcfg:pkg:{target_id}  — show packages (existing flow)
         target_id = int(data.split(":")[3])
         set_agency_price_config(target_id, "package",
             get_agency_price_config(target_id)["global_type"],
@@ -12496,7 +12331,7 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data.startswith("adm:agcfg:pergb:") and data.count(":") == 3:
-        # adm:agcfg:pergb:{target_id} � show types list with per-GB prices
+        # adm:agcfg:pergb:{target_id} — show types list with per-GB prices
         target_id = int(data.split(":")[3])
         set_agency_price_config(target_id, "per_gb",
             get_agency_price_config(target_id)["global_type"],
@@ -12536,7 +12371,7 @@ def _dispatch_callback(call, uid, data):
             back_button(f"adm:agcfg:pergb:{target_id}"))
         return
 
-    # -- Admin: Broadcast ------------------------------------------------------
+    # ── Admin: Broadcast ──────────────────────────────────────────────────────
     if data == "admin:broadcast":
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("📣 همه کاربران",             callback_data="adm:bc:all"))
@@ -12584,7 +12419,7 @@ def _dispatch_callback(call, uid, data):
                      back_button("admin:broadcast"))
         return
 
-    # -- Admin: Group management -----------------------------------------------
+    # ── Admin: Group management ───────────────────────────────────────────────
     if data == "admin:group":
         if not admin_has_perm(uid, "settings"):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
@@ -12599,7 +12434,7 @@ def _dispatch_callback(call, uid, data):
             "۱. یک سوپرگروه تلگرام بسازید و Topics را فعال کنید.\n"
             "۲. ربات را به گروه اضافه و ادمین کنید.\n"
             "۳. آیدی عددی گروه را با @getidsbot دریافت کنید.\n"
-            "?. ???? �??? ???? ????� ?? ????? ? ???? ?? ????? ????.\n\n"
+            "۴. دکمه «ثبت آیدی گروه» را بزنید و آیدی را ارسال کنید.\n\n"
             "ℹ️ آیدی گروه با <code>-100</code> شروع می‌شود. مثال: <code>-1001234567890</code>\n\n"
             f"📊 <b>وضعیت:</b> گروه {gid_text} | تاپیک‌ها: {active_c}/{total_c}"
         )
@@ -12645,7 +12480,7 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, f"♻️ <b>بازسازی تاپیک‌ها</b>\n\n{result}", back_button("admin:group"))
         return
 
-    # -- Admin: Settings -------------------------------------------------------
+    # ── Admin: Settings ───────────────────────────────────────────────────────
     if data == "admin:settings":
         if not admin_has_perm(uid, "settings"):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
@@ -12671,7 +12506,7 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, "⚙️ <b>تنظیمات</b>", kb)
         return
 
-    # -- Admin: Premium Emoji Tools --------------------------------------------
+    # ── Admin: Premium Emoji Tools ────────────────────────────────────────────
     if data == "adm:emoji:menu":
         if not admin_has_perm(uid, "settings"):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
@@ -12759,7 +12594,7 @@ def _dispatch_callback(call, uid, data):
             back_button("admin:settings"))
         return
 
-    # -- Notification Management -----------------------------------------------
+    # ── Notification Management ───────────────────────────────────────────────
     # Notification types: (key, label)
     _NOTIF_TYPES = [
         ("new_users",        "👋 کاربر جدید"),
@@ -12941,7 +12776,7 @@ def _dispatch_callback(call, uid, data):
             "✅ = فعال  |  ❌ = غیرفعال",
             kb)
         return
-    # -- End Notification Management -------------------------------------------
+    # ── End Notification Management ───────────────────────────────────────────
 
     if data == "adm:set:support":
         support_raw = setting_get("support_username", "")
@@ -12985,7 +12820,7 @@ def _dispatch_callback(call, uid, data):
                      back_button("adm:set:support"))
         return
 
-    # -- Shop management settings ---------------------------------------------
+    # ── Shop management settings ─────────────────────────────────────────────
     if data == "adm:set:shop":
         shop_open     = setting_get("shop_open", "1")
         preorder_mode = setting_get("preorder_mode", "0")
@@ -13002,14 +12837,14 @@ def _dispatch_callback(call, uid, data):
             callback_data="adm:shop:toggle_stock"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
         _shop_desc = {
-            "1": "?? ??? � ????? ????? ? ?????? ???/???? ??? ????",
-            "2": "?? ??? ????? ? ???? ???/???? � ???? ???? ???????",
-            "0": "?? ???? � ??????? ?? ????? ????",
+            "1": "🟢 باز — خرید، تمدید و افزایش حجم/زمان همه فعال",
+            "2": "🟡 فقط تمدید و خرید حجم/زمان — خرید جدید غیرفعال",
+            "0": "🔴 بسته — هیچ‌چیز در دسترس نیست",
         }.get(shop_open, "🟢 باز")
         text = (
             "🏪 <b>مدیریت فروش</b>\n\n"
             f"🔹 <b>وضعیت فروش:</b> {_shop_desc}\n"
-            f"?? <b>???? ?? ???? ??????:</b> {'?? ???? � ??? ???????? ????? ?????? ????? ???? ???????.' if preorder_mode == '1' else '?? ??????? � ??? ??????? ????? ???? ???????. ?? ???? ???? ??????? ????? ?? ???????? ????? ??????.'}\n\n"
+            f"🔹 <b>فروش بر اساس موجودی:</b> {'🟢 فعال – فقط پکیج‌های دارای موجودی نمایش داده می‌شوند.' if preorder_mode == '1' else '🔴 غیرفعال – همه پکیج‌ها نمایش داده می‌شوند. در صورت نبود موجودی، سفارش به پشتیبانی ارسال می‌شود.'}\n\n"
             "برای تغییر وضعیت فروش روی دکمه آن بزنید (چرخه: باز ← فقط تمدید ← بسته)."
         )
         bot.answer_callback_query(call.id)
@@ -13023,7 +12858,7 @@ def _dispatch_callback(call, uid, data):
         new_val = cycle.get(current, "1")
         setting_set("shop_open", new_val)
         _labels = {"1": "باز", "2": "فقط تمدید و خرید حجم/زمان", "0": "بسته"}
-        log_admin_action(uid, f"????? ??????? ?? �{_labels[new_val]}� ????? ???")
+        log_admin_action(uid, f"وضعیت فروشگاه به «{_labels[new_val]}» تغییر کرد")
         bot.answer_callback_query(call.id, f"وضعیت فروش: {_labels[new_val]}")
         from types import SimpleNamespace as _SN
         fake = _SN(id=call.id, from_user=call.from_user, message=call.message, data="adm:set:shop")
@@ -13040,7 +12875,7 @@ def _dispatch_callback(call, uid, data):
         _dispatch_callback(fake, uid, "adm:set:shop")
         return
 
-    # -- Bot Operations Management ---------------------------------------------
+    # ── Bot Operations Management ─────────────────────────────────────────────
     def _build_ops_kb():
         bot_status      = setting_get("bot_status", "on")
         renewal_enabled = setting_get("manual_renewal_enabled", "1")
@@ -13080,7 +12915,7 @@ def _dispatch_callback(call, uid, data):
         _inv_enabled = setting_get("invoice_expiry_enabled", "1")
         _inv_mins    = setting_get("invoice_expiry_minutes", "30")
         _inv_label   = (
-            f"? ???? � {_inv_mins} ?????"
+            f"✅ فعال — {_inv_mins} دقیقه"
             if _inv_enabled == "1" else "❌ غیرفعال"
         )
         ops_kb.row(
@@ -13112,9 +12947,9 @@ def _dispatch_callback(call, uid, data):
         _inv_exp_enabled = setting_get("invoice_expiry_enabled", "1")
         _inv_exp_mins    = setting_get("invoice_expiry_minutes", "30")
         _inv_fa = (
-            f"? ???? � ?? ?????? ?? <b>{_inv_exp_mins} ?????</b> ????? ???."
+            f"✅ فعال — هر فاکتور تا <b>{_inv_exp_mins} دقیقه</b> معتبر است."
             if _inv_exp_enabled == "1"
-            else "? ??????? � ???????? ??????? ????? ??????."
+            else "❌ غیرفعال — فاکتورها محدودیت زمانی ندارند."
         )
         _wp_enabled = setting_get("wallet_pay_enabled", "1")
         _wp_fa = "✅ فعال" if _wp_enabled == "1" else "❌ غیرفعال"
@@ -13197,14 +13032,14 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data == "adm:ops:bulk_sale":
-        # Legacy � redirect to the sub-menu
+        # Legacy — redirect to the sub-menu
         bot.answer_callback_query(call.id)
         from types import SimpleNamespace as _SN
         fake = _SN(id=call.id, from_user=call.from_user, message=call.message, data="adm:ops:bulk_menu")
         _dispatch_callback(fake, uid, "adm:ops:bulk_menu")
         return
 
-    # -- Bulk Sale Sub-menu ----------------------------------------------------
+    # ── Bulk Sale Sub-menu ────────────────────────────────────────────────────
     def _bulk_menu_kb():
         bulk_mode = setting_get("bulk_sale_mode", "everyone")
         min_qty, max_qty = get_bulk_qty_limits()
@@ -13293,15 +13128,15 @@ def _dispatch_callback(call, uid, data):
             "⬆️ <b>تنظیم حداکثر تعداد خرید</b>\n\n"
             "تعداد حداکثر کانفیگ در هر سفارش فروش عمده را وارد کنید.\n\n"
             f"📌 مقدار فعلی: <b>{cur_max_label}</b>\n\n"
-            "?? <i>?? ??? ???? ???? ???? ????? ?? <b>0</b> ???? �???? ???????�</i>",
+            "📝 <i>یک عدد صحیح مثبت وارد کنید، یا <b>0</b> برای «بدون محدودیت»</i>",
             back_button("adm:ops:bulk_menu"))
         return
 
-    # -- Invoice Expiry Sub-menu -----------------------------------------------
+    # ── Invoice Expiry Sub-menu ───────────────────────────────────────────────
     def _invoice_expiry_menu_kb():
         enabled = setting_get("invoice_expiry_enabled", "1")
         mins    = setting_get("invoice_expiry_minutes", "30")
-        toggle_label = "? ???? � ???? ???? ?? ??????? ???" if enabled == "1" else "? ??????? � ???? ???? ?? ???? ???"
+        toggle_label = "✅ فعال — کلیک کنید تا غیرفعال شود" if enabled == "1" else "❌ غیرفعال — کلیک کنید تا فعال شود"
         kb = types.InlineKeyboardMarkup(row_width=1)
         kb.add(types.InlineKeyboardButton(toggle_label, callback_data="adm:ops:inv_exp:toggle"))
         if enabled == "1":
@@ -13312,7 +13147,7 @@ def _dispatch_callback(call, uid, data):
     def _invoice_expiry_menu_text():
         enabled = setting_get("invoice_expiry_enabled", "1")
         mins    = setting_get("invoice_expiry_minutes", "30")
-        status_fa = f"? ???? � ?? ?????? ?? <b>{mins} ?????</b> ????? ???." if enabled == "1" else "? ??????? � ???????? ??????? ????? ??????."
+        status_fa = f"✅ فعال — هر فاکتور تا <b>{mins} دقیقه</b> معتبر است." if enabled == "1" else "❌ غیرفعال — فاکتورها محدودیت زمانی ندارند."
         return (
             "📄 <b>تنظیمات اعتبار فاکتور پرداخت</b>\n\n"
             f"🔹 <b>وضعیت:</b> {status_fa}\n\n"
@@ -13358,7 +13193,7 @@ def _dispatch_callback(call, uid, data):
             back_button("adm:ops:invoice_expiry"))
         return
 
-    # -- Wallet Pay Toggle -----------------------------------------------------
+    # ── Wallet Pay Toggle ─────────────────────────────────────────────────────
     if data == "adm:ops:wallet_pay_toggle":
         if not admin_has_perm(uid, "settings"):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
@@ -13372,7 +13207,7 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, _ops_menu_text(), _build_ops_kb())
         return
 
-    # -- Wallet Pay Exceptions Sub-menu ----------------------------------------
+    # ── Wallet Pay Exceptions Sub-menu ────────────────────────────────────────
     def _wpe_page_from_data(d):
         """Extract page number from adm:wpe:list:{page}"""
         parts = d.split(":")
@@ -13416,7 +13251,7 @@ def _dispatch_callback(call, uid, data):
         _rows, total = get_wallet_pay_exceptions(page=page, per_page=PER_PAGE, search=search)
         wp_fa = "✅ فعال" if setting_get("wallet_pay_enabled", "1") == "1" else "❌ غیرفعال"
         return (
-            "?? <b>?????? ?? ?????? � ????????</b>\n\n"
+            "💰 <b>پرداخت با موجودی — استثناها</b>\n\n"
             f"🔹 وضعیت کلی: {wp_fa}\n"
             f"🔹 تعداد استثناها: <b>{total}</b> کاربر\n\n"
             "کاربران موجود در این لیست حتی وقتی پرداخت با موجودی <b>غیرفعال</b> باشد، "
@@ -13507,7 +13342,7 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, _wpe_text(0, None), _wpe_kb(0, None))
         return
 
-    # -- Referral Settings -----------------------------------------------------
+    # ── Referral Settings ─────────────────────────────────────────────────────
     def _ref_settings_kb():
         sr_enabled = setting_get("referral_start_reward_enabled", "0")
         pr_enabled = setting_get("referral_purchase_reward_enabled", "0")
@@ -13525,13 +13360,13 @@ def _dispatch_callback(call, uid, data):
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("📸 تنظیم بنر اشتراک‌گذاری", callback_data="adm:ref:banner"))
         # Reward condition
-        kb.add(types.InlineKeyboardButton("-- ?? ??? ?????? ????? --", callback_data="adm:ops:noop"))
+        kb.add(types.InlineKeyboardButton("── 🔐 شرط دریافت پاداش ──", callback_data="adm:ops:noop"))
         kb.row(
             types.InlineKeyboardButton(rc_label, callback_data="adm:ref:reward_condition"),
             types.InlineKeyboardButton("شرط ریوارد استارت", callback_data="adm:ops:noop"),
         )
         # Start reward section
-        kb.add(types.InlineKeyboardButton("-- ?? ???? ?????? --", callback_data="adm:ops:noop"))
+        kb.add(types.InlineKeyboardButton("── 🎁 هدیه استارت ──", callback_data="adm:ops:noop"))
         kb.row(
             types.InlineKeyboardButton(sr_label, callback_data="adm:ref:sr:toggle"),
             types.InlineKeyboardButton("وضعیت هدیه استارت", callback_data="adm:ops:noop"),
@@ -13551,7 +13386,7 @@ def _dispatch_callback(call, uid, data):
             kb.add(types.InlineKeyboardButton(f"📦 پکیج: {pkg_name}", callback_data="adm:ref:sr:pkg"))
 
         # Purchase reward section
-        kb.add(types.InlineKeyboardButton("-- ?? ???? ???? --", callback_data="adm:ops:noop"))
+        kb.add(types.InlineKeyboardButton("── 💸 هدیه خرید ──", callback_data="adm:ops:noop"))
         kb.row(
             types.InlineKeyboardButton(pr_label, callback_data="adm:ref:pr:toggle"),
             types.InlineKeyboardButton("وضعیت هدیه خرید", callback_data="adm:ops:noop"),
@@ -13571,7 +13406,7 @@ def _dispatch_callback(call, uid, data):
             kb.add(types.InlineKeyboardButton(f"📦 پکیج: {pkg_name}", callback_data="adm:ref:pr:pkg"))
 
         # Anti-spam section
-        kb.add(types.InlineKeyboardButton("-- ?? ????? ?? ???? --", callback_data="adm:ops:noop"))
+        kb.add(types.InlineKeyboardButton("── 🛡 سیستم ضد اسپم ──", callback_data="adm:ops:noop"))
         as_enabled = setting_get("referral_antispam_enabled", "0")
         as_label = "✅ فعال" if as_enabled == "1" else "❌ غیرفعال"
         kb.add(types.InlineKeyboardButton(f"🛡 ضد اسپم: {as_label}", callback_data="adm:ref:antispam"))
@@ -13648,7 +13483,7 @@ def _dispatch_callback(call, uid, data):
             "channel":    "دعوت + عضویت در کانال",
             "start_only": "فقط دعوت به ربات",
         }
-        log_admin_action(uid, f"??? ????? ????????? ?? �{labels[new_val]}� ????? ???")
+        log_admin_action(uid, f"شرط پاداش زیرمجموعه به «{labels[new_val]}» تغییر کرد")
         bot.answer_callback_query(call.id, f"شرط پاداش: {labels[new_val]}")
         send_or_edit(call, _ref_settings_text(), _ref_settings_kb())
         return
@@ -13807,7 +13642,7 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, _ref_settings_text(), _ref_settings_kb())
         return
 
-    # -- Anti-Spam Settings ----------------------------------------------------
+    # ── Anti-Spam Settings ────────────────────────────────────────────────────
 
     _ANTISPAM_ACTION_LABELS = {
         "report_only":  "فقط گزارش به ادمین",
@@ -13969,9 +13804,9 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call,
             "🎯 <b>تنظیم نتیجه در صورت تشخیص اسپم</b>\n\n"
             "یکی از گزینه‌های زیر را انتخاب کنید:\n\n"
-            "?? <b>????? ???? ?? ??????????????</b> � ??? ??? ???? ????? ??????\n"
-            "?? <b>????? ??? ?? ?? ????</b> � ?????? ???? ????? ??? ??????\n"
-            "?? <b>??? ????? ?? ?????</b> � ???????? ????? ???????? ??? ????? ???? ??????",
+            "▫️ <b>محدود کامل از زیرمجموعه‌گیری</b> — فقط بخش دعوت مسدود می‌شود\n"
+            "▫️ <b>محدود شدن از کل ربات</b> — دسترسی کامل کاربر قطع می‌شود\n"
+            "▫️ <b>فقط گزارش به ادمین</b> — محدودیتی اعمال نمی‌شود، فقط ادمین مطلع می‌شود",
             kb2)
         return
 
@@ -13985,7 +13820,7 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id, "گزینه نامعتبر است.", show_alert=True)
             return
         setting_set("referral_antispam_action", new_action)
-        log_admin_action(uid, f"????? ?? ???? ?? �{_ANTISPAM_ACTION_LABELS[new_action]}� ????? ???")
+        log_admin_action(uid, f"نتیجه ضد اسپم به «{_ANTISPAM_ACTION_LABELS[new_action]}» تغییر کرد")
         bot.answer_callback_query(call.id, f"✅ نتیجه: {_ANTISPAM_ACTION_LABELS[new_action]}")
         send_or_edit(call, _antispam_text(), _antispam_kb())
         return
@@ -14071,7 +13906,7 @@ def _dispatch_callback(call, uid, data):
                 except Exception:
                     pass
             type_fa = "محدود کامل" if new_type == "full" else "محدود از زیرمجموعه‌گیری"
-            log_admin_action(uid, f"??? ??????? ????? {target_uid} ?? �{type_fa}� ????? ???")
+            log_admin_action(uid, f"نوع محدودیت کاربر {target_uid} به «{type_fa}» تغییر کرد")
             bot.answer_callback_query(call.id, f"✅ تغییر به: {type_fa}")
             send_or_edit(call, _restrictions_text(0), _restrictions_kb(0))
             return
@@ -14130,17 +13965,17 @@ def _dispatch_callback(call, uid, data):
                         pass
             state_clear(uid)
             type_fa = "محدود از زیرمجموعه‌گیری" if rtype == "referral_only" else "محدود کامل از ربات"
-            log_admin_action(uid, f"??????? �{type_fa}� ???? ????? {target_uid} ????? ??")
+            log_admin_action(uid, f"محدودیت «{type_fa}» برای کاربر {target_uid} اعمال شد")
             bot.answer_callback_query(call.id, f"✅ محدودیت اعمال شد: {type_fa}")
             send_or_edit(call, _restrictions_text(0), _restrictions_kb(0))
             return
 
-        # Fallback � unknown sub-command
+        # Fallback — unknown sub-command
         bot.answer_callback_query(call.id)
         send_or_edit(call, _restrictions_text(0), _restrictions_kb(0))
         return
 
-    # -- Gateway settings -----------------------------------------------------
+    # ── Gateway settings ─────────────────────────────────────────────────────
     if data == "adm:set:gateways":
         kb = types.InlineKeyboardMarkup()
         for gw_key, gw_default in [
@@ -14187,7 +14022,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("🏷 نام نمایشی درگاه", callback_data="adm:gw:card:set_name"))
         kb.add(types.InlineKeyboardButton(f"💳 مدیریت کارت‌ها ({cards_count} کارت)", callback_data="adm:gw:card:cards"))
         fee_bonus_lbl = ("🟢 کارمزد" if fee_on else "🔴 کارمزد") + " | " + ("🟢 بونس" if bonus_on else "🔴 بونس")
-        kb.add(types.InlineKeyboardButton(f"?? ???? ? ?????? � {fee_bonus_lbl}", callback_data="adm:gw:card:feebonus"))
+        kb.add(types.InlineKeyboardButton(f"🎁 بونس و کارمزد — {fee_bonus_lbl}", callback_data="adm:gw:card:feebonus"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gateways", icon_custom_emoji_id="5253997076169115797"))
         name_display = display_name or "<i>پیش‌فرض: کارت به کارت</i>"
         cards_status = f"{len(active_cards)} کارت فعال از {cards_count}" if cards_count else "⚠️ هیچ کارتی ثبت نشده"
@@ -14243,7 +14078,7 @@ def _dispatch_callback(call, uid, data):
         _fake_call(call, "adm:set:gw:card")
         return
 
-    # -- Card management -------------------------------------------------------
+    # ── Card management ───────────────────────────────────────────────────────
     if data == "adm:gw:card:cards":
         if not admin_has_perm(uid, "settings"):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
@@ -14265,7 +14100,7 @@ def _dispatch_callback(call, uid, data):
         for c in cards:
             status = "✅" if c["is_active"] else "⛔"
             kb.add(types.InlineKeyboardButton(
-                f"{status} {c['card_number']} � {c['bank_name'] or '???? ??? ????'}",
+                f"{status} {c['card_number']} — {c['bank_name'] or 'بدون نام بانک'}",
                 callback_data=f"adm:gw:card:cards:cfg:{c['id']}"
             ))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gw:card", icon_custom_emoji_id="5253997076169115797"))
@@ -14330,8 +14165,8 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call,
             f"💳 <b>تنظیمات کارت</b>\n\n"
             f"شماره: <code>{esc(card['card_number'])}</code>\n"
-            f"????: {esc(card['bank_name'] or '�')}\n"
-            f"???? ????: {esc(card['holder_name'] or '�')}\n"
+            f"بانک: {esc(card['bank_name'] or '—')}\n"
+            f"صاحب کارت: {esc(card['holder_name'] or '—')}\n"
             f"وضعیت: {status_lbl}",
             kb)
         return
@@ -14386,7 +14221,7 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call,
             f"⚠️ <b>تأیید حذف کارت</b>\n\n"
             f"شماره: <code>{esc(card['card_number'])}</code>\n"
-            f"????: {esc(card['bank_name'] or '�')}\n\n"
+            f"بانک: {esc(card['bank_name'] or '—')}\n\n"
             "آیا از حذف این کارت مطمئن هستید؟",
             kb)
         return
@@ -14429,7 +14264,7 @@ def _dispatch_callback(call, uid, data):
             back_button(f"adm:gw:card:cards:cfg:{card_id}"))
         return
 
-    # -- Fee / Bonus admin for all gateways ------------------------------------
+    # ── Fee / Bonus admin for all gateways ────────────────────────────────────
     _GW_NAMES_FEEBONUS = {
         "card":              "💳 کارت به کارت",
         "crypto":            "💎 ارز دیجیتال",
@@ -14448,8 +14283,8 @@ def _dispatch_callback(call, uid, data):
         bonus_type= setting_get(f"gw_{gw}_bonus_type",  "fixed")
         bonus_val = setting_get(f"gw_{gw}_bonus_value",    "0")
         type_lbl  = lambda t: "درصد (%)" if t == "pct" else "مبلغ ثابت (تومان)"
-        fee_txt   = (f"{'?' if fee_on else '?'} ??????: {type_lbl(fee_type)} � ?????: {fee_val}")
-        bonus_txt = (f"{'?' if bonus_on else '?'} ????: {type_lbl(bonus_type)} � ?????: {bonus_val}")
+        fee_txt   = (f"{'✅' if fee_on else '❌'} کارمزد: {type_lbl(fee_type)} — مقدار: {fee_val}")
+        bonus_txt = (f"{'✅' if bonus_on else '❌'} بونس: {type_lbl(bonus_type)} — مقدار: {bonus_val}")
         return f"{fee_txt}\n{bonus_txt}"
 
     def _feebonus_kb(gw):
@@ -14525,7 +14360,7 @@ def _dispatch_callback(call, uid, data):
             gw_lbl = _GW_NAMES_FEEBONUS.get(_gw_fb, _gw_fb)
             bot.answer_callback_query(call.id)
             send_or_edit(call,
-                f"?? <b>???? ? ?????? � {gw_lbl}</b>\n\n"
+                f"🎁 <b>بونس و کارمزد — {gw_lbl}</b>\n\n"
                 f"{_feebonus_text(_gw_fb)}\n\n"
                 "کارمزد: مبلغ یا درصد اضافه به مبلغ فاکتور کاربر.\n"
                 "بونس: مبلغ یا درصد به کیف پول کاربر پس از پرداخت موفق.",
@@ -14540,7 +14375,7 @@ def _dispatch_callback(call, uid, data):
             type_lbl = "درصد" if fee_type == "pct" else "تومان ثابت"
             bot.answer_callback_query(call.id)
             send_or_edit(call,
-                f"?? <b>?????? � {_GW_NAMES_FEEBONUS.get(_gw_fb, _gw_fb)}</b>\n\n"
+                f"💸 <b>کارمزد — {_GW_NAMES_FEEBONUS.get(_gw_fb, _gw_fb)}</b>\n\n"
                 f"مقدار فعلی: <b>{fee_val}</b> {type_lbl}\n\n"
                 "<i>کارمزد به مبلغ فاکتور کاربر اضافه می‌شود و مبلغ نهایی قابل پرداخت را تغییر می‌دهد.</i>",
                 _fee_setting_kb(_gw_fb))
@@ -14573,7 +14408,7 @@ def _dispatch_callback(call, uid, data):
             state_set(uid, "admin_gw_set_fee_val", gw=_gw_fb)
             bot.answer_callback_query(call.id)
             send_or_edit(call,
-                f"?? <b>????? ?????? � {_GW_NAMES_FEEBONUS.get(_gw_fb, _gw_fb)}</b>\n\n"
+                f"💸 <b>تنظیم کارمزد — {_GW_NAMES_FEEBONUS.get(_gw_fb, _gw_fb)}</b>\n\n"
                 f"نوع: {hint}\n\n"
                 "مقدار را ارسال کنید:",
                 back_button(f"adm:gw:{_gw_fb}:fee"))
@@ -14587,7 +14422,7 @@ def _dispatch_callback(call, uid, data):
             type_lbl   = "درصد" if bonus_type == "pct" else "تومان ثابت"
             bot.answer_callback_query(call.id)
             send_or_edit(call,
-                f"?? <b>???? � {_GW_NAMES_FEEBONUS.get(_gw_fb, _gw_fb)}</b>\n\n"
+                f"🎁 <b>بونس — {_GW_NAMES_FEEBONUS.get(_gw_fb, _gw_fb)}</b>\n\n"
                 f"مقدار فعلی: <b>{bonus_val}</b> {type_lbl}\n\n"
                 "<i>پس از پرداخت موفق از این درگاه، این مقدار به کیف پول کاربر اضافه می‌شود.</i>",
                 _bonus_setting_kb(_gw_fb))
@@ -14620,7 +14455,7 @@ def _dispatch_callback(call, uid, data):
             state_set(uid, "admin_gw_set_bonus_val", gw=_gw_fb)
             bot.answer_callback_query(call.id)
             send_or_edit(call,
-                f"?? <b>????? ???? � {_GW_NAMES_FEEBONUS.get(_gw_fb, _gw_fb)}</b>\n\n"
+                f"🎁 <b>تنظیم بونس — {_GW_NAMES_FEEBONUS.get(_gw_fb, _gw_fb)}</b>\n\n"
                 f"نوع: {hint}\n\n"
                 "مقدار را ارسال کنید:",
                 back_button(f"adm:gw:{_gw_fb}:bonus"))
@@ -14728,7 +14563,7 @@ def _dispatch_callback(call, uid, data):
         if api_key:
             key_display = f"<code>{esc(api_key[:8])}...{esc(api_key[-4:])}</code>"
         else:
-            key_display = "? <b>??? ????</b> � ????? ?? ???? TetraPay ???? API ??? ?? ?????? ????"
+            key_display = "❌ <b>ثبت نشده</b> — ابتدا از سایت TetraPay کلید API خود را دریافت کنید"
         display_name_tp = setting_get("gw_tetrapay_display_name", "")
         name_display_tp = display_name_tp or "<i>پیش‌فرض: درگاه کارت به کارت (TetraPay)</i>"
         text = (
@@ -14818,7 +14653,7 @@ def _dispatch_callback(call, uid, data):
         if not api_key:
             kb.add(types.InlineKeyboardButton("🌐 دریافت کلید API از سواپ ولت", url="https://swapwallet.app"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gateways", icon_custom_emoji_id="5253997076169115797"))
-        key_display = f"<code>{esc(api_key[:8])}...{esc(api_key[-4:])}</code>" if api_key else "? <b>??? ???? � ??????</b>"
+        key_display = f"<code>{esc(api_key[:8])}...{esc(api_key[-4:])}</code>" if api_key else "❌ <b>ثبت نشده — الزامی</b>"
         user_status = "✅ ثبت شده" if username else "❌ ثبت نشده"
         display_name_sw = setting_get("gw_swapwallet_crypto_display_name", "")
         name_display_sw = display_name_sw or "<i>پیش‌فرض: درگاه کارت به کارت و ارز دیجیتال (SwapWallet)</i>"
@@ -14829,7 +14664,7 @@ def _dispatch_callback(call, uid, data):
             f"نام نمایشی: {name_display_sw}\n\n"
             f"👤 نام کاربری Application: <code>{esc(username or 'ثبت نشده')}</code> {user_status}\n"
             f"🔑 کلید API: {key_display}\n\n"
-            "?? <b>???????? ????????:</b> TRON � TON � BSC\n\n"
+            "📖 <b>شبکه‌های پشتیبانی:</b> TRON · TON · BSC\n\n"
             "📖 <b>مراحل راه‌اندازی:</b>\n"
             "1️⃣ در مینی‌اپ سواپ‌ولت استارت بزنید:\n"
             "   👉 @SwapWalletBot\n"
@@ -14915,7 +14750,7 @@ def _dispatch_callback(call, uid, data):
             kb.add(types.InlineKeyboardButton("🤖 دریافت API Key از @TronPaysBot", url="https://t.me/TronPaysBot"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gateways", icon_custom_emoji_id="5253997076169115797"))
         key_display = (f"<code>{esc(api_key[:8])}...{esc(api_key[-4:])}</code>"
-                       if api_key else "? <b>??? ????</b> � ????? ?? ???? @TronPaysBot ???? API ?????? ????")
+                       if api_key else "❌ <b>ثبت نشده</b> — ابتدا از ربات @TronPaysBot کلید API دریافت کنید")
         cb_url = setting_get("tronpays_rial_callback_url", "").strip() or "https://example.com/"
         display_name_tp_rial = setting_get("gw_tronpays_rial_display_name", "")
         name_display_tp_rial = display_name_tp_rial or "<i>پیش‌فرض: درگاه کارت به کارت (TronPay)</i>"
@@ -14981,7 +14816,7 @@ def _dispatch_callback(call, uid, data):
 
     _GW_RANGE_LABELS = {"card": "💳 کارت به کارت", "crypto": "💎 ارز دیجیتال", "tetrapay": "🏦 TetraPay", "swapwallet": "💎 SwapWallet", "swapwallet_crypto": "💎 SwapWallet کریپتو", "tronpays_rial": "💳 TronPays", "plisio": "💎 Plisio", "nowpayments": "💎 NowPayments"}
 
-    # -- Plisio admin settings -------------------------------------------------
+    # ── Plisio admin settings ─────────────────────────────────────────────────
     if data == "adm:set:gw:plisio":
         enabled     = setting_get("gw_plisio_enabled", "0")
         vis         = setting_get("gw_plisio_visibility", "public")
@@ -15002,7 +14837,7 @@ def _dispatch_callback(call, uid, data):
                 pub_url_source  = "🤖 تشخیص خودکار از IP عمومی سرور"
             else:
                 pub_url_display = "❌ تشخیص داده نشد"
-                pub_url_source  = "�"
+                pub_url_source  = "—"
         enabled_label = "🟢 فعال" if enabled == "1" else "🔴 غیرفعال"
         vis_label     = "👥 عمومی" if vis == "public" else "🔒 کاربران امن"
         range_label   = "🟢 فعال" if range_en == "1" else "🔴 غیرفعال"
@@ -15032,7 +14867,7 @@ def _dispatch_callback(call, uid, data):
             "📋 <b>راهنما:</b>\n"
             "۱. در <a href='https://plisio.net'>plisio.net</a> ثبت‌نام کنید\n"
             "۲. از پنل، کلید API را دریافت کنید\n"
-            "?. ???? ????? ??????? ?????? ?? IP ???? ????? ???? ?????? � ????? ?? ????? ?? ???? Plisio ????? Webhook ?? ?????? ??????? ?????? ??? ??????."
+            "۳. آدرس عمومی به‌صورت خودکار از IP سرور تشخیص داده می‌شود — نیازی به تنظیم در سایت Plisio نیست؛ Webhook هر فاکتور به‌صورت خودکار ثبت می‌شود."
         )
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
@@ -15083,12 +14918,12 @@ def _dispatch_callback(call, uid, data):
             auto_url = ""
         auto_line = (
             f"\n🤖 <b>آدرس تشخیص‌داده‌شدهٔ خودکار:</b> <code>{esc(auto_url)}</code>\n"
-            "??? ??? ???? ???? ???? ????? ?? ????? ???? ???? � ?????? ???? ???? ?? ??????."
+            "اگر این آدرس درست است، نیازی به تنظیم دستی نیست — کافیست همین صفحه را ببندید."
             if auto_url else ""
         )
         send_or_edit(call,
             "🌐 <b>آدرس عمومی سرور (Server Public URL)</b>\n\n"
-            f"????? ????: <code>{esc(current or '??? ???? � ????? ?????? ???? ???')}</code>\n"
+            f"مقدار فعلی: <code>{esc(current or 'ثبت نشده — تشخیص خودکار فعال است')}</code>\n"
             f"{auto_line}\n\n"
             "این مقدار <b>اختیاری</b> است. اگر دامنه یا HTTPS دارید می‌توانید آدرس کامل را وارد کنید "
             "(بدون / در انتها). مثال: <code>https://myserver.example.com</code>\n\n"
@@ -15097,7 +14932,7 @@ def _dispatch_callback(call, uid, data):
             back_button("adm:set:gw:plisio"))
         return
 
-    # -- NowPayments admin settings --------------------------------------------
+    # ── NowPayments admin settings ────────────────────────────────────────────
     if data == "adm:set:gw:nowpayments":
         if not admin_has_perm(uid, "settings"):
             try:
@@ -15125,18 +14960,10 @@ def _dispatch_callback(call, uid, data):
                 pub_url_source  = "🤖 تشخیص خودکار از IP عمومی سرور"
             else:
                 pub_url_display = "❌ تشخیص داده نشد"
-        _NP_CUR_NAMES = {
-            "usdttrc20": "USDT (TRC20 - ترون)", "usdterc20": "USDT (ERC20 - اتریوم)",
-            "usdtbsc": "USDT (BEP20 - BSC)", "usdtton": "USDT (TON)",
-            "btc": "Bitcoin (BTC)", "eth": "Ethereum (ETH)",
-            "trx": "TRX (ترون)", "ton": "TON", "ltc": "Litecoin (LTC)",
-            "bnbbsc": "BNB (BSC)",
-        }
-        _enabled_curs   = get_nowpayments_enabled_currencies()
-        cur_labels      = " | ".join(_NP_CUR_NAMES.get(c, c.upper()) for c in _enabled_curs) or "USDT (TRC20 - ترون)"
-        enabled_label   = "✅ فعال" if enabled == "1" else "❌ غیرفعال"
-        vis_label       = "👁 عمومی" if vis == "public" else "🔒 محدود ادمین"
-        range_label     = "✅ فعال" if range_en == "1" else "❌ غیرفعال"
+                pub_url_source  = "—"
+        enabled_label = "🟢 فعال" if enabled == "1" else "🔴 غیرفعال"
+        vis_label     = "👥 عمومی" if vis == "public" else "🔒 کاربران امن"
+        range_label   = "🟢 فعال" if range_en == "1" else "🔴 غیرفعال"
         display_name_np = setting_get("gw_nowpayments_display_name", "")
         name_display_np = display_name_np or "<i>پیش‌فرض: پرداخت کریپتو (NowPayments)</i>"
         kb = types.InlineKeyboardMarkup()
@@ -15144,36 +14971,33 @@ def _dispatch_callback(call, uid, data):
             types.InlineKeyboardButton(f"وضعیت: {enabled_label}", callback_data="adm:gw:nowpayments:toggle"),
             types.InlineKeyboardButton(f"نمایش: {vis_label}",     callback_data="adm:gw:nowpayments:vis"),
         )
-        kb.add(types.InlineKeyboardButton(f"🪙 ارزهای فعال ({len(_enabled_curs)})", callback_data="adm:gw:nowpayments:set_currency"))
-        kb.add(types.InlineKeyboardButton(f"🪙 ارز پرداختی: {cur_label}", callback_data="adm:gw:nowpayments:set_currency"))
-        kb.add(types.InlineKeyboardButton(f"🔢 محدوده مبلغ: {range_label}", callback_data="adm:gw:nowpayments:range"))
+        kb.add(types.InlineKeyboardButton(f"📊 بازه پرداختی: {range_label}", callback_data="adm:gw:nowpayments:range"))
         kb.add(types.InlineKeyboardButton("🔑 تنظیم کلید API", callback_data="adm:set:nowpayments_key"))
         kb.add(types.InlineKeyboardButton("🔐 تنظیم IPN Secret", callback_data="adm:set:nowpayments_ipn"))
-        kb.add(types.InlineKeyboardButton("✏️ نام نمایشی درگاه", callback_data="adm:gw:nowpayments:set_name"))
-        kb.add(types.InlineKeyboardButton("💸 کارمزد و پاداش", callback_data="adm:gw:nowpayments:feebonus"))
-        kb.add(types.InlineKeyboardButton("🌐 تنظیم Server Public URL (وبهوک)" , callback_data="adm:set:server_public_url"))
+        kb.add(types.InlineKeyboardButton("🏷 نام نمایشی درگاه", callback_data="adm:gw:nowpayments:set_name"))
+        kb.add(types.InlineKeyboardButton("🎁 بونس و کارمزد", callback_data="adm:gw:nowpayments:feebonus"))
+        kb.add(types.InlineKeyboardButton("🌐 تنظیم Server Public URL (اختیاری)", callback_data="adm:set:server_public_url"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gateways", icon_custom_emoji_id="5253997076169115797"))
         key_display = (f"<code>{esc(api_key[:8])}...{esc(api_key[-4:])}</code>"
                        if api_key else "❌ <b>ثبت نشده</b>")
         ipn_display = (f"<code>{esc(ipn_secret[:6])}...{esc(ipn_secret[-4:])}</code>"
                        if ipn_secret else "❌ <b>ثبت نشده</b>")
         text = (
-            "💎 <b>تنظیمات NowPayments (کریپتو)</b>\n\n"
+            "💎 <b>درگاه NowPayments (کریپتو)</b>\n\n"
             f"وضعیت: {enabled_label}\n"
             f"نمایش: {vis_label}\n"
-            f"نام نمایشی: {name_display_np}\n"
-            f"🪙 ارزهای فعال: <b>{esc(cur_labels)}</b>\n\n"
+            f"نام نمایشی: {name_display_np}\n\n"
             f"🔑 کلید API: {key_display}\n"
             f"🔐 IPN Secret: {ipn_display}\n"
             f"🌐 Server Public URL: <code>{esc(pub_url_display[:80])}</code>\n"
             f"   منبع: {pub_url_source}\n\n"
             "📋 <b>راهنمای دریافت کلید API:</b>\n"
             "۱. در <a href='https://nowpayments.io'>nowpayments.io</a> ثبت‌نام کنید\n"
-            "۲. ابتدا یک کیف پول برداشت (Payout Wallet) در بخش <b>Store Settings → Payout Wallets</b> ثبت کنید\n"
-            "۳. از بخش <b>Settings → API Keys</b> روی <b>Add New Key</b> کلیک و کلید API را کپی کنید\n"
-            "۴. از بخش <b>Settings → Payment Settings → IPN Settings</b> روی <b>Generate</b> کلید IPN Secret را بگیرید\n"
-            "۵. هر دو مقدار را در ربات ذخیره کنید\n\n"
-            "🔔 آدرس Webhook بصورت خودکار از IP سرور تشخیص داده می‌شود — ادمین می‌تواند با تنظیم Server Public URL آن را override کند."
+            "۲. آدرس کیف پول دریافت‌کننده (Payout Wallet) را در بخش <b>Store Settings → Payout Wallets</b> ثبت کنید\n"
+            "۳. از منوی <b>Settings → API Keys</b> روی <b>Add New Key</b> بزنید و کلید API را کپی کنید\n"
+            "۴. از منوی <b>Settings → Payment Settings → IPN Settings</b> روی <b>Generate</b> کلیک کنید تا <b>IPN Secret Key</b> ساخته شود (⚠️ <u>فقط یک‌بار نمایش داده می‌شود — حتماً ذخیره کنید</u>)\n"
+            "۵. هر دو مقدار را در همین صفحه با دکمه‌های بالا وارد کنید\n\n"
+            "💡 آدرس Webhook به‌صورت خودکار از IP عمومی سرور تشخیص داده می‌شود — نیازی به تنظیم دستی در سایت NowPayments نیست؛ هر فاکتور، IPN خودش را همراه دارد."
         )
         try:
             bot.answer_callback_query(call.id)
@@ -15237,81 +15061,6 @@ def _dispatch_callback(call, uid, data):
             back_button("adm:set:gw:nowpayments"))
         return
 
-    if data == "adm:gw:nowpayments:set_currency":
-        if not admin_has_perm(uid, "settings"):
-            try:
-                bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
-            except Exception:
-                pass
-            return
-        try:
-            bot.answer_callback_query(call.id)
-        except Exception:
-            pass
-        _NP_CUR_OPTS = [
-            ("usdttrc20", "💵 USDT (TRC20 - ترون)"),
-            ("usdterc20", "💵 USDT (ERC20 - اتریوم)"),
-            ("usdtbsc",   "💵 USDT (BEP20 - BSC)"),
-            ("usdtton",   "💵 USDT (TON)"),
-            ("btc",       "₿ Bitcoin (BTC)"),
-            ("eth",       "⟠ Ethereum (ETH)"),
-            ("trx",       "🔷 TRX (ترون)"),
-            ("ton",       "💎 TON"),
-            ("ltc",       "🔵 Litecoin (LTC)"),
-            ("bnbbsc",    "🟡 BNB (BSC)"),
-        ]
-        _enabled_now = get_nowpayments_enabled_currencies()
-        kb2 = types.InlineKeyboardMarkup(row_width=1)
-        for code, label in _NP_CUR_OPTS:
-            mark = "✅ " if code in _enabled_now else "☑️ "
-            kb2.add(types.InlineKeyboardButton(f"{mark}{label}", callback_data=f"adm:gw:nowpayments:cur:{code}"))
-        kb2.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gw:nowpayments", icon_custom_emoji_id="5253997076169115797"))
-        send_or_edit(call,
-            "🪙 <b>انتخاب ارزهای فعال NowPayments</b>\n\n"
-            "هر ارزی که می‌خواهید کاربران بتوانند با آن پرداخت کنند را فعال کنید.\n"
-            "✅ = فعال   ☑️ = غیرفعال\n\n"
-            "کاربر هنگام پرداخت از بین ارزهای فعال یکی را انتخاب می‌کند.",
-            kb2)
-        return
-
-    if data.startswith("adm:gw:nowpayments:cur:"):
-        if not admin_has_perm(uid, "settings"):
-            try:
-                bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
-            except Exception:
-                pass
-            return
-        cur_code = data.split(":", 4)[-1].strip().lower()
-        _VALID_NP_CURS = {"usdttrc20","usdterc20","usdtbsc","usdtton","btc","eth","trx","ton","ltc","bnbbsc"}
-        if cur_code not in _VALID_NP_CURS:
-            try:
-                bot.answer_callback_query(call.id, "ارز نامعتبر.", show_alert=True)
-            except Exception:
-                pass
-            return
-        # Toggle this currency in/out of enabled list
-        _cur_list = get_nowpayments_enabled_currencies()
-        if cur_code in _cur_list:
-            if len(_cur_list) == 1:
-                try:
-                    bot.answer_callback_query(call.id, "حداقل یک ارز باید فعال باشد!", show_alert=True)
-                except Exception:
-                    pass
-                return
-            _cur_list.remove(cur_code)
-            _action = "غیرفعال"
-        else:
-            _cur_list.append(cur_code)
-            _action = "فعال"
-        setting_set("nowpayments_enabled_currencies", ",".join(_cur_list))
-        try:
-            bot.answer_callback_query(call.id, f"{cur_code.upper()} {_action} شد ✅", show_alert=False)
-        except Exception:
-            pass
-        # Refresh currency selection page
-        call.data = "adm:gw:nowpayments:set_currency"
-        data      = "adm:gw:nowpayments:set_currency"
-
     if data == "adm:set:nowpayments_key":
         if not admin_has_perm(uid, "settings"):
             try:
@@ -15364,7 +15113,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("✏️ تنظیم بازه", callback_data=f"adm:gw:{gw_name}:range:set"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:set:gw:{gw_name}", icon_custom_emoji_id="5253997076169115797"))
         text = (
-            f"?? <b>???? ??????? � {gw_label}</b>\n\n"
+            f"📊 <b>بازه پرداختی — {gw_label}</b>\n\n"
             f"وضعیت: {enabled_label}\n"
             f"حداقل مبلغ: {min_label}\n"
             f"حداکثر مبلغ: {max_label}\n\n"
@@ -15495,7 +15244,7 @@ def _dispatch_callback(call, uid, data):
         )
         return
 
-    # -- Admin: Locked Channels Management ------------------------------------
+    # ── Admin: Locked Channels Management ────────────────────────────────────
     if data == "adm:locked_channels":
         if not admin_has_perm(uid, "settings"):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
@@ -15529,7 +15278,7 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, *_build_locked_channels_menu())
         return
 
-    # -- Admin: SwapWallet active currencies -----------------------------------
+    # ── Admin: SwapWallet active currencies ───────────────────────────────────
     if data == "adm:set:swc_currencies":
         if not admin_has_perm(uid, "settings"):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
@@ -15580,7 +15329,7 @@ def _dispatch_callback(call, uid, data):
             "✅ = فعال  |  ❌ = غیرفعال", kb)
         return
 
-    # -- Admin: Free Test Settings ---------------------------------------------
+    # ── Admin: Free Test Settings ─────────────────────────────────────────────
     if data == "adm:set:freetest":
         ft_mode = setting_get("free_test_mode", "everyone")
         agent_limit = setting_get("agent_test_limit", "0")
@@ -15637,7 +15386,7 @@ def _dispatch_callback(call, uid, data):
         )
         return
 
-    # -- Admin: Phone Collection Settings -------------------------------------
+    # ── Admin: Phone Collection Settings ─────────────────────────────────────
     if data == "adm:set:phone":
         if not admin_has_perm(uid, "settings"):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
@@ -15670,11 +15419,11 @@ def _dispatch_callback(call, uid, data):
             f"حالت: {mode_label}\n"
             f"اعتبارسنجی ایران: {iran_label}\n\n"
             "حالت‌های جمع‌آوری:\n"
-            "� <b>???????</b> � ????? ???????? ???????\n"
-            "� <b>??? ???????</b> � ??? ???? ????? ?????\n"
-            "� <b>??? ?????????</b> � ??? ????????? ????? ???????\n"
-            "� <b>??????? ?????</b> � ??? ??????? ?? ????? �???�\n"
-            "� <b>????? ?????? ????</b> � ??? ?? ?????? ???? ?? ????",
+            "• <b>غیرفعال</b> — شماره جمع‌آوری نمی‌شود\n"
+            "• <b>همه کاربران</b> — همه باید شماره بدهند\n"
+            "• <b>فقط نمایندگان</b> — فقط نمایندگان شماره می‌دهند\n"
+            "• <b>کاربران مطمئن</b> — فقط کاربران با وضعیت «امن»\n"
+            "• <b>هنگام پرداخت کارت</b> — قبل از پرداخت کارت به کارت",
             kb)
         return
 
@@ -15709,7 +15458,7 @@ def _dispatch_callback(call, uid, data):
         _fake_call(call, "adm:set:phone")
         return
 
-    # -- Admin: Purchase Rules -------------------------------------------------
+    # ── Admin: Purchase Rules ─────────────────────────────────────────────────
     if data == "adm:set:rules":
         enabled = setting_get("purchase_rules_enabled", "0")
         kb = types.InlineKeyboardMarkup()
@@ -15789,7 +15538,7 @@ def _dispatch_callback(call, uid, data):
                              parse_mode="HTML", reply_markup=kb)
         return
 
-    # -- Admin: Pinned Messages -------------------------------------------------
+    # ── Admin: Pinned Messages ─────────────────────────────────────────────────
     if data == "adm:pin":
         if not admin_has_perm(uid, "settings"):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
@@ -15870,7 +15619,7 @@ def _dispatch_callback(call, uid, data):
             back_button("adm:pin"))
         return
 
-    # -- Admin: Backup ---------------------------------------------------------
+    # ── Admin: Backup ─────────────────────────────────────────────────────────
     if data == "admin:backup":
         enabled  = setting_get("backup_enabled", "0")
         interval = setting_get("backup_interval", "24")
@@ -15931,7 +15680,7 @@ def _dispatch_callback(call, uid, data):
             back_button("admin:backup"))
         return
 
-    # -- Admin: Discount Codes -------------------------------------------------
+    # ── Admin: Discount Codes ─────────────────────────────────────────────────
     if data == "admin:discounts":
         if not is_admin(uid):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
@@ -15998,7 +15747,7 @@ def _dispatch_callback(call, uid, data):
             kb.add(types.InlineKeyboardButton(t["name"], callback_data=f"admin:vch:pick_type:{t['id']}"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:vch:add", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call,
-            "?? <b>?????? ???? ???? � ?????? ???</b>\n\n"
+            "🎫 <b>افزودن کارت هدیه – انتخاب نوع</b>\n\n"
             "نوع کانفیگ را انتخاب کنید:", kb)
         return
 
@@ -16017,7 +15766,7 @@ def _dispatch_callback(call, uid, data):
             label = (f"{p['name']} | " if _sn else "") + f"{fmt_vol(p['volume_gb'])} | {fmt_dur(p['duration_days'])}"
             kb.add(types.InlineKeyboardButton(label, callback_data=f"admin:vch:pick_pkg:{p['id']}"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:vch:gift_type:config", icon_custom_emoji_id="5253997076169115797"))
-        send_or_edit(call, "?? <b>?????? ???? ???? � ?????? ????</b>\n\n???? ???? ??? ?? ?????? ????:", kb)
+        send_or_edit(call, "🎫 <b>افزودن کارت هدیه – انتخاب پکیج</b>\n\nپکیج مورد نظر را انتخاب کنید:", kb)
         return
 
     if data.startswith("admin:vch:pick_pkg:"):
@@ -16062,7 +15811,7 @@ def _dispatch_callback(call, uid, data):
         )
         send_or_edit(call,
             f"🗑 <b>حذف کارت هدیه</b>\n\n"
-            f"??? ?? ??? ???? �{esc(batch['name'])}� ? ???? ????? ?? ????? ??????",
+            f"آیا از حذف دسته «{esc(batch['name'])}» و تمام کدهای آن مطمئن هستید؟",
             kb)
         return
 
@@ -16077,7 +15826,7 @@ def _dispatch_callback(call, uid, data):
         _render_voucher_admin_list(call, uid)
         return
 
-    # -- User: voucher redemption ----------------------------------------------
+    # ── User: voucher redemption ──────────────────────────────────────────────
     if data == "voucher:redeem":
         if setting_get("vouchers_enabled", "1") != "1":
             bot.answer_callback_query(call.id, "⚠️ سیستم کارت هدیه در حال حاضر غیرفعال است.", show_alert=True)
@@ -16113,7 +15862,7 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call,
             "🎟 <b>افزودن کد تخفیف</b>\n\n"
             "مرحله ۱/۵: متن کد تخفیف را وارد کنید:\n"
-            "(???? ???????? ?????? ?? ???? � ????: NEWUSER20)",
+            "(حروف انگلیسی، اعداد، خط تیره — مثال: NEWUSER20)",
             back_button("admin:discounts"))
         return
 
@@ -16191,9 +15940,9 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call,
             "🎟 <b>افزودن کد تخفیف</b>\n\n"
             "مرحله ۷/۷: محدوده پکیج را انتخاب کنید:\n\n"
-            "?? <b>??? ???????</b> � ???? ???????\n"
-            "?? <b>??????? ???</b> � ??? ???? ??????? ???????\n"
-            "?? <b>???????? ???</b> � ??? ???? ???????? ???????",
+            "🌐 <b>همه پکیج‌ها</b> — بدون محدودیت\n"
+            "🧩 <b>نوع‌های خاص</b> — فقط برای نوع‌های انتخابی\n"
+            "📦 <b>پکیج‌های خاص</b> — فقط برای پکیج‌های انتخابی",
             kb)
         return
 
@@ -16525,11 +16274,11 @@ def _dispatch_callback(call, uid, data):
         audience = parts[4] if parts[4] in ("all", "public", "agents") else "all"
         update_discount_code_field(code_id, "audience", audience)
         audience_labels = {"all": "همه", "public": "فقط عموم", "agents": "فقط نمایندگان"}
-        bot.answer_callback_query(call.id, f"? ?????? ?? �{audience_labels.get(audience)}� ????? ????.")
+        bot.answer_callback_query(call.id, f"✅ دسترسی به «{audience_labels.get(audience)}» تغییر یافت.")
         _render_discount_code_detail(call, uid, code_id)
         return
 
-    # -- Admin: Payment approve/reject -----------------------------------------
+    # ── Admin: Payment approve/reject ─────────────────────────────────────────
     if data.startswith("adm:pay:ap:"):
         if not admin_has_perm(uid, "approve_payments"):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
@@ -16598,10 +16347,10 @@ def _dispatch_callback(call, uid, data):
         )
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton(
-            "? ???? ??? � ????? ?? ????",
+            "⛔ رسید فیک — محدود ۲۴ ساعت",
             callback_data=f"adm:pay:rjc:fake24:{payment_id}"))
         kb.add(types.InlineKeyboardButton(
-            "?? ???? ??? � ????? ?????",
+            "🚫 رسید فیک — محدود همیشه",
             callback_data=f"adm:pay:rjc:fakeall:{payment_id}"))
         kb.add(types.InlineKeyboardButton("🔙 انصراف", callback_data="nav:admin:panel"))
         state_set(uid, "admin_payment_reject_note", payment_id=payment_id)
@@ -16668,7 +16417,7 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, "❌ تراکنش رد شد.", kb_admin_panel(uid))
         return
 
-    # -- Admin: Pending receipts panel -----------------------------------------
+    # ── Admin: Pending receipts panel ─────────────────────────────────────────
     if data == "admin:pr" or data.startswith("admin:pr:list:"):
         if not admin_has_perm(uid, "approve_payments"):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
@@ -16705,8 +16454,8 @@ def _dispatch_callback(call, uid, data):
                 f"\n📦 پکیج: {esc(package_row['name'])}"
                 f"\n🔋 حجم: {fmt_vol(package_row['volume_gb'])} | ⏰ {fmt_dur(package_row['duration_days'])}"
             )
-        receipt_note = esc(payment["receipt_text"] or "�")
-        uname = "@" + esc(user_row["username"]) if (user_row and user_row["username"]) else "�"
+        receipt_note = esc(payment["receipt_text"] or "—")
+        uname = "@" + esc(user_row["username"]) if (user_row and user_row["username"]) else "—"
         _pay_dict = dict(payment)
         crypto_comment_line = ""
         if _pay_dict.get("crypto_comment"):
@@ -16714,7 +16463,7 @@ def _dispatch_callback(call, uid, data):
         text = (
             f"📋 <b>جزئیات رسید #{payment_id}</b>\n\n"
             f"🧾 نوع: <b>{kind_label}</b>\n"
-            f"?? ?????: {esc(user_row['full_name'] if user_row else '�')}\n"
+            f"👤 کاربر: {esc(user_row['full_name'] if user_row else '—')}\n"
             f"🆔 آیدی: <code>{payment['user_id']}</code>\n"
             f"📞 یوزرنیم: {uname}\n"
             f"💰 مبلغ: <b>{fmt_price(payment['amount'])}</b> تومان\n"
@@ -16786,10 +16535,10 @@ def _dispatch_callback(call, uid, data):
             "❌ رد بدون توضیح",
             callback_data=f"admin:pr:rjdo:plain:{payment_id}:{page}"))
         kb.add(types.InlineKeyboardButton(
-            "? ???? ??? � ????? ?? ????",
+            "⛔ رسید فیک — محدود ۲۴ ساعت",
             callback_data=f"admin:pr:rjdo:fake24:{payment_id}:{page}"))
         kb.add(types.InlineKeyboardButton(
-            "?? ???? ??? � ????? ?????",
+            "🚫 رسید فیک — محدود همیشه",
             callback_data=f"admin:pr:rjdo:fakeall:{payment_id}:{page}"))
         kb.add(types.InlineKeyboardButton(
             "بازگشت", callback_data=f"admin:pr:det:{payment_id}:{page}",
@@ -16925,8 +16674,8 @@ def _dispatch_callback(call, uid, data):
                   type_id=pkg["type_id"] if pkg else 0,
                   pending_id=pending_id)
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("1?? ?????? + ??? � ????? ??",   callback_data=f"adm:pnd:v2bm:1:{pending_id}"))
-        kb.add(types.InlineKeyboardButton("2?? ?????? + ??? � ????? ????", callback_data=f"adm:pnd:v2bm:2:{pending_id}"))
+        kb.add(types.InlineKeyboardButton("1️⃣ کانفیگ + ساب — تعداد کم",   callback_data=f"adm:pnd:v2bm:1:{pending_id}"))
+        kb.add(types.InlineKeyboardButton("2️⃣ کانفیگ + ساب — تعداد زیاد", callback_data=f"adm:pnd:v2bm:2:{pending_id}"))
         kb.add(types.InlineKeyboardButton("3️⃣ کانفیگ تنها",               callback_data=f"adm:pnd:v2bm:3:{pending_id}"))
         kb.add(types.InlineKeyboardButton("4️⃣ ساب تنها",                  callback_data=f"adm:pnd:v2bm:4:{pending_id}"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:pnd:proto:v2ray:{pending_id}", icon_custom_emoji_id="5253997076169115797"))
@@ -16955,7 +16704,7 @@ def _dispatch_callback(call, uid, data):
             kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:pnd:v2:bulk:{pending_id}", icon_custom_emoji_id="5253997076169115797"))
             send_or_edit(call,
                 "✂️ <b>پیشوند حذفی از نام کانفیگ</b>\n\n"
-                "??? ?????? ??? ????????? ??? ???????? ???? ???? ????? ?? ??? ??????? �???? ??????� ?????.", kb)
+                "اگر ابتدای نام کانفیگ‌ها متن اضافه‌ای دارد وارد کنید، در غیر اینصورت «بدون پیشوند» بزنید.", kb)
         else:  # mode 4: sub only
             state_set(uid, "v2_bulk_data",
                       package_id=p_row["package_id"],
@@ -16978,7 +16727,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:pnd:v2:bulk:{pending_id}", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call,
             "✂️ <b>پسوند حذفی از نام کانفیگ</b>\n\n"
-            "??? ?????? ?????? ??? ???????? ???? ???? ????? ?? ??? ??????? �???? ?????� ?????.", kb)
+            "اگر انتهای نام‌ها متن اضافه‌ای دارد وارد کنید، در غیر اینصورت «بدون پسوند» بزنید.", kb)
         return
 
     # adm:pnd:v2bsfx:skip:{pending_id}  →  skip suffix for pending bulk
@@ -17022,8 +16771,8 @@ def _dispatch_callback(call, uid, data):
                   package_id=p_row["package_id"], pending_id=pending_id)
         kb = types.InlineKeyboardMarkup()
         kb.row(
-            types.InlineKeyboardButton("? ??? � ?? ????",    callback_data=f"adm:pnd:ovpn:bshared:{pending_id}"),
-            types.InlineKeyboardButton("? ??? � ???? ???????", callback_data=f"adm:pnd:ovpn:bdiff:{pending_id}"),
+            types.InlineKeyboardButton("✅ بله — یک فایل",    callback_data=f"adm:pnd:ovpn:bshared:{pending_id}"),
+            types.InlineKeyboardButton("❌ خیر — فایل جداگانه", callback_data=f"adm:pnd:ovpn:bdiff:{pending_id}"),
         )
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:pnd:proto:ovpn:{pending_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
@@ -17097,8 +16846,8 @@ def _dispatch_callback(call, uid, data):
                   pending_id=pending_id)
         kb = types.InlineKeyboardMarkup()
         kb.row(
-            types.InlineKeyboardButton("? ??? � ?? ??????",    callback_data=f"adm:pnd:wg:bshared:{pending_id}"),
-            types.InlineKeyboardButton("? ??? � ?????? ???????", callback_data=f"adm:pnd:wg:bdiff:{pending_id}"),
+            types.InlineKeyboardButton("✅ بله — یک کانفیگ",    callback_data=f"adm:pnd:wg:bshared:{pending_id}"),
+            types.InlineKeyboardButton("❌ خیر — کانفیگ جداگانه", callback_data=f"adm:pnd:wg:bdiff:{pending_id}"),
         )
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:pnd:proto:wg:{pending_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
@@ -17154,8 +16903,8 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call,
             "⚠️ <b>آیا مطمئن هستید؟</b>\n\n"
             "همه رسیدهای بررسی‌نشده رد خواهند شد.\n\n"
-            "� <b>?? ??? ?? ?????</b>: ?? ????? ?? ??? ??????? ? ?? ??????? ????? ??????.\n"
-            "� <b>?? ??? ???? ?????</b>: ??? ???? ?? ??? ??????? ???? ????.",
+            "• <b>رد همه با توضیح</b>: یک توضیح از شما می‌گیرد و به کاربران ارسال می‌شود.\n"
+            "• <b>رد همه بدون توضیح</b>: فقط پیام رد شدن می‌رود، بدون دلیل.",
             kb)
         return
 
@@ -17281,8 +17030,8 @@ def _dispatch_callback(call, uid, data):
                   type_id=pkg["type_id"] if pkg else 0,
                   pending_id=pending_id)
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("1?? ?????? + ??? � ????? ??",   callback_data=f"adm:pnd:v2bm:1:{pending_id}"))
-        kb.add(types.InlineKeyboardButton("2?? ?????? + ??? � ????? ????", callback_data=f"adm:pnd:v2bm:2:{pending_id}"))
+        kb.add(types.InlineKeyboardButton("1️⃣ کانفیگ + ساب — تعداد کم",   callback_data=f"adm:pnd:v2bm:1:{pending_id}"))
+        kb.add(types.InlineKeyboardButton("2️⃣ کانفیگ + ساب — تعداد زیاد", callback_data=f"adm:pnd:v2bm:2:{pending_id}"))
         kb.add(types.InlineKeyboardButton("3️⃣ کانفیگ تنها",               callback_data=f"adm:pnd:v2bm:3:{pending_id}"))
         kb.add(types.InlineKeyboardButton("4️⃣ ساب تنها",                  callback_data=f"adm:pnd:v2bm:4:{pending_id}"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:pnd:proto:v2ray:{pending_id}", icon_custom_emoji_id="5253997076169115797"))
@@ -17311,7 +17060,7 @@ def _dispatch_callback(call, uid, data):
             kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:pnd:v2:bulk:{pending_id}", icon_custom_emoji_id="5253997076169115797"))
             send_or_edit(call,
                 "✂️ <b>پیشوند حذفی از نام کانفیگ</b>\n\n"
-                "??? ?????? ??? ????????? ??? ???????? ???? ???? ????? ?? ??? ??????? �???? ??????� ?????.", kb)
+                "اگر ابتدای نام کانفیگ‌ها متن اضافه‌ای دارد وارد کنید، در غیر اینصورت «بدون پیشوند» بزنید.", kb)
         else:  # mode 4: sub only
             state_set(uid, "v2_bulk_data",
                       package_id=p_row["package_id"],
@@ -17334,7 +17083,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:pnd:v2:bulk:{pending_id}", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call,
             "✂️ <b>پسوند حذفی از نام کانفیگ</b>\n\n"
-            "??? ?????? ?????? ??? ???????? ???? ???? ????? ?? ??? ??????? �???? ?????� ?????.", kb)
+            "اگر انتهای نام‌ها متن اضافه‌ای دارد وارد کنید، در غیر اینصورت «بدون پسوند» بزنید.", kb)
         return
 
     # adm:pnd:v2bsfx:skip:{pending_id}  →  skip suffix for pending bulk
@@ -17378,8 +17127,8 @@ def _dispatch_callback(call, uid, data):
                   package_id=p_row["package_id"], pending_id=pending_id)
         kb = types.InlineKeyboardMarkup()
         kb.row(
-            types.InlineKeyboardButton("? ??? � ?? ????",    callback_data=f"adm:pnd:ovpn:bshared:{pending_id}"),
-            types.InlineKeyboardButton("? ??? � ???? ???????", callback_data=f"adm:pnd:ovpn:bdiff:{pending_id}"),
+            types.InlineKeyboardButton("✅ بله — یک فایل",    callback_data=f"adm:pnd:ovpn:bshared:{pending_id}"),
+            types.InlineKeyboardButton("❌ خیر — فایل جداگانه", callback_data=f"adm:pnd:ovpn:bdiff:{pending_id}"),
         )
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:pnd:proto:ovpn:{pending_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
@@ -17453,8 +17202,8 @@ def _dispatch_callback(call, uid, data):
                   pending_id=pending_id)
         kb = types.InlineKeyboardMarkup()
         kb.row(
-            types.InlineKeyboardButton("? ??? � ?? ??????",    callback_data=f"adm:pnd:wg:bshared:{pending_id}"),
-            types.InlineKeyboardButton("? ??? � ?????? ???????", callback_data=f"adm:pnd:wg:bdiff:{pending_id}"),
+            types.InlineKeyboardButton("✅ بله — یک کانفیگ",    callback_data=f"adm:pnd:wg:bshared:{pending_id}"),
+            types.InlineKeyboardButton("❌ خیر — کانفیگ جداگانه", callback_data=f"adm:pnd:wg:bdiff:{pending_id}"),
         )
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:pnd:proto:wg:{pending_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
@@ -17502,7 +17251,7 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id)
         return
 
-    # -- Panel management ------------------------------------------------------
+    # ── Panel management ──────────────────────────────────────────────────────
 
     if data == "admin:panels":
         if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
@@ -17512,7 +17261,7 @@ def _dispatch_callback(call, uid, data):
         _show_admin_panels(call)
         return
 
-    # -- Admin: Add-on purchase settings -------------------------------------
+    # ── Admin: Add-on purchase settings ─────────────────────────────────────
     if data == "adm:addons":
         if uid not in ADMIN_IDS:
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
@@ -17578,7 +17327,7 @@ def _dispatch_callback(call, uid, data):
         kb_type.add(InlineKeyboardButton("🖥 سناعی (3x-ui)", callback_data="adm:pnl:add_type:sanaei"))
         send_or_edit(call,
             "🖥 <b>افزودن پنل جدید</b>\n\n"
-            "????? ?/? � <b>??? ???</b>\n"
+            "مرحله ۱/۸ — <b>نوع پنل</b>\n"
             "نوع پنل مدیریت را انتخاب کنید:",
             kb_type)
         return
@@ -17595,7 +17344,7 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id)
         send_or_edit(call,
             "🖥 <b>افزودن پنل جدید</b>\n\n"
-            "????? ?/? � <b>??? ???</b>\n"
+            "مرحله ۲/۸ — <b>نام پنل</b>\n"
             "یک نام دلخواه برای شناسایی این پنل وارد کنید:",
             back_button("admin:panels"))
         return
@@ -17615,14 +17364,14 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id)
         send_or_edit(call,
             f"🖥 <b>افزودن پنل جدید</b>\n\n"
-            f"????? ?/? � <b>???? IP ?? ?????</b>\n"
+            f"مرحله ۴/۸ — <b>آدرس IP یا دامنه</b>\n"
             f"پروتکل انتخاب‌شده: <b>{protocol}</b>\n\n"
             "آدرس IP یا دامنه سرور پنل را ارسال کنید:",
             back_button("admin:panels"))
         return
 
     if data.startswith("adm:pnl:ef:protocol:"):
-        # Edit protocol � show buttons
+        # Edit protocol — show buttons
         if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
             bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
             return
@@ -17676,16 +17425,16 @@ def _dispatch_callback(call, uid, data):
             "name":         "نام پنل",
             "host":         "آدرس IP / دامنه",
             "port":         "پورت",
-            "path":         "???? ???? � ???? ??? ???? / ????? ????",
+            "path":         "مسیر مخفی — برای عدم وجود / ارسال کنید",
             "username":     "نام کاربری",
             "password":     "رمز عبور",
-            "sub_url_base": "????? ??? (????: http://stareh.parhiiz.top:2096) � ???? ??? /skip ????? ????",
+            "sub_url_base": "دامنه ساب (مثال: http://stareh.parhiiz.top:2096) — برای حذف /skip ارسال کنید",
         }
         label = field_labels.get(field, field)
         state_set(uid, "pnl_edit_field", field=field, panel_id=panel_id)
         bot.answer_callback_query(call.id)
         send_or_edit(call,
-            f"?? <b>?????? � {label}</b>\n\n???: <b>{esc(p['name'])}</b>\n\n"
+            f"✏️ <b>ویرایش — {label}</b>\n\nپنل: <b>{esc(p['name'])}</b>\n\n"
             f"مقدار فعلی: <code>{esc(str(p[field] or ''))}</code>\n\n"
             "مقدار جدید را ارسال کنید:",
             back_button(f"adm:pnl:detail:{panel_id}"))
@@ -17753,7 +17502,7 @@ def _dispatch_callback(call, uid, data):
         if not p:
             bot.answer_callback_query(call.id, "پنل یافت نشد.", show_alert=True)
             return
-        bot.answer_callback_query(call.id, "?? ??? ?????�")
+        bot.answer_callback_query(call.id, "در حال بررسی…")
         try:
             from ..panels.client import PanelClient
             try:
@@ -17812,7 +17561,7 @@ def _dispatch_callback(call, uid, data):
         username = sd.get("username", "")
         password = sd.get("password", "")
         bot.answer_callback_query(call.id)
-        bot.send_message(uid, "? ?? ??? ????? ????? ?? ???�")
+        bot.send_message(uid, "⏳ در حال بررسی اتصال به پنل…")
         ok, err = _panel_connect_with_retry(
             uid=uid, protocol=protocol, host=host, port=int(port),
             path=path, username=username, password=password,
@@ -17848,7 +17597,7 @@ def _dispatch_callback(call, uid, data):
         _show_admin_panels(call)
         return
 
-    # -- Panel Client Packages management --------------------------------------
+    # ── Panel Client Packages management ──────────────────────────────────────
     if data.startswith("adm:pnl:cpkgs:"):
         if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
             bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
@@ -17946,7 +17695,7 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id)
         from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
         send_or_edit(call,
-            f"?? <b>?????? ?????? ???? � ???: {esc(p['name'])}</b>\n\n"
+            f"📦 <b>افزودن کلاینت پکیج — پنل: {esc(p['name'])}</b>\n\n"
             "🔢 <b>شماره ID اینباند</b> را ارسال کنید:\n\n"
             "💡 در پنل ثنایی به Inbounds بروید و عدد ستون ID را بنویسید (مثلاً <code>3</code>).",
             back_button(f"adm:pnl:cpkgs:{panel_id}"))
@@ -17968,7 +17717,7 @@ def _dispatch_callback(call, uid, data):
 
         bot.answer_callback_query(call.id)
 
-        # -- Manual input flow: ask admin to type sample config / sub URL ------
+        # ── Manual input flow: ask admin to type sample config / sub URL ──────
         if mode in ("config_only", "both"):
             state_set(uid, "cpkg_sample_config", panel_id=panel_id, inbound_id=inbound_id, mode=mode)
             send_or_edit(call,
