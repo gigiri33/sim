@@ -8571,22 +8571,11 @@ def _dispatch_callback(call, uid, data):
                                       is_user_view=True)
             return
 
-        # mypnlcfg:renewwarn:{config_id}  — confirmation warning before quick renewal
+        # mypnlcfg:renewwarn:{config_id}  — skip warning, go directly to package selection
         if data.startswith("mypnlcfg:renewwarn:"):
             config_id = int(data.split(":")[-1])
-            cfg = get_panel_config(config_id)
-            if not cfg or cfg["user_id"] != uid:
-                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
-            bot.answer_callback_query(call.id)
-            kb = types.InlineKeyboardMarkup()
-            kb.add(types.InlineKeyboardButton("✅ بله، تمدید کن", callback_data=f"mypnlcfg:renewconfirm:{config_id}"))
-            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"mypnlcfg:d:{config_id}", icon_custom_emoji_id="5253997076169115797"))
-            send_or_edit(call,
-                "⚠️ <b>تمدید فوری</b>\n\n"
-                "با تمدید فوری، <b>حجم و زمان</b> کانفیگ شما ریست می‌شود و از نو با اطلاعات پکیج جدید فعال می‌گردد.\n\n"
-                "آیا مطمئن هستید؟",
-                kb)
-            return
+            data = f"mypnlcfg:renewconfirm:{config_id}"
+            # fall through to renewconfirm handler below
 
         # mypnlcfg:renewconfirm:{config_id}  — show package list for panel config renewal
         if data.startswith("mypnlcfg:renewconfirm:"):

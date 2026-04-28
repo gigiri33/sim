@@ -797,6 +797,8 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
     # ── Try live traffic from panel API ──────────────────────────────────────
     remaining_vol_str   = "—"
     client_enabled_live = None
+    _live_total_b       = None   # total quota bytes from panel (0 = unlimited)
+    _live_exp_ms        = None   # expiry timestamp ms from panel  (0 = unlimited)
     try:
         panel = get_panel(cfg["panel_id"])
         if panel:
@@ -810,12 +812,14 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
                 total_b = td.get("total", 0) or 0
                 used_b  = (td.get("up", 0) or 0) + (td.get("down", 0) or 0)
                 client_enabled_live = td.get("enable", True)
+                _live_total_b = total_b
                 if total_b == 0:
                     remaining_vol_str = "نامحدود"
                 else:
                     rem_gb = max(0, total_b - used_b) / (1024 ** 3)
                     remaining_vol_str = f"{rem_gb:.2f} GB مانده"
                 exp_ms = td.get("expiryTime", 0) or 0
+                _live_exp_ms = exp_ms
                 if exp_ms > 0 and remaining_time_str == "نامحدود":
                     import time as _time
                     rem_s = exp_ms / 1000 - _time.time()
@@ -828,9 +832,13 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
     except Exception:
         pass
 
-    # ── Static package info ───────────────────────────────────────────────────
-    vol_text = "نامحدود" if not cfg.get("volume_gb")    else f"{cfg['volume_gb']} گیگ"
-    dur_text = "نامحدود" if not cfg.get("duration_days") else f"{cfg['duration_days']} روز"
+    # ── Volume and duration: prefer live panel data, fallback to package ───────
+    if _live_total_b is not None:
+        vol_text = "نامحدود" if _live_total_b == 0 else f"{_live_total_b / 1_073_741_824:.1f} گیگ"
+    else:
+        vol_text = "نامحدود" if not cfg.get("volume_gb") else f"{cfg['volume_gb']} گیگ"
+    # For duration, use the already-computed remaining_time_str (reflects actual expire_at)
+    dur_text = remaining_time_str
 
     cpkg_delivery = "—"
     if cfg.get("cpkg_id"):
@@ -941,19 +949,9 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
         # User view: send QR inline if possible, then show buttons
         ar_label = "♻️ تمدید خودکار: ✅" if auto_renew else "♻️ تمدید خودکار: ❌"
         kb.row(
-            InlineKeyboardButton("⚡ تمدید فوری",  callback_data=f"mypnlcfg:renewwarn:{config_id}"),
+            InlineKeyboardButton("⚡ تمدید فوری",  callback_data=f"mypnlcfg:renewconfirm:{config_id}"),
             InlineKeyboardButton(ar_label,          callback_data=f"mypnlcfg:autorenew:{config_id}"),
         )
-        # ── Add-on purchase buttons (only for panel-created configs) ──────
-        _vol_en  = setting_get("addon_volume_enabled", "1") == "1"
-        _time_en = setting_get("addon_time_enabled",   "1") == "1"
-        _addon_row = []
-        if _vol_en:
-            _addon_row.append(InlineKeyboardButton("📦 خرید حجم",  callback_data=f"addon:vol:{config_id}"))
-        if _time_en:
-            _addon_row.append(InlineKeyboardButton("⏰ خرید زمان", callback_data=f"addon:time:{config_id}"))
-        if _addon_row:
-            kb.row(*_addon_row)
         kb.add(InlineKeyboardButton("بازگشت", callback_data=back_data,
                                     icon_custom_emoji_id="5253997076169115797"))
 

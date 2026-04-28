@@ -136,7 +136,6 @@ def kb_admin_panel(uid=None):
 
     if is_owner or (uid and admin_has_perm(uid, "manage_panels")):
         rows.append([_btn("مدیریت پنل‌ها",      callback_data="admin:panels",  emoji_id="5372926953978341366")])
-        rows.append([_btn("افزودنی های خرید",    callback_data="adm:addons",    emoji_id="5287654304593586388")])
 
     # License management — always visible to owner
     if is_owner:
