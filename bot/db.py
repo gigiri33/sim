@@ -481,6 +481,8 @@ def _run_init_db_migrations():
             "ALTER TABLE referrals ADD COLUMN rewarded_at TEXT",
             "ALTER TABLE users ADD COLUMN phone_number TEXT",
             "CREATE TABLE IF NOT EXISTS payment_cards (id INTEGER PRIMARY KEY AUTOINCREMENT, card_number TEXT NOT NULL, bank_name TEXT NOT NULL DEFAULT '', owner_name TEXT NOT NULL DEFAULT '', is_active INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
+            # For databases where payment_cards was created before owner_name was added
+            "ALTER TABLE payment_cards ADD COLUMN owner_name TEXT NOT NULL DEFAULT ''",
             # audience: 'all' | 'public' | 'agents'  (default 'all' = everyone)
             "ALTER TABLE discount_codes ADD COLUMN audience TEXT NOT NULL DEFAULT 'all'",
             # scope_type: 'all' | 'types' | 'packages'
