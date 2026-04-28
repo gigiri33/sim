@@ -958,7 +958,8 @@ def _show_renewal_gateways(target, uid, purchase_id, package_id, price, package_
 
 def _execute_pnlcfg_renewal(config_id, package_id, chat_id=None, uid=None):
     """
-    Execute panel config renewal: reset traffic + enable_client with new expiry.
+    Execute panel config renewal: ADD volume + time to existing client (no reset).
+    The package's volume_gb and duration_days are added on top of current values.
     Retries indefinitely on connection errors (up to 8 hours).
     On non-connection failures retries up to 3 minutes then gives up.
     Returns (True, None) on success or (False, user_friendly_msg) on fatal failure.
@@ -1066,43 +1067,78 @@ def _execute_pnlcfg_renewal(config_id, package_id, chat_id=None, uid=None):
         _notify_panel_error(_uid, pkg, "login (تمدید)", login_err, config_id, cfg["panel_id"])
         return False, "تمدید سرویس با خطا مواجه شد. لطفاً با پشتیبانی ارتباط بگیرید."
 
-    # ── Step 2: reset traffic ──────────────────────────────────────────────────
-    reset_err = None
-    _t0 = _time.time()
-    while True:
-        if _time.time() - _t_start > MAX_WAIT:
-            reset_err = "حداکثر زمان انتظار تمام شد"
-            break
-        ok_rt, err_rt = pc_api.reset_client_traffic(cfg["inbound_id"], cfg["client_name"] or "")
-        if ok_rt:
-            reset_err = None
-            break
-        reset_err = str(err_rt)
-        elapsed = _time.time() - _t0
-        if _is_conn_err(reset_err):
-            _maybe_notify_waiting()
-            log.warning("_execute_pnlcfg_renewal: reset_traffic CONN_ERR (%.0fs elapsed), retry in %ds: %s",
-                        elapsed, CONN_RETRY_DELAY, reset_err)
-            _time.sleep(CONN_RETRY_DELAY)
-        else:
-            log.warning("_execute_pnlcfg_renewal: reset_traffic failed (%.0fs elapsed): %s", elapsed, reset_err)
-            if elapsed + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:
+    extra_gb   = float(pkg["volume_gb"] or 0)
+    extra_days = int(pkg["duration_days"] or 0)
+
+    # ── Step 2: Add volume (if package has volume) ─────────────────────────────
+    new_exp_ms  = None
+    new_exp_str = None
+
+    if extra_gb > 0:
+        vol_err = None
+        _t0 = _time.time()
+        while True:
+            if _time.time() - _t_start > MAX_WAIT:
+                vol_err = "حداکثر زمان انتظار تمام شد"
                 break
-            _time.sleep(FUNC_RETRY_DELAY)
-    if reset_err is not None:
-        _notify_panel_error(_uid, pkg, "reset_traffic (تمدید)", reset_err, config_id, cfg["panel_id"])
-        return False, "تمدید سرویس با خطا مواجه شد. لطفاً با پشتیبانی ارتباط بگیرید."
+            ok_v, res_v = pc_api.add_client_volume(
+                cfg["inbound_id"], cfg["client_uuid"], extra_gb
+            )
+            if ok_v:
+                vol_err = None
+                break
+            vol_err = str(res_v)
+            elapsed = _time.time() - _t0
+            if _is_conn_err(vol_err):
+                _maybe_notify_waiting()
+                log.warning("_execute_pnlcfg_renewal: add_volume CONN_ERR (%.0fs elapsed), retry %ds: %s",
+                            elapsed, CONN_RETRY_DELAY, vol_err)
+                _time.sleep(CONN_RETRY_DELAY)
+            else:
+                log.warning("_execute_pnlcfg_renewal: add_volume failed (%.0fs elapsed): %s", elapsed, vol_err)
+                if elapsed + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:
+                    break
+                _time.sleep(FUNC_RETRY_DELAY)
+        if vol_err is not None:
+            _notify_panel_error(_uid, pkg, "add_volume (تمدید)", vol_err, config_id, cfg["panel_id"])
+            return False, "تمدید سرویس با خطا مواجه شد. لطفاً با پشتیبانی ارتباط بگیرید."
 
-    # ── Step 3: enable_client with new expiry ─────────────────────────────────
-    dur_days = int(pkg["duration_days"] or 0)
-    if dur_days:
-        new_exp_dt  = _dt.utcnow() + _td(days=dur_days)
-        new_exp_str = new_exp_dt.strftime("%Y-%m-%d %H:%M:%S")
-        new_exp_ms  = int(new_exp_dt.timestamp() * 1000)
-    else:
-        new_exp_str = None
-        new_exp_ms  = 0
+    # ── Step 3: Add time (if package has duration) ─────────────────────────────
+    if extra_days > 0:
+        time_err = None
+        _t0 = _time.time()
+        while True:
+            if _time.time() - _t_start > MAX_WAIT:
+                time_err = "حداکثر زمان انتظار تمام شد"
+                break
+            ok_t, res_t = pc_api.add_client_time(
+                cfg["inbound_id"], cfg["client_uuid"], extra_days
+            )
+            if ok_t:
+                new_exp_ms = res_t
+                time_err   = None
+                break
+            time_err = str(res_t)
+            elapsed = _time.time() - _t0
+            if _is_conn_err(time_err):
+                _maybe_notify_waiting()
+                log.warning("_execute_pnlcfg_renewal: add_time CONN_ERR (%.0fs elapsed), retry %ds: %s",
+                            elapsed, CONN_RETRY_DELAY, time_err)
+                _time.sleep(CONN_RETRY_DELAY)
+            else:
+                log.warning("_execute_pnlcfg_renewal: add_time failed (%.0fs elapsed): %s", elapsed, time_err)
+                if elapsed + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:
+                    break
+                _time.sleep(FUNC_RETRY_DELAY)
+        if time_err is not None:
+            _notify_panel_error(_uid, pkg, "add_time (تمدید)", time_err, config_id, cfg["panel_id"])
+            return False, "تمدید سرویس با خطا مواجه شد. لطفاً با پشتیبانی ارتباط بگیرید."
 
+        if new_exp_ms:
+            import datetime as _datetime
+            new_exp_str = _datetime.datetime.utcfromtimestamp(new_exp_ms / 1000).strftime("%Y-%m-%d %H:%M:%S")
+
+    # ── Step 4: enable client (in case it was disabled/expired) ───────────────
     enable_err = None
     _t0 = _time.time()
     while True:
@@ -1112,8 +1148,6 @@ def _execute_pnlcfg_renewal(config_id, package_id, chat_id=None, uid=None):
         ok_e, res_e = pc_api.enable_client(
             inbound_id=cfg["inbound_id"], client_uuid=cfg["client_uuid"],
             email=cfg["client_name"] or "",
-            traffic_bytes=int((pkg["volume_gb"] or 0) * 1073741824),
-            expire_ms=new_exp_ms,
         )
         if ok_e:
             enable_err = None
@@ -1134,8 +1168,9 @@ def _execute_pnlcfg_renewal(config_id, package_id, chat_id=None, uid=None):
         _notify_panel_error(_uid, pkg, "enable_client (تمدید)", enable_err, config_id, cfg["panel_id"])
         return False, "تمدید سرویس با خطا مواجه شد. لطفاً با پشتیبانی ارتباط بگیرید."
 
-    # ── Step 4: update DB ──────────────────────────────────────────────────────
-    _upf(config_id, "expire_at",  new_exp_str)
+    # ── Step 5: update DB ──────────────────────────────────────────────────────
+    if new_exp_str:
+        _upf(config_id, "expire_at", new_exp_str)
     _upf(config_id, "is_expired",  0)
     _upf(config_id, "is_disabled", 0)
     if int(pkg["id"]) != int(cfg.get("package_id") or 0):
