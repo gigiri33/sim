@@ -186,3 +186,77 @@ def back_button(target="main"):
         "callback_data": f"nav:{target}",
         "icon_custom_emoji_id": "5253997076169115797",
     }]]})
+
+
+# ── Service naming helpers ─────────────────────────────────────────────────────
+_SERVICE_NAME_RE = re.compile(r'^[a-z0-9]+$')
+
+
+def validate_service_name(name: str) -> bool:
+    """Return True if name consists only of a-z and 0-9 (non-empty)."""
+    return bool(name) and bool(_SERVICE_NAME_RE.match(name))
+
+
+def normalize_service_name(name: str) -> str:
+    """Lowercase and strip the name."""
+    return (name or "").strip().lower()
+
+
+def generate_random_name(length: int = 6) -> str:
+    """Generate a fully random lowercase alphanumeric name (no user_id prefix)."""
+    import random
+    import string
+    return "".join(random.choices(string.ascii_lowercase + string.digits, k=length))
+
+
+def parse_bulk_names(text: str, count: int) -> list:
+    """
+    Parse `count` service names from multi-line text.
+    - Each non-empty line is normalized and validated.
+    - Invalid/empty lines are replaced with a random name.
+    Returns a list of exactly `count` valid names.
+    """
+    lines = [l.strip() for l in (text or "").splitlines()]
+    lines = [l for l in lines if l]  # drop blank lines
+    names = []
+    for i in range(count):
+        raw = lines[i] if i < len(lines) else ""
+        normalized = normalize_service_name(raw)
+        if validate_service_name(normalized):
+            names.append(normalized)
+        else:
+            names.append(generate_random_name())
+    return names
+
+
+def ensure_unique_name(name: str, try_create_fn, max_retries: int = 3) -> str:
+    """
+    Try to use `name` via try_create_fn(name) -> (ok, result).
+    If panel returns a duplicate error, retry with name + "-" + 2-char random suffix.
+    After max_retries duplicate failures, fall back to a fully random name.
+    Returns the name that finally succeeded.
+    On non-duplicate errors, retries up to max_retries with a new random name.
+    Never raises — always returns a name (even if all retries failed, returns last candidate).
+    """
+    import random
+    import string
+    candidate = name
+    for attempt in range(max_retries + 1):
+        ok, result = try_create_fn(candidate)
+        if ok:
+            return candidate
+        err_str = str(result).lower()
+        is_dup = any(x in err_str for x in ["duplicate", "already exist", "exists", "taken", "conflict"])
+        if attempt < max_retries:
+            if is_dup and name:
+                suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=2))
+                candidate = f"{name}-{suffix}"
+            else:
+                candidate = generate_random_name()
+        # else: last attempt exhausted, fall through
+    # Final attempt with the last candidate
+    ok, result = try_create_fn(candidate)
+    if ok:
+        return candidate
+    # All retries exhausted — return a random name as best-effort fallback
+    return generate_random_name()

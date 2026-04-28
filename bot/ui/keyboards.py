@@ -135,7 +135,8 @@ def kb_admin_panel(uid=None):
         rows.append([_btn("تنظیمات", callback_data="admin:settings", emoji_id="5370935802844946281")])
 
     if is_owner or (uid and admin_has_perm(uid, "manage_panels")):
-        rows.append([_btn("مدیریت پنل‌ها", callback_data="admin:panels", emoji_id="5372926953978341366")])
+        rows.append([_btn("مدیریت پنل‌ها",      callback_data="admin:panels",  emoji_id="5372926953978341366")])
+        rows.append([_btn("افزودنی های خرید",    callback_data="adm:addons",    emoji_id="5287654304593586388")])
 
     # License management — always visible to owner
     if is_owner:
@@ -144,6 +145,10 @@ def kb_admin_panel(uid=None):
             rows.append([_btn("🔐 فعال‌سازی لایسنس", callback_data="license:activate")])
         else:
             rows.append([_btn("🔐 مدیریت لایسنس", callback_data="license:status")])
+
+    # Analytics dashboard
+    if is_owner or (uid and admin_has_perm(uid, "view_users")):
+        rows.append([_btn("📊 آمار فروش", callback_data="admin:stats", emoji_id="5370935802844946281")])
 
     rows.append([_btn("بازگشت", callback_data="nav:main", emoji_id="5253997076169115797")])
     return _raw_markup(rows)

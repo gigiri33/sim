@@ -5,11 +5,12 @@ Entry point for the ConfigFlow Telegram Bot.
 Run with:  python main.py
 """
 import threading
+import json
 
 from bot.db import init_db
 from bot.db import cleanup_stale_reservations
 from bot.ui.helpers import set_bot_commands
-from bot.db import setting_get, setting_set, add_locked_channel
+from bot.db import setting_get, setting_set, add_locked_channel, get_payment, complete_payment, update_balance
 from bot.admin.backup import _backup_loop
 from bot.group_manager import _group_topic_loop
 from bot.panels.checker import start_panel_checker
@@ -22,6 +23,93 @@ from bot.license_manager import (
     is_limited_mode,
     LIMITED_MODE_TEXT,
 )
+
+
+# ── Plisio webhook server (runs in a background thread) ───────────────────────
+def _plisio_webhook_server():
+    """
+    Lightweight Flask server to receive Plisio IPN callbacks.
+    Runs only when ``server_public_url`` is set in admin settings.
+    """
+    try:
+        from flask import Flask, request, jsonify
+    except ImportError:
+        print("⚠️ Flask not installed — Plisio webhook disabled. Run: pip install flask")
+        return
+
+    from bot.gateways.plisio import verify_plisio_json_callback, is_plisio_paid
+    from bot.helpers import fmt_price
+    from bot.payments import apply_gateway_bonus_if_needed
+
+    _app = Flask(__name__)
+
+    @_app.route("/plisio/<bot_username>/callback", methods=["POST"])
+    def _plisio_callback(bot_username):
+        try:
+            data = request.get_json(force=True, silent=True) or {}
+            if not data:
+                return jsonify({"status": "error", "message": "empty body"}), 400
+            if not verify_plisio_json_callback(dict(data)):
+                return jsonify({"status": "error", "message": "invalid signature"}), 403
+            order_number = data.get("order_number", "")
+            status       = data.get("status", "")
+            if not order_number:
+                return jsonify({"status": "ok"}), 200
+            try:
+                payment_id = int(order_number)
+            except (ValueError, TypeError):
+                return jsonify({"status": "ok"}), 200
+            payment = get_payment(payment_id)
+            if not payment or payment["status"] != "pending":
+                return jsonify({"status": "ok"}), 200
+            if not is_plisio_paid(status):
+                return jsonify({"status": "ok"}), 200
+            if not complete_payment(payment_id):
+                return jsonify({"status": "ok"}), 200
+            uid    = payment["user_id"]
+            amount = payment["amount"]
+            kind   = payment["kind"]
+            if kind == "wallet_charge":
+                update_balance(uid, amount)
+                try:
+                    apply_gateway_bonus_if_needed(uid, "plisio", amount)
+                except Exception:
+                    pass
+                try:
+                    from bot.ui.helpers import send_or_edit
+                    from bot.helpers import back_button
+                    bot.send_message(uid,
+                        f"✅ پرداخت Plisio شما تأیید شد و کیف پول شارژ شد.\n\n💰 مبلغ: {fmt_price(amount)} تومان",
+                        parse_mode="HTML")
+                except Exception:
+                    pass
+            else:
+                # config_purchase / renewal / pnlcfg_renewal — let the polling thread handle it
+                # by doing nothing here; complete_payment was already called so polling stops
+                pass
+        except Exception as exc:
+            print("PLISIO_WEBHOOK_ERROR:", exc)
+        return jsonify({"status": "ok"}), 200
+
+    @_app.route("/plisio/<bot_username>/success")
+    def _plisio_success(bot_username):
+        return "✅ پرداخت با موفقیت انجام شد. به ربات تلگرام بازگردید.", 200
+
+    @_app.route("/plisio/<bot_username>/fail")
+    def _plisio_fail(bot_username):
+        return "❌ پرداخت ناموفق بود. به ربات تلگرام بازگردید.", 200
+
+    port = int(setting_get("plisio_webhook_port", "5050") or "5050")
+    print(f"🌐 Plisio webhook server starting on port {port}…")
+    _app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+
+
+def _start_plisio_webhook_server():
+    pub_url = (setting_get("server_public_url", "") or "").strip()
+    if not pub_url:
+        return  # Webhook not configured — skip
+    t = threading.Thread(target=_plisio_webhook_server, daemon=True)
+    t.start()
 
 
 def main():
@@ -73,6 +161,9 @@ def main():
 
     # Start panel health-check background thread
     start_panel_checker()
+
+    # Start Plisio webhook server (only if server_public_url is set)
+    _start_plisio_webhook_server()
 
     # Remove any active webhook before starting long-polling (prevents 409 conflict)
     try:

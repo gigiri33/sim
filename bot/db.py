@@ -328,15 +328,6 @@ def _run_init_db_migrations():
                 used_by   INTEGER,
                 used_at   TEXT
             )""",
-            """CREATE TABLE IF NOT EXISTS payment_cards (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                card_number TEXT NOT NULL,
-                bank_name   TEXT NOT NULL DEFAULT '',
-                owner_name  TEXT NOT NULL DEFAULT '',
-                is_active   INTEGER NOT NULL DEFAULT 0,
-                created_at  TEXT NOT NULL,
-                updated_at  TEXT NOT NULL
-            )""",
         ]:
             conn.execute(_sql)
 
@@ -377,16 +368,10 @@ def _run_init_db_migrations():
             "swapwallet_crypto_api_key":  "",
             "swapwallet_crypto_username": "",
             "swapwallet_active_currencies": "TRON,TON,BSC",
-            "gw_tronpays_rial_enabled": "0",
-            "gw_tronpays_rial_visibility": "public",
             "gw_tronpays_rial_display_name": "",
-            "gw_tronpays_rial_range_enabled": "0",
-            "gw_tronpays_rial_range_min": "",
-            "gw_tronpays_rial_range_max": "",
-            "tronpays_rial_api_key": "",
-            "tronpays_rial_callback_url": "",
             "shop_open":         "1",
             "preorder_mode":     "0",
+            "panel_renewal_enabled": "1",
             "support_link":     "",
             "support_link_desc": "",
             "start_text":       "",
@@ -440,14 +425,44 @@ def _run_init_db_migrations():
             "referral_antispam_window":     "15",
             "referral_antispam_threshold":  "10",
             "referral_antispam_action":     "report_only",
+            # ── Referral Captcha ───────────────────────────────────────────────
+            "referral_captcha_enabled":     "1",
+            # ── Payment Card Management ────────────────────────────────────────
+            "gw_card_rotation_enabled":     "0",
+            # ── Gateway Fee / Bonus ────────────────────────────────────────────
+            "gw_card_fee_enabled":               "0",
+            "gw_card_fee_type":                  "fixed",
+            "gw_card_fee_value":                 "0",
+            "gw_card_bonus_enabled":             "0",
+            "gw_card_bonus_type":                "fixed",
+            "gw_card_bonus_value":               "0",
+            "gw_crypto_fee_enabled":             "0",
+            "gw_crypto_fee_type":                "fixed",
+            "gw_crypto_fee_value":               "0",
+            "gw_crypto_bonus_enabled":           "0",
+            "gw_crypto_bonus_type":              "fixed",
+            "gw_crypto_bonus_value":             "0",
+            "gw_tetrapay_fee_enabled":           "0",
+            "gw_tetrapay_fee_type":              "fixed",
+            "gw_tetrapay_fee_value":             "0",
+            "gw_tetrapay_bonus_enabled":         "0",
+            "gw_tetrapay_bonus_type":            "fixed",
+            "gw_tetrapay_bonus_value":           "0",
+            "gw_swapwallet_crypto_fee_enabled":  "0",
+            "gw_swapwallet_crypto_fee_type":     "fixed",
+            "gw_swapwallet_crypto_fee_value":    "0",
+            "gw_swapwallet_crypto_bonus_enabled":"0",
+            "gw_swapwallet_crypto_bonus_type":   "fixed",
+            "gw_swapwallet_crypto_bonus_value":  "0",
+            "gw_tronpays_rial_fee_enabled":      "0",
+            "gw_tronpays_rial_fee_type":         "fixed",
+            "gw_tronpays_rial_fee_value":        "0",
+            "gw_tronpays_rial_bonus_enabled":    "0",
+            "gw_tronpays_rial_bonus_type":       "fixed",
+            "gw_tronpays_rial_bonus_value":      "0",
         }
         for coin, _ in CRYPTO_COINS:
             defaults[f"crypto_{coin}"] = ""
-        for gw_name in ("card", "tetrapay", "tronpays_rial", "swapwallet_crypto"):
-            defaults[f"gw_{gw_name}_fee_type"] = "none"
-            defaults[f"gw_{gw_name}_fee_value"] = "0"
-            defaults[f"gw_{gw_name}_bonus_type"] = "none"
-            defaults[f"gw_{gw_name}_bonus_value"] = "0"
 
         for k, v in defaults.items():
             conn.execute(
@@ -463,6 +478,7 @@ def _run_init_db_migrations():
             "ALTER TABLE packages ADD COLUMN position INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE config_types ADD COLUMN description TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE config_types ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE config_types ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
             "CREATE TABLE IF NOT EXISTS pinned_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL, created_at TEXT NOT NULL)",
             "CREATE TABLE IF NOT EXISTS pinned_message_sends (id INTEGER PRIMARY KEY AUTOINCREMENT, pin_id INTEGER NOT NULL, user_id INTEGER NOT NULL, message_id INTEGER NOT NULL)",
             "CREATE TABLE IF NOT EXISTS referrals (id INTEGER PRIMARY KEY AUTOINCREMENT, referrer_id INTEGER NOT NULL, referee_id INTEGER NOT NULL UNIQUE, created_at TEXT NOT NULL, start_reward_given INTEGER NOT NULL DEFAULT 0, purchase_reward_given INTEGER NOT NULL DEFAULT 0)",
@@ -480,9 +496,12 @@ def _run_init_db_migrations():
             "ALTER TABLE referrals ADD COLUMN channel_joined INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE referrals ADD COLUMN rewarded_at TEXT",
             "ALTER TABLE users ADD COLUMN phone_number TEXT",
+<<<<<<< HEAD
             "CREATE TABLE IF NOT EXISTS payment_cards (id INTEGER PRIMARY KEY AUTOINCREMENT, card_number TEXT NOT NULL, bank_name TEXT NOT NULL DEFAULT '', owner_name TEXT NOT NULL DEFAULT '', is_active INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
             # For databases where payment_cards was created before owner_name was added
             "ALTER TABLE payment_cards ADD COLUMN owner_name TEXT NOT NULL DEFAULT ''",
+=======
+>>>>>>> parent of b14922f (آبدیت باگ های)
             # audience: 'all' | 'public' | 'agents'  (default 'all' = everyone)
             "ALTER TABLE discount_codes ADD COLUMN audience TEXT NOT NULL DEFAULT 'all'",
             # scope_type: 'all' | 'types' | 'packages'
@@ -636,30 +655,84 @@ def _run_init_db_migrations():
                 "action_taken TEXT NOT NULL DEFAULT ''"
                 ")"
             ),
+            # ── Payment Cards (multi-card management) ─────────────────────────
+            (
+                "CREATE TABLE IF NOT EXISTS payment_cards ("
+                "id          INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "card_number TEXT    NOT NULL,"
+                "bank_name   TEXT    NOT NULL DEFAULT '',"
+                "holder_name TEXT    NOT NULL DEFAULT '',"
+                "is_active   INTEGER NOT NULL DEFAULT 1,"
+                "created_at  TEXT    NOT NULL"
+                ")"
+            ),
+            # ── Crypto comment code shown to user during payment ──────────────
+            "ALTER TABLE payments ADD COLUMN crypto_comment TEXT",
+            # ── Stored crypto equivalent amount at time of payment ────────────
+            "ALTER TABLE payments ADD COLUMN crypto_amount TEXT",
+            # ── Referral captcha verification tracking ────────────────────────
+            "ALTER TABLE referrals ADD COLUMN captcha_verified INTEGER NOT NULL DEFAULT 0",
+            # ── Referral captcha failure tracking ─────────────────────────────
+            "ALTER TABLE referrals ADD COLUMN captcha_failed INTEGER NOT NULL DEFAULT 0",
+            # ── Reseller per-GB pricing ────────────────────────────────────────
+            (
+                "CREATE TABLE IF NOT EXISTS reseller_per_gb_prices ("
+                "id         INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "user_id    INTEGER NOT NULL,"
+                "type_id    INTEGER NOT NULL,"
+                "price_per_gb INTEGER NOT NULL,"
+                "created_at TEXT NOT NULL,"
+                "updated_at TEXT NOT NULL,"
+                "UNIQUE(user_id, type_id)"
+                ")"
+            ),
+            # ── Reseller requests table ────────────────────────────────────────
+            (
+                "CREATE TABLE IF NOT EXISTS reseller_requests ("
+                "id          INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "user_id     INTEGER NOT NULL,"
+                "username    TEXT,"
+                "full_name   TEXT,"
+                "description TEXT,"
+                "status      TEXT NOT NULL DEFAULT 'pending',"
+                "rejected_at TEXT,"
+                "reviewed_at TEXT,"
+                "reviewed_by INTEGER,"
+                "created_at  TEXT NOT NULL,"
+                "updated_at  TEXT NOT NULL"
+                ")"
+            ),
+            # ── Purchase credit on users table ────────────────────────────────
+            "ALTER TABLE users ADD COLUMN purchase_credit_enabled INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN purchase_credit_limit INTEGER NOT NULL DEFAULT 0",
+            # ── Purchase addon prices ─────────────────────────────────────────
+            (
+                "CREATE TABLE IF NOT EXISTS purchase_addon_prices ("
+                "id                   INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "type_id              INTEGER NOT NULL,"
+                "addon_type           TEXT    NOT NULL,"
+                "normal_unit_price    INTEGER,"
+                "reseller_unit_price  INTEGER,"
+                "created_at           TEXT    NOT NULL,"
+                "updated_at           TEXT    NOT NULL,"
+                "UNIQUE(type_id, addon_type)"
+                ")"
+            ),
+            "INSERT OR IGNORE INTO settings(key,value) VALUES('addon_volume_enabled','1')",
+            "INSERT OR IGNORE INTO settings(key,value) VALUES('addon_time_enabled','1')",
+            # ── Discount code usage scope ─────────────────────────────────────
+            "ALTER TABLE discount_codes ADD COLUMN usage_scope TEXT NOT NULL DEFAULT 'all'",
+            # ── Admin balance adjustment tracking ─────────────────────────────
+            "ALTER TABLE users ADD COLUMN total_admin_adjusted INTEGER NOT NULL DEFAULT 0",
+            # ── Service naming for panel configs ──────────────────────────────
+            "ALTER TABLE payments ADD COLUMN service_names_json TEXT",
+            "INSERT OR IGNORE INTO settings(key,value) VALUES('panel_renewal_enabled','1')",
         ]
         for sql in migrations:
             try:
                 conn.execute(sql)
             except Exception:
                 pass
-
-        cards_count = conn.execute("SELECT COUNT(*) AS c FROM payment_cards").fetchone()["c"]
-        if cards_count == 0:
-            legacy_card = conn.execute(
-                "SELECT value FROM settings WHERE key='payment_card'"
-            ).fetchone()["value"]
-            if legacy_card:
-                legacy_bank = conn.execute(
-                    "SELECT value FROM settings WHERE key='payment_bank'"
-                ).fetchone()["value"]
-                legacy_owner = conn.execute(
-                    "SELECT value FROM settings WHERE key='payment_owner'"
-                ).fetchone()["value"]
-                now = now_str()
-                conn.execute(
-                    "INSERT INTO payment_cards(card_number, bank_name, owner_name, is_active, created_at, updated_at) VALUES(?,?,?,?,?,?)",
-                    (legacy_card, legacy_bank or "", legacy_owner or "", 1, now, now)
-                )
 
         # ── Indexes (CREATE IF NOT EXISTS is idempotent) ───────────────────────
         indexes = [
@@ -677,6 +750,13 @@ def _run_init_db_migrations():
                 conn.execute(sql)
             except Exception:
                 pass
+        # Initialize sort_order for existing rows that still have the default 0
+        try:
+            conn.execute(
+                "UPDATE config_types SET sort_order=id WHERE sort_order=0"
+            )
+        except Exception:
+            pass
         conn.commit()
     finally:
         _init_conn.close()
@@ -817,9 +897,15 @@ def get_users(has_purchase=None, limit=None, offset=0, status=None):
     )
     params = []
     if has_purchase is True:
-        q += " AND EXISTS (SELECT 1 FROM purchases p WHERE p.user_id=u.user_id)"
+        q += (
+            " AND (EXISTS (SELECT 1 FROM purchases p WHERE p.user_id=u.user_id)"
+            " OR EXISTS (SELECT 1 FROM panel_configs pc WHERE pc.user_id=u.user_id))"
+        )
     elif has_purchase is False:
-        q += " AND NOT EXISTS (SELECT 1 FROM purchases p WHERE p.user_id=u.user_id)"
+        q += (
+            " AND NOT EXISTS (SELECT 1 FROM purchases p WHERE p.user_id=u.user_id)"
+            " AND NOT EXISTS (SELECT 1 FROM panel_configs pc WHERE pc.user_id=u.user_id)"
+        )
     if status is not None:
         q += " AND u.status=?"
         params.append(status)
@@ -835,11 +921,17 @@ def get_user_detail(user_id):
         return conn.execute(
             """
             SELECT u.*,
-                   (SELECT COUNT(*) FROM purchases p WHERE p.user_id=u.user_id) AS purchase_count,
-                   (SELECT COALESCE(SUM(amount),0) FROM purchases p WHERE p.user_id=u.user_id) AS total_spent,
-                   (SELECT COUNT(*) FROM payments py WHERE py.user_id=u.user_id AND py.kind='renewal' AND py.status='completed') AS renewal_count,
-                   (SELECT COALESCE(SUM(amount),0) FROM payments py WHERE py.user_id=u.user_id AND py.kind='renewal' AND py.status='completed') AS total_renewals,
-                   (SELECT COALESCE(SUM(py2.amount),0) FROM payments py2 WHERE py2.user_id=u.user_id AND py2.status='completed' AND py2.payment_method != 'wallet') AS total_direct_payments
+                   (SELECT COUNT(*) FROM purchases p WHERE p.user_id=u.user_id)
+                   + (SELECT COUNT(*) FROM panel_configs pc WHERE pc.user_id=u.user_id) AS purchase_count,
+                   (SELECT COALESCE(SUM(p.amount),0) FROM purchases p WHERE p.user_id=u.user_id)
+                   + (SELECT COALESCE(SUM(py.amount),0) FROM payments py
+                      INNER JOIN panel_configs pc ON pc.payment_id=py.id
+                      WHERE pc.user_id=u.user_id AND py.status='completed' AND py.kind='config_purchase') AS total_spent,
+                   (SELECT COUNT(*) FROM payments py WHERE py.user_id=u.user_id AND py.kind IN ('renewal','pnlcfg_renewal') AND py.status='completed') AS renewal_count,
+                   (SELECT COALESCE(SUM(amount),0) FROM payments py WHERE py.user_id=u.user_id AND py.kind IN ('renewal','pnlcfg_renewal') AND py.status='completed') AS total_renewals,
+                   (SELECT COALESCE(SUM(py2.amount),0) FROM payments py2 WHERE py2.user_id=u.user_id AND py2.status='completed' AND py2.payment_method != 'wallet') AS total_direct_payments,
+                   (SELECT COUNT(*) FROM panel_configs pc WHERE pc.user_id=u.user_id) AS panel_sales_count,
+                   (SELECT COUNT(*) FROM payments py WHERE py.user_id=u.user_id AND py.kind='pnlcfg_renewal' AND py.status='completed') AS panel_renew_count
             FROM users u WHERE u.user_id=?
             """,
             (user_id,)
@@ -889,6 +981,15 @@ def update_balance(user_id, delta):
     with get_conn() as conn:
         conn.execute(
             "UPDATE users SET balance=balance+? WHERE user_id=?", (delta, user_id)
+        )
+
+
+def update_admin_adjusted(user_id, delta):
+    """Track admin manual balance additions/subtractions for statistics."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE users SET total_admin_adjusted=total_admin_adjusted+? WHERE user_id=?",
+            (delta, user_id)
         )
 
 
@@ -1004,16 +1105,26 @@ def count_users_by_filter(filter_type):
 # ── Config Types ───────────────────────────────────────────────────────────────
 def get_all_types():
     with get_conn() as conn:
-        return conn.execute(
-            "SELECT * FROM config_types ORDER BY id DESC"
-        ).fetchall()
+        try:
+            return conn.execute(
+                "SELECT * FROM config_types ORDER BY sort_order ASC, id ASC"
+            ).fetchall()
+        except Exception:
+            return conn.execute(
+                "SELECT * FROM config_types ORDER BY id ASC"
+            ).fetchall()
 
 
 def get_active_types():
     with get_conn() as conn:
-        return conn.execute(
-            "SELECT * FROM config_types WHERE is_active=1 ORDER BY id DESC"
-        ).fetchall()
+        try:
+            return conn.execute(
+                "SELECT * FROM config_types WHERE is_active=1 ORDER BY sort_order ASC, id ASC"
+            ).fetchall()
+        except Exception:
+            return conn.execute(
+                "SELECT * FROM config_types WHERE is_active=1 ORDER BY id ASC"
+            ).fetchall()
 
 
 def get_type(type_id):
@@ -1025,10 +1136,19 @@ def get_type(type_id):
 
 def add_type(name, description=""):
     with get_conn() as conn:
-        conn.execute(
-            "INSERT INTO config_types(name, description) VALUES(?, ?)",
-            (name.strip(), description.strip())
-        )
+        try:
+            max_order = conn.execute(
+                "SELECT COALESCE(MAX(sort_order), 0) FROM config_types"
+            ).fetchone()[0]
+            conn.execute(
+                "INSERT INTO config_types(name, description, sort_order) VALUES(?, ?, ?)",
+                (name.strip(), description.strip(), max_order + 1)
+            )
+        except Exception:
+            conn.execute(
+                "INSERT INTO config_types(name, description) VALUES(?, ?)",
+                (name.strip(), description.strip())
+            )
 
 
 def update_type(type_id, new_name):
@@ -1051,6 +1171,32 @@ def update_type_active(type_id, is_active):
         conn.execute(
             "UPDATE config_types SET is_active=? WHERE id=?", (is_active, type_id)
         )
+
+
+def reorder_type(type_id, new_position):
+    """Move a type to new_position (1-indexed) and renumber all types."""
+    with get_conn() as conn:
+        try:
+            all_types = conn.execute(
+                "SELECT id FROM config_types ORDER BY sort_order ASC, id ASC"
+            ).fetchall()
+        except Exception:
+            all_types = conn.execute(
+                "SELECT id FROM config_types ORDER BY id ASC"
+            ).fetchall()
+        ids = [r["id"] for r in all_types]
+        if type_id not in ids:
+            return
+        ids.remove(type_id)
+        pos = max(1, min(new_position, len(ids) + 1)) - 1  # 0-indexed clamp
+        ids.insert(pos, type_id)
+        for order, tid in enumerate(ids, start=1):
+            try:
+                conn.execute(
+                    "UPDATE config_types SET sort_order=? WHERE id=?", (order, tid)
+                )
+            except Exception:
+                pass
 
 
 def delete_type(type_id):
@@ -1165,6 +1311,17 @@ def delete_package(package_id):
 
 
 # ── Configs / Stock ────────────────────────────────────────────────────────────
+def count_available_manual_configs(package_id: int) -> int:
+    """Count configs available for delivery (unsold, unreserved, not expired)."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) AS n FROM configs"
+            " WHERE package_id=? AND sold_to IS NULL"
+            " AND reserved_payment_id IS NULL AND is_expired=0",
+            (package_id,),
+        ).fetchone()["n"]
+
+
 def add_config(type_id, package_id, service_name, config_text, inquiry_link):
     with get_conn() as conn:
         conn.execute(
@@ -1173,6 +1330,10 @@ def add_config(type_id, package_id, service_name, config_text, inquiry_link):
             (type_id, package_id, service_name.strip(),
              config_text.strip(), inquiry_link.strip(), now_str())
         )
+    # Reset low-stock / empty-stock notification flags so they fire again
+    # if stock later drops below threshold after being replenished.
+    setting_set(f"stock_low_notif_{package_id}", "0")
+    setting_set(f"stock_empty_notif_{package_id}", "0")
 
 
 def get_registered_packages_stock():
@@ -1575,6 +1736,48 @@ def update_payment_final_amount(payment_id, final_amount):
         )
 
 
+def set_payment_service_names(payment_id, names: list):
+    """Persist the ordered list of chosen service names for a panel config payment."""
+    import json as _json
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE payments SET service_names_json=? WHERE id=?",
+            (_json.dumps(names, ensure_ascii=False), payment_id)
+        )
+
+
+def get_payment_service_names(payment_id) -> list:
+    """Return the saved service names list for a payment, or None if not set."""
+    import json as _json
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT service_names_json FROM payments WHERE id=?", (payment_id,)
+        ).fetchone()
+    if not row or not row["service_names_json"]:
+        return None
+    try:
+        result = _json.loads(row["service_names_json"])
+        return result if isinstance(result, list) and result else None
+    except Exception:
+        return None
+
+
+def update_payment_crypto_comment(payment_id, comment_code):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE payments SET crypto_comment=? WHERE id=?",
+            (comment_code, payment_id)
+        )
+
+
+def update_payment_crypto_amount(payment_id, coin_amount_str):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE payments SET crypto_amount=? WHERE id=?",
+            (coin_amount_str, payment_id)
+        )
+
+
 def get_payment(payment_id):
     with get_conn() as conn:
         return conn.execute(
@@ -1583,11 +1786,25 @@ def get_payment(payment_id):
 
 
 def get_pending_payments_page(page=0, page_size=10):
-    """Return (total_count, list_of_dicts) for pending payments, oldest first."""
+    """Return (total_count, list_of_dicts) for pending payments with submitted receipts.
+
+    Only card/crypto payments where the user has actually submitted a receipt
+    (receipt_file_id IS NOT NULL or receipt_text is non-empty) are included.
+    - Automated gateways (tetrapay, tronpays_rial, swapwallet_crypto) are excluded
+      because they pre-set receipt_text to an auth/invoice ID and self-verify.
+    - Payments that only reached 'pending' by opening the card/wallet copy page
+      without submitting a receipt are also excluded.
+    """
+    _PENDING_FILTER = (
+        " AND p.payment_method IN ('card', 'crypto')"
+        " AND (p.receipt_file_id IS NOT NULL"
+        " OR (p.receipt_text IS NOT NULL AND p.receipt_text != ''))"
+    )
     offset = page * page_size
     with get_conn() as conn:
         total = conn.execute(
-            "SELECT COUNT(*) AS c FROM payments WHERE status='pending'"
+            "SELECT COUNT(*) AS c FROM payments p"
+            " WHERE p.status='pending'" + _PENDING_FILTER
         ).fetchone()["c"]
         rows = conn.execute(
             "SELECT p.*, u.full_name, u.username,"
@@ -1596,7 +1813,7 @@ def get_pending_payments_page(page=0, page_size=10):
             " LEFT JOIN users u ON u.user_id = p.user_id"
             " LEFT JOIN packages pk ON pk.id = p.package_id"
             " LEFT JOIN config_types t ON t.id = pk.type_id"
-            " WHERE p.status = 'pending'"
+            " WHERE p.status = 'pending'" + _PENDING_FILTER +
             " ORDER BY p.created_at ASC"
             " LIMIT ? OFFSET ?",
             (page_size, offset)
@@ -1679,56 +1896,6 @@ def update_admin_permissions(user_id, permissions_dict):
         )
 
 
-# ── Payment Cards ─────────────────────────────────────────────────────────────
-def get_payment_cards(include_inactive=True):
-    sql = "SELECT * FROM payment_cards"
-    params = ()
-    if not include_inactive:
-        sql += " WHERE is_active=1"
-    sql += " ORDER BY is_active DESC, id DESC"
-    with get_conn() as conn:
-        return conn.execute(sql, params).fetchall()
-
-
-def get_payment_card(card_id):
-    with get_conn() as conn:
-        return conn.execute(
-            "SELECT * FROM payment_cards WHERE id=?",
-            (card_id,)
-        ).fetchone()
-
-
-def add_payment_card(card_number, bank_name, owner_name, is_active=0):
-    now = now_str()
-    with get_conn() as conn:
-        conn.execute(
-            "INSERT INTO payment_cards(card_number, bank_name, owner_name, is_active, created_at, updated_at) VALUES(?,?,?,?,?,?)",
-            (card_number, bank_name, owner_name, 1 if is_active else 0, now, now)
-        )
-        return conn.execute("SELECT last_insert_rowid() AS x").fetchone()["x"]
-
-
-def update_payment_card(card_id, card_number, bank_name, owner_name):
-    with get_conn() as conn:
-        conn.execute(
-            "UPDATE payment_cards SET card_number=?, bank_name=?, owner_name=?, updated_at=? WHERE id=?",
-            (card_number, bank_name, owner_name, now_str(), card_id)
-        )
-
-
-def set_payment_card_active(card_id, is_active):
-    with get_conn() as conn:
-        conn.execute(
-            "UPDATE payment_cards SET is_active=?, updated_at=? WHERE id=?",
-            (1 if is_active else 0, now_str(), card_id)
-        )
-
-
-def delete_payment_card(card_id):
-    with get_conn() as conn:
-        conn.execute("DELETE FROM payment_cards WHERE id=?", (card_id,))
-
-
 # ── Pending Orders ─────────────────────────────────────────────────────────────
 def create_pending_order(user_id, package_id, payment_id, amount, payment_method, quantity=1):
     with get_conn() as conn:
@@ -1776,16 +1943,17 @@ def get_discount_code_by_code(code):
         ).fetchone()
 
 
-def add_discount_code(code, discount_type, discount_value, max_uses_total, max_uses_per_user, audience="all", scope_type="all"):
+def add_discount_code(code, discount_type, discount_value, max_uses_total, max_uses_per_user, audience="all", scope_type="all", usage_scope="all"):
     audience = audience if audience in ("all", "public", "agents") else "all"
     scope_type = scope_type if scope_type in ("all", "types", "packages") else "all"
+    usage_scope = usage_scope if usage_scope in ("all", "package", "addon_volume", "addon_time") else "all"
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO discount_codes(code, discount_type, discount_value, "
-            "max_uses_total, max_uses_per_user, used_count, is_active, created_at, audience, scope_type) "
-            "VALUES(?,?,?,?,?,0,1,?,?,?)",
+            "max_uses_total, max_uses_per_user, used_count, is_active, created_at, audience, scope_type, usage_scope) "
+            "VALUES(?,?,?,?,?,0,1,?,?,?,?)",
             (code.strip().upper(), discount_type, int(discount_value),
-             int(max_uses_total), int(max_uses_per_user), now_str(), audience, scope_type)
+             int(max_uses_total), int(max_uses_per_user), now_str(), audience, scope_type, usage_scope)
         )
         return conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
 
@@ -1823,8 +1991,10 @@ def get_discount_code_user_uses(code_id, user_id):
         return row["cnt"] if row else 0
 
 
-def validate_discount_code(code, user_id, amount, is_agent=False, package_id=None):
-    """Returns (ok, row, discount_amount, final_amount, error_msg)."""
+def validate_discount_code(code, user_id, amount, is_agent=False, package_id=None, usage_scope="all"):
+    """Returns (ok, row, discount_amount, final_amount, error_msg).
+    usage_scope: 'all' | 'package' | 'addon_volume' | 'addon_time'
+    """
     row = get_discount_code_by_code(code)
     if not row:
         return False, None, 0, amount, "❌ کد تخفیف وارد شده معتبر نیست."
@@ -1842,7 +2012,12 @@ def validate_discount_code(code, user_id, amount, is_agent=False, package_id=Non
         user_uses = get_discount_code_user_uses(row["id"], user_id)
         if user_uses >= row["max_uses_per_user"]:
             return False, None, 0, amount, "❌ شما قبلاً از این کد تخفیف استفاده کرده‌اید."
-    # Scope check
+    # Usage scope check (what type of purchase this code can be used for)
+    row_usage_scope = row["usage_scope"] if "usage_scope" in row.keys() else "all"
+    if row_usage_scope != "all" and usage_scope != "all":
+        if row_usage_scope != usage_scope:
+            return False, None, 0, amount, "❌ این کد تخفیف برای این نوع خرید قابل استفاده نیست."
+    # Scope check (which category/package)
     scope_type = row["scope_type"] if "scope_type" in row.keys() else "all"
     if scope_type != "all" and package_id is not None:
         targets = get_discount_code_targets(row["id"])
@@ -1919,16 +2094,28 @@ def set_discount_code_targets(code_id, target_type, target_ids):
 
 
 def reject_all_pending_payments():
-    """Reject all pending payments. Returns count of rejected payments."""
+    """Reject all pending card/crypto payments that have a submitted receipt.
+
+    Automated gateways (tetrapay, tronpays_rial, swapwallet_crypto) are excluded
+    because they self-verify and should not be bulk-rejected.
+    Payments without a submitted receipt (user only opened the card page) are
+    also excluded to avoid wrongly rejecting in-progress sessions.
+    Returns count of rejected payments.
+    """
+    _REJECT_FILTER = (
+        " AND payment_method IN ('card', 'crypto')"
+        " AND (receipt_file_id IS NOT NULL"
+        " OR (receipt_text IS NOT NULL AND receipt_text != ''))"
+    )
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT id FROM payments WHERE status='pending'"
+            "SELECT id FROM payments WHERE status='pending'" + _REJECT_FILTER
         ).fetchall()
         ids = [r["id"] for r in rows]
         if ids:
             conn.execute(
                 "UPDATE payments SET status='rejected', admin_note=?, approved_at=? "
-                "WHERE status='pending'",
+                "WHERE status='pending'" + _REJECT_FILTER,
                 ("رد شد توسط ادمین (رد همه)", now_str())
             )
         return len(ids)
@@ -2057,7 +2244,8 @@ def get_referral_stats(referrer_id):
 def count_referrals(referrer_id):
     with get_conn() as conn:
         return conn.execute(
-            "SELECT COUNT(*) AS n FROM referrals WHERE referrer_id=?", (referrer_id,)
+            "SELECT COUNT(*) AS n FROM referrals WHERE referrer_id=? AND captcha_failed=0",
+            (referrer_id,)
         ).fetchone()["n"]
 
 
@@ -2065,13 +2253,14 @@ def get_referrals_paged(referrer_id, page=0, per_page=10):
     """Return paginated list of referrals with basic user info."""
     with get_conn() as conn:
         total = conn.execute(
-            "SELECT COUNT(*) AS n FROM referrals WHERE referrer_id=?", (referrer_id,)
+            "SELECT COUNT(*) AS n FROM referrals WHERE referrer_id=? AND captcha_failed=0",
+            (referrer_id,)
         ).fetchone()["n"]
         rows = conn.execute(
             "SELECT r.referee_id, u.full_name, u.username "
             "FROM referrals r "
             "LEFT JOIN users u ON u.user_id = r.referee_id "
-            "WHERE r.referrer_id=? ORDER BY r.id DESC LIMIT ? OFFSET ?",
+            "WHERE r.referrer_id=? AND r.captcha_failed=0 ORDER BY r.id DESC LIMIT ? OFFSET ?",
             (referrer_id, per_page, page * per_page)
         ).fetchall()
     return rows, total
@@ -2099,6 +2288,189 @@ def delete_agency_request_messages(referee_uid):
         conn.execute(
             "DELETE FROM agency_request_messages WHERE referee_uid=?", (referee_uid,)
         )
+
+
+# ── Reseller per-GB pricing ────────────────────────────────────────────────────
+def get_per_gb_price(user_id, type_id):
+    """Returns price_per_gb integer or None if not set."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT price_per_gb FROM reseller_per_gb_prices WHERE user_id=? AND type_id=?",
+            (user_id, type_id)
+        ).fetchone()
+    return row["price_per_gb"] if row else None
+
+
+def set_per_gb_price(user_id, type_id, price):
+    from .helpers import now_str
+    now = now_str()
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO reseller_per_gb_prices (user_id, type_id, price_per_gb, created_at, updated_at) "
+            "VALUES (?,?,?,?,?) "
+            "ON CONFLICT(user_id, type_id) DO UPDATE SET price_per_gb=excluded.price_per_gb, updated_at=excluded.updated_at",
+            (user_id, type_id, price, now, now)
+        )
+
+
+def get_all_per_gb_prices(user_id):
+    """Returns list of rows with type_id and price_per_gb for a user."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT type_id, price_per_gb FROM reseller_per_gb_prices WHERE user_id=?",
+            (user_id,)
+        ).fetchall()
+
+
+# ── Purchase addon prices ──────────────────────────────────────────────────────
+
+def get_panel_connected_types():
+    """Returns config_types that have at least one panel-linked package."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT DISTINCT ct.id, ct.name FROM config_types ct "
+            "JOIN packages p ON p.type_id=ct.id "
+            "WHERE p.config_source='panel' AND ct.is_active=1 "
+            "ORDER BY ct.name"
+        ).fetchall()
+
+
+def get_addon_price(type_id, addon_type):
+    """Returns the addon price row for a given type_id and addon_type, or None."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM purchase_addon_prices WHERE type_id=? AND addon_type=?",
+            (type_id, addon_type)
+        ).fetchone()
+
+
+def set_addon_price(type_id, addon_type, role, unit_price):
+    """Set normal or reseller unit price for a category addon.
+    role: 'normal' | 'reseller'
+    unit_price: integer or None to clear.
+    """
+    field = "normal_unit_price" if role == "normal" else "reseller_unit_price"
+    with get_conn() as conn:
+        # Try upsert — insert if not exists, then update the specific role column
+        try:
+            conn.execute(
+                "INSERT INTO purchase_addon_prices(type_id, addon_type, created_at, updated_at) "
+                "VALUES(?,?,?,?)",
+                (type_id, addon_type, now_str(), now_str())
+            )
+        except Exception:
+            pass
+        conn.execute(
+            f"UPDATE purchase_addon_prices SET {field}=?, updated_at=? WHERE type_id=? AND addon_type=?",
+            (unit_price, now_str(), type_id, addon_type)
+        )
+
+
+def get_all_addon_prices_for_addon_type(addon_type):
+    """Returns rows (type_id, type_name, normal_unit_price, reseller_unit_price)
+    for all panel-connected types, joined with any existing price row."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT ct.id AS type_id, ct.name AS type_name, "
+            "ap.normal_unit_price, ap.reseller_unit_price "
+            "FROM config_types ct "
+            "JOIN packages p ON p.type_id = ct.id AND p.config_source = 'panel' "
+            "LEFT JOIN purchase_addon_prices ap "
+            "       ON ap.type_id = ct.id AND ap.addon_type = ? "
+            "WHERE ct.is_active = 1 "
+            "GROUP BY ct.id "
+            "ORDER BY ct.name",
+            (addon_type,)
+        ).fetchall()
+
+
+
+def create_reseller_request(user_id, username, full_name, description):
+    from .helpers import now_str
+    now = now_str()
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO reseller_requests (user_id, username, full_name, description, status, created_at, updated_at) "
+            "VALUES (?,?,?,?,'pending',?,?)",
+            (user_id, username, full_name, description, now, now)
+        )
+        return cur.lastrowid
+
+
+def get_reseller_request(user_id, status=None):
+    """Get the most recent request for a user, optionally filtered by status."""
+    with get_conn() as conn:
+        if status:
+            return conn.execute(
+                "SELECT * FROM reseller_requests WHERE user_id=? AND status=? ORDER BY id DESC LIMIT 1",
+                (user_id, status)
+            ).fetchone()
+        return conn.execute(
+            "SELECT * FROM reseller_requests WHERE user_id=? ORDER BY id DESC LIMIT 1",
+            (user_id,)
+        ).fetchone()
+
+
+def get_pending_reseller_requests(page=0, per_page=10):
+    offset = page * per_page
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM reseller_requests WHERE status='pending' ORDER BY created_at ASC LIMIT ? OFFSET ?",
+            (per_page, offset)
+        ).fetchall()
+        total = conn.execute(
+            "SELECT COUNT(*) AS n FROM reseller_requests WHERE status='pending'"
+        ).fetchone()["n"]
+    return rows, total
+
+
+def get_reseller_request_by_id(request_id):
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM reseller_requests WHERE id=?", (request_id,)
+        ).fetchone()
+
+
+def approve_reseller_request(request_id, reviewed_by):
+    from .helpers import now_str
+    now = now_str()
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE reseller_requests SET status='approved', reviewed_at=?, reviewed_by=?, updated_at=? WHERE id=?",
+            (now, reviewed_by, now, request_id)
+        )
+
+
+def reject_reseller_request(request_id, reviewed_by):
+    from .helpers import now_str
+    now = now_str()
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE reseller_requests SET status='rejected', rejected_at=?, reviewed_at=?, reviewed_by=?, updated_at=? WHERE id=?",
+            (now, now, reviewed_by, now, request_id)
+        )
+
+
+# ── Purchase credit ────────────────────────────────────────────────────────────
+def set_user_purchase_credit(user_id, enabled, limit):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE users SET purchase_credit_enabled=?, purchase_credit_limit=? WHERE user_id=?",
+            (1 if enabled else 0, int(limit), user_id)
+        )
+
+
+def can_use_credit(user_id, amount):
+    """Returns True if user can use purchase credit to cover `amount` (even with negative balance)."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT balance, purchase_credit_enabled, purchase_credit_limit FROM users WHERE user_id=?",
+            (user_id,)
+        ).fetchone()
+    if not row or not row["purchase_credit_enabled"]:
+        return False
+    # Can pay if balance + credit_limit >= amount
+    return (row["balance"] + row["purchase_credit_limit"]) >= amount
 
 
 # ── Payment admin message tracking ────────────────────────────────────────────
@@ -2137,6 +2509,33 @@ def count_referee_first_purchases(referrer_id):
         ).fetchone()["n"]
 
 
+def set_referral_captcha_verified(referee_id: int) -> bool:
+    """
+    Atomically mark that a referee has passed captcha (0 → 1 transition).
+    Returns True only if this call performed the transition (first time).
+    Idempotent: safe to call multiple times.
+    """
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE referrals SET captcha_verified=1 WHERE referee_id=? AND captcha_verified=0",
+            (referee_id,)
+        )
+        return cur.rowcount > 0
+
+
+def set_referral_captcha_failed(referee_id: int) -> bool:
+    """
+    Mark that a referee failed captcha (idempotent).
+    Returns True if the row was updated (first failure record).
+    """
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE referrals SET captcha_failed=1 WHERE referee_id=? AND captcha_failed=0 AND captcha_verified=0",
+            (referee_id,)
+        )
+        return cur.rowcount > 0
+
+
 def set_referral_channel_joined(referee_id: int) -> bool:
     """
     Atomically mark that a referee has joined the channel (0 → 1 transition).
@@ -2152,17 +2551,20 @@ def set_referral_channel_joined(referee_id: int) -> bool:
 
 
 def try_claim_start_reward_batch(referrer_id: int, required_count: int,
-                                  channel_required: bool) -> bool:
+                                  channel_required: bool,
+                                  captcha_required: bool = False) -> bool:
     """
     Atomically claim `required_count` eligible unrewarded start-referrals.
     First checks if enough eligible rows exist; only then performs the UPDATE.
     Returns True if the batch was fully claimed (caller should now give the reward).
     Thread-safe against race conditions.
+    captcha_required: if True, only count referees who have passed captcha verification.
     """
     ch = "AND channel_joined=1" if channel_required else ""
+    cp = "AND captcha_verified=1" if captcha_required else ""
     with get_conn() as conn:
         count = conn.execute(
-            f"SELECT COUNT(*) AS n FROM referrals WHERE referrer_id=? AND start_reward_given=0 {ch}",
+            f"SELECT COUNT(*) AS n FROM referrals WHERE referrer_id=? AND start_reward_given=0 {ch} {cp}",
             (referrer_id,)
         ).fetchone()["n"]
         if count < required_count:
@@ -2170,10 +2572,10 @@ def try_claim_start_reward_batch(referrer_id: int, required_count: int,
         cur = conn.execute(
             f"""UPDATE referrals
                    SET start_reward_given=1, rewarded_at=?
-                 WHERE referrer_id=? AND start_reward_given=0 {ch}
+                 WHERE referrer_id=? AND start_reward_given=0 {ch} {cp}
                    AND referee_id IN (
                          SELECT referee_id FROM referrals
-                          WHERE referrer_id=? AND start_reward_given=0 {ch}
+                          WHERE referrer_id=? AND start_reward_given=0 {ch} {cp}
                           LIMIT ?
                        )""",
             (now_str(), referrer_id, referrer_id, required_count)
@@ -2976,3 +3378,136 @@ def count_recent_referrals(referrer_id: int, window_seconds: int) -> int:
             (referrer_id, int(cutoff_ts)),
         ).fetchone()
         return row["n"] if row else 0
+
+
+# ── Payment Cards (multi-card management) ─────────────────────────────────────
+
+def get_payment_cards(active_only: bool = False) -> list:
+    """Return list of payment cards. Pass active_only=True to get only enabled cards."""
+    with get_conn() as conn:
+        if active_only:
+            rows = conn.execute(
+                "SELECT * FROM payment_cards WHERE is_active=1 ORDER BY id ASC"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM payment_cards ORDER BY id ASC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_payment_card(card_id: int):
+    """Return a single payment card row by id, or None."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM payment_cards WHERE id=?", (card_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def add_payment_card(card_number: str, bank_name: str, holder_name: str) -> int:
+    """Insert a new card. Returns the new row id."""
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO payment_cards (card_number, bank_name, holder_name, is_active, created_at) "
+            "VALUES (?, ?, ?, 1, ?)",
+            (card_number.strip(), bank_name.strip(), holder_name.strip(), now_str()),
+        )
+        return cur.lastrowid
+
+
+def update_payment_card(card_id: int, card_number: str, bank_name: str, holder_name: str) -> None:
+    """Update card details."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE payment_cards SET card_number=?, bank_name=?, holder_name=? WHERE id=?",
+            (card_number.strip(), bank_name.strip(), holder_name.strip(), card_id),
+        )
+
+
+def toggle_payment_card_active(card_id: int) -> bool:
+    """Toggle card active state. Returns the new is_active bool."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT is_active FROM payment_cards WHERE id=?", (card_id,)
+        ).fetchone()
+        if not row:
+            return False
+        new_state = 0 if row["is_active"] else 1
+        conn.execute(
+            "UPDATE payment_cards SET is_active=? WHERE id=?", (new_state, card_id)
+        )
+        return bool(new_state)
+
+
+def delete_payment_card(card_id: int) -> None:
+    """Delete a card permanently."""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM payment_cards WHERE id=?", (card_id,))
+
+
+def pick_card_for_payment():
+    """Return one active card dict for the next payment.
+
+    Uses round-robin rotation when gw_card_rotation_enabled=1 and multiple
+    active cards exist. Falls back to the legacy payment_card/bank/owner
+    settings when no rows exist in payment_cards. Returns None when nothing
+    is configured.
+    """
+    cards = get_payment_cards(active_only=True)
+    if cards:
+        if len(cards) == 1 or setting_get("gw_card_rotation_enabled", "0") != "1":
+            return cards[0]
+        try:
+            idx = int(setting_get("gw_card_rotation_index", "0") or "0") % len(cards)
+        except (ValueError, ZeroDivisionError):
+            idx = 0
+        card = cards[idx]
+        setting_set("gw_card_rotation_index", str((idx + 1) % len(cards)))
+        return card
+    # Legacy single-card fallback
+    card_num = setting_get("payment_card", "")
+    if not card_num:
+        return None
+    return {
+        "id": 0,
+        "card_number": card_num,
+        "bank_name":   setting_get("payment_bank", ""),
+        "holder_name": setting_get("payment_owner", ""),
+        "is_active":   1,
+    }
+
+
+# ── Gateway Fee / Bonus ────────────────────────────────────────────────────────
+
+def get_gateway_fee_amount(gw_name: str, base_amount: int) -> int:
+    """Return the fee to add on top of base_amount for this gateway (0 if disabled)."""
+    if setting_get(f"gw_{gw_name}_fee_enabled", "0") != "1":
+        return 0
+    fee_type = setting_get(f"gw_{gw_name}_fee_type", "fixed")
+    try:
+        fee_value = int(setting_get(f"gw_{gw_name}_fee_value", "0") or "0")
+    except ValueError:
+        return 0
+    if fee_type == "pct":
+        return round(base_amount * fee_value / 100)
+    return fee_value
+
+
+def get_gateway_bonus_amount(gw_name: str, base_amount: int) -> int:
+    """Return wallet bonus to credit after successful payment through this gateway (0 if disabled)."""
+    if setting_get(f"gw_{gw_name}_bonus_enabled", "0") != "1":
+        return 0
+    bonus_type = setting_get(f"gw_{gw_name}_bonus_type", "fixed")
+    try:
+        bonus_value = int(setting_get(f"gw_{gw_name}_bonus_value", "0") or "0")
+    except ValueError:
+        return 0
+    if bonus_type == "pct":
+        return round(base_amount * bonus_value / 100)
+    return bonus_value
+
+
+def apply_gateway_fee(gw_name: str, base_amount: int) -> int:
+    """Return base_amount + fee for this gateway (fee-adjusted payable amount)."""
+    return base_amount + get_gateway_fee_amount(gw_name, base_amount)
