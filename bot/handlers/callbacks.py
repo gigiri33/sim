@@ -95,6 +95,7 @@ from ..gateways.plisio import (
 from ..gateways.nowpayments import (
     create_nowpayments_invoice, check_nowpayments_invoice,
     is_nowpayments_paid, is_nowpayments_pending, is_nowpayments_failed,
+    get_nowpayments_enabled_currencies,
 )
 from ..ui.helpers import send_or_edit, check_channel_membership, channel_lock_message
 from ..ui.helpers import _invalidate_channel_cache
@@ -5337,20 +5338,22 @@ def _dispatch_callback(call, uid, data):
         if not _check_invoice_valid(uid):
             _show_invoice_expired(call)
             return
+        # rpay:nowpayments:{purchase_id}:{pkg_id} or rpay:nowpayments:{purchase_id}:{pkg_id}:cur:{cur}
         parts = data.split(":")
         purchase_id = int(parts[2])
         package_id  = int(parts[3])
+        _chosen_cur_rnp = parts[5] if len(parts) >= 6 and parts[4] == "cur" else None
         item = get_purchase(purchase_id)
         package_row = get_package(package_id)
         if not item or item["user_id"] != uid:
             try:
-                bot.answer_callback_query(call.id, "?????? ???? ????.", show_alert=True)
+                bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
             except Exception:
                 pass
             return
         if not package_row:
             try:
-                bot.answer_callback_query(call.id, "???? ???? ???.", show_alert=True)
+                bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
             except Exception:
                 pass
             return
@@ -5359,29 +5362,53 @@ def _dispatch_callback(call, uid, data):
             _rng = get_gateway_range_text("nowpayments")
             try:
                 bot.answer_callback_query(call.id,
-                    f"?? ???? {fmt_price(price)} ????? ???? ????? NowPayments ???? ????.\n"
-                    f"?????? ????: {_rng}\n\n????? ????? ????? ?????? ????.",
+                    f"مبلغ {fmt_price(price)} خارج از محدوده مجاز درگاه NowPayments است.\n"
+                    f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
                     show_alert=True)
             except Exception:
                 pass
             return
-        payment_id = create_payment("renewal", uid, package_id, price, "nowpayments", status="pending",
-                                    config_id=item["config_id"])
-        _bot_username_rnp = bot.get_me().username or ""
-        order_label_rnp = (
-            f"????? {package_row['name']}"
-            if ('show_name' not in package_row.keys() or package_row['show_name'])
-            else f"????? {fmt_vol(package_row['volume_gb'])} | {fmt_dur(package_row['duration_days'])}"
-        )
-        success_rnp, result_rnp = create_nowpayments_invoice(price, payment_id, uid, _bot_username_rnp, order_label_rnp)
-        if not success_rnp:
-            err_msg = result_rnp.get("error", "???? ????????") if isinstance(result_rnp, dict) else str(result_rnp)
+        _np_enabled_rnp = get_nowpayments_enabled_currencies()
+        if not _chosen_cur_rnp and len(_np_enabled_rnp) > 1:
+            _NP_CUR_LABELS = {
+                "usdttrc20": "💵 USDT (TRC20 - ترون)", "usdterc20": "💵 USDT (ERC20 - اتریوم)",
+                "usdtbsc": "💵 USDT (BEP20 - BSC)", "usdtton": "💵 USDT (TON)",
+                "btc": "₿ Bitcoin (BTC)", "eth": "⟠ Ethereum (ETH)",
+                "trx": "🔷 TRX (ترون)", "ton": "💎 TON", "ltc": "🔵 Litecoin (LTC)", "bnbbsc": "🟡 BNB (BSC)",
+            }
+            kb_cur_rnp = types.InlineKeyboardMarkup(row_width=1)
+            for _c in _np_enabled_rnp:
+                kb_cur_rnp.add(types.InlineKeyboardButton(
+                    _NP_CUR_LABELS.get(_c, _c.upper()),
+                    callback_data=f"rpay:nowpayments:{purchase_id}:{package_id}:cur:{_c}"))
+            kb_cur_rnp.add(types.InlineKeyboardButton("بازگشت", callback_data=f"renew:{purchase_id}", icon_custom_emoji_id="5253997076169115797"))
             try:
                 bot.answer_callback_query(call.id)
             except Exception:
                 pass
             send_or_edit(call,
-                f"?? <b>??? ?? ????? ?????? NowPayments</b>\n\n<code>{esc(err_msg[:400])}</code>",
+                "🪙 <b>انتخاب ارز پرداخت</b>\n\nلطفاً ارز مورد نظر برای پرداخت را انتخاب کنید:",
+                kb_cur_rnp)
+            return
+        _sel_cur_rnp = _chosen_cur_rnp or (_np_enabled_rnp[0] if _np_enabled_rnp else "usdttrc20")
+        payment_id = create_payment("renewal", uid, package_id, price, "nowpayments", status="pending",
+                                    config_id=item["config_id"])
+        _bot_username_rnp = bot.get_me().username or ""
+        order_label_rnp = (
+            f"تمدید {package_row['name']}"
+            if ('show_name' not in package_row.keys() or package_row['show_name'])
+            else f"تمدید {fmt_vol(package_row['volume_gb'])} | {fmt_dur(package_row['duration_days'])}"
+        )
+        success_rnp, result_rnp = create_nowpayments_invoice(price, payment_id, uid, _bot_username_rnp, order_label_rnp,
+                                                             pay_currency=_sel_cur_rnp)
+        if not success_rnp:
+            err_msg = result_rnp.get("error", "خطای ناشناخته") if isinstance(result_rnp, dict) else str(result_rnp)
+            try:
+                bot.answer_callback_query(call.id)
+            except Exception:
+                pass
+            send_or_edit(call,
+                f"❌ <b>خطا در ایجاد فاکتور NowPayments</b>\n\n<code>{esc(err_msg[:400])}</code>",
                 back_button(f"renew:{purchase_id}"))
             return
         invoice_id_rnp  = result_rnp.get("invoice_id", "")
@@ -5393,17 +5420,17 @@ def _dispatch_callback(call, uid, data):
                   purchase_id=purchase_id)
         short_id_rnp = str(payment_id)
         text_rnp = (
-            "?? <b>?????? ?????? NowPayments � ?????</b>\n\n"
-            f"?? ?? ??????: <code>{short_id_rnp}</code>\n"
-            f"?? ????: <b>{fmt_price(price)}</b> ?????\n"
-            f"?? ?????: <b>{amount_usdt_rnp:.4f} USDT</b>\n\n"
-            "? ??? ?????? <b>? ????</b> ?????? ????\n"
-            "?? ?? ?????? ???? �? ????? ??????� ?? ?????."
+            "💎 <b>فاکتور پرداخت NowPayments — تمدید</b>\n\n"
+            f"🔢 شماره سفارش: <code>{short_id_rnp}</code>\n"
+            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n"
+            f"🪙 مبلغ کریپتو: <b>{amount_usdt_rnp:.6f} {_sel_cur_rnp.upper()}</b>\n\n"
+            "⏳ لینک پرداخت <b>۶۰ دقیقه</b> معتبر است\n"
+            "🔁 پس از پرداخت روی «بررسی پرداخت» بزنید."
         )
         kb_rnp = types.InlineKeyboardMarkup()
-        kb_rnp.add(types.InlineKeyboardButton("?? ?????? ?? NowPayments", url=inv_url_rnp))
-        kb_rnp.add(types.InlineKeyboardButton("? ????? ??????", callback_data=f"rpay:nowpayments:verify:{payment_id}"))
-        kb_rnp.add(types.InlineKeyboardButton("?? ??????", callback_data=f"renew:{purchase_id}"))
+        kb_rnp.add(types.InlineKeyboardButton("💳 پرداخت در NowPayments", url=inv_url_rnp))
+        kb_rnp.add(types.InlineKeyboardButton("🔄 بررسی پرداخت", callback_data=f"rpay:nowpayments:verify:{payment_id}"))
+        kb_rnp.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"renew:{purchase_id}"))
         try:
             bot.answer_callback_query(call.id)
         except Exception:
@@ -6415,11 +6442,14 @@ def _dispatch_callback(call, uid, data):
         if not _check_invoice_valid(uid):
             _show_invoice_expired(call)
             return
-        package_id  = int(data.split(":")[2])
+        # Parse: pay:nowpayments:{pkg_id} or pay:nowpayments:{pkg_id}:cur:{currency}
+        _parts_np = data.split(":")
+        package_id   = int(_parts_np[2])
+        _chosen_cur  = _parts_np[4] if len(_parts_np) >= 5 and _parts_np[3] == "cur" else None
         package_row = get_package(package_id)
         if not package_row or not _pkg_has_stock(package_row, setting_get("preorder_mode", "0") == "1"):
             try:
-                bot.answer_callback_query(call.id, "?????? ??? ???? ???? ??? ???.", show_alert=True)
+                bot.answer_callback_query(call.id, "موجودی این پکیج تمام شده است.", show_alert=True)
             except Exception:
                 pass
             return
@@ -6429,12 +6459,36 @@ def _dispatch_callback(call, uid, data):
             _rng = get_gateway_range_text("nowpayments")
             try:
                 bot.answer_callback_query(call.id,
-                    f"?? ???? {fmt_price(price)} ????? ???? ????? NowPayments ???? ????.\n"
-                    f"?????? ????: {_rng}\n\n????? ????? ????? ?????? ????.",
+                    f"مبلغ {fmt_price(price)} خارج از محدوده مجاز درگاه NowPayments است.\n"
+                    f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
                     show_alert=True)
             except Exception:
                 pass
             return
+        # If currency not chosen yet and more than one option, show currency picker
+        _np_enabled = get_nowpayments_enabled_currencies()
+        if not _chosen_cur and len(_np_enabled) > 1:
+            _NP_CUR_LABELS = {
+                "usdttrc20": "💵 USDT (TRC20 - ترون)", "usdterc20": "💵 USDT (ERC20 - اتریوم)",
+                "usdtbsc": "💵 USDT (BEP20 - BSC)", "usdtton": "💵 USDT (TON)",
+                "btc": "₿ Bitcoin (BTC)", "eth": "⟠ Ethereum (ETH)",
+                "trx": "🔷 TRX (ترون)", "ton": "💎 TON", "ltc": "🔵 Litecoin (LTC)", "bnbbsc": "🟡 BNB (BSC)",
+            }
+            kb_cur = types.InlineKeyboardMarkup(row_width=1)
+            for _c in _np_enabled:
+                kb_cur.add(types.InlineKeyboardButton(
+                    _NP_CUR_LABELS.get(_c, _c.upper()),
+                    callback_data=f"pay:nowpayments:{package_id}:cur:{_c}"))
+            kb_cur.add(types.InlineKeyboardButton("بازگشت", callback_data=f"buy:p:{package_id}", icon_custom_emoji_id="5253997076169115797"))
+            try:
+                bot.answer_callback_query(call.id)
+            except Exception:
+                pass
+            send_or_edit(call,
+                "🪙 <b>انتخاب ارز پرداخت</b>\n\nلطفاً ارز مورد نظر برای پرداخت را انتخاب کنید:",
+                kb_cur)
+            return
+        _sel_cur = _chosen_cur or (_np_enabled[0] if _np_enabled else "usdttrc20")
         payment_id = create_payment("config_purchase", uid, package_id, price, "nowpayments",
                                     status="pending", quantity=_qty_np)
         _snames_np = state_data(uid).get("service_names")
@@ -6442,19 +6496,20 @@ def _dispatch_callback(call, uid, data):
             set_payment_service_names(payment_id, _snames_np)
         _bot_username_np = bot.get_me().username or ""
         order_label_np = (
-            f"???? {package_row['name']}"
+            f"خرید {package_row['name']}"
             if ('show_name' not in package_row.keys() or package_row['show_name'])
-            else f"???? {fmt_vol(package_row['volume_gb'])} | {fmt_dur(package_row['duration_days'])}"
+            else f"خرید {fmt_vol(package_row['volume_gb'])} | {fmt_dur(package_row['duration_days'])}"
         )
-        success_np, result_np = create_nowpayments_invoice(price, payment_id, uid, _bot_username_np, order_label_np)
+        success_np, result_np = create_nowpayments_invoice(price, payment_id, uid, _bot_username_np, order_label_np,
+                                                           pay_currency=_sel_cur)
         if not success_np:
-            err_msg = result_np.get("error", "???? ????????") if isinstance(result_np, dict) else str(result_np)
+            err_msg = result_np.get("error", "خطای ناشناخته") if isinstance(result_np, dict) else str(result_np)
             try:
                 bot.answer_callback_query(call.id)
             except Exception:
                 pass
             send_or_edit(call,
-                f"?? <b>??? ?? ????? ?????? NowPayments</b>\n\n<code>{esc(err_msg[:400])}</code>",
+                f"❌ <b>خطا در ایجاد فاکتور NowPayments</b>\n\n<code>{esc(err_msg[:400])}</code>",
                 back_button(f"buy:p:{package_id}"))
             return
         invoice_id_np  = result_np.get("invoice_id", "")
@@ -6465,17 +6520,17 @@ def _dispatch_callback(call, uid, data):
         state_set(uid, "await_nowpayments_verify", payment_id=payment_id, invoice_id=invoice_id_np)
         short_id_np = str(payment_id)
         text_np = (
-            "?? <b>?????? ?????? (NowPayments)</b>\n\n"
-            f"?? ?? ??????: <code>{short_id_np}</code>\n"
-            f"?? ????: <b>{fmt_price(price)}</b> ?????\n"
-            f"?? ?????: <b>{amount_usdt_np:.4f} USDT</b>\n\n"
-            "? ??? ?????? <b>? ????</b> ?????? ????\n"
-            "?? ?? ?????? ???? �? ????? ??????� ?? ?????."
+            "💎 <b>فاکتور پرداخت (NowPayments)</b>\n\n"
+            f"🔢 شماره سفارش: <code>{short_id_np}</code>\n"
+            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n"
+            f"🪙 مبلغ کریپتو: <b>{amount_usdt_np:.6f} {_sel_cur.upper()}</b>\n\n"
+            "⏳ لینک پرداخت <b>۶۰ دقیقه</b> معتبر است\n"
+            "🔁 پس از پرداخت روی «بررسی پرداخت» بزنید."
         )
         kb_np = types.InlineKeyboardMarkup()
-        kb_np.add(types.InlineKeyboardButton("?? ?????? ?? NowPayments", url=inv_url_np))
-        kb_np.add(types.InlineKeyboardButton("? ????? ??????", callback_data=f"pay:nowpayments:verify:{payment_id}"))
-        kb_np.add(types.InlineKeyboardButton("?? ??????", callback_data=f"buy:p:{package_id}"))
+        kb_np.add(types.InlineKeyboardButton("💳 پرداخت در NowPayments", url=inv_url_np))
+        kb_np.add(types.InlineKeyboardButton("🔄 بررسی پرداخت", callback_data=f"pay:nowpayments:verify:{payment_id}"))
+        kb_np.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"buy:p:{package_id}"))
         try:
             bot.answer_callback_query(call.id)
         except Exception:
@@ -6900,7 +6955,7 @@ def _dispatch_callback(call, uid, data):
         amount = sd.get("amount")
         if not amount:
             try:
-                bot.answer_callback_query(call.id, "????? ???? ?? ???? ????.", show_alert=True)
+                bot.answer_callback_query(call.id, "مبلغ کیف پول تنظیم نشده.", show_alert=True)
             except Exception:
                 pass
             return
@@ -6908,51 +6963,127 @@ def _dispatch_callback(call, uid, data):
             _rng = get_gateway_range_text("nowpayments")
             try:
                 bot.answer_callback_query(call.id,
-                    f"?? ???? {fmt_price(amount)} ????? ???? ????? NowPayments ???? ????.\n"
-                    f"?????? ????: {_rng}\n\n????? ????? ????? ?????? ????.",
+                    f"مبلغ {fmt_price(amount)} خارج از محدوده مجاز درگاه NowPayments است.\n"
+                    f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
                     show_alert=True)
             except Exception:
                 pass
             return
-        payment_id_wcn = create_payment("wallet_charge", uid, None, amount, "nowpayments", status="pending")
-        _bot_username_wcn = bot.get_me().username or ""
-        success_wcn, result_wcn = create_nowpayments_invoice(amount, payment_id_wcn, uid, _bot_username_wcn, "???? ??? ???")
-        if not success_wcn:
-            err_msg = result_wcn.get("error", "???? ????????") if isinstance(result_wcn, dict) else str(result_wcn)
+        _np_enabled_wcn = get_nowpayments_enabled_currencies()
+        if len(_np_enabled_wcn) > 1:
+            _NP_CUR_LABELS = {
+                "usdttrc20": "💵 USDT (TRC20 - ترون)", "usdterc20": "💵 USDT (ERC20 - اتریوم)",
+                "usdtbsc": "💵 USDT (BEP20 - BSC)", "usdtton": "💵 USDT (TON)",
+                "btc": "₿ Bitcoin (BTC)", "eth": "⟠ Ethereum (ETH)",
+                "trx": "🔷 TRX (ترون)", "ton": "💎 TON", "ltc": "🔵 Litecoin (LTC)", "bnbbsc": "🟡 BNB (BSC)",
+            }
+            kb_cur_wcn = types.InlineKeyboardMarkup(row_width=1)
+            for _c in _np_enabled_wcn:
+                kb_cur_wcn.add(types.InlineKeyboardButton(
+                    _NP_CUR_LABELS.get(_c, _c.upper()),
+                    callback_data=f"wallet:charge:nowpayments:cur:{_c}"))
+            kb_cur_wcn.add(types.InlineKeyboardButton("بازگشت", callback_data="wallet:charge", icon_custom_emoji_id="5253997076169115797"))
             try:
                 bot.answer_callback_query(call.id)
             except Exception:
                 pass
             send_or_edit(call,
-                f"?? <b>??? ?? ????? ?????? NowPayments</b>\n\n<code>{esc(err_msg[:400])}</code>",
-                back_button("wallet:charge"))
+                "🪙 <b>انتخاب ارز پرداخت</b>\n\nلطفاً ارز مورد نظر برای شارژ کیف پول را انتخاب کنید:",
+                kb_cur_wcn)
             return
-        invoice_id_wcn  = result_wcn.get("invoice_id", "")
-        inv_url_wcn     = result_wcn.get("invoice_url", "")
-        amount_usdt_wcn = result_wcn.get("amount_usdt", 0)
+        # Single currency - proceed directly
+        _sel_cur_wcn = _np_enabled_wcn[0] if _np_enabled_wcn else "usdttrc20"
+        _pay_wcn_id = create_payment("wallet_charge", uid, None, amount, "nowpayments", status="pending")
+        _bot_un_wcn = bot.get_me().username or ""
+        _succ_wcn, _res_wcn = create_nowpayments_invoice(amount, _pay_wcn_id, uid, _bot_un_wcn,
+                                                         "شارژ کیف پول", pay_currency=_sel_cur_wcn)
+        if not _succ_wcn:
+            _em_wcn = _res_wcn.get("error", "خطای ناشناخته") if isinstance(_res_wcn, dict) else str(_res_wcn)
+            try:
+                bot.answer_callback_query(call.id)
+            except Exception:
+                pass
+            send_or_edit(call, f"❌ <b>خطا در ایجاد فاکتور NowPayments</b>\n\n<code>{esc(_em_wcn[:400])}</code>",
+                         back_button("wallet:charge"))
+            return
+        _inv_id_wcn  = _res_wcn.get("invoice_id", "")
+        _inv_url_wcn = _res_wcn.get("invoice_url", "")
+        _amt_u_wcn   = _res_wcn.get("amount_usdt", 0)
         with get_conn() as conn:
-            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id_wcn, payment_id_wcn))
-        state_set(uid, "await_nowpayments_verify", payment_id=payment_id_wcn, invoice_id=invoice_id_wcn)
-        short_id_wcn = str(payment_id_wcn)
-        text_wcn = (
-            "?? <b>???? ??? ??? � NowPayments</b>\n\n"
-            f"?? ?? ??????: <code>{short_id_wcn}</code>\n"
-            f"?? ????: <b>{fmt_price(amount)}</b> ?????\n"
-            f"?? ?????: <b>{amount_usdt_wcn:.4f} USDT</b>\n\n"
-            "? ??? ?????? <b>? ????</b> ?????? ????\n"
-            "?? ?? ?????? ???? �? ????? ??????� ?? ?????."
-        )
-        kb_wcn = types.InlineKeyboardMarkup()
-        kb_wcn.add(types.InlineKeyboardButton("?? ?????? ?? NowPayments", url=inv_url_wcn))
-        kb_wcn.add(types.InlineKeyboardButton("? ????? ??????", callback_data=f"pay:nowpayments:verify:{payment_id_wcn}"))
-        kb_wcn.add(types.InlineKeyboardButton("?? ??????", callback_data="wallet:charge"))
+            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (_inv_id_wcn, _pay_wcn_id))
+        state_set(uid, "await_nowpayments_verify", payment_id=_pay_wcn_id, invoice_id=_inv_id_wcn)
+        _kb_wcn = types.InlineKeyboardMarkup()
+        _kb_wcn.add(types.InlineKeyboardButton("💳 پرداخت در NowPayments", url=_inv_url_wcn))
+        _kb_wcn.add(types.InlineKeyboardButton("🔄 بررسی پرداخت", callback_data=f"pay:nowpayments:verify:{_pay_wcn_id}"))
+        _kb_wcn.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="wallet:charge"))
         try:
             bot.answer_callback_query(call.id)
         except Exception:
             pass
-        send_or_edit(call, text_wcn, kb_wcn)
+        send_or_edit(call,
+            "💎 <b>شارژ کیف پول — NowPayments</b>\n\n"
+            f"🔢 شماره سفارش: <code>{str(_pay_wcn_id)}</code>\n"
+            f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان\n"
+            f"🪙 مبلغ کریپتو: <b>{_amt_u_wcn:.6f} {_sel_cur_wcn.upper()}</b>\n\n"
+            "⏳ لینک پرداخت <b>۶۰ دقیقه</b> معتبر است\n"
+            "🔁 پس از پرداخت روی «بررسی پرداخت» بزنید.",
+            _kb_wcn)
         _start_nowpayments_auto_verify(
-            payment_id_wcn, invoice_id_wcn, uid,
+            _pay_wcn_id, _inv_id_wcn, uid,
+            call.message.chat.id, call.message.message_id,
+            "wallet_charge")
+        return
+
+    if data.startswith("wallet:charge:nowpayments:cur:"):
+        if not _check_invoice_valid(uid):
+            _show_invoice_expired(call)
+            return
+        sd     = state_data(uid)
+        amount = sd.get("amount")
+        if not amount:
+            try:
+                bot.answer_callback_query(call.id, "مبلغ کیف پول تنظیم نشده.", show_alert=True)
+            except Exception:
+                pass
+            return
+        _sel_cur_wcn2 = data.split(":")[-1].strip().lower()
+        _pay_wcn2_id = create_payment("wallet_charge", uid, None, amount, "nowpayments", status="pending")
+        _bot_un_wcn2 = bot.get_me().username or ""
+        _succ_wcn2, _res_wcn2 = create_nowpayments_invoice(amount, _pay_wcn2_id, uid, _bot_un_wcn2,
+                                                           "شارژ کیف پول", pay_currency=_sel_cur_wcn2)
+        if not _succ_wcn2:
+            _em_wcn2 = _res_wcn2.get("error", "خطای ناشناخته") if isinstance(_res_wcn2, dict) else str(_res_wcn2)
+            try:
+                bot.answer_callback_query(call.id)
+            except Exception:
+                pass
+            send_or_edit(call, f"❌ <b>خطا در ایجاد فاکتور NowPayments</b>\n\n<code>{esc(_em_wcn2[:400])}</code>",
+                         back_button("wallet:charge"))
+            return
+        _inv_id_wcn2  = _res_wcn2.get("invoice_id", "")
+        _inv_url_wcn2 = _res_wcn2.get("invoice_url", "")
+        _amt_u_wcn2   = _res_wcn2.get("amount_usdt", 0)
+        with get_conn() as conn:
+            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (_inv_id_wcn2, _pay_wcn2_id))
+        state_set(uid, "await_nowpayments_verify", payment_id=_pay_wcn2_id, invoice_id=_inv_id_wcn2)
+        _kb_wcn2 = types.InlineKeyboardMarkup()
+        _kb_wcn2.add(types.InlineKeyboardButton("💳 پرداخت در NowPayments", url=_inv_url_wcn2))
+        _kb_wcn2.add(types.InlineKeyboardButton("🔄 بررسی پرداخت", callback_data=f"pay:nowpayments:verify:{_pay_wcn2_id}"))
+        _kb_wcn2.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="wallet:charge"))
+        try:
+            bot.answer_callback_query(call.id)
+        except Exception:
+            pass
+        send_or_edit(call,
+            "💎 <b>شارژ کیف پول — NowPayments</b>\n\n"
+            f"🔢 شماره سفارش: <code>{str(_pay_wcn2_id)}</code>\n"
+            f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان\n"
+            f"🪙 مبلغ کریپتو: <b>{_amt_u_wcn2:.6f} {_sel_cur_wcn2.upper()}</b>\n\n"
+            "⏳ لینک پرداخت <b>۶۰ دقیقه</b> معتبر است\n"
+            "🔁 پس از پرداخت روی «بررسی پرداخت» بزنید.",
+            _kb_wcn2)
+        _start_nowpayments_auto_verify(
+            _pay_wcn2_id, _inv_id_wcn2, uid,
             call.message.chat.id, call.message.message_id,
             "wallet_charge")
         return
@@ -8910,17 +9041,18 @@ def _dispatch_callback(call, uid, data):
             parts = data.split(":")
             config_id  = int(parts[2])
             package_id = int(parts[3])
+            _chosen_cur_pnp = parts[5] if len(parts) >= 6 and parts[4] == "cur" else None
             cfg = get_panel_config(config_id)
             if not cfg or cfg["user_id"] != uid:
                 try:
-                    bot.answer_callback_query(call.id, "?????? ???? ????.", show_alert=True)
+                    bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
                 except Exception:
                     pass
                 return
             package_row = get_package(package_id)
             if not package_row:
                 try:
-                    bot.answer_callback_query(call.id, "???? ???? ???.", show_alert=True)
+                    bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
                 except Exception:
                     pass
                 return
@@ -8930,29 +9062,54 @@ def _dispatch_callback(call, uid, data):
                 _rng = get_gateway_range_text("nowpayments")
                 try:
                     bot.answer_callback_query(call.id,
-                        f"?? ???? {fmt_price(price)} ????? ???? ????? NowPayments ???? ????.\n"
-                        f"?????? ????: {_rng}\n\n????? ????? ????? ?????? ????.",
+                        f"مبلغ {fmt_price(price)} خارج از محدوده مجاز درگاه NowPayments است.\n"
+                        f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
                         show_alert=True)
                 except Exception:
                     pass
                 return
-            payment_id = create_payment("pnlcfg_renewal", uid, package_id, price, "nowpayments",
-                                        status="pending", config_id=config_id)
-            _bot_username_pnp = bot.get_me().username or ""
-            order_label_pnp = (
-                f"????? {package_row['name']}"
-                if ('show_name' not in package_row.keys() or package_row['show_name'])
-                else f"????? {fmt_vol(package_row['volume_gb'])} | {fmt_dur(package_row['duration_days'])}"
-            )
-            success_pnp, result_pnp = create_nowpayments_invoice(price, payment_id, uid, _bot_username_pnp, order_label_pnp)
-            if not success_pnp:
-                err_pnp = result_pnp.get("error", "???? ????????") if isinstance(result_pnp, dict) else str(result_pnp)
+            _np_enabled_pnp = get_nowpayments_enabled_currencies()
+            if not _chosen_cur_pnp and len(_np_enabled_pnp) > 1:
+                _NP_CUR_LABELS = {
+                    "usdttrc20": "💵 USDT (TRC20 - ترون)", "usdterc20": "💵 USDT (ERC20 - اتریوم)",
+                    "usdtbsc": "💵 USDT (BEP20 - BSC)", "usdtton": "💵 USDT (TON)",
+                    "btc": "₿ Bitcoin (BTC)", "eth": "⟠ Ethereum (ETH)",
+                    "trx": "🔷 TRX (ترون)", "ton": "💎 TON", "ltc": "🔵 Litecoin (LTC)", "bnbbsc": "🟡 BNB (BSC)",
+                }
+                kb_cur_pnp = types.InlineKeyboardMarkup(row_width=1)
+                for _c in _np_enabled_pnp:
+                    kb_cur_pnp.add(types.InlineKeyboardButton(
+                        _NP_CUR_LABELS.get(_c, _c.upper()),
+                        callback_data=f"mypnlcfgrpay:nowpayments:{config_id}:{package_id}:cur:{_c}"))
+                kb_cur_pnp.add(types.InlineKeyboardButton("بازگشت", callback_data=f"mypnlcfg:renewconfirm:{config_id}",
+                                                          icon_custom_emoji_id="5253997076169115797"))
                 try:
                     bot.answer_callback_query(call.id)
                 except Exception:
                     pass
                 send_or_edit(call,
-                    f"?? <b>??? ?? ????? ?????? NowPayments</b>\n\n<code>{esc(err_pnp[:400])}</code>",
+                    "🪙 <b>انتخاب ارز پرداخت</b>\n\nلطفاً ارز مورد نظر برای پرداخت را انتخاب کنید:",
+                    kb_cur_pnp)
+                return
+            _sel_cur_pnp = _chosen_cur_pnp or (_np_enabled_pnp[0] if _np_enabled_pnp else "usdttrc20")
+            payment_id = create_payment("pnlcfg_renewal", uid, package_id, price, "nowpayments",
+                                        status="pending", config_id=config_id)
+            _bot_username_pnp = bot.get_me().username or ""
+            order_label_pnp = (
+                f"تمدید {package_row['name']}"
+                if ('show_name' not in package_row.keys() or package_row['show_name'])
+                else f"تمدید {fmt_vol(package_row['volume_gb'])} | {fmt_dur(package_row['duration_days'])}"
+            )
+            success_pnp, result_pnp = create_nowpayments_invoice(price, payment_id, uid, _bot_username_pnp,
+                                                                  order_label_pnp, pay_currency=_sel_cur_pnp)
+            if not success_pnp:
+                err_pnp = result_pnp.get("error", "خطای ناشناخته") if isinstance(result_pnp, dict) else str(result_pnp)
+                try:
+                    bot.answer_callback_query(call.id)
+                except Exception:
+                    pass
+                send_or_edit(call,
+                    f"❌ <b>خطا در ایجاد فاکتور NowPayments</b>\n\n<code>{esc(err_pnp[:400])}</code>",
                     back_button(f"mypnlcfg:renewconfirm:{config_id}"))
                 return
             invoice_id_pnp  = result_pnp.get("invoice_id", "")
@@ -8964,21 +9121,21 @@ def _dispatch_callback(call, uid, data):
                       payment_id=payment_id, invoice_id=invoice_id_pnp, config_id=config_id)
             short_id_pnp = str(payment_id)
             kb_pnp = types.InlineKeyboardMarkup()
-            kb_pnp.add(types.InlineKeyboardButton("?? ?????? ?? NowPayments", url=inv_url_pnp))
-            kb_pnp.add(types.InlineKeyboardButton("? ????? ??????",
+            kb_pnp.add(types.InlineKeyboardButton("💳 پرداخت در NowPayments", url=inv_url_pnp))
+            kb_pnp.add(types.InlineKeyboardButton("🔄 بررسی پرداخت",
                         callback_data=f"mypnlcfgrpay:nowpayments:verify:{payment_id}"))
-            kb_pnp.add(types.InlineKeyboardButton("?? ??????", callback_data=f"mypnlcfg:renewconfirm:{config_id}"))
+            kb_pnp.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"mypnlcfg:renewconfirm:{config_id}"))
             try:
                 bot.answer_callback_query(call.id)
             except Exception:
                 pass
             send_or_edit(call,
-                "?? <b>?????? ?????? NowPayments (?????)</b>\n\n"
-                f"?? ?? ??????: <code>{short_id_pnp}</code>\n"
-                f"?? ????: <b>{fmt_price(price)}</b> ?????\n"
-                f"?? ?????: <b>{amount_usdt_pnp:.4f} USDT</b>\n\n"
-                "? ??? ?????? <b>? ????</b> ?????? ????\n"
-                "?? ?? ?????? ???? �? ????? ??????� ?? ?????.",
+                "💎 <b>فاکتور پرداخت NowPayments (تمدید پنل)</b>\n\n"
+                f"🔢 شماره سفارش: <code>{short_id_pnp}</code>\n"
+                f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n"
+                f"🪙 مبلغ کریپتو: <b>{amount_usdt_pnp:.6f} {_sel_cur_pnp.upper()}</b>\n\n"
+                "⏳ لینک پرداخت <b>۶۰ دقیقه</b> معتبر است\n"
+                "🔁 پس از پرداخت روی «بررسی پرداخت» بزنید.",
                 kb_pnp)
             _start_nowpayments_auto_verify(
                 payment_id, invoice_id_pnp, uid,
@@ -14968,7 +15125,6 @@ def _dispatch_callback(call, uid, data):
                 pub_url_source  = "?? ????? ?????? ?? IP ????? ????"
             else:
                 pub_url_display = "? ????? ???? ???"
-                pub_url_source  = "�"
         _NP_CUR_NAMES = {
             "usdttrc20": "USDT (TRC20 - ترون)", "usdterc20": "USDT (ERC20 - اتریوم)",
             "usdtbsc": "USDT (BEP20 - BSC)", "usdtton": "USDT (TON)",
@@ -14976,11 +15132,11 @@ def _dispatch_callback(call, uid, data):
             "trx": "TRX (ترون)", "ton": "TON", "ltc": "Litecoin (LTC)",
             "bnbbsc": "BNB (BSC)",
         }
-        pay_cur         = (setting_get("nowpayments_pay_currency", "") or "usdttrc20").strip().lower()
+        _enabled_curs   = get_nowpayments_enabled_currencies()
+        cur_labels      = " | ".join(_NP_CUR_NAMES.get(c, c.upper()) for c in _enabled_curs) or "USDT (TRC20 - ترون)"
         enabled_label   = "✅ فعال" if enabled == "1" else "❌ غیرفعال"
         vis_label       = "👁 عمومی" if vis == "public" else "🔒 محدود ادمین"
         range_label     = "✅ فعال" if range_en == "1" else "❌ غیرفعال"
-        cur_label       = _NP_CUR_NAMES.get(pay_cur, pay_cur.upper())
         display_name_np = setting_get("gw_nowpayments_display_name", "")
         name_display_np = display_name_np or "<i>پیش‌فرض: پرداخت کریپتو (NowPayments)</i>"
         kb = types.InlineKeyboardMarkup()
@@ -14988,6 +15144,7 @@ def _dispatch_callback(call, uid, data):
             types.InlineKeyboardButton(f"وضعیت: {enabled_label}", callback_data="adm:gw:nowpayments:toggle"),
             types.InlineKeyboardButton(f"نمایش: {vis_label}",     callback_data="adm:gw:nowpayments:vis"),
         )
+        kb.add(types.InlineKeyboardButton(f"🪙 ارزهای فعال ({len(_enabled_curs)})", callback_data="adm:gw:nowpayments:set_currency"))
         kb.add(types.InlineKeyboardButton(f"🪙 ارز پرداختی: {cur_label}", callback_data="adm:gw:nowpayments:set_currency"))
         kb.add(types.InlineKeyboardButton(f"🔢 محدوده مبلغ: {range_label}", callback_data="adm:gw:nowpayments:range"))
         kb.add(types.InlineKeyboardButton("🔑 تنظیم کلید API", callback_data="adm:set:nowpayments_key"))
@@ -15005,7 +15162,7 @@ def _dispatch_callback(call, uid, data):
             f"وضعیت: {enabled_label}\n"
             f"نمایش: {vis_label}\n"
             f"نام نمایشی: {name_display_np}\n"
-            f"🪙 ارز پرداختی: <b>{esc(cur_label)}</b> (<code>{pay_cur}</code>)\n\n"
+            f"🪙 ارزهای فعال: <b>{esc(cur_labels)}</b>\n\n"
             f"🔑 کلید API: {key_display}\n"
             f"🔐 IPN Secret: {ipn_display}\n"
             f"🌐 Server Public URL: <code>{esc(pub_url_display[:80])}</code>\n"
@@ -15103,16 +15260,17 @@ def _dispatch_callback(call, uid, data):
             ("ltc",       "🔵 Litecoin (LTC)"),
             ("bnbbsc",    "🟡 BNB (BSC)"),
         ]
-        cur_now = (setting_get("nowpayments_pay_currency", "") or "usdttrc20").strip().lower()
+        _enabled_now = get_nowpayments_enabled_currencies()
         kb2 = types.InlineKeyboardMarkup(row_width=1)
         for code, label in _NP_CUR_OPTS:
-            mark = "✅ " if code == cur_now else ""
+            mark = "✅ " if code in _enabled_now else "☑️ "
             kb2.add(types.InlineKeyboardButton(f"{mark}{label}", callback_data=f"adm:gw:nowpayments:cur:{code}"))
         kb2.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gw:nowpayments", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call,
-            "🪙 <b>انتخاب ارز پرداختی NowPayments</b>\n\n"
-            "ارز مورد نظر برای دریافت پرداخت را انتخاب کنید.\n"
-            "این تنظیم برای تمام فاکتورهای جدید اعمال می‌شود.",
+            "🪙 <b>انتخاب ارزهای فعال NowPayments</b>\n\n"
+            "هر ارزی که می‌خواهید کاربران بتوانند با آن پرداخت کنند را فعال کنید.\n"
+            "✅ = فعال   ☑️ = غیرفعال\n\n"
+            "کاربر هنگام پرداخت از بین ارزهای فعال یکی را انتخاب می‌کند.",
             kb2)
         return
 
@@ -15131,14 +15289,28 @@ def _dispatch_callback(call, uid, data):
             except Exception:
                 pass
             return
-        setting_set("nowpayments_pay_currency", cur_code)
+        # Toggle this currency in/out of enabled list
+        _cur_list = get_nowpayments_enabled_currencies()
+        if cur_code in _cur_list:
+            if len(_cur_list) == 1:
+                try:
+                    bot.answer_callback_query(call.id, "حداقل یک ارز باید فعال باشد!", show_alert=True)
+                except Exception:
+                    pass
+                return
+            _cur_list.remove(cur_code)
+            _action = "غیرفعال"
+        else:
+            _cur_list.append(cur_code)
+            _action = "فعال"
+        setting_set("nowpayments_enabled_currencies", ",".join(_cur_list))
         try:
-            bot.answer_callback_query(call.id, f"ارز به {cur_code.upper()} تغییر یافت ✅", show_alert=True)
+            bot.answer_callback_query(call.id, f"{cur_code.upper()} {_action} شد ✅", show_alert=False)
         except Exception:
             pass
-        # Redirect back to NowPayments settings
-        call.data = "adm:set:gw:nowpayments"
-        data      = "adm:set:gw:nowpayments"
+        # Refresh currency selection page
+        call.data = "adm:gw:nowpayments:set_currency"
+        data      = "adm:gw:nowpayments:set_currency"
 
     if data == "adm:set:nowpayments_key":
         if not admin_has_perm(uid, "settings"):
