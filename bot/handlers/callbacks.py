@@ -2227,6 +2227,20 @@ def _build_config_from_inbound(inbound, client_uuid, client_name, panel, real_po
     return None
 
 
+# ── Per-panel concurrency lock ─────────────────────────────────────────────────
+# Ensures only one create_client call goes to each panel at a time.
+# Eliminates race-condition failures when multiple background threads try to
+# create configs on the same panel simultaneously.
+_panel_locks: dict = {}
+_panel_locks_meta = threading.Lock()
+
+def _panel_create_lock(panel_id):
+    with _panel_locks_meta:
+        if panel_id not in _panel_locks:
+            _panel_locks[panel_id] = threading.Lock()
+        return _panel_locks[panel_id]
+
+
 def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name=None):
     """
     Create a config in the panel for uid/package_id.
@@ -2290,7 +2304,7 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
         ])
 
     CONN_RETRY_DELAY   = 30    # seconds between retries when server is down
-    FUNC_RETRY_TIMEOUT = 180   # 3 min timeout for non-connection errors
+    FUNC_RETRY_TIMEOUT = 1800  # 30 min timeout for non-connection errors (safe: runs in background thread)
     FUNC_RETRY_DELAY   = 15
     MAX_WAIT           = 28800 # 8-hour absolute hard cap
 
@@ -2411,6 +2425,8 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
         expire_str = None
 
     # ── Step 3: create client ─────────────────────────────────────────────────
+    # Per-panel lock: only one create_client call to this panel at a time.
+    # Prevents the panel from rejecting concurrent requests even when online.
     result = None
     create_err = None
     _t0 = time.time()
@@ -2420,7 +2436,11 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
         if time.time() - _t_start > MAX_WAIT:
             create_err = "حداکثر زمان انتظار (8 ساعت) تمام شد"
             break
-        ok, result = client.create_client(inbound_id, client_name, traffic_bytes, expire_ms)
+        with _panel_create_lock(panel_id):
+            # Reset partial timer after waiting for lock (another thread may have
+            # held the lock for a long time while the panel was busy).
+            _t0 = time.time()
+            ok, result = client.create_client(inbound_id, client_name, traffic_bytes, expire_ms)
         if ok:
             create_err = None
             break
