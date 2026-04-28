@@ -706,22 +706,14 @@ def _finish_card_payment_approval_core(payment_id, admin_note, approved):
                 apply_gateway_bonus_if_needed(user_id, payment["payment_method"] or "card", payment["amount"])
             except Exception:
                 pass
-            # ── Deliver in background so admin gets instant confirmation ──────
-            import threading as _threading
-            _svc_names = get_payment_service_names(payment_id)
-            def _bg_deliver():
-                try:
-                    purchase_ids, pending_ids = _deliver_bulk_configs(
-                        user_id, user_id, package_id,
-                        payment["amount"], payment["payment_method"], _qty_card, payment_id,
-                        service_names=_svc_names,
-                    )
-                    _send_bulk_delivery_result(user_id, user_id, package_row,
-                                               purchase_ids, pending_ids,
-                                               payment["payment_method"])
-                except Exception as _bg_exc:
-                    _log.error("bg_deliver payment #%s failed: %s", payment_id, _bg_exc, exc_info=True)
-            _threading.Thread(target=_bg_deliver, daemon=True).start()
+            purchase_ids, pending_ids = _deliver_bulk_configs(
+                user_id, user_id, package_id,
+                payment["amount"], payment["payment_method"], _qty_card, payment_id,
+                service_names=get_payment_service_names(payment_id)
+            )
+            _send_bulk_delivery_result(user_id, user_id, package_row,
+                                       purchase_ids, pending_ids,
+                                       payment["payment_method"])
             return True, notified
 
         elif payment["kind"] == "renewal":
@@ -755,41 +747,22 @@ def _finish_card_payment_approval_core(payment_id, admin_note, approved):
             package_id      = payment["package_id"]
             if not complete_payment(payment_id):
                 return True, True  # already processed
-            notified = _safe_send(
-                user_id,
-                "✅ <b>پرداخت تأیید شد!</b>\n\n"
-                "⏳ در حال تمدید سرویس ... لطفاً صبر کنید.",
-                parse_mode="HTML",
-            )
-            # ── Renew in background so admin gets instant confirmation ────────
-            import threading as _threading
-            def _bg_renew():
-                try:
-                    ok_r, err_r = _exec_pnlr(panel_config_id, package_id, uid=user_id)
-                    if ok_r:
-                        try:
-                            bot.send_message(
-                                user_id,
-                                "✅ <b>تمدید سرویس انجام شد!</b>\n\n"
-                                "🔄 سرویس شما با موفقیت تمدید شد.\n\n"
-                                "🙏 از اعتماد شما سپاسگزاریم.",
-                                parse_mode="HTML",
-                            )
-                        except Exception:
-                            pass
-                    else:
-                        try:
-                            bot.send_message(
-                                user_id,
-                                "✅ پرداخت تأیید شد اما تمدید سرویس با خطا مواجه شد.\n"
-                                "لطفاً با پشتیبانی ارتباط بگیرید.",
-                                parse_mode="HTML",
-                            )
-                        except Exception:
-                            pass
-                except Exception as _bg_exc:
-                    _log.error("bg_renew payment #%s failed: %s", payment_id, _bg_exc, exc_info=True)
-            _threading.Thread(target=_bg_renew, daemon=True).start()
+            ok_r, err_r = _exec_pnlr(panel_config_id, package_id, uid=user_id)
+            if ok_r:
+                notified = _safe_send(
+                    user_id,
+                    "✅ <b>تمدید سرویس انجام شد!</b>\n\n"
+                    "🔄 پرداخت شما تأیید و سرویس با موفقیت تمدید شد.\n\n"
+                    "🙏 از اعتماد شما سپاسگزاریم.",
+                    parse_mode="HTML",
+                )
+            else:
+                notified = _safe_send(
+                    user_id,
+                    "✅ پرداخت تأیید شد اما تمدید سرویس با خطا مواجه شد.\n"
+                    "لطفاً با پشتیبانی ارتباط بگیرید.",
+                    parse_mode="HTML",
+                )
             return True, notified
 
         return True, True

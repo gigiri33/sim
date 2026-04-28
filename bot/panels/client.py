@@ -344,59 +344,6 @@ class PanelClient:
         """
         return self._update_client(inbound_id, client_uuid, {"enable": True})
 
-    def extend_client(self, inbound_id: int, client_uuid: str,
-                      email: str = "",
-                      add_bytes: int = 0, add_days: int = 0) -> tuple:
-        """
-        Extend an existing client by ADDING ``add_bytes`` to its current ``totalGB``
-        and ``add_days`` to its current ``expiryTime``. Also re-enables the client.
-
-        Semantics:
-          • If ``add_bytes <= 0`` → ``totalGB`` is left unchanged.
-          • If the client currently has ``totalGB == 0`` (unlimited) → stays unlimited.
-          • Else new totalGB = current totalGB + ``add_bytes``.
-
-          • If ``add_days <= 0`` → ``expiryTime`` is left unchanged.
-          • If the client currently has ``expiryTime == 0`` (no expiry) → stays unlimited.
-          • Else new expiryTime = ``max(current expiryTime, now)`` + ``add_days * 86_400_000``.
-
-        The consumed-bytes counter (``up`` + ``down``) is **not** touched, so the
-        user keeps their historical usage — only the cap and the expiry move forward.
-
-        Returns ``(True, {"new_total": int, "new_expiry_ms": int})`` on success
-        or ``(False, error_str)`` on failure.
-        """
-        import time as _time
-        ok, current = self.get_client_full(inbound_id, client_uuid)
-        if not ok:
-            return False, current
-        cur_total = int(current.get("totalGB") or 0) if isinstance(current, dict) else 0
-        cur_exp   = int(current.get("expiryTime") or 0) if isinstance(current, dict) else 0
-
-        # Volume
-        if add_bytes <= 0:
-            new_total = cur_total
-        elif cur_total <= 0:
-            new_total = 0
-        else:
-            new_total = cur_total + int(add_bytes)
-
-        # Expiry
-        if add_days <= 0:
-            new_exp = cur_exp
-        elif cur_exp <= 0:
-            new_exp = 0
-        else:
-            now_ms = int(_time.time() * 1000)
-            base_ms = max(cur_exp, now_ms)
-            new_exp = base_ms + int(add_days) * 86_400_000
-
-        overrides = {"enable": True, "totalGB": new_total, "expiryTime": new_exp}
-        ok2, err2 = self._update_client(inbound_id, client_uuid, overrides)
-        if not ok2:
-            return False, err2
-        return True, {"new_total": new_total, "new_expiry_ms": new_exp}
-
     def update_client_sub(self, inbound_id: int, client_uuid: str,
                           email: str, new_sub_id: str,
                           traffic_bytes: int = 0, expire_ms: int = 0,
