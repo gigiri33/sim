@@ -2310,9 +2310,10 @@ def get_active_panels():
 
 def get_panel(panel_id):
     with get_conn() as conn:
-        return conn.execute(
+        row = conn.execute(
             "SELECT * FROM panels WHERE id=?", (panel_id,)
         ).fetchone()
+        return dict(row) if row else None
 
 
 def add_panel(name, protocol, host, port, path, username, password, sub_url_base=""):
@@ -2460,9 +2461,10 @@ def add_panel_config(user_id, package_id, panel_id, panel_type,
 
 def get_panel_config(config_id):
     with get_conn() as conn:
-        return conn.execute(
+        row = conn.execute(
             "SELECT * FROM panel_configs WHERE id=?", (config_id,)
         ).fetchone()
+        return dict(row) if row else None
 
 
 def get_panel_configs_by_cpkg(cpkg_id):
@@ -2586,6 +2588,7 @@ def get_panel_config_full(config_id):
             """,
             (config_id,)
         ).fetchone()
+        return dict(row) if row else None
 
 
 def get_user_panel_configs(user_id):
