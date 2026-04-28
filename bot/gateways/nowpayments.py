@@ -106,19 +106,19 @@ def _api_headers() -> dict:
 
 
 def get_nowpayments_min_usdt() -> float:
-    """Query NowPayments live minimum amount for USD→USDT-TRC20. Falls back to 5.0."""
+    """Query NowPayments live minimum amount for USD→selected pay currency. Falls back to 5.0."""
     api_key = (setting_get("nowpayments_api_key", "") or "").strip()
     if not api_key:
         return 5.0
+    pay_currency = (setting_get("nowpayments_pay_currency", "") or "usdttrc20").strip().lower()
     try:
         resp = requests.get(
             f"{NOWPAYMENTS_BASE_URL}/min-amount",
-            params={"currency_from": "usd", "currency_to": "usdttrc20"},
+            params={"currency_from": "usd", "currency_to": pay_currency},
             headers={"x-api-key": api_key},
             timeout=10,
         )
         data = resp.json()
-        # API returns {"currency_from":"usd","currency_to":"usdttrc20","min_amount":X}
         amt = float(data.get("min_amount") or 0)
         if amt > 0:
             return amt
@@ -127,12 +127,25 @@ def get_nowpayments_min_usdt() -> float:
     return 5.0
 
 
-def create_nowpayments_invoice(amount_toman: int, payment_id, user_id, bot_username: str, description: str):
+def get_nowpayments_enabled_currencies() -> list:
+    """Returns list of admin-enabled NowPayments currencies. Default ['usdttrc20']."""
+    raw = (setting_get("nowpayments_enabled_currencies", "") or "").strip()
+    if raw:
+        return [c.strip() for c in raw.split(",") if c.strip()]
+    return ["usdttrc20"]
+
+
+def create_nowpayments_invoice(amount_toman: int, payment_id, user_id, bot_username: str, description: str,
+                               pay_currency: str = None):
     """
     Create a new NowPayments invoice.
 
     Converts *amount_toman* to USD using the live USDT/IRT rate (USDT≈USD),
     then POSTs to ``/v1/invoice``.
+
+    Args:
+        pay_currency: Override the payment currency. If None, uses the first
+                      enabled currency from admin settings.
 
     Returns:
         ``(True,  {"invoice_id": ..., "invoice_url": ..., "amount_usdt": ..., "usdt_rate": ...})``  on success
@@ -149,18 +162,11 @@ def create_nowpayments_invoice(amount_toman: int, payment_id, user_id, bot_usern
 
     amount_usdt = round(amount_toman / usdt_irt, 4)
 
-    # Enforce NowPayments minimum (queried live, fallback 5 USDT)
-    min_usdt = get_nowpayments_min_usdt()
-    if amount_usdt < min_usdt:
-        min_toman = int(min_usdt * usdt_irt)
-        from ..helpers import fmt_price
-        return False, {"error": (
-            f"حداقل مبلغ پرداخت از طریق NowPayments برابر {min_usdt:.2f} USDT "
-            f"(معادل {fmt_price(min_toman)} تومان) است.\n"
-            "لطفاً درگاه دیگری انتخاب کنید یا مبلغ را افزایش دهید."
-        )}
-
-    pay_currency = ((setting_get("nowpayments_pay_currency", "") or "") or "usdttrc20").strip().lower()
+    if pay_currency:
+        pay_currency = pay_currency.strip().lower()
+    else:
+        enabled = get_nowpayments_enabled_currencies()
+        pay_currency = enabled[0] if enabled else "usdttrc20"
 
     body = {
         "price_amount":      amount_usdt,
