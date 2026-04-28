@@ -102,16 +102,6 @@ def calculate_effective_order_price(user_id, package_row, quantity=1):
       pricing_mode         – 'normal'|'global_pct'|'global_fixed'|'type_pct'|'type_fixed'|'package'|'per_gb'
     """
     base = package_row["price"]
-<<<<<<< HEAD
-    if base is None or base < 0:
-        print(f"DEBUG: get_effective_price uid={user_id} pkg={package_row['id']} invalid base={base}, defaulting to 0")
-        base = 0
-    if not user or not user["is_agent"]:
-        return base
-    cfg   = get_agency_price_config(user_id)
-    mode  = cfg["price_mode"]
-    print(f"DEBUG: get_effective_price uid={user_id} pkg={package_row['id']} base={base} mode={mode} is_agent=True")
-=======
     user = get_user(user_id)
     if not user or not user["is_agent"]:
         subtotal = base * quantity
@@ -128,7 +118,6 @@ def calculate_effective_order_price(user_id, package_row, quantity=1):
     cfg  = get_agency_price_config(user_id)
     mode = cfg["price_mode"]
 
->>>>>>> parent of b14922f (آبدیت باگ های)
     if mode == "global":
         g_type = cfg["global_type"]
         g_val  = cfg["global_val"]

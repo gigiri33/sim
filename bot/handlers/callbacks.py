@@ -61,17 +61,10 @@ from ..db import (
     has_pending_rewards, get_unclaimed_rewards, mark_rewards_claimed, mark_reward_claimed_by_id,
     get_locked_channels, add_locked_channel, remove_locked_channel_by_id,
     wallet_pay_enabled_for, get_wallet_pay_exceptions, add_wallet_pay_exception, remove_wallet_pay_exception,
-<<<<<<< HEAD
-    get_payment_cards, get_payment_card,
-    add_payment_card, update_payment_card, set_payment_card_active, delete_payment_card,
-=======
->>>>>>> parent of b14922f (آبدیت باگ های)
     get_referral_restriction, add_referral_restriction,
     remove_referral_restriction_by_id, remove_referral_restriction_by_user,
     toggle_referral_restriction_type, get_referral_restrictions_paged,
     set_user_restricted as _set_user_restricted_db,
-<<<<<<< HEAD
-=======
     # Card management
     get_payment_cards, get_payment_card, add_payment_card, update_payment_card,
     toggle_payment_card_active, delete_payment_card, pick_card_for_payment,
@@ -84,7 +77,6 @@ from ..db import (
     update_panel_config_field, delete_panel_config,
     # Service naming
     set_payment_service_names, get_payment_service_names,
->>>>>>> parent of b14922f (آبدیت باگ های)
 )
 from ..gateways.base import is_gateway_available, is_card_info_complete, get_gateway_range_text, is_gateway_in_range, build_gateway_range_guide
 from ..gateways.crypto import fetch_crypto_prices
@@ -646,157 +638,8 @@ def _get_state_price(uid, package_row, state_key):
     if state_name(uid) == state_key:
         stored = state_data(uid).get("amount")
         if stored:
-<<<<<<< HEAD
-            val = int(stored)
-            if val > 0:
-                return val
-            print(f"DEBUG: _get_state_price uid={uid} stored amount invalid={stored}, recalculating")
-    price = get_effective_price(uid, package_row)
-    if price is None or price < 0:
-        print(f"DEBUG: _get_state_price uid={uid} pkg={package_row['id']} computed invalid price={price}")
-        price = int(package_row["price"] or 0)
-    return price
-
-
-def _prepare_gateway_payment(gateway_key, base_amount, payment_id):
-    breakdown = get_gateway_payment_breakdown(gateway_key, base_amount)
-    final_amount = breakdown["payable_amount"]
-    if gateway_key == "card" and setting_get("gw_card_random_amount", "0") == "1":
-        final_amount = _generate_card_final_amount(final_amount, payment_id)
-    if final_amount != base_amount:
-        update_payment_final_amount(payment_id, final_amount)
-    return breakdown, final_amount
-
-
-def _build_gateway_amount_lines(gateway_key, base_amount, payable_amount=None):
-    breakdown = get_gateway_payment_breakdown(gateway_key, base_amount)
-    payable = payable_amount if payable_amount is not None else breakdown["payable_amount"]
-    lines = []
-    if payable != base_amount:
-        lines.append(f"💵 مبلغ پایه: <b>{fmt_price(base_amount)}</b> تومان")
-    if breakdown["fee_amount"] > 0:
-        lines.append(f"➕ کارمزد: <b>{fmt_price(breakdown['fee_amount'])}</b> تومان")
-    lines.append(f"💰 مبلغ قابل پرداخت: <b>{fmt_price(payable)}</b> تومان")
-    if breakdown["bonus_amount"] > 0:
-        lines.append(f"🎁 بونس کیف پول پس از پرداخت: <b>{fmt_price(breakdown['bonus_amount'])}</b> تومان")
-    return "\n".join(lines)
-
-
-def _get_random_card_for_payment():
-    return get_random_active_payment_card()
-
-
-def _wallet_charge_success_text(payment_row):
-    paid_amount = get_payment_paid_amount(payment_row)
-    lines = [
-        "✅ پرداخت شما تأیید و کیف پول شارژ شد.",
-        "",
-        f"💳 مبلغ پرداختی: <b>{fmt_price(paid_amount)}</b> تومان",
-    ]
-    if paid_amount != payment_row["amount"]:
-        lines.append(f"💰 مبلغ شارژ کیف پول: <b>{fmt_price(payment_row['amount'])}</b> تومان")
-    bonus_msg = build_gateway_bonus_message(payment_row)
-    if bonus_msg:
-        lines.extend(["", f"🎁 {bonus_msg}"])
-    return "\n".join(lines)
-
-
-def _sync_legacy_card_settings_from_active():
-    """Mirror first active multi-card into legacy settings for backward compatibility."""
-    active_cards = get_payment_cards(include_inactive=False)
-    if not active_cards:
-        setting_set("payment_card", "")
-        setting_set("payment_bank", "")
-        setting_set("payment_owner", "")
-        return
-    first = active_cards[0]
-    setting_set("payment_card", first["card_number"] or "")
-    setting_set("payment_bank", first["bank_name"] or "")
-    setting_set("payment_owner", first["owner_name"] or "")
-
-
-def _render_cards_admin(call):
-    cards = get_payment_cards(include_inactive=True)
-    active_count = len([c for c in cards if c["is_active"]])
-    kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton("➕ افزودن کارت جدید", callback_data="adm:cards:add"))
-    for c in cards:
-        status_icon = "🟢" if c["is_active"] else "⚪️"
-        kb.add(types.InlineKeyboardButton(
-            f"{status_icon} {c['bank_name'] or 'بانک نامشخص'} | {c['card_number']}",
-            callback_data="noop"
-        ))
-        kb.row(
-            types.InlineKeyboardButton("✏️ ویرایش", callback_data=f"adm:cards:e:{c['id']}"),
-            types.InlineKeyboardButton(
-                "🔴 غیرفعال" if c["is_active"] else "🟢 فعال",
-                callback_data=f"adm:cards:t:{c['id']}"
-            ),
-            types.InlineKeyboardButton("🗑 حذف", callback_data=f"adm:cards:d:{c['id']}")
-        )
-    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gw:card", icon_custom_emoji_id="5253997076169115797"))
-
-    lines = [
-        "💳 <b>مدیریت کارت ها</b>",
-        "",
-        f"تعداد کل کارت ها: <b>{len(cards)}</b>",
-        f"کارت های فعال: <b>{active_count}</b>",
-        "",
-        "🟢 = فعال | ⚪️ = غیرفعال",
-    ]
-    if not cards:
-        lines.extend(["", "هنوز کارتی ثبت نشده است."])
-    send_or_edit(call, "\n".join(lines), kb)
-
-
-def _render_gateway_adjustments_menu(call, gw_name):
-    gw_label_map = {
-        "card": "کارت به کارت",
-        "crypto": "ارز دیجیتال",
-        "tetrapay": "TetraPay",
-        "swapwallet_crypto": "SwapWallet",
-        "tronpays_rial": "TronPays",
-    }
-    type_map = {
-        "none": "بدون",
-        "fixed": "ثابت (تومان)",
-        "percent": "درصدی",
-    }
-    fee_type = setting_get(f"gw_{gw_name}_fee_type", "none")
-    fee_value = int(setting_get(f"gw_{gw_name}_fee_value", "0") or "0")
-    bonus_type = setting_get(f"gw_{gw_name}_bonus_type", "none")
-    bonus_value = int(setting_get(f"gw_{gw_name}_bonus_value", "0") or "0")
-
-    kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton(
-        f"➕ نوع کارمزد: {type_map.get(fee_type, fee_type)}",
-        callback_data=f"adm:gw:{gw_name}:fee:type"
-    ))
-    kb.add(types.InlineKeyboardButton(
-        f"✏️ مقدار کارمزد: {fmt_price(fee_value)}",
-        callback_data=f"adm:gw:{gw_name}:fee:value"
-    ))
-    kb.add(types.InlineKeyboardButton(
-        f"🎁 نوع بونس: {type_map.get(bonus_type, bonus_type)}",
-        callback_data=f"adm:gw:{gw_name}:bonus:type"
-    ))
-    kb.add(types.InlineKeyboardButton(
-        f"✏️ مقدار بونس: {fmt_price(bonus_value)}",
-        callback_data=f"adm:gw:{gw_name}:bonus:value"
-    ))
-    kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:set:gw:{gw_name}", icon_custom_emoji_id="5253997076169115797"))
-
-    text = (
-        f"💰 <b>بونس و کارمزد — {gw_label_map.get(gw_name, gw_name)}</b>\n\n"
-        f"کارمزد: <b>{type_map.get(fee_type, fee_type)}</b> | مقدار: <b>{fmt_price(fee_value)}</b>\n"
-        f"بونس: <b>{type_map.get(bonus_type, bonus_type)}</b> | مقدار: <b>{fmt_price(bonus_value)}</b>\n\n"
-        "اگر نوع روی «درصدی» باشد، مقدار به صورت درصد از مبلغ پایه حساب می شود."
-    )
-    send_or_edit(call, text, kb)
-=======
             return stored
     return get_effective_price(uid, package_row)
->>>>>>> parent of b14922f (آبدیت باگ های)
 
 
 # ── Invoice expiry helpers ─────────────────────────────────────────────────────
@@ -1103,8 +946,7 @@ def _show_renewal_gateways(target, uid, purchase_id, package_id, price, package_
 
 def _execute_pnlcfg_renewal(config_id, package_id, chat_id=None, uid=None):
     """
-    Execute panel config renewal: add package volume to remaining volume,
-    add package duration to remaining time (additive renewal).
+    Execute panel config renewal: reset traffic + enable_client with new expiry.
     Retries indefinitely on connection errors (up to 8 hours).
     On non-connection failures retries up to 3 minutes then gives up.
     Returns (True, None) on success or (False, user_friendly_msg) on fatal failure.
@@ -1212,51 +1054,43 @@ def _execute_pnlcfg_renewal(config_id, package_id, chat_id=None, uid=None):
         _notify_panel_error(_uid, pkg, "login (تمدید)", login_err, config_id, cfg["panel_id"])
         return False, "تمدید سرویس با خطا مواجه شد. لطفاً با پشتیبانی ارتباط بگیرید."
 
-    # ── Step 2: fetch current client traffic from panel ───────────────────────
-    cur_total_b  = 0   # current totalGB in bytes (0 = unlimited)
-    cur_used_b   = 0   # current used bytes
-    cur_exp_ms   = 0   # current expiryTime in ms (0 = unlimited)
-    try:
-        ok_td, td = pc_api.get_client_traffics(cfg.get("client_name") or "")
-        if ok_td and td:
-            cur_total_b = int(td.get("total", 0) or 0)
-            cur_used_b  = int((td.get("up", 0) or 0) + (td.get("down", 0) or 0))
-            cur_exp_ms  = int(td.get("expiryTime", 0) or 0)
-    except Exception as _te:
-        log.warning("_execute_pnlcfg_renewal: get_client_traffics failed (non-fatal): %s", _te)
+    # ── Step 2: reset traffic ──────────────────────────────────────────────────
+    reset_err = None
+    _t0 = _time.time()
+    while True:
+        if _time.time() - _t_start > MAX_WAIT:
+            reset_err = "حداکثر زمان انتظار تمام شد"
+            break
+        ok_rt, err_rt = pc_api.reset_client_traffic(cfg["inbound_id"], cfg["client_name"] or "")
+        if ok_rt:
+            reset_err = None
+            break
+        reset_err = str(err_rt)
+        elapsed = _time.time() - _t0
+        if _is_conn_err(reset_err):
+            _maybe_notify_waiting()
+            log.warning("_execute_pnlcfg_renewal: reset_traffic CONN_ERR (%.0fs elapsed), retry in %ds: %s",
+                        elapsed, CONN_RETRY_DELAY, reset_err)
+            _time.sleep(CONN_RETRY_DELAY)
+        else:
+            log.warning("_execute_pnlcfg_renewal: reset_traffic failed (%.0fs elapsed): %s", elapsed, reset_err)
+            if elapsed + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:
+                break
+            _time.sleep(FUNC_RETRY_DELAY)
+    if reset_err is not None:
+        _notify_panel_error(_uid, pkg, "reset_traffic (تمدید)", reset_err, config_id, cfg["panel_id"])
+        return False, "تمدید سرویس با خطا مواجه شد. لطفاً با پشتیبانی ارتباط بگیرید."
 
-    # ── Step 3: calculate additive volume and expiry ──────────────────────────
-    pkg_vol_gb  = float(pkg["volume_gb"] or 0)
-    pkg_dur_days = int(pkg["duration_days"] or 0)
-
-    # Volume: remaining + package volume
-    if pkg_vol_gb == 0:
-        # new package is unlimited → set unlimited
-        new_traffic_bytes = 0
-    elif cur_total_b == 0:
-        # current is unlimited → just set new package volume
-        new_traffic_bytes = int(pkg_vol_gb * 1073741824)
-    else:
-        cur_remaining_b   = max(0, cur_total_b - cur_used_b)
-        new_traffic_bytes = cur_remaining_b + int(pkg_vol_gb * 1073741824)
-
-    # Expiry: remaining time + package duration
-    _now_ms = int(_time.time() * 1000)
-    if pkg_dur_days == 0:
-        # new package is unlimited → set unlimited
-        new_exp_ms  = 0
-        new_exp_str = None
-    elif cur_exp_ms > 0 and cur_exp_ms > _now_ms:
-        # still has remaining time → add duration on top of current expiry
-        new_exp_ms  = cur_exp_ms + pkg_dur_days * 86400 * 1000
-        new_exp_str = _dt.utcfromtimestamp(new_exp_ms / 1000).strftime("%Y-%m-%d %H:%M:%S")
-    else:
-        # expired or unlimited → start fresh from now
-        new_exp_dt  = _dt.utcnow() + _td(days=pkg_dur_days)
+    # ── Step 3: enable_client with new expiry ─────────────────────────────────
+    dur_days = int(pkg["duration_days"] or 0)
+    if dur_days:
+        new_exp_dt  = _dt.utcnow() + _td(days=dur_days)
         new_exp_str = new_exp_dt.strftime("%Y-%m-%d %H:%M:%S")
         new_exp_ms  = int(new_exp_dt.timestamp() * 1000)
+    else:
+        new_exp_str = None
+        new_exp_ms  = 0
 
-    # ── Step 4: update client on panel ────────────────────────────────────────
     enable_err = None
     _t0 = _time.time()
     while True:
@@ -1266,7 +1100,7 @@ def _execute_pnlcfg_renewal(config_id, package_id, chat_id=None, uid=None):
         ok_e, res_e = pc_api.enable_client(
             inbound_id=cfg["inbound_id"], client_uuid=cfg["client_uuid"],
             email=cfg["client_name"] or "",
-            traffic_bytes=new_traffic_bytes,
+            traffic_bytes=int((pkg["volume_gb"] or 0) * 1073741824),
             expire_ms=new_exp_ms,
         )
         if ok_e:
@@ -1288,7 +1122,7 @@ def _execute_pnlcfg_renewal(config_id, package_id, chat_id=None, uid=None):
         _notify_panel_error(_uid, pkg, "enable_client (تمدید)", enable_err, config_id, cfg["panel_id"])
         return False, "تمدید سرویس با خطا مواجه شد. لطفاً با پشتیبانی ارتباط بگیرید."
 
-    # ── Step 5: update DB ──────────────────────────────────────────────────────
+    # ── Step 4: update DB ──────────────────────────────────────────────────────
     _upf(config_id, "expire_at",  new_exp_str)
     _upf(config_id, "is_expired",  0)
     _upf(config_id, "is_disabled", 0)

@@ -496,9 +496,6 @@ def _run_init_db_migrations():
             "ALTER TABLE referrals ADD COLUMN channel_joined INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE referrals ADD COLUMN rewarded_at TEXT",
             "ALTER TABLE users ADD COLUMN phone_number TEXT",
-            "CREATE TABLE IF NOT EXISTS payment_cards (id INTEGER PRIMARY KEY AUTOINCREMENT, card_number TEXT NOT NULL, bank_name TEXT NOT NULL DEFAULT '', owner_name TEXT NOT NULL DEFAULT '', is_active INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
-            # For databases where payment_cards was created before owner_name was added
-            "ALTER TABLE payment_cards ADD COLUMN owner_name TEXT NOT NULL DEFAULT ''",
             # audience: 'all' | 'public' | 'agents'  (default 'all' = everyone)
             "ALTER TABLE discount_codes ADD COLUMN audience TEXT NOT NULL DEFAULT 'all'",
             # scope_type: 'all' | 'types' | 'packages'
@@ -2711,10 +2708,9 @@ def get_active_panels():
 
 def get_panel(panel_id):
     with get_conn() as conn:
-        row = conn.execute(
+        return conn.execute(
             "SELECT * FROM panels WHERE id=?", (panel_id,)
         ).fetchone()
-        return dict(row) if row else None
 
 
 def add_panel(name, protocol, host, port, path, username, password, sub_url_base=""):
@@ -2862,10 +2858,9 @@ def add_panel_config(user_id, package_id, panel_id, panel_type,
 
 def get_panel_config(config_id):
     with get_conn() as conn:
-        row = conn.execute(
+        return conn.execute(
             "SELECT * FROM panel_configs WHERE id=?", (config_id,)
         ).fetchone()
-        return dict(row) if row else None
 
 
 def get_panel_configs_by_cpkg(cpkg_id):
@@ -2989,7 +2984,6 @@ def get_panel_config_full(config_id):
             """,
             (config_id,)
         ).fetchone()
-        return dict(row) if row else None
 
 
 def get_user_panel_configs(user_id):
