@@ -48,6 +48,10 @@ def _plisio_webhook_server():
     )
     from bot.helpers import fmt_price
     from bot.payments import apply_gateway_bonus_if_needed
+    from bot.crypto_fulfillment import run_crypto_fulfillment_async
+
+    def _run_fulfillment(gateway: str, payment_id: int):
+        run_crypto_fulfillment_async(gateway, payment_id)
 
     _app = Flask(__name__)
 
@@ -80,7 +84,7 @@ def _plisio_webhook_server():
             amount = payment["amount"]
 
             if kind == "wallet_charge":
-                # Wallet charges are simple: complete + credit balance here.
+                # Wallet charges: complete + credit balance immediately.
                 if not complete_payment(payment_id):
                     return jsonify({"status": "ok"}), 200
                 update_balance(uid, amount)
@@ -98,12 +102,13 @@ def _plisio_webhook_server():
                     pass
             else:
                 # config_purchase / renewal / pnlcfg_renewal:
-                # Do NOT call complete_payment here — let the existing polling
-                # thread observe the paid status and run the full fulfillment
-                # pipeline (delivers config, sends message, etc.).
-                # The webhook simply acknowledges receipt; polling will catch up
-                # within its next interval.
-                print(f"PLISIO_WEBHOOK: paid notice for kind={kind} payment_id={payment_id} — deferring to poller")
+                # Complete and fulfill in a background thread so the webhook
+                # response returns immediately and Plisio doesn't retry.
+                threading.Thread(
+                    target=_run_fulfillment,
+                    args=("plisio", payment_id),
+                    daemon=True,
+                ).start()
         except Exception as exc:
             print("PLISIO_WEBHOOK_ERROR:", exc)
         return jsonify({"status": "ok"}), 200
@@ -164,9 +169,13 @@ def _plisio_webhook_server():
                 except Exception:
                     pass
             else:
-                # config_purchase / renewal / pnlcfg_renewal — defer to poller
-                # so the existing fulfillment pipeline handles delivery.
-                print(f"NOWPAYMENTS_WEBHOOK: paid notice for kind={kind} payment_id={payment_id} — deferring to poller")
+                # config_purchase / renewal / pnlcfg_renewal:
+                # Complete and fulfill in a background thread.
+                threading.Thread(
+                    target=_run_fulfillment,
+                    args=("nowpayments", payment_id),
+                    daemon=True,
+                ).start()
         except Exception as exc:
             print("NOWPAYMENTS_WEBHOOK_ERROR:", exc)
         return jsonify({"status": "ok"}), 200

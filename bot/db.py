@@ -1793,6 +1793,24 @@ def get_payment(payment_id):
         ).fetchone()
 
 
+def get_pending_crypto_payments(limit=30):
+    """Return pending payments for automated crypto gateways (plisio/nowpayments)
+    that have a receipt_text (invoice/txn ID) and are still pending."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT p.*, u.full_name, u.username"
+            " FROM payments p"
+            " LEFT JOIN users u ON u.user_id = p.user_id"
+            " WHERE p.status = 'pending'"
+            " AND p.payment_method IN ('plisio', 'nowpayments')"
+            " AND p.receipt_text IS NOT NULL AND p.receipt_text != ''"
+            " ORDER BY p.created_at DESC"
+            " LIMIT ?",
+            (limit,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def get_pending_payments_page(page=0, page_size=10):
     """Return (total_count, list_of_dicts) for pending payments with submitted receipts.
 

@@ -4184,8 +4184,8 @@ def _start_pazzlenet_auto_verify(payment_id, pazzlenet_pid, uid, chat_id, messag
 
 # ── Plisio auto-verify thread ─────────────────────────────────────────────────
 def _plisio_auto_verify(payment_id, txn_id, uid, chat_id, message_id, kind, package_id=None):
-    """Background thread: polls Plisio every 15s for up to 15 minutes."""
-    max_tries = 60  # 60 × 15s = 15 minutes
+    """Background thread: polls Plisio every 15s for up to 30 minutes."""
+    max_tries = 120  # 120 × 15s = 30 minutes
     for attempt in range(max_tries):
         time.sleep(15)
         payment = get_payment(payment_id)
@@ -4298,6 +4298,109 @@ def _plisio_auto_verify(payment_id, txn_id, uid, chat_id, message_id, kind, pack
             print("PLISIO_AUTO_VERIFY_ERROR:", e)
         return
 
+    # One final immediate check before giving up — catches confirmations that
+    # arrived right at the polling boundary (e.g. slow blockchain networks).
+    payment = get_payment(payment_id)
+    if payment and payment["status"] == "pending":
+        ok_final, status_final = check_plisio_invoice(txn_id)
+        print(f"[Plisio final-check] payment={payment_id} ok={ok_final} status={status_final!r}")
+        if ok_final and is_plisio_paid(status_final):
+            try:
+                if kind == "wallet_charge":
+                    if not complete_payment(payment_id):
+                        return
+                    update_balance(uid, payment["amount"])
+                    state_clear(uid)
+                    try:
+                        apply_gateway_bonus_if_needed(uid, "plisio", payment["amount"])
+                    except Exception:
+                        pass
+                    try:
+                        bot.edit_message_text(
+                            f"✅ پرداخت شما تأیید شد و کیف پول شارژ شد.\n\n💰 مبلغ: {fmt_price(payment['amount'])} تومان",
+                            chat_id, message_id, parse_mode="HTML",
+                            reply_markup=back_button("main"))
+                    except Exception:
+                        bot.send_message(uid,
+                            f"✅ پرداخت شما تأیید شد و کیف پول شارژ شد.\n\n💰 مبلغ: {fmt_price(payment['amount'])} تومان",
+                            parse_mode="HTML", reply_markup=back_button("main"))
+                elif kind == "config_purchase":
+                    pkg_row = get_package(package_id)
+                    _qty_pf = int(payment["quantity"]) if "quantity" in payment.keys() else 1
+                    if not complete_payment(payment_id):
+                        return
+                    state_clear(uid)
+                    try:
+                        bot.edit_message_text(
+                            "✅ پرداخت شما تأیید شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
+                            chat_id, message_id, parse_mode="HTML",
+                            reply_markup=back_button("main"))
+                    except Exception:
+                        bot.send_message(uid,
+                            "✅ پرداخت شما تأیید شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
+                            parse_mode="HTML", reply_markup=back_button("main"))
+                    purchase_ids, pending_ids = _deliver_bulk_configs(
+                        chat_id, uid, package_id,
+                        payment["amount"], "plisio", _qty_pf, payment_id,
+                        service_names=get_payment_service_names(payment_id)
+                    )
+                    try:
+                        apply_gateway_bonus_if_needed(uid, "plisio", payment["amount"])
+                    except Exception:
+                        pass
+                    _send_bulk_delivery_result(chat_id, uid, pkg_row,
+                                               purchase_ids, pending_ids, "Plisio")
+                elif kind == "renewal":
+                    pkg_row = get_package(package_id)
+                    cfg_id = payment["config_id"]
+                    with get_conn() as conn:
+                        row = conn.execute("SELECT purchase_id FROM configs WHERE id=?", (cfg_id,)).fetchone()
+                    pid = row["purchase_id"] if row else 0
+                    item = get_purchase(pid) if pid else None
+                    if not complete_payment(payment_id):
+                        return
+                    state_clear(uid)
+                    msg_text = (
+                        "✅ <b>درخواست تمدید ارسال شد</b>\n\n"
+                        "🔄 درخواست تمدید سرویس شما با موفقیت ثبت و برای پشتیبانی ارسال شد.\n"
+                        "⏳ لطفاً کمی صبر کنید، پس از انجام تمدید به شما اطلاع داده خواهد شد.\n\n"
+                        "🙏 از صبر و شکیبایی شما متشکریم."
+                    )
+                    try:
+                        bot.edit_message_text(msg_text, chat_id, message_id, parse_mode="HTML",
+                                              reply_markup=back_button("main"))
+                    except Exception:
+                        bot.send_message(uid, msg_text, parse_mode="HTML", reply_markup=back_button("main"))
+                    if item:
+                        admin_renewal_notify(uid, item, pkg_row, payment["amount"], "Plisio")
+                    try:
+                        apply_gateway_bonus_if_needed(uid, "plisio", payment["amount"])
+                    except Exception:
+                        pass
+                elif kind == "pnlcfg_renewal":
+                    cfg_id_pf  = payment["config_id"]
+                    pkg_id_pf  = payment["package_id"]
+                    if not complete_payment(payment_id):
+                        return
+                    state_clear(uid)
+                    ok_pf, err_pf = _execute_pnlcfg_renewal(cfg_id_pf, pkg_id_pf, chat_id=uid, uid=uid)
+                    if ok_pf:
+                        try:
+                            bot.send_message(uid, "✅ پرداخت تأیید و سرویس تمدید شد.",
+                                             parse_mode="HTML", reply_markup=back_button("my_configs"))
+                        except Exception:
+                            pass
+                    else:
+                        try:
+                            bot.send_message(uid,
+                                "✅ پرداخت تأیید شد اما تمدید سرویس با خطا مواجه شد.\nلطفاً با پشتیبانی ارتباط بگیرید.",
+                                parse_mode="HTML", reply_markup=back_button("my_configs"))
+                        except Exception:
+                            pass
+            except Exception as e:
+                print("PLISIO_FINAL_CHECK_ERROR:", e)
+            return
+
     # Timeout — show manual verify button
     payment = get_payment(payment_id)
     if payment and payment["status"] == "pending":
@@ -4339,8 +4442,8 @@ def _start_plisio_auto_verify(payment_id, txn_id, uid, chat_id, message_id,
 
 # ── NowPayments auto-verify thread ────────────────────────────────────────────
 def _nowpayments_auto_verify(payment_id, invoice_id, uid, chat_id, message_id, kind, package_id=None):
-    """Background thread: polls NowPayments every 15s for up to 15 minutes."""
-    max_tries = 60  # 60 × 15s = 15 minutes
+    """Background thread: polls NowPayments every 15s for up to 30 minutes."""
+    max_tries = 120  # 120 × 15s = 30 minutes
     for attempt in range(max_tries):
         time.sleep(15)
         payment = get_payment(payment_id)
@@ -4451,6 +4554,109 @@ def _nowpayments_auto_verify(payment_id, invoice_id, uid, chat_id, message_id, k
         except Exception as e:
             print("NOWPAYMENTS_AUTO_VERIFY_ERROR:", e)
         return
+
+    # One final immediate check before giving up — catches confirmations that
+    # arrived right at the polling boundary (e.g. slow blockchain networks).
+    payment = get_payment(payment_id)
+    if payment and payment["status"] == "pending":
+        ok_final, status_final = check_nowpayments_invoice(invoice_id)
+        print(f"[NowPayments final-check] payment={payment_id} ok={ok_final} status={status_final!r}")
+        if ok_final and is_nowpayments_paid(status_final):
+            try:
+                if kind == "wallet_charge":
+                    if not complete_payment(payment_id):
+                        return
+                    update_balance(uid, payment["amount"])
+                    state_clear(uid)
+                    try:
+                        apply_gateway_bonus_if_needed(uid, "nowpayments", payment["amount"])
+                    except Exception:
+                        pass
+                    try:
+                        bot.edit_message_text(
+                            f"✅ پرداخت شما تأیید شد و کیف پول شارژ شد.\n\n💰 مبلغ: {fmt_price(payment['amount'])} تومان",
+                            chat_id, message_id, parse_mode="HTML",
+                            reply_markup=back_button("main"))
+                    except Exception:
+                        bot.send_message(uid,
+                            f"✅ پرداخت شما تأیید شد و کیف پول شارژ شد.\n\n💰 مبلغ: {fmt_price(payment['amount'])} تومان",
+                            parse_mode="HTML", reply_markup=back_button("main"))
+                elif kind == "config_purchase":
+                    pkg_row = get_package(package_id)
+                    _qty_npf = int(payment["quantity"]) if "quantity" in payment.keys() else 1
+                    if not complete_payment(payment_id):
+                        return
+                    state_clear(uid)
+                    try:
+                        bot.edit_message_text(
+                            "✅ پرداخت شما تأیید شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
+                            chat_id, message_id, parse_mode="HTML",
+                            reply_markup=back_button("main"))
+                    except Exception:
+                        bot.send_message(uid,
+                            "✅ پرداخت شما تأیید شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
+                            parse_mode="HTML", reply_markup=back_button("main"))
+                    purchase_ids, pending_ids = _deliver_bulk_configs(
+                        chat_id, uid, package_id,
+                        payment["amount"], "nowpayments", _qty_npf, payment_id,
+                        service_names=get_payment_service_names(payment_id)
+                    )
+                    try:
+                        apply_gateway_bonus_if_needed(uid, "nowpayments", payment["amount"])
+                    except Exception:
+                        pass
+                    _send_bulk_delivery_result(chat_id, uid, pkg_row,
+                                               purchase_ids, pending_ids, "NowPayments")
+                elif kind == "renewal":
+                    pkg_row = get_package(package_id)
+                    cfg_id = payment["config_id"]
+                    with get_conn() as conn:
+                        row = conn.execute("SELECT purchase_id FROM configs WHERE id=?", (cfg_id,)).fetchone()
+                    pid = row["purchase_id"] if row else 0
+                    item = get_purchase(pid) if pid else None
+                    if not complete_payment(payment_id):
+                        return
+                    state_clear(uid)
+                    msg_text = (
+                        "✅ <b>درخواست تمدید ارسال شد</b>\n\n"
+                        "🔄 درخواست تمدید سرویس شما با موفقیت ثبت و برای پشتیبانی ارسال شد.\n"
+                        "⏳ لطفاً کمی صبر کنید، پس از انجام تمدید به شما اطلاع داده خواهد شد.\n\n"
+                        "🙏 از صبر و شکیبایی شما متشکریم."
+                    )
+                    try:
+                        bot.edit_message_text(msg_text, chat_id, message_id, parse_mode="HTML",
+                                              reply_markup=back_button("main"))
+                    except Exception:
+                        bot.send_message(uid, msg_text, parse_mode="HTML", reply_markup=back_button("main"))
+                    if item:
+                        admin_renewal_notify(uid, item, pkg_row, payment["amount"], "NowPayments")
+                    try:
+                        apply_gateway_bonus_if_needed(uid, "nowpayments", payment["amount"])
+                    except Exception:
+                        pass
+                elif kind == "pnlcfg_renewal":
+                    cfg_id_npf = payment["config_id"]
+                    pkg_id_npf = payment["package_id"]
+                    if not complete_payment(payment_id):
+                        return
+                    state_clear(uid)
+                    ok_npf, err_npf = _execute_pnlcfg_renewal(cfg_id_npf, pkg_id_npf, chat_id=uid, uid=uid)
+                    if ok_npf:
+                        try:
+                            bot.send_message(uid, "✅ پرداخت تأیید و سرویس تمدید شد.",
+                                             parse_mode="HTML", reply_markup=back_button("my_configs"))
+                        except Exception:
+                            pass
+                    else:
+                        try:
+                            bot.send_message(uid,
+                                "✅ پرداخت تأیید شد اما تمدید سرویس با خطا مواجه شد.\nلطفاً با پشتیبانی ارتباط بگیرید.",
+                                parse_mode="HTML", reply_markup=back_button("my_configs"))
+                        except Exception:
+                            pass
+            except Exception as e:
+                print("NOWPAYMENTS_FINAL_CHECK_ERROR:", e)
+            return
 
     payment = get_payment(payment_id)
     if payment and payment["status"] == "pending":
@@ -5544,7 +5750,10 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
             return
         if payment["status"] != "pending":
-            bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+            if payment["status"] == "completed":
+                bot.answer_callback_query(call.id, "✅ این پرداخت قبلاً تأیید و پردازش شده است.\nدرخواست تمدید ثبت شده — در صورت عدم تمدید با پشتیبانی تماس بگیرید.", show_alert=True)
+            else:
+                bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
             return
         txn_id_rv = payment["receipt_text"]
         ok_rv, status_rv = check_plisio_invoice(txn_id_rv)
@@ -5658,7 +5867,10 @@ def _dispatch_callback(call, uid, data):
             return
         if payment["status"] != "pending":
             try:
-                bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+                if payment["status"] == "completed":
+                    bot.answer_callback_query(call.id, "✅ این پرداخت قبلاً تأیید و پردازش شده است.\nدرخواست تمدید ثبت شده — در صورت عدم تمدید با پشتیبانی تماس بگیرید.", show_alert=True)
+                else:
+                    bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
             except Exception:
                 pass
             return
@@ -6712,7 +6924,14 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
             return
         if payment["status"] != "pending":
-            bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+            if payment["status"] == "completed":
+                _kind_hint = payment["kind"]
+                if _kind_hint == "wallet_charge":
+                    bot.answer_callback_query(call.id, "✅ پرداخت قبلاً تأیید شده — کیف پول شما شارژ شده است.", show_alert=True)
+                else:
+                    bot.answer_callback_query(call.id, "✅ این پرداخت قبلاً تأیید و پردازش شده است.\nدر صورت عدم دریافت سرویس با پشتیبانی تماس بگیرید.", show_alert=True)
+            else:
+                bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
             return
         txn_id_v = payment["receipt_text"]
         ok_v, status_v = check_plisio_invoice(txn_id_v)
@@ -6842,7 +7061,14 @@ def _dispatch_callback(call, uid, data):
             return
         if payment["status"] != "pending":
             try:
-                bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+                if payment["status"] == "completed":
+                    _kind_np = payment["kind"]
+                    if _kind_np == "wallet_charge":
+                        bot.answer_callback_query(call.id, "✅ پرداخت قبلاً تأیید شده — کیف پول شما شارژ شده است.", show_alert=True)
+                    else:
+                        bot.answer_callback_query(call.id, "✅ این پرداخت قبلاً تأیید و پردازش شده است.\nدر صورت عدم دریافت سرویس با پشتیبانی تماس بگیرید.", show_alert=True)
+                else:
+                    bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
             except Exception:
                 pass
             return
@@ -7930,6 +8156,125 @@ def _dispatch_callback(call, uid, data):
             f"{footer}"
         )
         send_or_edit(call, text, kb_admin_panel(uid))
+        return
+
+    # ── Admin: Force-check pending crypto payments ─────────────────────────────
+    if data == "admin:crypto_pay_check" or data.startswith("admin:crypto_pay_check:force:") or data.startswith("admin:crypto_pay_check:approve:"):
+        if uid not in ADMIN_IDS:
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        from ..db import get_pending_crypto_payments
+
+        # ── Force-approve (bypass gateway API — for testing) ──────────────────
+        if data.startswith("admin:crypto_pay_check:approve:"):
+            _pid = int(data.split(":")[-1])
+            _pay = get_payment(_pid)
+            if not _pay or _pay["status"] != "pending":
+                send_or_edit(call, "ℹ️ این پرداخت دیگر pending نیست.", back_button("admin:crypto_pay_check"))
+                return
+            _gw = _pay["payment_method"]
+            from ..crypto_fulfillment import run_crypto_fulfillment_async
+            run_crypto_fulfillment_async(_gw, _pid)
+            send_or_edit(call,
+                f"✅ پرداخت <b>#{_pid}</b> به‌صورت اجباری تأیید و در حال تحویل است.",
+                back_button("admin:crypto_pay_check"))
+            return
+
+        # ── Check via gateway API ─────────────────────────────────────────────
+        if data.startswith("admin:crypto_pay_check:force:"):
+            _pid = int(data.split(":")[-1])
+            _pay = get_payment(_pid)
+            if not _pay or _pay["status"] != "pending":
+                send_or_edit(call, "این پرداخت دیگر pending نیست.", back_button("admin:crypto_pay_check"))
+                return
+            _gw = _pay["payment_method"]
+            _inv = _pay["receipt_text"]
+            send_or_edit(call,
+                f"⏳ در حال بررسی پرداخت <b>#{_pid}</b> از درگاه <b>{_gw}</b>...",
+                back_button("admin:crypto_pay_check"))
+            def _force_check(_pid=_pid, _gw=_gw, _inv=_inv, _chat_id=call.message.chat.id, _msg_id=call.message.message_id):
+                try:
+                    if _gw == "plisio":
+                        from ..gateways.plisio import check_plisio_invoice, is_plisio_paid
+                        ok, st = check_plisio_invoice(_inv)
+                        paid = ok and is_plisio_paid(st)
+                    elif _gw == "nowpayments":
+                        ok, st = check_nowpayments_invoice(_inv)
+                        paid = ok and is_nowpayments_paid(st)
+                    else:
+                        ok, st, paid = False, "?", False
+                    print(f"[admin force-check] payment={_pid} gw={_gw} ok={ok} status={st!r} paid={paid}")
+                    pay = get_payment(_pid)
+                    if not pay or pay["status"] != "pending":
+                        try:
+                            bot.edit_message_text(
+                                f"ℹ️ پرداخت <b>#{_pid}</b> — وضعیت تغییر کرده بود (احتمالاً قبلاً تأیید شد).",
+                                _chat_id, _msg_id, parse_mode="HTML",
+                                reply_markup=back_button("admin:crypto_pay_check"))
+                        except Exception:
+                            pass
+                        return
+                    if paid:
+                        from ..crypto_fulfillment import run_crypto_fulfillment_async
+                        run_crypto_fulfillment_async(_gw, _pid)
+                        try:
+                            bot.edit_message_text(
+                                f"✅ پرداخت <b>#{_pid}</b> تأیید شد! در حال تحویل سرویس...",
+                                _chat_id, _msg_id, parse_mode="HTML",
+                                reply_markup=back_button("admin:crypto_pay_check"))
+                        except Exception:
+                            pass
+                    else:
+                        kb_fc = types.InlineKeyboardMarkup()
+                        kb_fc.add(types.InlineKeyboardButton(
+                            f"✅ تأیید اجباری #{_pid}",
+                            callback_data=f"admin:crypto_pay_check:approve:{_pid}"))
+                        kb_fc.add(types.InlineKeyboardButton("🔙 بازگشت",
+                            callback_data="admin:crypto_pay_check"))
+                        status_str = st if ok else "خطا در اتصال به API"
+                        try:
+                            bot.edit_message_text(
+                                f"❌ پرداخت <b>#{_pid}</b> هنوز از طرف درگاه تأیید نشده.\n"
+                                f"وضعیت API: <code>{esc(str(status_str))}</code>\n\n"
+                                f"اگر پرداخت واقعاً انجام شده، دکمه «تأیید اجباری» بزن.",
+                                _chat_id, _msg_id, parse_mode="HTML", reply_markup=kb_fc)
+                        except Exception:
+                            pass
+                except Exception as _e:
+                    print(f"ADMIN_FORCE_CHECK_ERROR: {_e}")
+            threading.Thread(target=_force_check, daemon=True).start()
+            return
+
+        # ── List view ─────────────────────────────────────────────────────────
+        rows = get_pending_crypto_payments(30)
+        if not rows:
+            send_or_edit(call,
+                "✅ هیچ پرداخت کریپتو pending‌ای وجود ندارد.\n\n"
+                "برای تست: یک خرید رو شروع کن و فاکتور رو باز کن (نیازی به پرداخت نیست)، "
+                "بعد برگرد اینجا و دکمه «تأیید اجباری» رو بزن.",
+                back_button("admin:panel"))
+            return
+        kb = types.InlineKeyboardMarkup()
+        lines = ["🔍 <b>پرداخت‌های کریپتو معلق</b>\n"]
+        for r in rows:
+            gw      = r["payment_method"]
+            pid     = r["id"]
+            amt     = r["amount"]
+            kind    = r.get("kind", "")
+            uname   = r.get("username") or r.get("full_name") or str(r["user_id"])
+            created = (r.get("created_at") or "")[:16]
+            lines.append(f"• <b>#{pid}</b> | {gw} | {fmt_price(amt)}T | {kind} | @{uname} | {created}")
+            kb.row(
+                types.InlineKeyboardButton(
+                    f"🔁 بررسی #{pid}",
+                    callback_data=f"admin:crypto_pay_check:force:{pid}"),
+                types.InlineKeyboardButton(
+                    f"✅ تأیید اجباری #{pid}",
+                    callback_data=f"admin:crypto_pay_check:approve:{pid}"),
+            )
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin:panel"))
+        send_or_edit(call, "\n".join(lines), kb)
         return
 
     # ── Admin: Stats / Analytics ───────────────────────────────────────────────
@@ -9648,7 +9993,11 @@ def _dispatch_callback(call, uid, data):
             if not payment or payment["user_id"] != uid:
                 bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
             if payment["status"] != "pending":
-                bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True); return
+                if payment["status"] == "completed":
+                    bot.answer_callback_query(call.id, "✅ این پرداخت قبلاً تأیید شده است.\nسرویس تمدید شده — در صورت عدم تمدید با پشتیبانی تماس بگیرید.", show_alert=True)
+                else:
+                    bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+                return
             txn_id_vp = payment["receipt_text"]
             ok_vp, status_vp = check_plisio_invoice(txn_id_vp)
             if not ok_vp:
@@ -9736,7 +10085,10 @@ def _dispatch_callback(call, uid, data):
                 return
             if payment["status"] != "pending":
                 try:
-                    bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+                    if payment["status"] == "completed":
+                        bot.answer_callback_query(call.id, "✅ این پرداخت قبلاً تأیید شده است.\nسرویس تمدید شده — در صورت عدم تمدید با پشتیبانی تماس بگیرید.", show_alert=True)
+                    else:
+                        bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
                 except Exception:
                     pass
                 return
