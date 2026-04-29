@@ -3382,6 +3382,17 @@ def universal_handler(message):
             bot.send_message(uid, "✅ کلید API TronPays ذخیره شد.", reply_markup=back_button("adm:set:gw:tronpays_rial"))
             return
 
+        if sn == "admin_set_pazzlenet_key" and is_admin(uid):
+            val = (message.text or "").strip()
+            if not val:
+                bot.send_message(uid, "⚠️ کلید API نمی‌تواند خالی باشد. لطفاً دوباره ارسال کنید:", reply_markup=back_button("adm:set:gw:pazzlenet"))
+                return
+            setting_set("pazzlenet_api_key", val)
+            log_admin_action(uid, "کلید API PazzleNet تغییر کرد")
+            state_clear(uid)
+            bot.send_message(uid, "✅ کلید API PazzleNet ذخیره شد.", reply_markup=back_button("adm:set:gw:pazzlenet"))
+            return
+
         if sn == "admin_set_tronpays_rial_cb_url" and is_admin(uid):
             val = (message.text or "").strip()
             if val and not (val.startswith("http://") or val.startswith("https://")):

@@ -88,6 +88,9 @@ from ..gateways.swapwallet_crypto import (
 from ..gateways.tronpays_rial import (
     create_tronpays_rial_invoice, check_tronpays_rial_invoice, is_tronpays_paid,
 )
+from ..gateways.pazzlenet import (
+    create_pazzlenet_invoice, check_pazzlenet_payment, is_pazzlenet_paid,
+)
 from ..gateways.plisio import (
     create_plisio_invoice, check_plisio_invoice,
     is_plisio_paid, is_plisio_pending, is_plisio_failed,
@@ -95,6 +98,7 @@ from ..gateways.plisio import (
 from ..gateways.nowpayments import (
     create_nowpayments_invoice, check_nowpayments_invoice,
     is_nowpayments_paid, is_nowpayments_pending, is_nowpayments_failed,
+    get_active_nowpayments_currencies, NOWPAYMENTS_CURRENCIES, NP_CURRENCY_LABELS,
 )
 from ..ui.helpers import send_or_edit, check_channel_membership, channel_lock_message
 from ..ui.helpers import _invalidate_channel_cache
@@ -842,6 +846,10 @@ def _show_purchase_gateways(target, uid, package_id, price, package_row):
         _lbl = setting_get("gw_tronpays_rial_display_name", "").strip() or "💳 درگاه کارت به کارت (TronPay)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:tronpays_rial:{package_id}"))
         _gw_labels.append(("tronpays_rial", _lbl))
+    if is_gateway_available("pazzlenet", uid):
+        _lbl = setting_get("gw_pazzlenet_display_name", "").strip() or "💳 درگاه کارت به کارت (PazzleNet)"
+        kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:pazzlenet:{package_id}"))
+        _gw_labels.append(("pazzlenet", _lbl))
     if is_gateway_available("plisio", uid):
         _lbl = setting_get("gw_plisio_display_name", "").strip() or "💎 پرداخت کریپتو (Plisio)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:plisio:{package_id}"))
@@ -920,6 +928,10 @@ def _show_renewal_gateways(target, uid, purchase_id, package_id, price, package_
         _lbl = setting_get("gw_tronpays_rial_display_name", "").strip() or "💳 درگاه کارت به کارت (TronPay)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:tronpays_rial:{purchase_id}:{package_id}"))
         _gw_labels.append(("tronpays_rial", _lbl))
+    if is_gateway_available("pazzlenet", uid):
+        _lbl = setting_get("gw_pazzlenet_display_name", "").strip() or "💳 درگاه کارت به کارت (PazzleNet)"
+        kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:pazzlenet:{purchase_id}:{package_id}"))
+        _gw_labels.append(("pazzlenet", _lbl))
     if is_gateway_available("plisio", uid):
         _lbl = setting_get("gw_plisio_display_name", "").strip() or "💎 پرداخت کریپتو (Plisio)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:plisio:{purchase_id}:{package_id}"))
@@ -1418,6 +1430,10 @@ def _show_pnlcfg_renewal_gateways(target, uid, config_id, package_id, price, pac
         _lbl = setting_get("gw_tronpays_rial_display_name", "").strip() or "💳 درگاه کارت به کارت (TronPay)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"mypnlcfgrpay:tronpays_rial:{config_id}:{package_id}"))
         _gw_labels.append(("tronpays_rial", _lbl))
+    if is_gateway_available("pazzlenet", uid):
+        _lbl = setting_get("gw_pazzlenet_display_name", "").strip() or "💳 درگاه کارت به کارت (PazzleNet)"
+        kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"mypnlcfgrpay:pazzlenet:{config_id}:{package_id}"))
+        _gw_labels.append(("pazzlenet", _lbl))
     if is_gateway_available("plisio", uid):
         _lbl = setting_get("gw_plisio_display_name", "").strip() or "💎 پرداخت کریپتو (Plisio)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"mypnlcfgrpay:plisio:{config_id}:{package_id}"))
@@ -1481,6 +1497,10 @@ def _show_wallet_gateways(target, uid, amount):
         _lbl = setting_get("gw_tronpays_rial_display_name", "").strip() or "💳 درگاه کارت به کارت (TronPay)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:tronpays_rial"))
         _gw_labels.append(("tronpays_rial", _lbl))
+    if is_gateway_available("pazzlenet", uid):
+        _lbl = setting_get("gw_pazzlenet_display_name", "").strip() or "💳 درگاه کارت به کارت (PazzleNet)"
+        kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:pazzlenet"))
+        _gw_labels.append(("pazzlenet", _lbl))
     if is_gateway_available("plisio", uid):
         _lbl = setting_get("gw_plisio_display_name", "").strip() or "💎 پرداخت کریپتو (Plisio)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:plisio"))
@@ -4000,6 +4020,159 @@ def _start_tronpays_rial_auto_verify(payment_id, invoice_id, uid, chat_id, messa
     t.start()
 
 
+# ── PazzleNet auto-verify thread ──────────────────────────────────────────────
+def _pazzlenet_auto_verify(payment_id, pazzlenet_pid, uid, chat_id, message_id, kind,
+                           package_id=None):
+    """Background thread: polls PazzleNet every 15s for up to 60 minutes."""
+    max_tries = 240  # 240 × 15s = 60 minutes
+    for attempt in range(max_tries):
+        time.sleep(15)
+        payment = get_payment(payment_id)
+        if not payment or payment["status"] != "pending":
+            return
+        ok, status = check_pazzlenet_payment(pazzlenet_pid)
+        print(f"[PazzleNet auto-verify] attempt={attempt+1} payment={payment_id} ok={ok} status={status!r}")
+        if not ok or not is_pazzlenet_paid(status):
+            continue
+        try:
+            if kind == "wallet_charge":
+                if not complete_payment(payment_id):
+                    return
+                update_balance(uid, payment["amount"])
+                state_clear(uid)
+                try:
+                    apply_gateway_bonus_if_needed(uid, "pazzlenet", payment["amount"])
+                except Exception:
+                    pass
+                try:
+                    bot.edit_message_text(
+                        f"✅ پرداخت شما تأیید شد و کیف پول شارژ شد.\n\n💰 مبلغ: {fmt_price(payment['amount'])} تومان",
+                        chat_id, message_id, parse_mode="HTML",
+                        reply_markup=back_button("main"))
+                except Exception:
+                    bot.send_message(uid,
+                        f"✅ پرداخت شما تأیید شد و کیف پول شارژ شد.\n\n💰 مبلغ: {fmt_price(payment['amount'])} تومان",
+                        parse_mode="HTML", reply_markup=back_button("main"))
+
+            elif kind == "config_purchase":
+                pkg_row = get_package(package_id)
+                _qty_pz_auto = int(payment["quantity"]) if "quantity" in payment.keys() else 1
+                if not complete_payment(payment_id):
+                    return
+                state_clear(uid)
+                try:
+                    bot.edit_message_text(
+                        "✅ پرداخت شما تأیید شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
+                        chat_id, message_id, parse_mode="HTML",
+                        reply_markup=back_button("main"))
+                except Exception:
+                    bot.send_message(uid,
+                        "✅ پرداخت شما تأیید شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
+                        parse_mode="HTML", reply_markup=back_button("main"))
+                purchase_ids, pending_ids = _deliver_bulk_configs(
+                    chat_id, uid, package_id,
+                    payment["amount"], "pazzlenet", _qty_pz_auto, payment_id,
+                    service_names=get_payment_service_names(payment_id)
+                )
+                try:
+                    apply_gateway_bonus_if_needed(uid, "pazzlenet", payment["amount"])
+                except Exception:
+                    pass
+                _send_bulk_delivery_result(chat_id, uid, pkg_row,
+                                           purchase_ids, pending_ids, "PazzleNet")
+
+            elif kind == "renewal":
+                pkg_row = get_package(package_id)
+                cfg_id = payment["config_id"]
+                with get_conn() as conn:
+                    row = conn.execute("SELECT purchase_id FROM configs WHERE id=?", (cfg_id,)).fetchone()
+                pid = row["purchase_id"] if row else 0
+                item = get_purchase(pid) if pid else None
+                if not complete_payment(payment_id):
+                    return
+                state_clear(uid)
+                msg_text = (
+                    "✅ <b>درخواست تمدید ارسال شد</b>\n\n"
+                    "🔄 درخواست تمدید سرویس شما با موفقیت ثبت و برای پشتیبانی ارسال شد.\n"
+                    "⏳ لطفاً کمی صبر کنید، پس از انجام تمدید به شما اطلاع داده خواهد شد.\n\n"
+                    "🙏 از صبر و شکیبایی شما متشکریم."
+                )
+                try:
+                    bot.edit_message_text(msg_text, chat_id, message_id, parse_mode="HTML",
+                                          reply_markup=back_button("main"))
+                except Exception:
+                    bot.send_message(uid, msg_text, parse_mode="HTML", reply_markup=back_button("main"))
+                if item:
+                    admin_renewal_notify(uid, item, pkg_row, payment["amount"], "PazzleNet")
+                try:
+                    apply_gateway_bonus_if_needed(uid, "pazzlenet", payment["amount"])
+                except Exception:
+                    pass
+
+            elif kind == "pnlcfg_renewal":
+                cfg_id_pz  = payment["config_id"]
+                pkg_id_pz  = payment["package_id"]
+                if not complete_payment(payment_id):
+                    return
+                state_clear(uid)
+                ok_pz, err_pz = _execute_pnlcfg_renewal(cfg_id_pz, pkg_id_pz, chat_id=uid, uid=uid)
+                if ok_pz:
+                    try:
+                        bot.send_message(uid, "✅ پرداخت تأیید و سرویس تمدید شد.",
+                                         parse_mode="HTML", reply_markup=back_button("my_configs"))
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        bot.send_message(uid,
+                            "✅ پرداخت تأیید شد اما تمدید سرویس با خطا مواجه شد.\nلطفاً با پشتیبانی ارتباط بگیرید.",
+                            parse_mode="HTML", reply_markup=back_button("my_configs"))
+                    except Exception:
+                        pass
+
+        except Exception as e:
+            print("PAZZLENET_AUTO_VERIFY_ERROR:", e)
+        return
+
+    # Timeout
+    payment = get_payment(payment_id)
+    if payment and payment["status"] == "pending":
+        state_clear(uid)
+        if kind == "pnlcfg_renewal":
+            verify_cb = f"mypnlcfgrpay:pazzlenet:verify:{payment_id}"
+        elif kind == "renewal":
+            verify_cb = f"rpay:pazzlenet:verify:{payment_id}"
+        else:
+            verify_cb = f"pay:pazzlenet:verify:{payment_id}"
+        timeout_msg = (
+            "⏰ <b>بررسی خودکار پرداخت پایان یافت</b>\n\n"
+            "وقتی پرداخت‌تون تو PazzleNet تایید شد، دکمه <b>بررسی پرداخت</b> زیر را بزنید "
+            "تا پرداخت تأیید شده و ادامه عملیات انجام شود.\n\n"
+            "اگر مبلغ از حساب شما کسر شده و پرداخت تأیید نشده، لطفاً با پشتیبانی تماس بگیرید."
+        )
+        timeout_kb = types.InlineKeyboardMarkup()
+        timeout_kb.add(types.InlineKeyboardButton("🔍 بررسی پرداخت", callback_data=verify_cb))
+        try:
+            bot.edit_message_text(timeout_msg, chat_id, message_id, parse_mode="HTML",
+                                  reply_markup=timeout_kb)
+        except Exception:
+            try:
+                bot.send_message(uid, timeout_msg, parse_mode="HTML", reply_markup=timeout_kb)
+            except Exception:
+                pass
+
+
+def _start_pazzlenet_auto_verify(payment_id, pazzlenet_pid, uid, chat_id, message_id,
+                                 kind, package_id=None):
+    t = threading.Thread(
+        target=_pazzlenet_auto_verify,
+        args=(payment_id, pazzlenet_pid, uid, chat_id, message_id, kind),
+        kwargs={"package_id": package_id},
+        daemon=True,
+    )
+    t.start()
+
+
 # ── Plisio auto-verify thread ─────────────────────────────────────────────────
 def _plisio_auto_verify(payment_id, txn_id, uid, chat_id, message_id, kind, package_id=None):
     """Background thread: polls Plisio every 15s for up to 15 minutes."""
@@ -5244,6 +5417,116 @@ def _dispatch_callback(call, uid, data):
             "renewal", package_id=package_id)
         return
 
+    # ── PazzleNet: renewal ────────────────────────────────────────────────────
+    if data.startswith("rpay:pazzlenet:verify:"):
+        payment_id = int(data.split(":")[3])
+        payment = get_payment(payment_id)
+        if not payment or payment["user_id"] != uid:
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        if payment["status"] != "pending":
+            bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+            return
+        pz_pid_rv = payment["receipt_text"]
+        ok, status = check_pazzlenet_payment(pz_pid_rv)
+        if not ok:
+            bot.answer_callback_query(call.id, "خطا در بررسی وضعیت پرداخت.", show_alert=True)
+            return
+        if is_pazzlenet_paid(status):
+            if not complete_payment(payment_id):
+                bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+                return
+            package_row = get_package(payment["package_id"])
+            config_id   = payment["config_id"]
+            with get_conn() as conn:
+                row = conn.execute("SELECT purchase_id FROM configs WHERE id=?", (config_id,)).fetchone()
+            purchase_id = row["purchase_id"] if row else 0
+            item = get_purchase(purchase_id) if purchase_id else None
+            bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد!")
+            send_or_edit(call,
+                "✅ <b>درخواست تمدید ارسال شد</b>\n\n"
+                "🔄 درخواست تمدید سرویس شما با موفقیت ثبت و برای پشتیبانی ارسال شد.\n"
+                "⏳ لطفاً کمی صبر کنید، پس از انجام تمدید به شما اطلاع داده خواهد شد.\n\n"
+                "🙏 از صبر و شکیبایی شما متشکریم.",
+                back_button("main"))
+            if item:
+                admin_renewal_notify(uid, item, package_row, payment["amount"], "PazzleNet")
+            try:
+                apply_gateway_bonus_if_needed(uid, "pazzlenet", payment["amount"])
+            except Exception:
+                pass
+            state_clear(uid)
+        else:
+            bot.answer_callback_query(call.id, "❌ پرداخت هنوز تأیید نشده. لطفاً ابتدا پرداخت را انجام دهید.", show_alert=True)
+        return
+
+    if data.startswith("rpay:pazzlenet:"):
+        if not _check_invoice_valid(uid):
+            _show_invoice_expired(call)
+            return
+        parts = data.split(":")
+        purchase_id = int(parts[2])
+        package_id  = int(parts[3])
+        item = get_purchase(purchase_id)
+        package_row = get_package(package_id)
+        if not item or item["user_id"] != uid:
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        if not package_row:
+            bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
+            return
+        price = _get_state_price(uid, package_row, "renew_select_method")
+        if not is_gateway_in_range("pazzlenet", price):
+            _rng = get_gateway_range_text("pazzlenet")
+            bot.answer_callback_query(call.id,
+                f"⛔️ مبلغ {fmt_price(price)} تومان برای درگاه PazzleNet مجاز نیست.\n"
+                f"محدوده مجاز: {_rng}\n\n"
+                "لطفاً درگاه دیگری متناسب با این مبلغ انتخاب کنید.",
+                show_alert=True)
+            return
+        success, result = create_pazzlenet_invoice(price, uid)
+        if not success:
+            err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                f"⚠️ <b>خطا در ایجاد درگاه PazzleNet</b>\n\n"
+                f"<code>{esc(err_msg[:400])}</code>\n\n"
+                "💡 مطمئن شوید کلید API صحیح وارد شده باشد.",
+                back_button(f"renew:{purchase_id}"))
+            return
+        pz_pid = result.get("payment_id")
+        pz_url = result.get("payment_link")
+        if not pz_pid or not pz_url:
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                f"⚠️ <b>خطا در ایجاد فاکتور PazzleNet</b>\n\n"
+                f"<code>پاسخ API: {esc(str(result)[:400])}</code>",
+                back_button(f"renew:{purchase_id}"))
+            return
+        payment_id = create_payment("renewal", uid, package_id, price, "pazzlenet", status="pending",
+                                    config_id=item["config_id"])
+        with get_conn() as conn:
+            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (pz_pid, payment_id))
+        state_set(uid, "await_renewal_pazzlenet_verify", payment_id=payment_id,
+                  pazzlenet_id=pz_pid, purchase_id=purchase_id)
+        text = (
+            "💳 <b>پرداخت ریالی (PazzleNet) — تمدید</b>\n\n"
+            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n\n"
+            "از لینک زیر پرداخت را انجام دهید.\n\n"
+            "⏳ <b>تا یک ساعت</b> پرداخت به صورت خودکار بررسی می‌شود.\n"
+            "در غیر این صورت دکمه «بررسی پرداخت» را بزنید."
+        )
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("💳 پرداخت از درگاه PazzleNet", url=pz_url))
+        kb.add(types.InlineKeyboardButton("🔍 بررسی پرداخت", callback_data=f"rpay:pazzlenet:verify:{payment_id}"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, text, kb)
+        _start_pazzlenet_auto_verify(
+            payment_id, pz_pid, uid,
+            call.message.chat.id, call.message.message_id,
+            "renewal", package_id=package_id)
+        return
+
     # ── Plisio: renewal ───────────────────────────────────────────────────────
     if data.startswith("rpay:plisio:verify:"):
         payment_id = int(data.split(":")[3])
@@ -5447,54 +5730,26 @@ def _dispatch_callback(call, uid, data):
             except Exception:
                 pass
             return
-        payment_id = create_payment("renewal", uid, package_id, price, "nowpayments", status="pending",
-                                    config_id=item["config_id"])
-        _bot_username_rnp = bot.get_me().username or ""
-        order_label_rnp = (
-            f"تمدید {package_row['name']}"
-            if ('show_name' not in package_row.keys() or package_row['show_name'])
-            else f"تمدید {fmt_vol(package_row['volume_gb'])} | {fmt_dur(package_row['duration_days'])}"
-        )
-        success_rnp, result_rnp = create_nowpayments_invoice(price, payment_id, uid, _bot_username_rnp, order_label_rnp)
-        if not success_rnp:
-            err_msg = result_rnp.get("error", "خطای ناشناخته") if isinstance(result_rnp, dict) else str(result_rnp)
+        _active_np_r = get_active_nowpayments_currencies()
+        if not _active_np_r:
+            bot.answer_callback_query(call.id, "هیچ ارزی برای NowPayments فعال نشده است.", show_alert=True)
+            return
+        state_set(uid, "npcur_select", kind="renewal",
+                  purchase_id=purchase_id, package_id=package_id,
+                  amount=price, config_id=item["config_id"])
+        if len(_active_np_r) == 1:
+            _fake_call(call, f"npay:cur:{_active_np_r[0][0]}")
+        else:
+            kb = types.InlineKeyboardMarkup()
+            for code, lbl in _active_np_r:
+                kb.add(types.InlineKeyboardButton(lbl, callback_data=f"npay:cur:{code}"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"renew:{purchase_id}",
+                                              icon_custom_emoji_id="5253997076169115797"))
             try:
                 bot.answer_callback_query(call.id)
             except Exception:
                 pass
-            send_or_edit(call,
-                f"⚠️ <b>خطا در ایجاد فاکتور NowPayments</b>\n\n<code>{esc(err_msg[:400])}</code>",
-                back_button(f"renew:{purchase_id}"))
-            return
-        invoice_id_rnp  = result_rnp.get("invoice_id", "")
-        inv_url_rnp     = result_rnp.get("invoice_url", "")
-        amount_usdt_rnp = result_rnp.get("amount_usdt", 0)
-        with get_conn() as conn:
-            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id_rnp, payment_id))
-        state_set(uid, "await_nowpayments_verify", payment_id=payment_id, invoice_id=invoice_id_rnp,
-                  purchase_id=purchase_id)
-        short_id_rnp = str(payment_id)
-        text_rnp = (
-            "💎 <b>پرداخت کریپتو NowPayments — تمدید</b>\n\n"
-            f"🛒 کد پیگیری: <code>{short_id_rnp}</code>\n"
-            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n"
-            f"💱 معادل: <b>{amount_usdt_rnp:.4f} USDT</b>\n\n"
-            "❌ این فاکتور <b>۱ ساعت</b> اعتبار دارد\n"
-            "پس از واریز، دکمه «✅ بررسی پرداخت» را بزنید."
-        )
-        kb_rnp = types.InlineKeyboardMarkup()
-        kb_rnp.add(types.InlineKeyboardButton("💎 پرداخت در NowPayments", url=inv_url_rnp))
-        kb_rnp.add(types.InlineKeyboardButton("✅ بررسی پرداخت", callback_data=f"rpay:nowpayments:verify:{payment_id}"))
-        kb_rnp.add(types.InlineKeyboardButton("⬅️ بازگشت", callback_data=f"renew:{purchase_id}"))
-        try:
-            bot.answer_callback_query(call.id)
-        except Exception:
-            pass
-        send_or_edit(call, text_rnp, kb_rnp)
-        _start_nowpayments_auto_verify(
-            payment_id, invoice_id_rnp, uid,
-            call.message.chat.id, call.message.message_id,
-            "renewal", package_id=package_id)
+            send_or_edit(call, "💎 <b>پرداخت NowPayments</b>\n\nارز مورد نظر را برای پرداخت انتخاب کنید:", kb)
         return
 
     # ── Admin: Confirm renewal ────────────────────────────────────────────────
@@ -6315,6 +6570,131 @@ def _dispatch_callback(call, uid, data):
             "config_purchase", package_id=package_id)
         return
 
+    # ── PazzleNet: purchase ───────────────────────────────────────────────────
+    if data.startswith("pay:pazzlenet:verify:"):
+        payment_id = int(data.split(":")[3])
+        payment = get_payment(payment_id)
+        if not payment or payment["user_id"] != uid:
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        if payment["status"] != "pending":
+            bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+            return
+        pz_pid_v = payment["receipt_text"]
+        ok, status = check_pazzlenet_payment(pz_pid_v)
+        if not ok:
+            bot.answer_callback_query(call.id, "خطا در بررسی وضعیت پرداخت.", show_alert=True)
+            return
+        if is_pazzlenet_paid(status):
+            if payment["kind"] == "wallet_charge":
+                if not complete_payment(payment_id):
+                    bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+                    return
+                update_balance(uid, payment["amount"])
+                bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد!")
+                send_or_edit(call, f"✅ پرداخت شما تأیید و کیف پول شارژ شد.\n\n💰 مبلغ: {fmt_price(payment['amount'])} تومان",
+                             back_button("main"))
+                try:
+                    apply_gateway_bonus_if_needed(uid, "pazzlenet", payment["amount"])
+                except Exception:
+                    pass
+                state_clear(uid)
+            else:
+                config_id  = payment["config_id"]
+                package_id = payment["package_id"]
+                package_row = get_package(package_id)
+                _qty_pz  = int(payment["quantity"]) if "quantity" in payment.keys() else 1
+                if not complete_payment(payment_id):
+                    bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+                    return
+                bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد!")
+                send_or_edit(call, "✅ پرداخت شما تأیید شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
+                             back_button("main"))
+                _chat_id_pz = call.message.chat.id
+                _amt_pz = payment["amount"]
+                _snames_pz_verify = get_payment_service_names(payment_id)
+                def _do_pazzlenet_deliver():
+                    purchase_ids, pending_ids = _deliver_bulk_configs(
+                        _chat_id_pz, uid, package_id,
+                        _amt_pz, "pazzlenet", _qty_pz, payment_id,
+                        service_names=_snames_pz_verify
+                    )
+                    try:
+                        apply_gateway_bonus_if_needed(uid, "pazzlenet", _amt_pz)
+                    except Exception:
+                        pass
+                    _send_bulk_delivery_result(_chat_id_pz, uid, package_row,
+                                               purchase_ids, pending_ids, "PazzleNet")
+                threading.Thread(target=_do_pazzlenet_deliver, daemon=True).start()
+                state_clear(uid)
+        else:
+            bot.answer_callback_query(call.id, "❌ پرداخت هنوز تأیید نشده. لطفاً ابتدا پرداخت را انجام دهید.", show_alert=True)
+        return
+
+    if data.startswith("pay:pazzlenet:"):
+        if not _check_invoice_valid(uid):
+            _show_invoice_expired(call)
+            return
+        package_id  = int(data.split(":")[2])
+        package_row = get_package(package_id)
+        if not package_row or not _pkg_has_stock(package_row, setting_get("preorder_mode", "0") == "1"):
+            bot.answer_callback_query(call.id, "موجودی این پکیج تمام شده است.", show_alert=True)
+            return
+        price        = _get_state_price(uid, package_row, "buy_select_method")
+        _qty_pz_buy  = int(state_data(uid).get("quantity", 1) or 1)
+        if not is_gateway_in_range("pazzlenet", price):
+            _rng = get_gateway_range_text("pazzlenet")
+            bot.answer_callback_query(call.id,
+                f"⛔️ مبلغ {fmt_price(price)} تومان برای درگاه PazzleNet مجاز نیست.\n"
+                f"محدوده مجاز: {_rng}\n\n"
+                "لطفاً درگاه دیگری متناسب با این مبلغ انتخاب کنید.",
+                show_alert=True)
+            return
+        success, result = create_pazzlenet_invoice(price, uid)
+        if not success:
+            err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                f"⚠️ <b>خطا در ایجاد درگاه PazzleNet</b>\n\n"
+                f"<code>{esc(err_msg[:400])}</code>\n\n"
+                "💡 مطمئن شوید کلید API صحیح وارد شده باشد.",
+                back_button(f"buy:p:{package_id}"))
+            return
+        pz_pid = result.get("payment_id")
+        pz_url = result.get("payment_link")
+        if not pz_pid or not pz_url:
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                f"⚠️ <b>خطا در ایجاد فاکتور PazzleNet</b>\n\n"
+                f"<code>پاسخ API: {esc(str(result)[:400])}</code>",
+                back_button(f"buy:p:{package_id}"))
+            return
+        payment_id = create_payment("config_purchase", uid, package_id, price, "pazzlenet",
+                                    status="pending", quantity=_qty_pz_buy)
+        _snames_pz = state_data(uid).get("service_names")
+        if _snames_pz:
+            set_payment_service_names(payment_id, _snames_pz)
+        with get_conn() as conn:
+            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (pz_pid, payment_id))
+        state_set(uid, "await_pazzlenet_verify", payment_id=payment_id, pazzlenet_id=pz_pid)
+        text = (
+            "💳 <b>پرداخت ریالی (PazzleNet)</b>\n\n"
+            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n\n"
+            "از لینک زیر پرداخت را انجام دهید.\n\n"
+            "⏳ <b>تا یک ساعت</b> پرداخت به صورت خودکار بررسی می‌شود.\n"
+            "در غیر این صورت دکمه «بررسی پرداخت» را بزنید."
+        )
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("💳 پرداخت از درگاه PazzleNet", url=pz_url))
+        kb.add(types.InlineKeyboardButton("🔍 بررسی پرداخت", callback_data=f"pay:pazzlenet:verify:{payment_id}"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, text, kb)
+        _start_pazzlenet_auto_verify(
+            payment_id, pz_pid, uid,
+            call.message.chat.id, call.message.message_id,
+            "config_purchase", package_id=package_id)
+        return
+
     # ── Plisio: purchase ──────────────────────────────────────────────────────
     if data.startswith("pay:plisio:verify:"):
         payment_id = int(data.split(":")[3])
@@ -6534,56 +6914,26 @@ def _dispatch_callback(call, uid, data):
             except Exception:
                 pass
             return
-        payment_id = create_payment("config_purchase", uid, package_id, price, "nowpayments",
-                                    status="pending", quantity=_qty_np)
+        _active_np = get_active_nowpayments_currencies()
+        if not _active_np:
+            bot.answer_callback_query(call.id, "هیچ ارزی برای NowPayments فعال نشده است.", show_alert=True)
+            return
         _snames_np = state_data(uid).get("service_names")
-        if _snames_np:
-            set_payment_service_names(payment_id, _snames_np)
-        _bot_username_np = bot.get_me().username or ""
-        order_label_np = (
-            f"خرید {package_row['name']}"
-            if ('show_name' not in package_row.keys() or package_row['show_name'])
-            else f"خرید {fmt_vol(package_row['volume_gb'])} | {fmt_dur(package_row['duration_days'])}"
-        )
-        success_np, result_np = create_nowpayments_invoice(price, payment_id, uid, _bot_username_np, order_label_np)
-        if not success_np:
-            err_msg = result_np.get("error", "خطای ناشناخته") if isinstance(result_np, dict) else str(result_np)
+        state_set(uid, "npcur_select", kind="config_purchase", package_id=package_id,
+                  amount=price, quantity=_qty_np, service_names=_snames_np)
+        if len(_active_np) == 1:
+            _fake_call(call, f"npay:cur:{_active_np[0][0]}")
+        else:
+            kb = types.InlineKeyboardMarkup()
+            for code, lbl in _active_np:
+                kb.add(types.InlineKeyboardButton(lbl, callback_data=f"npay:cur:{code}"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"buy:p:{package_id}",
+                                              icon_custom_emoji_id="5253997076169115797"))
             try:
                 bot.answer_callback_query(call.id)
             except Exception:
                 pass
-            send_or_edit(call,
-                f"⚠️ <b>خطا در ایجاد فاکتور NowPayments</b>\n\n<code>{esc(err_msg[:400])}</code>",
-                back_button(f"buy:p:{package_id}"))
-            return
-        invoice_id_np  = result_np.get("invoice_id", "")
-        inv_url_np     = result_np.get("invoice_url", "")
-        amount_usdt_np = result_np.get("amount_usdt", 0)
-        with get_conn() as conn:
-            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id_np, payment_id))
-        state_set(uid, "await_nowpayments_verify", payment_id=payment_id, invoice_id=invoice_id_np)
-        short_id_np = str(payment_id)
-        text_np = (
-            "💎 <b>پرداخت کریپتو (NowPayments)</b>\n\n"
-            f"🛒 کد پیگیری: <code>{short_id_np}</code>\n"
-            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n"
-            f"💱 معادل: <b>{amount_usdt_np:.4f} USDT</b>\n\n"
-            "❌ این فاکتور <b>۱ ساعت</b> اعتبار دارد\n"
-            "پس از واریز، دکمه «✅ بررسی پرداخت» را بزنید."
-        )
-        kb_np = types.InlineKeyboardMarkup()
-        kb_np.add(types.InlineKeyboardButton("💎 پرداخت در NowPayments", url=inv_url_np))
-        kb_np.add(types.InlineKeyboardButton("✅ بررسی پرداخت", callback_data=f"pay:nowpayments:verify:{payment_id}"))
-        kb_np.add(types.InlineKeyboardButton("⬅️ بازگشت", callback_data=f"buy:p:{package_id}"))
-        try:
-            bot.answer_callback_query(call.id)
-        except Exception:
-            pass
-        send_or_edit(call, text_np, kb_np)
-        _start_nowpayments_auto_verify(
-            payment_id, invoice_id_np, uid,
-            call.message.chat.id, call.message.message_id,
-            "config_purchase", package_id=package_id)
+            send_or_edit(call, "💎 <b>پرداخت NowPayments</b>\n\nارز مورد نظر را برای پرداخت انتخاب کنید:", kb)
         return
 
     # ── Free test ─────────────────────────────────────────────────────────────
@@ -6617,7 +6967,7 @@ def _dispatch_callback(call, uid, data):
         has_any = False
         for item in items:
             packs = [p for p in get_packages(type_id=item['id'], price_only=0)
-                     if p['stock'] > 0 or (p.get('config_source') or 'manual') == 'panel']
+                     if p['stock'] > 0 or (p['config_source'] if 'config_source' in p.keys() else None) == 'panel']
             if packs:
                 kb.add(types.InlineKeyboardButton(f"🎁 {item['name']}", callback_data=f"test:t:{item['id']}"))
                 has_any = True
@@ -6658,14 +7008,14 @@ def _dispatch_callback(call, uid, data):
         type_row    = get_type(type_id)
         package_row = None
         for item in get_packages(type_id=type_id, price_only=0):
-            _is_panel = (item.get('config_source') or 'manual') == 'panel'
+            _is_panel = (item['config_source'] if 'config_source' in item.keys() else None) == 'panel'
             if item["stock"] > 0 or _is_panel:
                 package_row = item
                 break
         if not package_row:
             bot.answer_callback_query(call.id, "برای این نوع تست رایگان موجود نیست.", show_alert=True)
             return
-        _is_panel_pkg = (package_row.get('config_source') or 'manual') == 'panel'
+        _is_panel_pkg = (package_row['config_source'] if 'config_source' in package_row.keys() else None) == 'panel'
         if _is_panel_pkg:
             config_id = None  # will be created via panel
         else:
@@ -6678,17 +7028,16 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id)
             send_or_edit(call, "⏳ <b>در حال ساخت تست رایگان...</b>\n\nلطفاً چند لحظه صبر کنید.", back_button("nav:main"))
             _chat_id = call.message.chat.id
-            _svc_names = [_gen_service_name(uid)]
+            _svc_names = [generate_random_name()]
             def _do_panel_test():
                 _panel_ids, _pen_ids = _deliver_bulk_configs(
-                    uid=uid, package_id=package_row["id"], qty=1,
-                    payment_id=None, amount=0, pay_method="free_test",
-                    svc_names=_svc_names,
+                    _chat_id, uid, package_row["id"],
+                    0, "free_test", 1, None,
+                    service_names=_svc_names,
                 )
                 _send_bulk_delivery_result(
-                    chat_id=_chat_id, uid=uid, package=dict(package_row),
-                    panel_config_ids=_panel_ids, panel_pending_ids=_pen_ids,
-                    qty=1, amount=0, pay_method="free_test",
+                    _chat_id, uid, package_row,
+                    _panel_ids, _pen_ids, "تست رایگان",
                 )
             import threading as _threading
             _threading.Thread(target=_do_panel_test, daemon=True).start()
@@ -6964,6 +7313,64 @@ def _dispatch_callback(call, uid, data):
             "wallet_charge")
         return
 
+    if data == "wallet:charge:pazzlenet":
+        if not _check_invoice_valid(uid):
+            _show_invoice_expired(call)
+            return
+        sd     = state_data(uid)
+        amount = sd.get("amount")
+        if not amount:
+            bot.answer_callback_query(call.id, "ابتدا مبلغ را وارد کنید.", show_alert=True)
+            return
+        if not is_gateway_in_range("pazzlenet", amount):
+            _rng = get_gateway_range_text("pazzlenet")
+            bot.answer_callback_query(call.id,
+                f"⛔️ مبلغ {fmt_price(amount)} تومان برای درگاه PazzleNet مجاز نیست.\n"
+                f"محدوده مجاز: {_rng}\n\n"
+                "لطفاً درگاه دیگری متناسب با این مبلغ انتخاب کنید.",
+                show_alert=True)
+            return
+        success, result = create_pazzlenet_invoice(amount, uid)
+        if not success:
+            err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                f"⚠️ <b>خطا در ایجاد درگاه PazzleNet</b>\n\n"
+                f"<code>{esc(err_msg[:400])}</code>\n\n"
+                "💡 مطمئن شوید کلید API صحیح وارد شده باشد.",
+                back_button("wallet:charge"))
+            return
+        pz_pid      = result.get("payment_id")
+        pz_url      = result.get("payment_link")
+        if not pz_pid or not pz_url:
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                f"⚠️ <b>خطا در ایجاد فاکتور PazzleNet</b>\n\n"
+                f"<code>پاسخ API: {esc(str(result)[:400])}</code>",
+                back_button("wallet:charge"))
+            return
+        payment_id = create_payment("wallet_charge", uid, None, amount, "pazzlenet", status="pending")
+        with get_conn() as conn:
+            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (pz_pid, payment_id))
+        state_set(uid, "await_pazzlenet_verify", payment_id=payment_id, pazzlenet_id=pz_pid)
+        text = (
+            "💳 <b>شارژ کیف پول — PazzleNet</b>\n\n"
+            f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان\n\n"
+            "از لینک زیر پرداخت را انجام دهید.\n\n"
+            "⏳ <b>تا یک ساعت</b> پرداخت به صورت خودکار بررسی می‌شود.\n"
+            "در غیر این صورت دکمه «بررسی پرداخت» را بزنید."
+        )
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("💳 پرداخت از درگاه PazzleNet", url=pz_url))
+        kb.add(types.InlineKeyboardButton("🔍 بررسی پرداخت", callback_data=f"pay:pazzlenet:verify:{payment_id}"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, text, kb)
+        _start_pazzlenet_auto_verify(
+            payment_id, pz_pid, uid,
+            call.message.chat.id, call.message.message_id,
+            "wallet_charge")
+        return
+
     if data == "wallet:charge:plisio":
         if not _check_invoice_valid(uid):
             _show_invoice_expired(call)
@@ -7039,47 +7446,27 @@ def _dispatch_callback(call, uid, data):
             except Exception:
                 pass
             return
-        payment_id_wcn = create_payment("wallet_charge", uid, None, amount, "nowpayments", status="pending")
-        _bot_username_wcn = bot.get_me().username or ""
-        success_wcn, result_wcn = create_nowpayments_invoice(amount, payment_id_wcn, uid, _bot_username_wcn, "شارژ کیف پول")
-        if not success_wcn:
-            err_msg = result_wcn.get("error", "خطای ناشناخته") if isinstance(result_wcn, dict) else str(result_wcn)
+        _active_np_wc = get_active_nowpayments_currencies()
+        if not _active_np_wc:
+            bot.answer_callback_query(call.id, "هیچ ارزی برای NowPayments فعال نشده است.", show_alert=True)
+            return
+        if len(_active_np_wc) == 1:
+            # Single currency — create invoice directly
+            state_set(uid, "npcur_select", kind="wallet_charge", amount=amount,
+                      np_currency=_active_np_wc[0][0])
+            _fake_call(call, f"npay:cur:{_active_np_wc[0][0]}")
+        else:
+            state_set(uid, "npcur_select", kind="wallet_charge", amount=amount)
+            kb = types.InlineKeyboardMarkup()
+            for code, lbl in _active_np_wc:
+                kb.add(types.InlineKeyboardButton(lbl, callback_data=f"npay:cur:{code}"))
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data="wallet:charge",
+                                              icon_custom_emoji_id="5253997076169115797"))
             try:
                 bot.answer_callback_query(call.id)
             except Exception:
                 pass
-            send_or_edit(call,
-                f"⚠️ <b>خطا در ایجاد فاکتور NowPayments</b>\n\n<code>{esc(err_msg[:400])}</code>",
-                back_button("wallet:charge"))
-            return
-        invoice_id_wcn  = result_wcn.get("invoice_id", "")
-        inv_url_wcn     = result_wcn.get("invoice_url", "")
-        amount_usdt_wcn = result_wcn.get("amount_usdt", 0)
-        with get_conn() as conn:
-            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id_wcn, payment_id_wcn))
-        state_set(uid, "await_nowpayments_verify", payment_id=payment_id_wcn, invoice_id=invoice_id_wcn)
-        short_id_wcn = str(payment_id_wcn)
-        text_wcn = (
-            "💎 <b>شارژ کیف پول — NowPayments</b>\n\n"
-            f"🛒 کد پیگیری: <code>{short_id_wcn}</code>\n"
-            f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان\n"
-            f"💱 معادل: <b>{amount_usdt_wcn:.4f} USDT</b>\n\n"
-            "❌ این فاکتور <b>۱ ساعت</b> اعتبار دارد\n"
-            "پس از واریز، دکمه «✅ بررسی پرداخت» را بزنید."
-        )
-        kb_wcn = types.InlineKeyboardMarkup()
-        kb_wcn.add(types.InlineKeyboardButton("💎 پرداخت در NowPayments", url=inv_url_wcn))
-        kb_wcn.add(types.InlineKeyboardButton("✅ بررسی پرداخت", callback_data=f"pay:nowpayments:verify:{payment_id_wcn}"))
-        kb_wcn.add(types.InlineKeyboardButton("⬅️ بازگشت", callback_data="wallet:charge"))
-        try:
-            bot.answer_callback_query(call.id)
-        except Exception:
-            pass
-        send_or_edit(call, text_wcn, kb_wcn)
-        _start_nowpayments_auto_verify(
-            payment_id_wcn, invoice_id_wcn, uid,
-            call.message.chat.id, call.message.message_id,
-            "wallet_charge")
+            send_or_edit(call, "💎 <b>پرداخت NowPayments</b>\n\nارز مورد نظر را برای پرداخت انتخاب کنید:", kb)
         return
 
     if data.startswith("pay:swapwallet_crypto:verify:"):
@@ -7349,6 +7736,166 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id)
         show_swapwallet_crypto_page(call, amount_toman=amount, invoice_id=invoice_id,
                                     result=result, payment_id=payment_id, verify_cb=verify_cb)
+        return
+
+    # ── NowPayments: currency selected → create invoice ──────────────────────
+    if data.startswith("npay:cur:"):
+        currency = data[len("npay:cur:"):]
+        sd       = state_data(uid)
+        kind     = sd.get("kind", "")
+        amount   = sd.get("amount", 0)
+        if not amount:
+            bot.answer_callback_query(call.id, "خطا در اطلاعات سفارش.", show_alert=True)
+            return
+        _bot_username_nc = bot.get_me().username or ""
+
+        def _np_show_page(call, amount, payment_id, invoice_id, inv_url, amount_usdt, verify_cb, back_cb):
+            kb_nc = types.InlineKeyboardMarkup()
+            kb_nc.add(types.InlineKeyboardButton("💎 پرداخت در NowPayments", url=inv_url))
+            kb_nc.add(types.InlineKeyboardButton("✅ بررسی پرداخت", callback_data=verify_cb))
+            kb_nc.add(types.InlineKeyboardButton("⬅️ بازگشت", callback_data=back_cb))
+            send_or_edit(call,
+                "💎 <b>پرداخت کریپتو (NowPayments)</b>\n\n"
+                f"🛒 کد پیگیری: <code>{payment_id}</code>\n"
+                f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان\n"
+                f"💱 معادل: <b>{amount_usdt:.4f} USDT</b>\n\n"
+                "❌ این فاکتور <b>۱ ساعت</b> اعتبار دارد\n"
+                "پس از واریز، دکمه «✅ بررسی پرداخت» را بزنید.",
+                kb_nc)
+
+        if kind == "wallet_charge":
+            payment_id = create_payment("wallet_charge", uid, None, amount, "nowpayments", status="pending")
+            success, result = create_nowpayments_invoice(amount, payment_id, uid,
+                                                         _bot_username_nc, "شارژ کیف پول", currency)
+            if not success:
+                err = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
+                try: bot.answer_callback_query(call.id)
+                except Exception: pass
+                send_or_edit(call, f"⚠️ <b>خطا در ایجاد فاکتور NowPayments</b>\n\n<code>{esc(err[:400])}</code>",
+                             back_button("wallet:charge"))
+                return
+            invoice_id = result.get("invoice_id", "")
+            inv_url    = result.get("invoice_url", "")
+            amount_usdt = result.get("amount_usdt", 0)
+            with get_conn() as conn:
+                conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id, payment_id))
+            state_set(uid, "await_nowpayments_verify", payment_id=payment_id, invoice_id=invoice_id)
+            verify_cb = f"pay:nowpayments:verify:{payment_id}"
+            try: bot.answer_callback_query(call.id)
+            except Exception: pass
+            _np_show_page(call, amount, payment_id, invoice_id, inv_url, amount_usdt, verify_cb, "wallet:charge")
+            _start_nowpayments_auto_verify(payment_id, invoice_id, uid,
+                call.message.chat.id, call.message.message_id, "wallet_charge")
+
+        elif kind == "config_purchase":
+            package_id = sd.get("package_id")
+            _qty_nc    = int(sd.get("quantity", 1) or 1)
+            package_row = get_package(package_id)
+            order_lbl = (
+                f"خرید {package_row['name']}"
+                if package_row and ('show_name' not in package_row.keys() or package_row['show_name'])
+                else f"خرید سرویس"
+            )
+            payment_id = create_payment("config_purchase", uid, package_id, amount, "nowpayments",
+                                        status="pending", quantity=_qty_nc)
+            _snames_nc = sd.get("service_names")
+            if _snames_nc:
+                set_payment_service_names(payment_id, _snames_nc)
+            success, result = create_nowpayments_invoice(amount, payment_id, uid,
+                                                         _bot_username_nc, order_lbl, currency)
+            if not success:
+                err = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
+                try: bot.answer_callback_query(call.id)
+                except Exception: pass
+                send_or_edit(call, f"⚠️ <b>خطا در ایجاد فاکتور NowPayments</b>\n\n<code>{esc(err[:400])}</code>",
+                             back_button(f"buy:p:{package_id}"))
+                return
+            invoice_id  = result.get("invoice_id", "")
+            inv_url     = result.get("invoice_url", "")
+            amount_usdt = result.get("amount_usdt", 0)
+            with get_conn() as conn:
+                conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id, payment_id))
+            state_set(uid, "await_nowpayments_verify", payment_id=payment_id, invoice_id=invoice_id)
+            verify_cb = f"pay:nowpayments:verify:{payment_id}"
+            try: bot.answer_callback_query(call.id)
+            except Exception: pass
+            _np_show_page(call, amount, payment_id, invoice_id, inv_url, amount_usdt, verify_cb, f"buy:p:{package_id}")
+            _start_nowpayments_auto_verify(payment_id, invoice_id, uid,
+                call.message.chat.id, call.message.message_id, "config_purchase", package_id=package_id)
+
+        elif kind == "renewal":
+            package_id  = sd.get("package_id")
+            config_id_r = sd.get("config_id")
+            purchase_id = sd.get("purchase_id", 0)
+            package_row = get_package(package_id)
+            order_lbl = (
+                f"تمدید {package_row['name']}"
+                if package_row and ('show_name' not in package_row.keys() or package_row['show_name'])
+                else "تمدید سرویس"
+            )
+            payment_id = create_payment("renewal", uid, package_id, amount, "nowpayments",
+                                        status="pending", config_id=config_id_r)
+            success, result = create_nowpayments_invoice(amount, payment_id, uid,
+                                                         _bot_username_nc, order_lbl, currency)
+            if not success:
+                err = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
+                try: bot.answer_callback_query(call.id)
+                except Exception: pass
+                send_or_edit(call, f"⚠️ <b>خطا در ایجاد فاکتور NowPayments</b>\n\n<code>{esc(err[:400])}</code>",
+                             back_button(f"renew:{purchase_id}"))
+                return
+            invoice_id  = result.get("invoice_id", "")
+            inv_url     = result.get("invoice_url", "")
+            amount_usdt = result.get("amount_usdt", 0)
+            with get_conn() as conn:
+                conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id, payment_id))
+            state_set(uid, "await_nowpayments_verify", payment_id=payment_id, invoice_id=invoice_id,
+                      purchase_id=purchase_id)
+            verify_cb = f"rpay:nowpayments:verify:{payment_id}"
+            try: bot.answer_callback_query(call.id)
+            except Exception: pass
+            _np_show_page(call, amount, payment_id, invoice_id, inv_url, amount_usdt, verify_cb, f"renew:{purchase_id}")
+            _start_nowpayments_auto_verify(payment_id, invoice_id, uid,
+                call.message.chat.id, call.message.message_id, "renewal", package_id=package_id)
+
+        elif kind == "pnlcfg_renewal":
+            config_id  = sd.get("config_id")
+            package_id = sd.get("package_id")
+            package_row = get_package(package_id)
+            order_lbl = (
+                f"تمدید {package_row['name']}"
+                if package_row and ('show_name' not in package_row.keys() or package_row['show_name'])
+                else "تمدید سرویس"
+            )
+            payment_id = create_payment("pnlcfg_renewal", uid, package_id, amount, "nowpayments",
+                                        status="pending", config_id=config_id)
+            success, result = create_nowpayments_invoice(amount, payment_id, uid,
+                                                         _bot_username_nc, order_lbl, currency)
+            if not success:
+                err = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
+                try: bot.answer_callback_query(call.id)
+                except Exception: pass
+                send_or_edit(call, f"⚠️ <b>خطا در ایجاد فاکتور NowPayments</b>\n\n<code>{esc(err[:400])}</code>",
+                             back_button(f"mypnlcfg:renewconfirm:{config_id}"))
+                return
+            invoice_id  = result.get("invoice_id", "")
+            inv_url     = result.get("invoice_url", "")
+            amount_usdt = result.get("amount_usdt", 0)
+            with get_conn() as conn:
+                conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id, payment_id))
+            state_set(uid, "await_pnlcfg_renewal_nowpayments_verify",
+                      payment_id=payment_id, invoice_id=invoice_id, config_id=config_id)
+            verify_cb = f"mypnlcfgrpay:nowpayments:verify:{payment_id}"
+            try: bot.answer_callback_query(call.id)
+            except Exception: pass
+            _np_show_page(call, amount, payment_id, invoice_id, inv_url, amount_usdt, verify_cb,
+                          f"mypnlcfg:renewconfirm:{config_id}")
+            _start_nowpayments_auto_verify(payment_id, invoice_id, uid,
+                call.message.chat.id, call.message.message_id, "pnlcfg_renewal", package_id=package_id)
+
+        else:
+            bot.answer_callback_query(call.id, "خطا در نوع پرداخت.", show_alert=True)
+            return
         return
 
     # ── Admin panel ────────────────────────────────────────────────────────────
@@ -8935,6 +9482,91 @@ def _dispatch_callback(call, uid, data):
                 bot.answer_callback_query(call.id, "❌ پرداخت هنوز تأیید نشده. لطفاً ابتدا پرداخت را انجام دهید.", show_alert=True)
             return
 
+        # mypnlcfgrpay:pazzlenet:{config_id}:{package_id}
+        if data.startswith("mypnlcfgrpay:pazzlenet:") and not data.startswith("mypnlcfgrpay:pazzlenet:verify:"):
+            if not _check_invoice_valid(uid):
+                _show_invoice_expired(call); return
+            parts = data.split(":")
+            config_id  = int(parts[2])
+            package_id = int(parts[3])
+            cfg = get_panel_config(config_id)
+            if not cfg or cfg["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            package_row = get_package(package_id)
+            if not package_row:
+                bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True); return
+            sd = state_data(uid)
+            price = sd.get("amount") or get_effective_price(uid, package_row)
+            if not is_gateway_in_range("pazzlenet", price):
+                _rng = get_gateway_range_text("pazzlenet")
+                bot.answer_callback_query(call.id,
+                    f"⛔️ مبلغ {fmt_price(price)} تومان برای درگاه PazzleNet مجاز نیست.\n"
+                    f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
+                    show_alert=True); return
+            success_pz, result_pz = create_pazzlenet_invoice(price, uid)
+            if not success_pz:
+                err_pz = result_pz.get("error", "خطای ناشناخته") if isinstance(result_pz, dict) else str(result_pz)
+                bot.answer_callback_query(call.id)
+                send_or_edit(call,
+                    f"⚠️ <b>خطا در ایجاد فاکتور PazzleNet</b>\n\n<code>{esc(err_pz[:400])}</code>",
+                    back_button(f"mypnlcfg:renewconfirm:{config_id}")); return
+            pz_pid2 = result_pz.get("payment_id")
+            pz_url2 = result_pz.get("payment_link")
+            if not pz_pid2 or not pz_url2:
+                bot.answer_callback_query(call.id)
+                send_or_edit(call, "⚠️ خطا در ایجاد فاکتور PazzleNet. لطفاً دوباره تلاش کنید.",
+                             back_button(f"mypnlcfg:renewconfirm:{config_id}")); return
+            payment_id = create_payment("pnlcfg_renewal", uid, package_id, price, "pazzlenet",
+                                        status="pending", config_id=config_id)
+            with get_conn() as conn:
+                conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (pz_pid2, payment_id))
+            state_set(uid, "await_pnlcfg_renewal_pazzlenet_verify",
+                      payment_id=payment_id, pazzlenet_id=pz_pid2, config_id=config_id)
+            kb_pz = types.InlineKeyboardMarkup()
+            kb_pz.add(types.InlineKeyboardButton("💳 پرداخت", url=pz_url2))
+            kb_pz.add(types.InlineKeyboardButton("🔍 بررسی پرداخت",
+                        callback_data=f"mypnlcfgrpay:pazzlenet:verify:{payment_id}"))
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                "🏦 <b>پرداخت آنلاین PazzleNet (تمدید)</b>\n\n"
+                f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n\n"
+                "⏳ پس از پرداخت، دکمه <b>بررسی پرداخت</b> را بزنید.",
+                kb_pz)
+            _start_pazzlenet_auto_verify(
+                payment_id, pz_pid2, uid,
+                call.message.chat.id, call.message.message_id,
+                "pnlcfg_renewal", package_id=package_id)
+            return
+
+        # mypnlcfgrpay:pazzlenet:verify:{payment_id}
+        if data.startswith("mypnlcfgrpay:pazzlenet:verify:"):
+            payment_id = int(data.split(":")[-1])
+            payment = get_payment(payment_id)
+            if not payment or payment["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            if payment["status"] != "pending":
+                bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True); return
+            pz_pid_v2 = payment["receipt_text"]
+            ok_pz_v, status_pz_v = check_pazzlenet_payment(pz_pid_v2)
+            if not ok_pz_v:
+                bot.answer_callback_query(call.id, "خطا در بررسی وضعیت پرداخت.", show_alert=True); return
+            if is_pazzlenet_paid(status_pz_v):
+                if not complete_payment(payment_id):
+                    bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True); return
+                config_id_v  = payment["config_id"]
+                package_id_v = payment["package_id"]
+                bot.answer_callback_query(call.id, "✅ پرداخت تأیید شد! در حال تمدید…")
+                ok_r, err_r = _execute_pnlcfg_renewal(config_id_v, package_id_v, chat_id=uid, uid=uid)
+                state_clear(uid)
+                if not ok_r:
+                    send_or_edit(call, "❌ پرداخت انجام شد اما تمدید سرویس با خطا مواجه شد.\nلطفاً با پشتیبانی ارتباط بگیرید.",
+                                 back_button("my_configs"))
+                    return
+                _show_panel_config_detail(call, config_id_v, back_data="my_configs", is_user_view=True)
+            else:
+                bot.answer_callback_query(call.id, "❌ پرداخت هنوز تأیید نشده. لطفاً ابتدا پرداخت را انجام دهید.", show_alert=True)
+            return
+
         # mypnlcfgrpay:plisio:{config_id}:{package_id}
         if data.startswith("mypnlcfgrpay:plisio:") and not data.startswith("mypnlcfgrpay:plisio:verify:"):
             if not _check_invoice_valid(uid):
@@ -9061,54 +9693,25 @@ def _dispatch_callback(call, uid, data):
                 except Exception:
                     pass
                 return
-            payment_id = create_payment("pnlcfg_renewal", uid, package_id, price, "nowpayments",
-                                        status="pending", config_id=config_id)
-            _bot_username_pnp = bot.get_me().username or ""
-            order_label_pnp = (
-                f"تمدید {package_row['name']}"
-                if ('show_name' not in package_row.keys() or package_row['show_name'])
-                else f"تمدید {fmt_vol(package_row['volume_gb'])} | {fmt_dur(package_row['duration_days'])}"
-            )
-            success_pnp, result_pnp = create_nowpayments_invoice(price, payment_id, uid, _bot_username_pnp, order_label_pnp)
-            if not success_pnp:
-                err_pnp = result_pnp.get("error", "خطای ناشناخته") if isinstance(result_pnp, dict) else str(result_pnp)
+            _active_np_pn = get_active_nowpayments_currencies()
+            if not _active_np_pn:
+                bot.answer_callback_query(call.id, "هیچ ارزی برای NowPayments فعال نشده است.", show_alert=True)
+                return
+            state_set(uid, "npcur_select", kind="pnlcfg_renewal",
+                      config_id=config_id, package_id=package_id, amount=price)
+            if len(_active_np_pn) == 1:
+                _fake_call(call, f"npay:cur:{_active_np_pn[0][0]}")
+            else:
+                kb = types.InlineKeyboardMarkup()
+                for code, lbl in _active_np_pn:
+                    kb.add(types.InlineKeyboardButton(lbl, callback_data=f"npay:cur:{code}"))
+                kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"mypnlcfg:renewconfirm:{config_id}",
+                                                  icon_custom_emoji_id="5253997076169115797"))
                 try:
                     bot.answer_callback_query(call.id)
                 except Exception:
                     pass
-                send_or_edit(call,
-                    f"⚠️ <b>خطا در ایجاد فاکتور NowPayments</b>\n\n<code>{esc(err_pnp[:400])}</code>",
-                    back_button(f"mypnlcfg:renewconfirm:{config_id}"))
-                return
-            invoice_id_pnp  = result_pnp.get("invoice_id", "")
-            inv_url_pnp     = result_pnp.get("invoice_url", "")
-            amount_usdt_pnp = result_pnp.get("amount_usdt", 0)
-            with get_conn() as conn:
-                conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id_pnp, payment_id))
-            state_set(uid, "await_pnlcfg_renewal_nowpayments_verify",
-                      payment_id=payment_id, invoice_id=invoice_id_pnp, config_id=config_id)
-            short_id_pnp = str(payment_id)
-            kb_pnp = types.InlineKeyboardMarkup()
-            kb_pnp.add(types.InlineKeyboardButton("💎 پرداخت در NowPayments", url=inv_url_pnp))
-            kb_pnp.add(types.InlineKeyboardButton("✅ بررسی پرداخت",
-                        callback_data=f"mypnlcfgrpay:nowpayments:verify:{payment_id}"))
-            kb_pnp.add(types.InlineKeyboardButton("⬅️ بازگشت", callback_data=f"mypnlcfg:renewconfirm:{config_id}"))
-            try:
-                bot.answer_callback_query(call.id)
-            except Exception:
-                pass
-            send_or_edit(call,
-                "💎 <b>پرداخت کریپتو NowPayments (تمدید)</b>\n\n"
-                f"🛒 کد پیگیری: <code>{short_id_pnp}</code>\n"
-                f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n"
-                f"💱 معادل: <b>{amount_usdt_pnp:.4f} USDT</b>\n\n"
-                "❌ این فاکتور <b>۱ ساعت</b> اعتبار دارد\n"
-                "پس از واریز، دکمه «✅ بررسی پرداخت» را بزنید.",
-                kb_pnp)
-            _start_nowpayments_auto_verify(
-                payment_id, invoice_id_pnp, uid,
-                call.message.chat.id, call.message.message_id,
-                "pnlcfg_renewal", package_id=package_id)
+                send_or_edit(call, "💎 <b>پرداخت NowPayments</b>\n\nارز مورد نظر را برای پرداخت انتخاب کنید:", kb)
             return
 
         # mypnlcfgrpay:nowpayments:verify:{payment_id}
@@ -14181,6 +14784,7 @@ def _dispatch_callback(call, uid, data):
             ("tetrapay",         "💳 درگاه کارت به کارت (TetraPay)"),
             ("swapwallet_crypto","💳 درگاه کارت به کارت و ارز دیجیتال (SwapWallet)"),
             ("tronpays_rial",    "💳 درگاه کارت به کارت (TronPay)"),
+            ("pazzlenet",        "💳 درگاه کارت به کارت (PazzleNet)"),
             ("plisio",           "💎 پرداخت کریپتو (Plisio)"),
             ("nowpayments",      "💎 پرداخت کریپتو (NowPayments)"),
         ]:
@@ -15011,7 +15615,127 @@ def _dispatch_callback(call, uid, data):
             back_button("adm:set:gw:tronpays_rial"))
         return
 
-    _GW_RANGE_LABELS = {"card": "💳 کارت به کارت", "crypto": "💎 ارز دیجیتال", "tetrapay": "🏦 TetraPay", "swapwallet": "💎 SwapWallet", "swapwallet_crypto": "💎 SwapWallet کریپتو", "tronpays_rial": "💳 TronPays", "plisio": "💎 Plisio", "nowpayments": "💎 NowPayments"}
+    _GW_RANGE_LABELS = {"card": "💳 کارت به کارت", "crypto": "💎 ارز دیجیتال", "tetrapay": "🏦 TetraPay", "swapwallet": "💎 SwapWallet", "swapwallet_crypto": "💎 SwapWallet کریپتو", "tronpays_rial": "💳 TronPays", "pazzlenet": "💳 PazzleNet", "plisio": "💎 Plisio", "nowpayments": "💎 NowPayments"}
+
+    # ── PazzleNet admin settings ──────────────────────────────────────────────
+    if data == "adm:set:gw:pazzlenet":
+        enabled  = setting_get("gw_pazzlenet_enabled", "0")
+        vis      = setting_get("gw_pazzlenet_visibility", "public")
+        api_key  = setting_get("pazzlenet_api_key", "")
+        range_en = setting_get("gw_pazzlenet_range_enabled", "0")
+        enabled_label = "🟢 فعال" if enabled == "1" else "🔴 غیرفعال"
+        vis_label     = "👥 عمومی" if vis == "public" else "🔒 کاربران امن"
+        range_label   = "🟢 فعال" if range_en == "1" else "🔴 غیرفعال"
+        fee_on   = setting_get("gw_pazzlenet_fee_enabled", "0") == "1"
+        bonus_on = setting_get("gw_pazzlenet_bonus_enabled", "0") == "1"
+        kb = types.InlineKeyboardMarkup()
+        kb.row(
+            types.InlineKeyboardButton(f"وضعیت: {enabled_label}", callback_data="adm:gw:pazzlenet:toggle"),
+            types.InlineKeyboardButton(f"نمایش: {vis_label}",     callback_data="adm:gw:pazzlenet:vis"),
+        )
+        kb.add(types.InlineKeyboardButton(f"📊 بازه پرداختی: {range_label}", callback_data="adm:gw:pazzlenet:range"))
+        kb.add(types.InlineKeyboardButton("🔑 تنظیم کلید API", callback_data="adm:set:pazzlenet_key"))
+        kb.add(types.InlineKeyboardButton("🏷 نام نمایشی درگاه", callback_data="adm:gw:pazzlenet:set_name"))
+        fee_bonus_lbl = ("🟢 کارمزد" if fee_on else "🔴 کارمزد") + " | " + ("🟢 بونس" if bonus_on else "🔴 بونس")
+        kb.add(types.InlineKeyboardButton(f"🎁 بونس و کارمزد — {fee_bonus_lbl}", callback_data="adm:gw:pazzlenet:feebonus"))
+        if not api_key:
+            kb.add(types.InlineKeyboardButton("🤖 ثبت‌نام در @puzzlenetpay_bot", url="https://t.me/puzzlenetpay_bot"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gateways", icon_custom_emoji_id="5253997076169115797"))
+        key_display = (f"<code>{esc(api_key[:8])}...{esc(api_key[-4:])}</code>"
+                       if api_key else "❌ <b>ثبت نشده</b>")
+        display_name_pz = setting_get("gw_pazzlenet_display_name", "")
+        name_display_pz = display_name_pz or "<i>پیش‌فرض: درگاه کارت به کارت (PazzleNet)</i>"
+        text = (
+            "💳 <b>درگاه کارت به کارت (PazzleNet)</b>\n\n"
+            f"وضعیت: {enabled_label}\n"
+            f"نمایش: {vis_label}\n"
+            f"نام نمایشی: {name_display_pz}\n\n"
+            f"🔑 کلید API: {key_display}\n\n"
+            "📋 <b>راهنمای دریافت API Key:</b>\n"
+            "۱. ربات @puzzlenetpay_bot را استارت کنید\n"
+            "۲. فروشگاه را ثبت کنید\n"
+            "۳. از قسمت مشخصات من، کلید API را بردارید"
+        )
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, text, kb)
+        return
+
+    if data == "adm:gw:pazzlenet:set_name":
+        state_set(uid, "admin_set_gw_display_name", gw="pazzlenet")
+        bot.answer_callback_query(call.id)
+        current = setting_get("gw_pazzlenet_display_name", "")
+        send_or_edit(call,
+            f"🏷 <b>نام نمایشی درگاه PazzleNet</b>\n\n"
+            f"مقدار فعلی: <code>{esc(current or 'پیش‌فرض')}</code>\n\n"
+            "نام دلخواه را ارسال کنید.\n"
+            "برای بازگشت به پیش‌فرض، <code>-</code> ارسال کنید.",
+            back_button("adm:set:gw:pazzlenet"))
+        return
+
+    if data == "adm:gw:pazzlenet:toggle":
+        enabled = setting_get("gw_pazzlenet_enabled", "0")
+        setting_set("gw_pazzlenet_enabled", "0" if enabled == "1" else "1")
+        log_admin_action(uid, f"درگاه PazzleNet {'غیرفعال' if enabled == '1' else 'فعال'} شد")
+        bot.answer_callback_query(call.id, "تغییر یافت.")
+        _fake_call(call, "adm:set:gw:pazzlenet")
+        return
+
+    if data == "adm:gw:pazzlenet:vis":
+        vis = setting_get("gw_pazzlenet_visibility", "public")
+        setting_set("gw_pazzlenet_visibility", "secure" if vis == "public" else "public")
+        log_admin_action(uid, f"نمایش درگاه PazzleNet به {'secure' if vis == 'public' else 'public'} تغییر کرد")
+        bot.answer_callback_query(call.id, "تغییر یافت.")
+        _fake_call(call, "adm:set:gw:pazzlenet")
+        return
+
+    if data == "adm:set:pazzlenet_key":
+        state_set(uid, "admin_set_pazzlenet_key")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "🔑 کلید API PazzleNet را ارسال کنید:", back_button("adm:set:gw:pazzlenet"))
+        return
+
+    if data == "adm:gw:pazzlenet:feebonus":
+        fee_on   = setting_get("gw_pazzlenet_fee_enabled", "0") == "1"
+        bonus_on = setting_get("gw_pazzlenet_bonus_enabled", "0") == "1"
+        fee_pct  = setting_get("gw_pazzlenet_fee_percent", "0")
+        bon_pct  = setting_get("gw_pazzlenet_bonus_percent", "0")
+        kb = types.InlineKeyboardMarkup()
+        kb.row(
+            types.InlineKeyboardButton(f"کارمزد: {'🟢' if fee_on else '🔴'}", callback_data="adm:gw:pazzlenet:fee_toggle"),
+            types.InlineKeyboardButton(f"بونس: {'🟢' if bonus_on else '🔴'}",  callback_data="adm:gw:pazzlenet:bonus_toggle"),
+        )
+        kb.add(types.InlineKeyboardButton(f"💸 درصد کارمزد: {fee_pct}%", callback_data="adm:gw:pazzlenet:fee_set"))
+        kb.add(types.InlineKeyboardButton(f"🎁 درصد بونس: {bon_pct}%",   callback_data="adm:gw:pazzlenet:bonus_set"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gw:pazzlenet", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "🎁 <b>بونس و کارمزد PazzleNet</b>", kb)
+        return
+
+    if data == "adm:gw:pazzlenet:fee_toggle":
+        cur = setting_get("gw_pazzlenet_fee_enabled", "0")
+        setting_set("gw_pazzlenet_fee_enabled", "0" if cur == "1" else "1")
+        bot.answer_callback_query(call.id, "تغییر یافت.")
+        _fake_call(call, "adm:gw:pazzlenet:feebonus")
+        return
+
+    if data == "adm:gw:pazzlenet:bonus_toggle":
+        cur = setting_get("gw_pazzlenet_bonus_enabled", "0")
+        setting_set("gw_pazzlenet_bonus_enabled", "0" if cur == "1" else "1")
+        bot.answer_callback_query(call.id, "تغییر یافت.")
+        _fake_call(call, "adm:gw:pazzlenet:feebonus")
+        return
+
+    if data == "adm:gw:pazzlenet:fee_set":
+        state_set(uid, "admin_set_gw_fee_percent", gw="pazzlenet")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "💸 درصد کارمزد PazzleNet را وارد کنید (مثال: 2.5):", back_button("adm:gw:pazzlenet:feebonus"))
+        return
+
+    if data == "adm:gw:pazzlenet:bonus_set":
+        state_set(uid, "admin_set_gw_bonus_percent", gw="pazzlenet")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "🎁 درصد بونس PazzleNet را وارد کنید (مثال: 5):", back_button("adm:gw:pazzlenet:feebonus"))
+        return
 
     # ── Plisio admin settings ─────────────────────────────────────────────────
     if data == "adm:set:gw:plisio":
@@ -15171,6 +15895,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton(f"📊 بازه پرداختی: {range_label}", callback_data="adm:gw:nowpayments:range"))
         kb.add(types.InlineKeyboardButton("🔑 تنظیم کلید API", callback_data="adm:set:nowpayments_key"))
         kb.add(types.InlineKeyboardButton("🔐 تنظیم IPN Secret", callback_data="adm:set:nowpayments_ipn"))
+        kb.add(types.InlineKeyboardButton("💎 ارزهای فعال", callback_data="adm:set:np_currencies"))
         kb.add(types.InlineKeyboardButton("🏷 نام نمایشی درگاه", callback_data="adm:gw:nowpayments:set_name"))
         kb.add(types.InlineKeyboardButton("🎁 بونس و کارمزد", callback_data="adm:gw:nowpayments:feebonus"))
         kb.add(types.InlineKeyboardButton("🌐 تنظیم Server Public URL (اختیاری)", callback_data="adm:set:server_public_url"))
@@ -15294,6 +16019,66 @@ def _dispatch_callback(call, uid, data):
             "(⚠️ <u>فقط یک‌بار نمایش داده می‌شود</u>) و در اینجا ارسال کنید.\n\n"
             "این کلید برای صحت‌سنجی پیام‌های IPN لازم است.",
             back_button("adm:set:gw:nowpayments"))
+        return
+
+    if data == "adm:set:np_currencies":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        stored = setting_get("nowpayments_active_currencies", "")
+        if not stored or not stored.strip():
+            active_set = {c for c, _ in NOWPAYMENTS_CURRENCIES}
+        else:
+            active_set = {x.strip().lower() for x in stored.split(",") if x.strip()}
+        kb = types.InlineKeyboardMarkup()
+        for code, lbl in NOWPAYMENTS_CURRENCIES:
+            check = "✅" if code in active_set else "❌"
+            kb.add(types.InlineKeyboardButton(f"{check} {lbl}", callback_data=f"adm:np:cur:{code}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gw:nowpayments",
+                                          icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "💎 <b>ارزهای فعال NowPayments</b>\n\n"
+            "ارزهایی که کاربر می‌تواند برای پرداخت انتخاب کند:\n"
+            "✅ = فعال  |  ❌ = غیرفعال\n\n"
+            "⚠️ اگر فقط یک ارز فعال باشد، صفحه انتخاب نمایش داده نمی‌شود و مستقیم به فاکتور می‌رود.",
+            kb)
+        return
+
+    if data.startswith("adm:np:cur:"):
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        code_toggle = data[len("adm:np:cur:"):].lower()
+        stored = setting_get("nowpayments_active_currencies", "")
+        if not stored or not stored.strip():
+            active_set = {c for c, _ in NOWPAYMENTS_CURRENCIES}
+        else:
+            active_set = {x.strip().lower() for x in stored.split(",") if x.strip()}
+        if code_toggle in active_set:
+            active_set.discard(code_toggle)
+        else:
+            active_set.add(code_toggle)
+        setting_set("nowpayments_active_currencies", ",".join(sorted(active_set)))
+        label = NP_CURRENCY_LABELS.get(code_toggle, code_toggle)
+        bot.answer_callback_query(call.id,
+            f"{'✅ فعال' if code_toggle in active_set else '❌ غیرفعال'} شد: {label}")
+        # Reload same menu
+        stored2 = setting_get("nowpayments_active_currencies", "")
+        active_set2 = {x.strip().lower() for x in stored2.split(",") if x.strip()} if stored2.strip() else \
+                      {c for c, _ in NOWPAYMENTS_CURRENCIES}
+        kb = types.InlineKeyboardMarkup()
+        for code, lbl in NOWPAYMENTS_CURRENCIES:
+            check = "✅" if code in active_set2 else "❌"
+            kb.add(types.InlineKeyboardButton(f"{check} {lbl}", callback_data=f"adm:np:cur:{code}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gw:nowpayments",
+                                          icon_custom_emoji_id="5253997076169115797"))
+        send_or_edit(call,
+            "💎 <b>ارزهای فعال NowPayments</b>\n\n"
+            "ارزهایی که کاربر می‌تواند برای پرداخت انتخاب کند:\n"
+            "✅ = فعال  |  ❌ = غیرفعال\n\n"
+            "⚠️ اگر فقط یک ارز فعال باشد، صفحه انتخاب نمایش داده نمی‌شود و مستقیم به فاکتور می‌رود.",
+            kb)
         return
 
     if data.startswith("adm:gw:") and data.endswith(":range"):

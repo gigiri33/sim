@@ -18,7 +18,41 @@ from .crypto import fetch_crypto_prices
 
 NOWPAYMENTS_BASE_URL = "https://api.nowpayments.io/v1"
 
-# Cached auto-detected public IP (per-process)
+# ── Supported currencies ──────────────────────────────────────────────────────
+# (api_code, display_label)
+# Default: all enabled
+NOWPAYMENTS_CURRENCIES = [
+    ("usdttrc20",  "💚 USDT (TRC20 — Tron)"),
+    ("usdtbep20",  "🟡 USDT (BEP20 — BSC)"),
+    ("usdterc20",  "🔵 USDT (ERC20 — Ethereum)"),
+    ("usdtsol",    "🟣 USDT (Solana)"),
+    ("usdttongram","💎 USDT (TON)"),
+    ("btc",        "🟠 Bitcoin (BTC)"),
+    ("eth",        "🔵 Ethereum (ETH)"),
+    ("ltc",        "⚪ Litecoin (LTC)"),
+    ("bnbbsc",     "🟡 BNB (BSC)"),
+    ("ton",        "💎 Toncoin (TON)"),
+    ("trx",        "🔴 Tron (TRX)"),
+    ("xmr",        "🟤 Monero (XMR)"),
+]
+
+_ALL_NP_CODES = [c for c, _ in NOWPAYMENTS_CURRENCIES]
+NP_CURRENCY_LABELS = dict(NOWPAYMENTS_CURRENCIES)
+
+
+def get_active_nowpayments_currencies() -> list:
+    """Return list of (code, label) for enabled NowPayments currencies.
+    Default: all currencies are enabled.
+    """
+    stored = setting_get("nowpayments_active_currencies", "")
+    if not stored or not stored.strip():
+        # No setting saved yet → enable everything by default
+        return NOWPAYMENTS_CURRENCIES
+    active_set = {x.strip().lower() for x in stored.split(",") if x.strip()}
+    return [(code, lbl) for code, lbl in NOWPAYMENTS_CURRENCIES if code.lower() in active_set]
+
+
+
 _CACHED_PUBLIC_IP: str | None = None
 
 
@@ -127,12 +161,17 @@ def get_nowpayments_min_usdt() -> float:
     return 5.0
 
 
-def create_nowpayments_invoice(amount_toman: int, payment_id, user_id, bot_username: str, description: str):
+def create_nowpayments_invoice(amount_toman: int, payment_id, user_id,
+                               bot_username: str, description: str,
+                               pay_currency: str = ""):
     """
     Create a new NowPayments invoice.
 
     Converts *amount_toman* to USD using the live USDT/IRT rate (USDT≈USD),
     then POSTs to ``/v1/invoice``.
+
+    *pay_currency* — NowPayments currency code. Falls back to settings or
+    the first active currency.
 
     Returns:
         ``(True,  {"invoice_id": ..., "invoice_url": ..., "amount_usdt": ..., "usdt_rate": ...})``  on success
@@ -149,18 +188,13 @@ def create_nowpayments_invoice(amount_toman: int, payment_id, user_id, bot_usern
 
     amount_usdt = round(amount_toman / usdt_irt, 4)
 
-    # Enforce NowPayments minimum (queried live, fallback 5 USDT)
-    min_usdt = get_nowpayments_min_usdt()
-    if amount_usdt < min_usdt:
-        min_toman = int(min_usdt * usdt_irt)
-        from ..helpers import fmt_price
-        return False, {"error": (
-            f"حداقل مبلغ پرداخت از طریق NowPayments برابر {min_usdt:.2f} USDT "
-            f"(معادل {fmt_price(min_toman)} تومان) است.\n"
-            "لطفاً درگاه دیگری انتخاب کنید یا مبلغ را افزایش دهید."
-        )}
-
-    pay_currency = ((setting_get("nowpayments_pay_currency", "") or "") or "usdttrc20").strip().lower()
+    # Resolve pay_currency: arg → settings fallback → first active → "usdttrc20"
+    if not pay_currency:
+        pay_currency = ((setting_get("nowpayments_pay_currency", "") or "") or "").strip().lower()
+    if not pay_currency:
+        active = get_active_nowpayments_currencies()
+        pay_currency = active[0][0] if active else "usdttrc20"
+    pay_currency = pay_currency.strip().lower()
 
     body = {
         "price_amount":      amount_usdt,
