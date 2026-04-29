@@ -1912,7 +1912,7 @@ def _panel_connect_with_retry(uid, protocol, host, port, path, username, passwor
 
 
 def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method,
-                          quantity, payment_id, service_names=None):
+                          quantity, payment_id, service_names=None, is_test=0):
     """
     Deliver `quantity` configs to user after successful payment.
     Returns (delivered_purchase_ids, pending_ids).
@@ -1938,7 +1938,8 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
         for i in range(quantity):
             desired_name = (service_names[i] if service_names and i < len(service_names) else None)
             ok, result, pc_id, c_name = _create_panel_config(
-                uid, package_id, payment_id, chat_id=chat_id, desired_name=desired_name
+                uid, package_id, payment_id, chat_id=chat_id, desired_name=desired_name,
+                is_test=is_test,
             )
             if ok:
                 panel_config_ids.append(pc_id)
@@ -1974,6 +1975,13 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
                     stage="ساخت کلاینت در پنل (سفارش معلق ایجاد شد)", detail=result,
                     panel_id=_pid,
                 )
+        # Register panel configs as purchases with is_test flag
+        for pc_id in panel_config_ids:
+            try:
+                from ..db import assign_panel_config_is_test as _set_is_test
+                _set_is_test(pc_id, is_test)
+            except Exception:
+                pass
         # Deliver each panel config
         for pc_id in panel_config_ids:
             try:
@@ -2015,7 +2023,7 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
             continue
         try:
             purchase_id = assign_config_to_user(
-                cfg_id, uid, package_id, unit_price, payment_method, is_test=0
+                cfg_id, uid, package_id, unit_price, payment_method, is_test=is_test
             )
             purchase_ids.append(purchase_id)
         except Exception:
@@ -2318,7 +2326,7 @@ def _panel_create_lock(panel_id):
         return _panel_locks[panel_id]
 
 
-def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name=None):
+def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name=None, is_test=0):
     """
     Create a config in the panel for uid/package_id.
     If the package has a client_package_id, the sample config/sub URL from that
@@ -2610,6 +2618,7 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
         expire_at=expire_str,
         payment_id=payment_id,
         cpkg_id=cpkg["id"] if cpkg else None,  # store which template was used
+        is_test=is_test,
     )
 
     return True, delivery_mode, pc_id, client_name
@@ -7034,6 +7043,7 @@ def _dispatch_callback(call, uid, data):
                     _chat_id, uid, package_row["id"],
                     0, "free_test", 1, None,
                     service_names=_svc_names,
+                    is_test=1,
                 )
                 _send_bulk_delivery_result(
                     _chat_id, uid, package_row,

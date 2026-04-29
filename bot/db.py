@@ -721,6 +721,7 @@ def _run_init_db_migrations():
             # ── Service naming for panel configs ──────────────────────────────
             "ALTER TABLE payments ADD COLUMN service_names_json TEXT",
             "INSERT OR IGNORE INTO settings(key,value) VALUES('panel_renewal_enabled','1')",
+            "ALTER TABLE panel_configs ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0",
         ]
         for sql in migrations:
             try:
@@ -1612,12 +1613,19 @@ def user_has_any_test(user_id):
             "SELECT COUNT(*) AS n FROM purchases WHERE user_id=? AND is_test=1",
             (user_id,)
         ).fetchone()
-    return row["n"] > 0
+        if row["n"] > 0:
+            return True
+        row2 = conn.execute(
+            "SELECT COUNT(*) AS n FROM panel_configs WHERE user_id=? AND is_test=1",
+            (user_id,)
+        ).fetchone()
+        return row2["n"] > 0
 
 
 def reset_all_free_tests():
     with get_conn() as conn:
         conn.execute("DELETE FROM purchases WHERE is_test=1")
+        conn.execute("UPDATE panel_configs SET is_test=0 WHERE is_test=1")
 
 
 def agent_test_count_in_period(user_id, period):
@@ -1640,7 +1648,13 @@ def agent_test_count_in_period(user_id, period):
             "SELECT COUNT(*) as cnt FROM purchases WHERE user_id=? AND is_test=1 AND created_at>=?",
             (user_id, start)
         ).fetchone()
-    return row["cnt"] if row else 0
+        cnt = row["cnt"] if row else 0
+        row2 = conn.execute(
+            "SELECT COUNT(*) as cnt FROM panel_configs WHERE user_id=? AND is_test=1 AND created_at>=?",
+            (user_id, start)
+        ).fetchone()
+        cnt += row2["cnt"] if row2 else 0
+    return cnt
 
 
 # ── Agency Prices ──────────────────────────────────────────────────────────────
@@ -2841,17 +2855,17 @@ def update_panel_client_package_field(cpkg_id, field, value):
 def add_panel_config(user_id, package_id, panel_id, panel_type,
                      inbound_id, inbound_port, client_name, client_uuid,
                      client_sub_url, client_config_text, expire_at,
-                     inbound_remark="", purchase_id=None, payment_id=None, cpkg_id=None):
+                     inbound_remark="", purchase_id=None, payment_id=None, cpkg_id=None, is_test=0):
     with get_conn() as conn:
         cur = conn.execute(
             """INSERT INTO panel_configs
                (user_id, package_id, panel_id, panel_type, inbound_id, inbound_port,
                 client_name, client_uuid, client_sub_url, client_config_text,
-                inbound_remark, expire_at, created_at, purchase_id, payment_id, cpkg_id)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                inbound_remark, expire_at, created_at, purchase_id, payment_id, cpkg_id, is_test)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (user_id, package_id, panel_id, panel_type, inbound_id, inbound_port,
              client_name, client_uuid, client_sub_url, client_config_text,
-             inbound_remark or "", expire_at, now_str(), purchase_id, payment_id, cpkg_id)
+             inbound_remark or "", expire_at, now_str(), purchase_id, payment_id, cpkg_id, int(is_test))
         )
         return cur.lastrowid
 
