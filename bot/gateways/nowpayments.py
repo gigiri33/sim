@@ -210,21 +210,34 @@ def create_nowpayments_invoice(amount_toman: int, payment_id, user_id,
         body["success_url"]      = urls["success_url"]
         body["cancel_url"]       = urls["cancel_url"]
 
-    try:
-        resp = requests.post(
-            f"{NOWPAYMENTS_BASE_URL}/invoice",
-            headers=_api_headers(),
-            data=json.dumps(body),
-            timeout=15,
-        )
-        data = resp.json()
-    except Exception as exc:
-        return False, {"error": str(exc)}
+    # Try selected currency; if unavailable auto-fallback to usdttrc20
+    _fallback_tried = False
+    while True:
+        try:
+            resp = requests.post(
+                f"{NOWPAYMENTS_BASE_URL}/invoice",
+                headers=_api_headers(),
+                data=json.dumps(body),
+                timeout=15,
+            )
+            data = resp.json()
+        except Exception as exc:
+            return False, {"error": str(exc)}
 
-    invoice_id  = str(data.get("id") or "")
-    invoice_url = data.get("invoice_url") or ""
-    if not invoice_id or not invoice_url:
-        msg = data.get("message") or data.get("error") or str(data)
+        invoice_id  = str(data.get("id") or "")
+        invoice_url = data.get("invoice_url") or ""
+        if invoice_id and invoice_url:
+            break
+
+        msg = (data.get("message") or data.get("error") or str(data))
+        # If currency is unavailable and we haven't fallen back yet, retry with usdttrc20
+        if not _fallback_tried and body.get("pay_currency", "") != "usdttrc20" and (
+            "unavailable" in str(msg).lower() or "not supported" in str(msg).lower()
+        ):
+            body["pay_currency"] = "usdttrc20"
+            pay_currency = "usdttrc20"
+            _fallback_tried = True
+            continue
         return False, {"error": msg[:400]}
 
     return True, {

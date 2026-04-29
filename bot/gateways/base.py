@@ -87,16 +87,18 @@ def get_gateway_range_text(gw_name):
                 if r_max:
                     return base + f" — حداکثر {int(r_max):,} تومان"
             return base
-    # NowPayments: show live USDT-based minimum (queried from API, fallback 5 USDT)
+    # NowPayments: no forced minimum — show user-configured range only
     if gw_name == "nowpayments":
-        dyn_min = _nowpayments_dynamic_min_toman()
-        if dyn_min:
-            base = f"حداقل {dyn_min:,} تومان"
-            if setting_get("gw_nowpayments_range_enabled", "0") == "1":
-                r_max = setting_get("gw_nowpayments_range_max", "")
-                if r_max:
-                    return base + f" — حداکثر {int(r_max):,} تومان"
-            return base
+        if setting_get("gw_nowpayments_range_enabled", "0") == "1":
+            r_min = setting_get("gw_nowpayments_range_min", "")
+            r_max = setting_get("gw_nowpayments_range_max", "")
+            if r_min and r_max:
+                return f"{int(r_min):,} تا {int(r_max):,} تومان"
+            elif r_min:
+                return f"حداقل {int(r_min):,} تومان — حداکثر ندارد"
+            elif r_max:
+                return f"حداقل ندارد — حداکثر {int(r_max):,} تومان"
+        return "بدون محدودیت مبلغی"
     if setting_get(f"gw_{gw_name}_range_enabled", "0") != "1":
         return "بدون محدودیت مبلغی"
     r_min = setting_get(f"gw_{gw_name}_range_min", "")
@@ -160,11 +162,7 @@ def is_gateway_in_range(gw_name, amount):
         dyn_min = _plisio_dynamic_min_toman()
         if dyn_min and amount < dyn_min:
             return False
-    # NowPayments: always enforce live API minimum regardless of range settings
-    if gw_name == "nowpayments":
-        dyn_min = _nowpayments_dynamic_min_toman()
-        if dyn_min and amount < dyn_min:
-            return False
+    # NowPayments: no forced minimum — only check user-configured range
     if setting_get(f"gw_{gw_name}_range_enabled", "0") != "1":
         return True
     r_min = setting_get(f"gw_{gw_name}_range_min", "")
