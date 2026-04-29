@@ -263,25 +263,7 @@ def check_nowpayments_invoice(invoice_id: str):
     api_key = (setting_get("nowpayments_api_key", "") or "").strip()
     if not api_key or not invoice_id:
         return False, None
-    try:
-        resp = requests.get(
-            f"{NOWPAYMENTS_BASE_URL}/payment/",
-            params={"limit": 10, "invoiceId": invoice_id},
-            headers={"x-api-key": api_key},
-            timeout=10,
-        )
-        data = resp.json()
-    except Exception as exc:
-        print(f"[NowPayments check_invoice] request error: {exc}")
-        return False, None
 
-    items = data.get("data") if isinstance(data, dict) else None
-    if not items:
-        # No payment created yet → user hasn't paid; treat as waiting.
-        return True, ""
-
-    # Pick the most "advanced" status (paid > pending > failed) so a partial
-    # confirmation isn't masked by an earlier failed attempt.
     rank = {
         "finished":       100,
         "confirmed":       90,
@@ -293,15 +275,74 @@ def check_nowpayments_invoice(invoice_id: str):
         "failed":          10,
         "refunded":         5,
     }
-    best_status = ""
-    best_rank   = -1
-    for it in items:
-        st = (it.get("payment_status") or "").lower()
-        r  = rank.get(st, 0)
-        if r > best_rank:
-            best_rank   = r
-            best_status = st
-    return True, best_status
+
+    # ── Primary: fetch payments filtered by invoice_id ────────────────────────
+    try:
+        resp = requests.get(
+            f"{NOWPAYMENTS_BASE_URL}/payment",
+            params={"limit": 50, "invoice_id": invoice_id},
+            headers={"x-api-key": api_key},
+            timeout=10,
+        )
+        data = resp.json()
+    except Exception as exc:
+        print(f"[NowPayments check_invoice] request error: {exc}")
+        return False, None
+
+    raw_items = data.get("data") if isinstance(data, dict) else (data if isinstance(data, list) else None)
+
+    # Only trust items that actually belong to this invoice
+    items = []
+    if raw_items:
+        for it in raw_items:
+            if str(it.get("invoice_id") or "") == str(invoice_id):
+                items.append(it)
+
+    if items:
+        best_status = ""
+        best_rank   = -1
+        for it in items:
+            st = (it.get("payment_status") or "").lower()
+            r  = rank.get(st, 0)
+            if r > best_rank:
+                best_rank   = r
+                best_status = st
+        return True, best_status
+
+    # ── Fallback: check the invoice endpoint directly ─────────────────────────
+    # The /payment filter may be unsupported on some API plans; the invoice
+    # endpoint is always available and returns an aggregated status.
+    try:
+        inv_resp = requests.get(
+            f"{NOWPAYMENTS_BASE_URL}/invoice/{invoice_id}",
+            headers={"x-api-key": api_key},
+            timeout=10,
+        )
+        inv_data = inv_resp.json()
+        inv_status = (inv_data.get("status") or "").lower()
+        if inv_status:
+            # Map invoice-level statuses to payment-level equivalents
+            _inv_map = {
+                "finished":       "finished",
+                "paid":           "confirmed",
+                "confirmed":      "confirmed",
+                "sending":        "sending",
+                "partially_paid": "partially_paid",
+                "confirming":     "confirming",
+                "waiting":        "waiting",
+                "pending":        "waiting",
+                "expired":        "expired",
+                "failed":         "failed",
+                "refunded":       "refunded",
+            }
+            mapped = _inv_map.get(inv_status, "")
+            if mapped:
+                return True, mapped
+    except Exception as exc:
+        print(f"[NowPayments check_invoice] invoice fallback error: {exc}")
+
+    # No payment created yet → user hasn't paid; treat as waiting.
+    return True, ""
 
 
 def verify_nowpayments_signature(raw_body: bytes, header_signature: str) -> bool:
