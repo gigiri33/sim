@@ -722,6 +722,8 @@ def _run_init_db_migrations():
             "ALTER TABLE payments ADD COLUMN service_names_json TEXT",
             "INSERT OR IGNORE INTO settings(key,value) VALUES('panel_renewal_enabled','1')",
             "ALTER TABLE panel_configs ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0",
+            # ── Package sale mode: 'all' | 'renew_only' | 'sale_only' | 'disabled' ──
+            "ALTER TABLE packages ADD COLUMN sale_mode TEXT NOT NULL DEFAULT 'all'",
         ]
         for sql in migrations:
             try:
@@ -1256,6 +1258,16 @@ def toggle_package_active(package_id):
     with get_conn() as conn:
         conn.execute(
             "UPDATE packages SET active=((active+1)%2) WHERE id=?", (package_id,)
+        )
+
+
+def set_package_sale_mode(package_id, mode):
+    """Set sale_mode for a package. mode: 'all'|'renew_only'|'sale_only'|'disabled'"""
+    if mode not in ("all", "renew_only", "sale_only", "disabled"):
+        return
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE packages SET sale_mode=? WHERE id=?", (mode, package_id)
         )
 
 
