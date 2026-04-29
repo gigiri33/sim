@@ -25,7 +25,7 @@ def _friendly_network_error(exc: Exception) -> str:
         return f"خطای شبکه — اتصال به PazzleNet ممکن نبود:\n{msg}"
     return msg
 
-PAZZLENET_BASE_URL = "https://api.puzzlenet.ir"
+PAZZLENET_BASE_URL = "https://pay.puzzlenet.xyz:8443"
 
 
 def _detect_public_ip() -> str:
