@@ -255,24 +255,31 @@ def is_pazzlenet_paid(status) -> bool:
     """
     Best-effort detection of successful payment from PazzleNet check response.
 
-    Handles dict (flat or nested under 'data'), string.
-    API returns: {"status": true, "data": {"paid": true}}
-    Callback body: {"status": "confirmed", ...}
+    PazzleNet API check response:  {"status": true, "data": {"paid": true|false, ...}}
+      - outer "status" is a *boolean API-call success flag* — NOT payment status.
+      - payment status lives inside "data".
+
+    PazzleNet webhook callback body: {"payment_id": ..., "status": "confirmed", ...}
+      - flat structure, no "data" key.
+      - "status" here is a *string* like "confirmed".
     """
     if isinstance(status, dict):
-        # Unwrap common nested wrapper: {"data": {...}}
+        # ── Wrapped API response: {"status": true|false, "data": {...}} ──────
+        # The outer "status" bool means "API call OK", not "payment confirmed".
+        # ONLY recurse into "data" — do NOT trust the outer boolean status.
         inner = status.get("data")
         if isinstance(inner, dict):
-            if is_pazzlenet_paid(inner):
-                return True
+            return is_pazzlenet_paid(inner)
 
+        # ── Flat dict (inner "data" object OR webhook callback body) ─────────
+        # Check paid boolean flag
         if status.get("paid") is True or status.get("paid") == 1:
             return True
 
+        # Check status *string* (webhook: {"status": "confirmed"})
+        # Intentionally skip boolean True — that's an API wrapper flag, not here.
         raw_status = status.get("status", "")
         if isinstance(raw_status, str) and raw_status.lower() in _PAID_VALUES:
-            return True
-        if raw_status is True or raw_status == 1:
             return True
 
         for key in ("payment_status", "state", "result"):

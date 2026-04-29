@@ -43,6 +43,7 @@ def run_crypto_fulfillment(gateway: str, payment_id: int):
         gw_label = {
             "plisio":      "Plisio",
             "nowpayments": "NowPayments",
+            "pazzlenet":   "PazzleNet",
         }.get(gateway, gateway.capitalize())
 
         if kind == "wallet_charge":
