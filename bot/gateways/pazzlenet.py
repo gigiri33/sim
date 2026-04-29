@@ -5,10 +5,25 @@ Register at @puzzlenetpay_bot → فروشگاه → مشخصات من → API K
 """
 
 import json
+import socket
 import urllib.request
 import urllib.error
 
 from ..db import setting_get
+
+
+def _friendly_network_error(exc: Exception) -> str:
+    """Return a human-readable Farsi string for common network/DNS errors."""
+    msg = str(exc)
+    # Errno -3 / EAI_AGAIN: DNS lookup failed
+    if isinstance(exc, (socket.gaierror, OSError)) and getattr(exc, 'errno', None) in (-3, 11001, 11004):
+        return (
+            f"خطای شبکه: آدرس سرور PazzleNet قابل دسترس نیست (DNS).\n"
+            f"لطفاً اتصال اینترنت سرور را بررسی کنید.\n({msg})"
+        )
+    if isinstance(exc, urllib.error.URLError):
+        return f"خطای شبکه — اتصال به PazzleNet ممکن نبود:\n{msg}"
+    return msg
 
 PAZZLENET_BASE_URL = "https://api.puzzlenet.ir"
 
@@ -107,7 +122,7 @@ def _post_pazzlenet(path: str, payload: dict, timeout: int = 15):
         return False, {"error": _extract_error_message(parsed), "status_code": e.code, "raw": parsed}
 
     except Exception as e:
-        return False, {"error": str(e)}
+        return False, {"error": _friendly_network_error(e)}
 
 
 def _get_pazzlenet(path: str, timeout: int = 15):
@@ -144,7 +159,7 @@ def _get_pazzlenet(path: str, timeout: int = 15):
         return False, {"error": _extract_error_message(parsed), "status_code": e.code, "raw": parsed}
 
     except Exception as e:
-        return False, {"error": str(e)}
+        return False, {"error": _friendly_network_error(e)}
 
 
 def create_pazzlenet_invoice(amount_toman: int, user_id: int):

@@ -5702,11 +5702,14 @@ def _dispatch_callback(call, uid, data):
         success, result = create_pazzlenet_invoice(price, uid)
         if not success:
             err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
+            hint = ("💡 اتصال اینترنت سرور را بررسی کنید."
+                    if any(x in err_msg for x in ("DNS", "شبکه", "اتصال", "name resolution", "urlopen", "timed out"))
+                    else "💡 مطمئن شوید کلید API صحیح وارد شده باشد.")
             bot.answer_callback_query(call.id)
             send_or_edit(call,
                 f"⚠️ <b>خطا در ایجاد درگاه PazzleNet</b>\n\n"
                 f"<code>{esc(err_msg[:400])}</code>\n\n"
-                "💡 مطمئن شوید کلید API صحیح وارد شده باشد.",
+                + hint,
                 back_button(f"renew:{purchase_id}"))
             return
         pz_pid = result.get("payment_id")
@@ -6874,11 +6877,14 @@ def _dispatch_callback(call, uid, data):
         success, result = create_pazzlenet_invoice(price, uid)
         if not success:
             err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
+            hint = ("💡 اتصال اینترنت سرور را بررسی کنید."
+                    if any(x in err_msg for x in ("DNS", "شبکه", "اتصال", "name resolution", "urlopen", "timed out"))
+                    else "💡 مطمئن شوید کلید API صحیح وارد شده باشد.")
             bot.answer_callback_query(call.id)
             send_or_edit(call,
                 f"⚠️ <b>خطا در ایجاد درگاه PazzleNet</b>\n\n"
                 f"<code>{esc(err_msg[:400])}</code>\n\n"
-                "💡 مطمئن شوید کلید API صحیح وارد شده باشد.",
+                + hint,
                 back_button(f"buy:p:{package_id}"))
             return
         pz_pid = result.get("payment_id")
@@ -7569,11 +7575,14 @@ def _dispatch_callback(call, uid, data):
         success, result = create_pazzlenet_invoice(amount, uid)
         if not success:
             err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
+            hint = ("💡 اتصال اینترنت سرور را بررسی کنید."
+                    if any(x in err_msg for x in ("DNS", "شبکه", "اتصال", "name resolution", "urlopen", "timed out"))
+                    else "💡 مطمئن شوید کلید API صحیح وارد شده باشد.")
             bot.answer_callback_query(call.id)
             send_or_edit(call,
                 f"⚠️ <b>خطا در ایجاد درگاه PazzleNet</b>\n\n"
                 f"<code>{esc(err_msg[:400])}</code>\n\n"
-                "💡 مطمئن شوید کلید API صحیح وارد شده باشد.",
+                + hint,
                 back_button("wallet:charge"))
             return
         pz_pid      = result.get("payment_id")
