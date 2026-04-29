@@ -6616,7 +6616,8 @@ def _dispatch_callback(call, uid, data):
         kb    = types.InlineKeyboardMarkup()
         has_any = False
         for item in items:
-            packs = [p for p in get_packages(type_id=item['id'], price_only=0) if p['stock'] > 0]
+            packs = [p for p in get_packages(type_id=item['id'], price_only=0)
+                     if p['stock'] > 0 or (p.get('config_source') or 'manual') == 'panel']
             if packs:
                 kb.add(types.InlineKeyboardButton(f"🎁 {item['name']}", callback_data=f"test:t:{item['id']}"))
                 has_any = True
@@ -6657,15 +6658,40 @@ def _dispatch_callback(call, uid, data):
         type_row    = get_type(type_id)
         package_row = None
         for item in get_packages(type_id=type_id, price_only=0):
-            if item["stock"] > 0:
+            _is_panel = (item.get('config_source') or 'manual') == 'panel'
+            if item["stock"] > 0 or _is_panel:
                 package_row = item
                 break
         if not package_row:
             bot.answer_callback_query(call.id, "برای این نوع تست رایگان موجود نیست.", show_alert=True)
             return
-        config_id = reserve_first_config(package_row["id"])
-        if not config_id:
-            bot.answer_callback_query(call.id, "تست رایگان این نوع تمام شده است.", show_alert=True)
+        _is_panel_pkg = (package_row.get('config_source') or 'manual') == 'panel'
+        if _is_panel_pkg:
+            config_id = None  # will be created via panel
+        else:
+            config_id = reserve_first_config(package_row["id"])
+            if not config_id:
+                bot.answer_callback_query(call.id, "تست رایگان این نوع تمام شده است.", show_alert=True)
+                return
+        if _is_panel_pkg:
+            # Panel-based free test: deliver via _deliver_bulk_configs in background
+            bot.answer_callback_query(call.id)
+            send_or_edit(call, "⏳ <b>در حال ساخت تست رایگان...</b>\n\nلطفاً چند لحظه صبر کنید.", back_button("nav:main"))
+            _chat_id = call.message.chat.id
+            _svc_names = [_gen_service_name(uid)]
+            def _do_panel_test():
+                _panel_ids, _pen_ids = _deliver_bulk_configs(
+                    uid=uid, package_id=package_row["id"], qty=1,
+                    payment_id=None, amount=0, pay_method="free_test",
+                    svc_names=_svc_names,
+                )
+                _send_bulk_delivery_result(
+                    chat_id=_chat_id, uid=uid, package=dict(package_row),
+                    panel_config_ids=_panel_ids, panel_pending_ids=_pen_ids,
+                    qty=1, amount=0, pay_method="free_test",
+                )
+            import threading as _threading
+            _threading.Thread(target=_do_panel_test, daemon=True).start()
             return
         try:
             purchase_id = assign_config_to_user(config_id, uid, package_row["id"], 0, "free_test", is_test=1)
@@ -12480,50 +12506,116 @@ def _dispatch_callback(call, uid, data):
 
     # ── Admin: Broadcast ──────────────────────────────────────────────────────
     if data == "admin:broadcast":
+        if not admin_has_perm(uid, "broadcast"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("📣 همه کاربران",             callback_data="adm:bc:all"))
-        kb.add(types.InlineKeyboardButton("🛍 فقط مشتریان (همه)",       callback_data="adm:bc:cust"))
-        kb.add(types.InlineKeyboardButton("👤 فقط مشتریان عادی",        callback_data="adm:bc:normal"))
-        kb.add(types.InlineKeyboardButton("🤝 فقط نمایندگان",           callback_data="adm:bc:agents"))
-        kb.add(types.InlineKeyboardButton("👑 فقط ادمین‌ها",            callback_data="adm:bc:admins"))
+        kb.add(types.InlineKeyboardButton("📣 فوروارد همگانی", callback_data="adm:bc:fwd"))
+        kb.add(types.InlineKeyboardButton("📌 پین همگانی",     callback_data="adm:bc:pin"))
+        kb.add(types.InlineKeyboardButton("📋 مدیریت پیام‌های پین شده", callback_data="adm:pin"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
+        send_or_edit(call, "📣 <b>فوروارد و پین همگانی</b>\n\nیک گزینه را انتخاب کنید:", kb)
+        return
+
+    if data in ("adm:bc:fwd", "adm:bc:menu"):
+        if not admin_has_perm(uid, "broadcast"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("📣 همه کاربران",           callback_data="adm:bc:all"))
+        kb.add(types.InlineKeyboardButton("🛍 فقط مشتریان (همه)",     callback_data="adm:bc:cust"))
+        kb.add(types.InlineKeyboardButton("👤 فقط مشتریان عادی",      callback_data="adm:bc:normal"))
+        kb.add(types.InlineKeyboardButton("🤝 فقط نمایندگان",         callback_data="adm:bc:agents"))
+        kb.add(types.InlineKeyboardButton("👑 فقط ادمین‌ها",          callback_data="adm:bc:admins"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:broadcast", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
         send_or_edit(call, "📣 <b>فوروارد همگانی</b>\n\nگیرنده‌ها را انتخاب کنید:", kb)
+        return
+
+    if data == "adm:bc:pin":
+        if not admin_has_perm(uid, "broadcast"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("📌 همه کاربران",           callback_data="adm:bc:pin:all"))
+        kb.add(types.InlineKeyboardButton("🛍 فقط مشتریان (همه)",     callback_data="adm:bc:pin:cust"))
+        kb.add(types.InlineKeyboardButton("👤 فقط مشتریان عادی",      callback_data="adm:bc:pin:normal"))
+        kb.add(types.InlineKeyboardButton("🤝 فقط نمایندگان",         callback_data="adm:bc:pin:agents"))
+        kb.add(types.InlineKeyboardButton("👑 فقط ادمین‌ها",          callback_data="adm:bc:pin:admins"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:broadcast", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "📌 <b>پین همگانی</b>\n\nگیرنده‌ها را انتخاب کنید:", kb)
         return
 
     if data == "adm:bc:all":
         state_set(uid, "admin_broadcast_all")
         bot.answer_callback_query(call.id)
         send_or_edit(call, "📣 پیام خود را فوروارد یا ارسال کنید.\nبرای <b>همه کاربران</b> ارسال می‌شود.",
-                     back_button("admin:broadcast"))
+                     back_button("adm:bc:menu"))
         return
 
     if data == "adm:bc:cust":
         state_set(uid, "admin_broadcast_customers")
         bot.answer_callback_query(call.id)
         send_or_edit(call, "🛍 پیام خود را فوروارد یا ارسال کنید.\nفقط برای <b>مشتریان</b> ارسال می‌شود.",
-                     back_button("admin:broadcast"))
+                     back_button("adm:bc:menu"))
         return
 
     if data == "adm:bc:normal":
         state_set(uid, "admin_broadcast_normal")
         bot.answer_callback_query(call.id)
         send_or_edit(call, "👤 پیام خود را فوروارد یا ارسال کنید.\nفقط برای <b>مشتریان عادی</b> (بدون نمایندگان و ادمین‌ها) ارسال می‌شود.",
-                     back_button("admin:broadcast"))
+                     back_button("adm:bc:menu"))
         return
 
     if data == "adm:bc:agents":
         state_set(uid, "admin_broadcast_agents")
         bot.answer_callback_query(call.id)
         send_or_edit(call, "🤝 پیام خود را فوروارد یا ارسال کنید.\nفقط برای <b>نمایندگان</b> ارسال می‌شود.",
-                     back_button("admin:broadcast"))
+                     back_button("adm:bc:menu"))
         return
 
     if data == "adm:bc:admins":
         state_set(uid, "admin_broadcast_admins")
         bot.answer_callback_query(call.id)
         send_or_edit(call, "👑 پیام خود را فوروارد یا ارسال کنید.\nفقط برای <b>ادمین‌ها</b> ارسال می‌شود.",
-                     back_button("admin:broadcast"))
+                     back_button("adm:bc:menu"))
+        return
+
+    if data == "adm:bc:pin:all":
+        state_set(uid, "admin_pin_broadcast_all")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "📌 پیام خود را ارسال کنید.\nبرای <b>همه کاربران</b> ارسال و پین می‌شود.",
+                     back_button("adm:bc:pin"))
+        return
+
+    if data == "adm:bc:pin:cust":
+        state_set(uid, "admin_pin_broadcast_customers")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "📌 پیام خود را ارسال کنید.\nفقط برای <b>مشتریان</b> ارسال و پین می‌شود.",
+                     back_button("adm:bc:pin"))
+        return
+
+    if data == "adm:bc:pin:normal":
+        state_set(uid, "admin_pin_broadcast_normal")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "📌 پیام خود را ارسال کنید.\nفقط برای <b>مشتریان عادی</b> ارسال و پین می‌شود.",
+                     back_button("adm:bc:pin"))
+        return
+
+    if data == "adm:bc:pin:agents":
+        state_set(uid, "admin_pin_broadcast_agents")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "📌 پیام خود را ارسال کنید.\nفقط برای <b>نمایندگان</b> ارسال و پین می‌شود.",
+                     back_button("adm:bc:pin"))
+        return
+
+    if data == "adm:bc:pin:admins":
+        state_set(uid, "admin_pin_broadcast_admins")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "📌 پیام خود را ارسال کنید.\nفقط برای <b>ادمین‌ها</b> ارسال و پین می‌شود.",
+                     back_button("adm:bc:pin"))
         return
 
     # ── Admin: Group management ───────────────────────────────────────────────
@@ -12604,7 +12696,6 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("📱 جمع‌آوری شماره تلفن", callback_data="adm:set:phone"))
         kb.add(types.InlineKeyboardButton("🤖 مدیریت عملیات ربات", callback_data="adm:ops"))
         kb.add(types.InlineKeyboardButton("🏢 مدیریت گروه",    callback_data="admin:group"))
-        kb.add(types.InlineKeyboardButton("📌 پیام‌های پین شده", callback_data="adm:pin"))
         kb.add(types.InlineKeyboardButton("⭐ آیدی ایموجی پرمیوم", callback_data="adm:emoji:menu"))
         kb.add(types.InlineKeyboardButton("� مدیریت اعلان‌ها",  callback_data="adm:notif"))
         kb.add(types.InlineKeyboardButton("�💾 بکاپ",            callback_data="admin:backup"))
@@ -12676,7 +12767,6 @@ def _dispatch_callback(call, uid, data):
             kb.add(types.InlineKeyboardButton("📜 قوانین خرید",     callback_data="adm:set:rules"))
             kb.add(types.InlineKeyboardButton("🏷 تنظیمات فروش",    callback_data="adm:set:shop"))
             kb.add(types.InlineKeyboardButton("🏢 مدیریت گروه",    callback_data="admin:group"))
-            kb.add(types.InlineKeyboardButton("📌 پیام‌های پین شده", callback_data="adm:pin"))
             kb.add(types.InlineKeyboardButton(f"{agency_icon} درخواست نمایندگی", callback_data="adm:set:agency_toggle"))
             kb.add(types.InlineKeyboardButton("📊 تخفیف پیش‌فرض نمایندگی", callback_data="adm:set:agency_defpct"))
             kb.add(types.InlineKeyboardButton("� مدیریت اعلان‌ها",  callback_data="adm:notif"))

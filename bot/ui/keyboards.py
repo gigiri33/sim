@@ -123,11 +123,11 @@ def kb_admin_panel(uid=None):
     show_pr        = is_owner or (uid and admin_has_perm(uid, "approve_payments"))
     if show_broadcast and show_pr:
         rows.append([
-            _btn("فوروارد همگانی",       callback_data="admin:broadcast", emoji_id="5416106115630918483"),
+            _btn("فوروارد و پین همگانی",       callback_data="admin:broadcast", emoji_id="5416106115630918483"),
             _btn("رسیدهای بررسی نشده",  callback_data="admin:pr",        emoji_id="5926764846518376076"),
         ])
     elif show_broadcast:
-        rows.append([_btn("فوروارد همگانی", callback_data="admin:broadcast", emoji_id="5416106115630918483")])
+        rows.append([_btn("فوروارد و پین همگانی", callback_data="admin:broadcast", emoji_id="5416106115630918483")])
     elif show_pr:
         rows.append([_btn("رسیدهای بررسی نشده", callback_data="admin:pr", emoji_id="5926764846518376076")])
 

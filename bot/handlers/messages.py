@@ -2,6 +2,8 @@
 import os
 import traceback
 import sqlite3
+import threading
+import time
 import urllib.parse
 from datetime import datetime
 from telebot import types
@@ -82,6 +84,83 @@ from .callbacks import (
     _v2_name_from_config, _v2_name_from_sub, _v2_bulk_data_prompt,
     _is_panel_package, _show_naming_prompt,
 )
+
+
+# ── Broadcast helpers ──────────────────────────────────────────────────────────
+
+def _bc_progress_text(title: str, total: int, done: int, ok: int, fail: int) -> str:
+    bar_fill = 10
+    filled = int(done / total * bar_fill) if total > 0 else 0
+    bar = "▓" * filled + "░" * (bar_fill - filled)
+    pct = (done / total * 100) if total > 0 else 0.0
+    from ..helpers import now_str as _now_str
+    return (
+        f"📊 <b>وضعیت {title}</b>\n\n"
+        f"🚀 پیام شما به <b>{total}</b> نفر ارسال می‌شود.\n"
+        f"📊 {bar} {pct:.1f}% {done}/{total}\n"
+        f"✅ موفق: <b>{ok}</b> | ❌ ناموفق: <b>{fail}</b>\n"
+        f"🕚 {_now_str()}"
+    )
+
+
+def _do_broadcast(user_ids: list, title: str, mode: str,
+                  admin_uid: int, from_chat_id: int, msg_id: int,
+                  reply_markup, progress_msg_id: int) -> None:
+    """Background thread: broadcast/pin message to list of user IDs.
+    mode: 'forward' | 'pin'
+    """
+    total = len(user_ids)
+    done = ok = fail = 0
+    last_edit = time.time()
+
+    def _upd():
+        nonlocal last_edit
+        try:
+            bot.edit_message_text(
+                _bc_progress_text(title, total, done, ok, fail),
+                admin_uid, progress_msg_id, parse_mode="HTML")
+            last_edit = time.time()
+        except Exception:
+            pass
+
+    for tgt_uid in user_ids:
+        try:
+            sent_msg = bot.copy_message(
+                tgt_uid, from_chat_id, msg_id, reply_markup=reply_markup)
+            if mode == "pin" and sent_msg:
+                try:
+                    bot.pin_chat_message(
+                        tgt_uid, sent_msg.message_id, disable_notification=True)
+                except Exception:
+                    pass
+            ok += 1
+        except Exception:
+            fail += 1
+        done += 1
+        time.sleep(0.05)
+        if done % 50 == 0 or (time.time() - last_edit) >= 5:
+            _upd()
+
+    # Final progress update
+    from ..helpers import now_str as _now_str
+    final_text = (
+        f"📊 <b>وضعیت {title}</b>\n\n"
+        f"🚀 پیام شما به <b>{total}</b> نفر ارسال شد.\n"
+        f"📊 {'▓' * 10} 100.0% {total}/{total}\n"
+        f"✅ موفق: <b>{ok}</b> | ❌ ناموفق: <b>{fail}</b>\n"
+        f"🕚 {_now_str()}\n\n"
+        f"✅ <b>عملیات پایان یافت.</b>"
+    )
+    try:
+        bot.edit_message_text(final_text, admin_uid, progress_msg_id, parse_mode="HTML")
+    except Exception:
+        pass
+
+    from ..group_manager import send_to_topic as _stt
+    _stt("broadcast_report",
+         f"📢 <b>{title}</b>\n\n"
+         f"👤 ارسال‌کننده: <code>{admin_uid}</code>\n"
+         f"✅ موفق: <b>{ok}</b> | ❌ ناموفق: <b>{fail}</b> | 📊 کل: <b>{total}</b>")
 
 
 # ── V2Ray bulk helpers ─────────────────────────────────────────────────────────
@@ -513,9 +592,182 @@ def universal_handler(message):
             return
 
         # ── Broadcast ─────────────────────────────────────────────────────────
-        def _bc_send(target_id):
-            """Copy message to target (supports text, photo, video, etc.)."""
-            bot.copy_message(target_id, message.chat.id, message.message_id)
+
+        if sn == "admin_broadcast_all" and is_admin(uid):
+            user_ids = [u["user_id"] for u in get_users()]
+            state_clear(uid)
+            prog = bot.send_message(
+                uid, _bc_progress_text("فوروارد همگانی — همه کاربران", len(user_ids), 0, 0, 0),
+                parse_mode="HTML")
+            threading.Thread(
+                target=_do_broadcast,
+                args=(user_ids, "فوروارد همگانی — همه کاربران", "forward",
+                      uid, message.chat.id, message.message_id,
+                      message.reply_markup, prog.message_id),
+                daemon=True).start()
+            return
+
+        if sn == "admin_broadcast_customers" and is_admin(uid):
+            user_ids = [u["user_id"] for u in get_users(has_purchase=True)]
+            state_clear(uid)
+            prog = bot.send_message(
+                uid, _bc_progress_text("فوروارد همگانی — مشتریان", len(user_ids), 0, 0, 0),
+                parse_mode="HTML")
+            threading.Thread(
+                target=_do_broadcast,
+                args=(user_ids, "فوروارد همگانی — مشتریان", "forward",
+                      uid, message.chat.id, message.message_id,
+                      message.reply_markup, prog.message_id),
+                daemon=True).start()
+            return
+
+        if sn == "admin_broadcast_normal" and is_admin(uid):
+            from ..db import get_all_admin_users as _get_admins
+            admin_ids_set = set(ADMIN_IDS)
+            for _ar in _get_admins():
+                admin_ids_set.add(_ar["user_id"])
+            user_ids = [
+                u["user_id"] for u in get_users(has_purchase=True)
+                if u["user_id"] not in admin_ids_set and not u["is_agent"]
+            ]
+            state_clear(uid)
+            prog = bot.send_message(
+                uid, _bc_progress_text("فوروارد همگانی — مشتریان عادی", len(user_ids), 0, 0, 0),
+                parse_mode="HTML")
+            threading.Thread(
+                target=_do_broadcast,
+                args=(user_ids, "فوروارد همگانی — مشتریان عادی", "forward",
+                      uid, message.chat.id, message.message_id,
+                      message.reply_markup, prog.message_id),
+                daemon=True).start()
+            return
+
+        if sn == "admin_broadcast_agents" and is_admin(uid):
+            user_ids = [u["user_id"] for u in get_users() if u["is_agent"]]
+            state_clear(uid)
+            prog = bot.send_message(
+                uid, _bc_progress_text("فوروارد همگانی — نمایندگان", len(user_ids), 0, 0, 0),
+                parse_mode="HTML")
+            threading.Thread(
+                target=_do_broadcast,
+                args=(user_ids, "فوروارد همگانی — نمایندگان", "forward",
+                      uid, message.chat.id, message.message_id,
+                      message.reply_markup, prog.message_id),
+                daemon=True).start()
+            return
+
+        if sn == "admin_broadcast_admins" and is_admin(uid):
+            from ..db import get_all_admin_users as _get_admins
+            seen = set()
+            user_ids = []
+            for aid in ADMIN_IDS:
+                if aid not in seen:
+                    seen.add(aid)
+                    user_ids.append(aid)
+            for _ar in _get_admins():
+                if _ar["user_id"] not in seen:
+                    seen.add(_ar["user_id"])
+                    user_ids.append(_ar["user_id"])
+            state_clear(uid)
+            prog = bot.send_message(
+                uid, _bc_progress_text("فوروارد همگانی — ادمین‌ها", len(user_ids), 0, 0, 0),
+                parse_mode="HTML")
+            threading.Thread(
+                target=_do_broadcast,
+                args=(user_ids, "فوروارد همگانی — ادمین‌ها", "forward",
+                      uid, message.chat.id, message.message_id,
+                      message.reply_markup, prog.message_id),
+                daemon=True).start()
+            return
+
+        # ── Pin Broadcast ──────────────────────────────────────────────────────
+
+        if sn == "admin_pin_broadcast_all" and is_admin(uid):
+            user_ids = [u["user_id"] for u in get_users()]
+            state_clear(uid)
+            prog = bot.send_message(
+                uid, _bc_progress_text("پین همگانی — همه کاربران", len(user_ids), 0, 0, 0),
+                parse_mode="HTML")
+            threading.Thread(
+                target=_do_broadcast,
+                args=(user_ids, "پین همگانی — همه کاربران", "pin",
+                      uid, message.chat.id, message.message_id,
+                      message.reply_markup, prog.message_id),
+                daemon=True).start()
+            return
+
+        if sn == "admin_pin_broadcast_customers" and is_admin(uid):
+            user_ids = [u["user_id"] for u in get_users(has_purchase=True)]
+            state_clear(uid)
+            prog = bot.send_message(
+                uid, _bc_progress_text("پین همگانی — مشتریان", len(user_ids), 0, 0, 0),
+                parse_mode="HTML")
+            threading.Thread(
+                target=_do_broadcast,
+                args=(user_ids, "پین همگانی — مشتریان", "pin",
+                      uid, message.chat.id, message.message_id,
+                      message.reply_markup, prog.message_id),
+                daemon=True).start()
+            return
+
+        if sn == "admin_pin_broadcast_normal" and is_admin(uid):
+            from ..db import get_all_admin_users as _get_admins
+            admin_ids_set = set(ADMIN_IDS)
+            for _ar in _get_admins():
+                admin_ids_set.add(_ar["user_id"])
+            user_ids = [
+                u["user_id"] for u in get_users(has_purchase=True)
+                if u["user_id"] not in admin_ids_set and not u["is_agent"]
+            ]
+            state_clear(uid)
+            prog = bot.send_message(
+                uid, _bc_progress_text("پین همگانی — مشتریان عادی", len(user_ids), 0, 0, 0),
+                parse_mode="HTML")
+            threading.Thread(
+                target=_do_broadcast,
+                args=(user_ids, "پین همگانی — مشتریان عادی", "pin",
+                      uid, message.chat.id, message.message_id,
+                      message.reply_markup, prog.message_id),
+                daemon=True).start()
+            return
+
+        if sn == "admin_pin_broadcast_agents" and is_admin(uid):
+            user_ids = [u["user_id"] for u in get_users() if u["is_agent"]]
+            state_clear(uid)
+            prog = bot.send_message(
+                uid, _bc_progress_text("پین همگانی — نمایندگان", len(user_ids), 0, 0, 0),
+                parse_mode="HTML")
+            threading.Thread(
+                target=_do_broadcast,
+                args=(user_ids, "پین همگانی — نمایندگان", "pin",
+                      uid, message.chat.id, message.message_id,
+                      message.reply_markup, prog.message_id),
+                daemon=True).start()
+            return
+
+        if sn == "admin_pin_broadcast_admins" and is_admin(uid):
+            from ..db import get_all_admin_users as _get_admins
+            seen = set()
+            user_ids = []
+            for aid in ADMIN_IDS:
+                if aid not in seen:
+                    seen.add(aid)
+                    user_ids.append(aid)
+            for _ar in _get_admins():
+                if _ar["user_id"] not in seen:
+                    seen.add(_ar["user_id"])
+                    user_ids.append(_ar["user_id"])
+            state_clear(uid)
+            prog = bot.send_message(
+                uid, _bc_progress_text("پین همگانی — ادمین‌ها", len(user_ids), 0, 0, 0),
+                parse_mode="HTML")
+            threading.Thread(
+                target=_do_broadcast,
+                args=(user_ids, "پین همگانی — ادمین‌ها", "pin",
+                      uid, message.chat.id, message.message_id,
+                      message.reply_markup, prog.message_id),
+                daemon=True).start()
+            return
 
         if sn == "admin_reject_all_note" and is_admin(uid):
             note_text = message.text.strip() if message.text else ""
