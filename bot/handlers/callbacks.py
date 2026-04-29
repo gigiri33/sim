@@ -15628,6 +15628,12 @@ def _dispatch_callback(call, uid, data):
         range_label   = "🟢 فعال" if range_en == "1" else "🔴 غیرفعال"
         fee_on   = setting_get("gw_pazzlenet_fee_enabled", "0") == "1"
         bonus_on = setting_get("gw_pazzlenet_bonus_enabled", "0") == "1"
+        try:
+            from ..gateways.pazzlenet import get_pazzlenet_callback_url
+            _bot_uname_pz = bot.get_me().username or ""
+            _cb_url_pz = get_pazzlenet_callback_url(_bot_uname_pz)
+        except Exception:
+            _cb_url_pz = ""
         kb = types.InlineKeyboardMarkup()
         kb.row(
             types.InlineKeyboardButton(f"وضعیت: {enabled_label}", callback_data="adm:gw:pazzlenet:toggle"),
@@ -15638,23 +15644,25 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("🏷 نام نمایشی درگاه", callback_data="adm:gw:pazzlenet:set_name"))
         fee_bonus_lbl = ("🟢 کارمزد" if fee_on else "🔴 کارمزد") + " | " + ("🟢 بونس" if bonus_on else "🔴 بونس")
         kb.add(types.InlineKeyboardButton(f"🎁 بونس و کارمزد — {fee_bonus_lbl}", callback_data="adm:gw:pazzlenet:feebonus"))
-        if not api_key:
-            kb.add(types.InlineKeyboardButton("🤖 ثبت‌نام در @puzzlenetpay_bot", url="https://t.me/puzzlenetpay_bot"))
+        kb.add(types.InlineKeyboardButton("🤖 باز کردن @puzzlenetpay_bot", url="https://t.me/puzzlenetpay_bot"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gateways", icon_custom_emoji_id="5253997076169115797"))
         key_display = (f"<code>{esc(api_key[:8])}...{esc(api_key[-4:])}</code>"
                        if api_key else "❌ <b>ثبت نشده</b>")
         display_name_pz = setting_get("gw_pazzlenet_display_name", "")
         name_display_pz = display_name_pz or "<i>پیش‌فرض: درگاه کارت به کارت (PazzleNet)</i>"
+        _cb_line = f"🔗 Callback URL:\n<code>{esc(_cb_url_pz)}</code>\n\n" if _cb_url_pz else "⚠️ Callback URL تشخیص داده نشد — مطمئن شوید server_public_url تنظیم باشد.\n\n"
         text = (
             "💳 <b>درگاه کارت به کارت (PazzleNet)</b>\n\n"
             f"وضعیت: {enabled_label}\n"
             f"نمایش: {vis_label}\n"
             f"نام نمایشی: {name_display_pz}\n\n"
             f"🔑 کلید API: {key_display}\n\n"
-            "📋 <b>راهنمای دریافت API Key:</b>\n"
+            f"{_cb_line}"
+            "📋 <b>راهنمای راه‌اندازی:</b>\n"
             "۱. ربات @puzzlenetpay_bot را استارت کنید\n"
             "۲. فروشگاه را ثبت کنید\n"
-            "۳. از قسمت مشخصات من، کلید API را بردارید"
+            "۳. از قسمت مشخصات من، کلید API را بردارید\n"
+            "۴. Callback URL بالا را در تنظیمات فروشگاه وارد کنید"
         )
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)

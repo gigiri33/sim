@@ -13,6 +13,37 @@ from ..db import setting_get
 PAZZLENET_BASE_URL = "https://api.puzzlenet.ir"
 
 
+def _detect_public_ip() -> str:
+    """Try to detect the server's public IP."""
+    import urllib.request
+    for url in ("https://api.ipify.org", "https://checkip.amazonaws.com"):
+        try:
+            with urllib.request.urlopen(url, timeout=5) as r:
+                return r.read().decode().strip()
+        except Exception:
+            pass
+    return ""
+
+
+def get_pazzlenet_callback_url(bot_username: str) -> str:
+    """
+    Return the callback URL that must be registered in @puzzlenetpay_bot.
+    Format: http://{ip}:{port}/pazzlenet/{bot_slug}/callback
+    Uses server_public_url setting if set, otherwise auto-detects public IP.
+    """
+    base = (setting_get("server_public_url", "") or "").strip().rstrip("/")
+    if not base:
+        ip = _detect_public_ip()
+        if ip:
+            port = (setting_get("plisio_webhook_port", "") or
+                    setting_get("webhook_port", "") or "5050").strip()
+            base = f"http://{ip}:{port}"
+    if not base:
+        return ""
+    slug = (bot_username or "").lower().replace("@", "").strip()
+    return f"{base}/pazzlenet/{slug}/callback"
+
+
 def _decode_response_body(resp) -> tuple:
     """Read response and try to parse JSON."""
     raw = resp.read().decode("utf-8", errors="replace").strip()
