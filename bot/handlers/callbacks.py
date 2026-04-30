@@ -5337,7 +5337,7 @@ def _dispatch_callback(call, uid, data):
         # Phone gate for card_only mode
         if setting_get("phone_mode", "disabled") == "card_only" and not get_phone_number(uid):
             from telebot.types import ReplyKeyboardMarkup, KeyboardButton
-            state_set(uid, "waiting_for_phone_card")
+            state_set(uid, "waiting_for_phone_card", pending_callback=data)
             bot.answer_callback_query(call.id)
             kb_phone = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
             kb_phone.add(KeyboardButton("📱 ارسال شماره تلفن", request_contact=True))
@@ -6391,7 +6391,10 @@ def _dispatch_callback(call, uid, data):
         # Phone gate for card_only mode
         if setting_get("phone_mode", "disabled") == "card_only" and not get_phone_number(uid):
             from telebot.types import ReplyKeyboardMarkup, KeyboardButton
-            state_set(uid, "waiting_for_phone_card", pending_package_id=package_id)
+            _cur_sd = state_data(uid)
+            state_set(uid, "waiting_for_phone_card", pending_callback=data,
+                      quantity=_cur_sd.get("quantity", 1),
+                      service_names=_cur_sd.get("service_names"))
             bot.answer_callback_query(call.id)
             kb_phone = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
             kb_phone.add(KeyboardButton("📱 ارسال شماره تلفن", request_contact=True))
@@ -7342,7 +7345,8 @@ def _dispatch_callback(call, uid, data):
         # Phone gate for card_only mode
         if setting_get("phone_mode", "disabled") == "card_only" and not get_phone_number(uid):
             from telebot.types import ReplyKeyboardMarkup, KeyboardButton
-            state_set(uid, "waiting_for_phone_card")
+            state_set(uid, "waiting_for_phone_card", pending_callback="wallet:charge:card",
+                      amount=amount)
             bot.answer_callback_query(call.id)
             kb_phone = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
             kb_phone.add(KeyboardButton("📱 ارسال شماره تلفن", request_contact=True))
@@ -9623,7 +9627,7 @@ def _dispatch_callback(call, uid, data):
             # Phone gate for card_only mode
             if setting_get("phone_mode", "disabled") == "card_only" and not get_phone_number(uid):
                 from telebot.types import ReplyKeyboardMarkup, KeyboardButton
-                state_set(uid, "waiting_for_phone_card")
+                state_set(uid, "waiting_for_phone_card", pending_callback=data)
                 bot.answer_callback_query(call.id)
                 kb_phone = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
                 kb_phone.add(KeyboardButton("📱 ارسال شماره تلفن", request_contact=True))

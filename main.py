@@ -188,6 +188,81 @@ def _plisio_webhook_server():
     def _nowpayments_cancel(bot_username):
         return "❌ پرداخت لغو شد. به ربات تلگرام بازگردید.", 200
 
+    # ── PazzleNet routes (sharing the same Flask app & port) ──────────────
+    @_app.route("/pazzlenet/<bot_username>/callback", methods=["GET", "POST"])
+    def _pazzlenet_callback(bot_username):
+        try:
+            # PazzleNet may send JSON body or query-string parameters
+            data = {}
+            if request.content_length and request.content_length > 0:
+                data = request.get_json(force=True, silent=True) or {}
+            if not data:
+                data = dict(request.args) or {}
+
+            # Extract the PazzleNet payment ID from the callback
+            pz_pid = (
+                data.get("payment_id")
+                or data.get("id")
+                or data.get("order_id")
+                or data.get("order_number")
+                or ""
+            )
+            if not pz_pid:
+                return jsonify({"status": "ok"}), 200
+
+            pz_pid = str(pz_pid).strip()
+
+            # Find our internal payment by the PazzleNet payment ID stored in receipt_text
+            from bot.db import get_conn as _gc
+            with _gc() as _c:
+                row = _c.execute(
+                    "SELECT id FROM payments WHERE receipt_text=? AND payment_method='pazzlenet' AND status='pending'",
+                    (pz_pid,)
+                ).fetchone()
+            if not row:
+                return jsonify({"status": "ok"}), 200
+
+            payment_id = row["id"]
+            payment = get_payment(payment_id)
+            if not payment or payment["status"] != "pending":
+                return jsonify({"status": "ok"}), 200
+
+            from bot.gateways.pazzlenet import is_pazzlenet_paid as _pz_paid
+            if not _pz_paid(data):
+                # Callback status not paid yet — ack it
+                return jsonify({"status": "ok"}), 200
+
+            kind   = payment["kind"]
+            uid    = payment["user_id"]
+            amount = payment["amount"]
+
+            if kind == "wallet_charge":
+                if not complete_payment(payment_id):
+                    return jsonify({"status": "ok"}), 200
+                update_balance(uid, amount)
+                try:
+                    apply_gateway_bonus_if_needed(uid, "pazzlenet", amount)
+                except Exception:
+                    pass
+                try:
+                    bot.send_message(
+                        uid,
+                        f"✅ پرداخت PazzleNet شما تأیید شد و کیف پول شارژ شد.\n\n💰 مبلغ: {fmt_price(amount)} تومان",
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    pass
+            else:
+                # config_purchase / renewal / pnlcfg_renewal
+                threading.Thread(
+                    target=_run_fulfillment,
+                    args=("pazzlenet", payment_id),
+                    daemon=True,
+                ).start()
+        except Exception as exc:
+            print("PAZZLENET_WEBHOOK_ERROR:", exc)
+        return jsonify({"status": "ok"}), 200
+
     port = int(get_plisio_webhook_port())
     print(f"🌐 Payment webhook server (Plisio + NowPayments) starting on port {port}…")
     _app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)

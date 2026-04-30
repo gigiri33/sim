@@ -870,8 +870,10 @@ def universal_handler(message):
                     return
                 final_phone = normalized if normalized else phone_raw
                 set_phone_number(uid, final_phone)
-                pending_pkg_id = sd.get("pending_package_id")
-                state_clear(uid)
+                pending_callback = sd.get("pending_callback")
+                # Preserve any state data needed for the resumed callback
+                _preserved_sd = {k: v for k, v in sd.items()
+                                 if k not in ("state", "pending_callback")}
                 from telebot.types import ReplyKeyboardRemove
                 bot.send_message(
                     message.chat.id,
@@ -879,12 +881,35 @@ def universal_handler(message):
                     parse_mode="HTML",
                     reply_markup=ReplyKeyboardRemove(),
                 )
-                if pending_pkg_id:
-                    bot.send_message(
-                        message.chat.id,
-                        "🛒 اکنون می‌توانید پرداخت خود را ادامه دهید.",
-                        parse_mode="HTML",
-                    )
+                if pending_callback:
+                    # Restore the preserved state (quantity, service_names, amount etc.)
+                    # then replay the original callback as if the user pressed the button again
+                    if _preserved_sd:
+                        state_set(uid, "_phone_resume_", **_preserved_sd)
+                    else:
+                        state_clear(uid)
+                    from ..handlers.callbacks import _dispatch_callback as _dc
+
+                    class _FakeUser:
+                        def __init__(self, uid_):
+                            self.id = uid_
+
+                    class _FakeMsg:
+                        def __init__(self, msg):
+                            self.chat       = msg.chat
+                            self.message_id = msg.message_id
+                            self.text       = ""
+
+                    class _FakeCall:
+                        def __init__(self, msg, uid_, cb_data):
+                            self.from_user = _FakeUser(uid_)
+                            self.message   = _FakeMsg(msg)
+                            self.data      = cb_data
+                            self.id        = "0"
+
+                    _dc(_FakeCall(message, uid, pending_callback), uid, pending_callback)
+                else:
+                    state_clear(uid)
                     show_main_menu(message)
             else:
                 bot.send_message(
@@ -3705,24 +3730,22 @@ def universal_handler(message):
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("🔙 بازگشت به کاربر", callback_data=f"adm:usr:v:{target_user_id}"))
             target_info = get_user(target_user_id)
-            _tname = (target_info.get('first_name') or '') if isinstance(target_info, dict) else (target_info['first_name'] or '' if target_info else '')
             try:
-                _tname = target_info['first_name'] or ''
+                _tname    = target_info['first_name'] or ''
+                _tuname   = target_info['username'] or ''
+                _new_bal  = target_info['balance']
             except Exception:
-                _tname = ''
-            try:
-                _tusername = target_info['username'] or ''
-            except Exception:
-                _tusername = ''
-            new_bal = (target_info['balance'] if target_info else 0)
-            _uname_str = f" (@{_tusername})" if _tusername else ""
+                _tname   = str(target_user_id)
+                _tuname  = ''
+                _new_bal = 0
+            _uname_str = f" (@{_tuname})" if _tuname else ""
             bot.send_message(
                 uid,
                 f"✅ موجودی {action_label} یافت.\n\n"
-                f"👤 کاربر: <b>{_tname}</b>{_uname_str}\n"
+                f"👤 کاربر: <b>{esc(_tname)}</b>{_uname_str}\n"
                 f"🆔 آیدی: <code>{target_user_id}</code>\n"
                 f"💰 مبلغ: <b>{fmt_price(abs(amount))}</b> تومان\n"
-                f"💳 موجودی جدید: <b>{fmt_price(new_bal)}</b> تومان",
+                f"💳 موجودی جدید: <b>{fmt_price(_new_bal)}</b> تومان",
                 reply_markup=kb, parse_mode="HTML")
             try:
                 msg = f"{'➕' if delta > 0 else '➖'} موجودی شما توسط ادمین {action_label} یافت.\n💰 مبلغ: {fmt_price(abs(amount))} تومان"

@@ -18,7 +18,7 @@ def run_crypto_fulfillment(gateway: str, payment_id: int):
     only the first caller proceeds; subsequent calls are no-ops.
 
     Args:
-        gateway:    "plisio" or "nowpayments"
+        gateway:    "plisio", "nowpayments", or "pazzlenet"
         payment_id: DB row ID of the payment
     """
     try:
@@ -43,6 +43,7 @@ def run_crypto_fulfillment(gateway: str, payment_id: int):
         gw_label = {
             "plisio":      "Plisio",
             "nowpayments": "NowPayments",
+            "pazzlenet":   "PazzleNet",
         }.get(gateway, gateway.capitalize())
 
         if kind == "wallet_charge":
