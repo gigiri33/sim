@@ -668,7 +668,7 @@ def _finish_card_payment_approval_core(payment_id, admin_note, approved):
             if not complete_payment(payment_id):
                 return False, True  # already processed
             update_balance(user_id, payment["amount"])
-            notified = _safe_send(user_id, f"{ce('✅', '5900157489759916320')} واریزی شما تأیید شد.\n\n{esc(admin_note)}")
+            notified = _safe_send(user_id, f"{ce('✅', '5900157489759916320')} واریزی شما تأیید شد." + (f"\n\n{esc(admin_note)}" if admin_note else ""))
             # Apply gateway bonus if configured
             try:
                 apply_gateway_bonus_if_needed(user_id, payment["payment_method"] or "card", payment["amount"])
@@ -699,8 +699,9 @@ def _finish_card_payment_approval_core(payment_id, admin_note, approved):
             if not complete_payment(payment_id):
                 return False, True  # already processed
             notified = _safe_send(user_id,
-                f"{ce('✅', '5900157489759916320')} واریزی شما تأیید شد.\n\n{esc(admin_note)}\n\n"
-                "⏳ کانفیگ‌های شما در حال آماده‌سازی هستند...")
+                f"{ce('✅', '5900157489759916320')} واریزی شما تأیید شد."
+                + (f"\n\n{esc(admin_note)}" if admin_note else "")
+                + "\n\n⏳ کانفیگ‌های شما در حال آماده‌سازی هستند...")
             # Apply gateway bonus if configured
             try:
                 apply_gateway_bonus_if_needed(user_id, payment["payment_method"] or "card", payment["amount"])

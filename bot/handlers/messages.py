@@ -123,10 +123,16 @@ def _do_broadcast(user_ids: list, title: str, mode: str,
         except Exception:
             pass
 
+    # If the source is a channel message, use forward_message to preserve channel header/view counts
+    _is_channel_src = isinstance(from_chat_id, int) and from_chat_id < 0
+
     for tgt_uid in user_ids:
         try:
-            sent_msg = bot.copy_message(
-                tgt_uid, from_chat_id, msg_id, reply_markup=reply_markup)
+            if _is_channel_src:
+                sent_msg = bot.forward_message(tgt_uid, from_chat_id, msg_id)
+            else:
+                sent_msg = bot.copy_message(
+                    tgt_uid, from_chat_id, msg_id, reply_markup=reply_markup)
             if mode == "pin" and sent_msg:
                 try:
                     bot.pin_chat_message(
@@ -3567,9 +3573,9 @@ def universal_handler(message):
                 bot.send_message(uid, "⚠️ عدد معتبر وارد کنید.", reply_markup=back_button("admin:backup"))
                 return
             setting_set("backup_interval", str(val))
-            log_admin_action(uid, f"بازه بکاپ به {val} ساعت تنظیم شد")
+            log_admin_action(uid, f"بازه بکاپ به {val} دقیقه تنظیم شد")
             state_clear(uid)
-            bot.send_message(uid, f"✅ بازه بکاپ به {val} ساعت تنظیم شد.", reply_markup=back_button("admin:backup"))
+            bot.send_message(uid, f"✅ بازه بکاپ به {val} دقیقه تنظیم شد.", reply_markup=back_button("admin:backup"))
             return
 
         if sn == "admin_set_backup_target" and is_admin(uid):
@@ -3698,7 +3704,26 @@ def universal_handler(message):
             action_label = "اضافه" if delta > 0 else "کاهش"
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("🔙 بازگشت به کاربر", callback_data=f"adm:usr:v:{target_user_id}"))
-            bot.send_message(uid, f"✅ موجودی {action_label} یافت.", reply_markup=kb)
+            target_info = get_user(target_user_id)
+            _tname = (target_info.get('first_name') or '') if isinstance(target_info, dict) else (target_info['first_name'] or '' if target_info else '')
+            try:
+                _tname = target_info['first_name'] or ''
+            except Exception:
+                _tname = ''
+            try:
+                _tusername = target_info['username'] or ''
+            except Exception:
+                _tusername = ''
+            new_bal = (target_info['balance'] if target_info else 0)
+            _uname_str = f" (@{_tusername})" if _tusername else ""
+            bot.send_message(
+                uid,
+                f"✅ موجودی {action_label} یافت.\n\n"
+                f"👤 کاربر: <b>{_tname}</b>{_uname_str}\n"
+                f"🆔 آیدی: <code>{target_user_id}</code>\n"
+                f"💰 مبلغ: <b>{fmt_price(abs(amount))}</b> تومان\n"
+                f"💳 موجودی جدید: <b>{fmt_price(new_bal)}</b> تومان",
+                reply_markup=kb, parse_mode="HTML")
             try:
                 msg = f"{'➕' if delta > 0 else '➖'} موجودی شما توسط ادمین {action_label} یافت.\n💰 مبلغ: {fmt_price(abs(amount))} تومان"
                 bot.send_message(target_user_id, msg)

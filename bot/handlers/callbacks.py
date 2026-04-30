@@ -15408,7 +15408,14 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id, "شناسه کارت نامعتبر است.", show_alert=True)
             return
         try:
+            _del_card = get_payment_card(card_id)
             delete_payment_card(card_id)
+            # Clear the legacy payment_card setting if it matches the deleted card,
+            # otherwise the card would be re-added on next list load
+            if _del_card and setting_get("payment_card", "").strip() == _del_card["card_number"]:
+                setting_set("payment_card", "")
+                setting_set("payment_bank", "")
+                setting_set("payment_owner", "")
         except Exception as e:
             print(f"[card delete] error: {e}")
             bot.answer_callback_query(call.id, f"خطا: {e}", show_alert=True)
@@ -16990,7 +16997,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("📥 بازیابی بکاپ", callback_data="adm:bkp:restore"))
         toggle_label = "🔴 غیرفعال کردن بکاپ خودکار" if enabled == "1" else "🟢 فعال کردن بکاپ خودکار"
         kb.add(types.InlineKeyboardButton(toggle_label, callback_data="adm:bkp:toggle"))
-        kb.add(types.InlineKeyboardButton(f"⏰ زمان‌بندی: هر {interval} ساعت", callback_data="adm:bkp:interval"))
+        kb.add(types.InlineKeyboardButton(f"⏰ زمان‌بندی: هر {interval} دقیقه", callback_data="adm:bkp:interval"))
         kb.add(types.InlineKeyboardButton("📤 تنظیم مقصد", callback_data="adm:bkp:target"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
@@ -16998,7 +17005,7 @@ def _dispatch_callback(call, uid, data):
             call,
             f"💾 <b>بکاپ</b>\n\n"
             f"بکاپ خودکار: {'🟢 فعال' if enabled == '1' else '🔴 غیرفعال'}\n"
-            f"هر {interval} ساعت\n"
+            f"هر {interval} دقیقه\n"
             f"مقصد: <code>{esc(target or 'ثبت نشده')}</code>",
             kb
         )
@@ -17020,7 +17027,7 @@ def _dispatch_callback(call, uid, data):
     if data == "adm:bkp:interval":
         state_set(uid, "admin_set_backup_interval")
         bot.answer_callback_query(call.id)
-        send_or_edit(call, "⏰ بازه بکاپ خودکار را به ساعت وارد کنید (مثال: 6، 12، 24):",
+        send_or_edit(call, "⏰ بازه بکاپ خودکار را به دقیقه وارد کنید (مثال: 30، 60، 1440):",
                      back_button("admin:backup"))
         return
 
@@ -17681,7 +17688,7 @@ def _dispatch_callback(call, uid, data):
         # Answer immediately so Telegram stops showing spinner and won't retry
         bot.answer_callback_query(call.id, "⏳ در حال پردازش...")
         state_clear(uid)
-        result = finish_card_payment_approval(payment_id, "واریزی شما تأیید شد.", approved=True)
+        result = finish_card_payment_approval(payment_id, "", approved=True)
         if not result:
             send_or_edit(call, "⚠️ این تراکنش قبلاً پردازش شده است.", kb_admin_panel(uid))
         else:
@@ -17872,7 +17879,7 @@ def _dispatch_callback(call, uid, data):
             return
         # Answer immediately so Telegram stops showing spinner and won't retry
         bot.answer_callback_query(call.id, "⏳ در حال پردازش...")
-        result = finish_card_payment_approval(payment_id, "واریزی شما تأیید شد.", approved=True)
+        result = finish_card_payment_approval(payment_id, "", approved=True)
         _render_pending_receipts_page(call, uid, page)
         return
 

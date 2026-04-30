@@ -377,7 +377,7 @@ def _run_init_db_migrations():
             "start_text":       "",
             "channel_id":       "",
             "backup_enabled":   "0",
-            "backup_interval":  "24",
+            "backup_interval":  "1440",
             "backup_target_id": "",
             "free_test_mode":    "everyone",
             "free_test_enabled": "1",

@@ -70,6 +70,8 @@ PERM_USER_FULL = {"agency", "assign_config", "manage_balance", "user_status"}
 CRYPTO_API_SYMBOLS = {
     "tron":       "TRX",
     "ton":        "TON",
+    "usdt_trc20": "USDT",
+    "usdt_ton":   "USDT",
     "usdt_bep20": "USDT",
     "usdc_bep20": "USDC",
     "ltc":        "LTC",
@@ -78,6 +80,8 @@ CRYPTO_API_SYMBOLS = {
 CRYPTO_COINS = [
     ("tron",       "Tron (TRC20)"),
     ("ton",        "TON"),
+    ("usdt_trc20", "USDT (TRC20 — Tron)"),
+    ("usdt_ton",   "USDT (TON)"),
     ("usdt_bep20", "USDT (BEP20)"),
     ("usdc_bep20", "USDC (BEP20)"),
     ("ltc",        "LTC (Litecoin)"),
@@ -87,6 +91,8 @@ CRYPTO_COINS = [
 CRYPTO_EMOJI_IDS = {
     "tron":       "5794054896852409524",
     "ton":        "5796252975215156083",
+    "usdt_trc20": "5796237685131582541",
+    "usdt_ton":   "5796237685131582541",
     "usdt_bep20": "5796237685131582541",
     "usdc_bep20": "5796237685131582541",
     "ltc":        "5796399747132563586",

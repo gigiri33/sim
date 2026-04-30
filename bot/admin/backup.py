@@ -200,12 +200,12 @@ def _backup_loop():
         time.sleep(600)  # check every 10 min
         try:
             enabled  = setting_get("backup_enabled", "0")
-            interval = int(setting_get("backup_interval", "24") or "24")
+            interval = int(setting_get("backup_interval", "1440") or "1440")
             target   = setting_get("backup_target_id", "").strip()
             if enabled != "1" or not target:
                 continue
             now = time.time()
-            if now - last_backup_at >= interval * 3600:
+            if now - last_backup_at >= interval * 60:
                 _send_backup(int(target) if target.lstrip("-").isdigit() else target)
                 last_backup_at = now
         except Exception:
