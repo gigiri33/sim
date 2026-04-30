@@ -45,8 +45,6 @@ def get_pazzlenet_callback_url(bot_username: str) -> str:
     Return the callback URL that must be registered in @puzzlenetpay_bot.
     Format: http://{ip}:{port}/pazzlenet/{bot_slug}/callback
     Uses server_public_url setting if set, otherwise auto-detects public IP.
-    If server_public_url has no explicit port (http scheme), the webhook port
-    is appended automatically to avoid Connection refused on port 80.
     """
     base = (setting_get("server_public_url", "") or "").strip().rstrip("/")
     if not base:
@@ -55,13 +53,6 @@ def get_pazzlenet_callback_url(bot_username: str) -> str:
             port = (setting_get("plisio_webhook_port", "") or
                     setting_get("webhook_port", "") or "5050").strip()
             base = f"http://{ip}:{port}"
-    else:
-        from urllib.parse import urlparse as _urlparse
-        _parsed = _urlparse(base)
-        if not _parsed.port and _parsed.scheme == "http":
-            _port = (setting_get("plisio_webhook_port", "") or
-                     setting_get("webhook_port", "") or "5050").strip()
-            base = f"http://{_parsed.hostname}:{_port}"
     if not base:
         return ""
     slug = (bot_username or "").lower().replace("@", "").strip()
