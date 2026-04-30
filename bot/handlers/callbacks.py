@@ -6446,18 +6446,35 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id, "خرید با موفقیت انجام شد.")
         send_or_edit(call, "✅ پرداخت از کیف پول انجام شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
                      back_button("main"))
-        _chat_id_wallet = call.message.chat.id
-        _snames_wallet_final = _snames_wallet
-        def _do_wallet_deliver():
-            purchase_ids, pending_ids = _deliver_bulk_configs(
-                _chat_id_wallet, uid, package_id, price, "wallet", quantity, payment_id,
-                service_names=_snames_wallet_final
-            )
-            _send_bulk_delivery_result(_chat_id_wallet, uid, package_row,
-                                       purchase_ids, pending_ids, "کیف پول")
-        threading.Thread(target=_do_wallet_deliver, daemon=True).start()
         state_clear(uid)
+        try:
+            purchase_ids, pending_ids = _deliver_bulk_configs(
+                call.message.chat.id, uid, package_id, price, "wallet", quantity, payment_id,
+                service_names=_snames_wallet
+            )
+        except Exception as _wallet_exc:
+            import traceback as _tb
+            print(f"[WALLET_DELIVERY_ERROR] uid={uid} payment={payment_id}: {_wallet_exc}")
+            print(_tb.format_exc())
+            try:
+                bot.send_message(
+                    call.message.chat.id,
+                    "⚠️ <b>خطا در تحویل سرویس</b>\n\n"
+                    "متأسفانه در تحویل سرویس مشکلی پیش آمد.\n"
+                    "لطفاً با پشتیبانی تماس بگیرید.",
+                    parse_mode="HTML", reply_markup=back_button("main"))
+            except Exception:
+                pass
+            return
+        _send_bulk_delivery_result(call.message.chat.id, uid, package_row,
+                                   purchase_ids, pending_ids, "کیف پول")
         return
+
+    if data.startswith("pay:card:"):
+        if not _check_invoice_valid(uid):
+            _show_invoice_expired(call)
+            return
+        package_id  = int(data.split(":")[2])
 
     if data.startswith("pay:card:"):
         if not _check_invoice_valid(uid):
