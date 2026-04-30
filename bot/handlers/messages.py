@@ -103,6 +103,18 @@ def _bc_progress_text(title: str, total: int, done: int, ok: int, fail: int) -> 
     )
 
 
+def _bc_source(message):
+    """Return (from_chat_id, msg_id) for broadcast.
+    If the admin forwarded a channel post, use the original channel as source
+    so forward_message shows 'Forwarded from [channel]' and counts channel views.
+    """
+    if (message.forward_from_chat and
+            message.forward_from_message_id and
+            message.forward_from_chat.id < 0):
+        return message.forward_from_chat.id, message.forward_from_message_id
+    return message.chat.id, message.message_id
+
+
 def _do_broadcast(user_ids: list, title: str, mode: str,
                   admin_uid: int, from_chat_id: int, msg_id: int,
                   reply_markup, progress_msg_id: int) -> None:
@@ -608,7 +620,7 @@ def universal_handler(message):
             threading.Thread(
                 target=_do_broadcast,
                 args=(user_ids, "فوروارد همگانی — همه کاربران", "forward",
-                      uid, message.chat.id, message.message_id,
+                      uid, *_bc_source(message),
                       message.reply_markup, prog.message_id),
                 daemon=True).start()
             return
@@ -622,7 +634,7 @@ def universal_handler(message):
             threading.Thread(
                 target=_do_broadcast,
                 args=(user_ids, "فوروارد همگانی — مشتریان", "forward",
-                      uid, message.chat.id, message.message_id,
+                      uid, *_bc_source(message),
                       message.reply_markup, prog.message_id),
                 daemon=True).start()
             return
@@ -643,7 +655,7 @@ def universal_handler(message):
             threading.Thread(
                 target=_do_broadcast,
                 args=(user_ids, "فوروارد همگانی — مشتریان عادی", "forward",
-                      uid, message.chat.id, message.message_id,
+                      uid, *_bc_source(message),
                       message.reply_markup, prog.message_id),
                 daemon=True).start()
             return
@@ -657,7 +669,7 @@ def universal_handler(message):
             threading.Thread(
                 target=_do_broadcast,
                 args=(user_ids, "فوروارد همگانی — نمایندگان", "forward",
-                      uid, message.chat.id, message.message_id,
+                      uid, *_bc_source(message),
                       message.reply_markup, prog.message_id),
                 daemon=True).start()
             return
@@ -681,7 +693,7 @@ def universal_handler(message):
             threading.Thread(
                 target=_do_broadcast,
                 args=(user_ids, "فوروارد همگانی — ادمین‌ها", "forward",
-                      uid, message.chat.id, message.message_id,
+                      uid, *_bc_source(message),
                       message.reply_markup, prog.message_id),
                 daemon=True).start()
             return
@@ -697,7 +709,7 @@ def universal_handler(message):
             threading.Thread(
                 target=_do_broadcast,
                 args=(user_ids, "پین همگانی — همه کاربران", "pin",
-                      uid, message.chat.id, message.message_id,
+                      uid, *_bc_source(message),
                       message.reply_markup, prog.message_id),
                 daemon=True).start()
             return
@@ -711,7 +723,7 @@ def universal_handler(message):
             threading.Thread(
                 target=_do_broadcast,
                 args=(user_ids, "پین همگانی — مشتریان", "pin",
-                      uid, message.chat.id, message.message_id,
+                      uid, *_bc_source(message),
                       message.reply_markup, prog.message_id),
                 daemon=True).start()
             return
@@ -732,7 +744,7 @@ def universal_handler(message):
             threading.Thread(
                 target=_do_broadcast,
                 args=(user_ids, "پین همگانی — مشتریان عادی", "pin",
-                      uid, message.chat.id, message.message_id,
+                      uid, *_bc_source(message),
                       message.reply_markup, prog.message_id),
                 daemon=True).start()
             return
@@ -746,7 +758,7 @@ def universal_handler(message):
             threading.Thread(
                 target=_do_broadcast,
                 args=(user_ids, "پین همگانی — نمایندگان", "pin",
-                      uid, message.chat.id, message.message_id,
+                      uid, *_bc_source(message),
                       message.reply_markup, prog.message_id),
                 daemon=True).start()
             return
@@ -770,7 +782,7 @@ def universal_handler(message):
             threading.Thread(
                 target=_do_broadcast,
                 args=(user_ids, "پین همگانی — ادمین‌ها", "pin",
-                      uid, message.chat.id, message.message_id,
+                      uid, *_bc_source(message),
                       message.reply_markup, prog.message_id),
                 daemon=True).start()
             return
@@ -4560,4 +4572,5 @@ def universal_handler(message):
         if message.text == "/start":
             return
         bot.send_message(uid, "لطفاً از دکمه‌های منو استفاده کنید.", reply_markup=kb_main(uid))
+
 

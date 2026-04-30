@@ -1215,12 +1215,9 @@ def _execute_pnlcfg_renewal(config_id, package_id, chat_id=None, uid=None):
 def _execute_pnlcfg_delete(config_id, chat_id, uid, admin_id):
     """
     Execute panel config deletion in background:
-      1. Login to panel with retry loop (like renewal)
-      2. delete_client with retry
-      3. Delete from DB on success
-      4. Notify user (chat_id) and admin of result
-    Connection errors retry indefinitely (up to 8h).
-    Non-connection errors retry up to 3 minutes then give up.
+      1. Try to delete from panel (with retry for connection errors, up to 3 min)
+      2. ALWAYS delete from DB regardless of panel result
+      3. Notify admin of result
     """
     import time as _time
     from ..db import get_panel_config as _get_pcfg, delete_panel_config as _del_pcfg
@@ -1239,15 +1236,13 @@ def _execute_pnlcfg_delete(config_id, chat_id, uid, admin_id):
     client_name = cfg.get("client_name") or "—"
     panel = _get_pnl(cfg["panel_id"])
 
-    CONN_RETRY_DELAY   = 30
-    FUNC_RETRY_TIMEOUT = 180
-    FUNC_RETRY_DELAY   = 15
-    MAX_WAIT           = 28800  # 8 hours
-    PERIODIC_INTERVAL  = 300
+    CONN_RETRY_DELAY   = 20
+    FUNC_RETRY_TIMEOUT = 180   # 3 minutes max for non-connection errors
+    FUNC_RETRY_DELAY   = 10
+    MAX_WAIT           = 28800  # 8 h for connection errors
 
     _t_start          = _time.time()
     _waiting_notified = False
-    _last_periodic    = 0.0
 
     def _is_conn_err(e):
         s = str(e).lower()
@@ -1259,148 +1254,109 @@ def _execute_pnlcfg_delete(config_id, chat_id, uid, admin_id):
             "econnreset", "broken pipe", "reset by peer",
         ])
 
-    def _maybe_notify_waiting():
-        nonlocal _waiting_notified, _last_periodic
-        now = _time.time()
-        if not _waiting_notified:
-            try:
-                bot.send_message(
-                    admin_id,
-                    "⏳ <b>پنل در حال حاضر در دسترس نیست</b>\n\n"
-                    f"حذف کانفیگ <b>{esc(client_name)}</b> در صف انتظار قرار گرفت.\n"
-                    "به محض بازگشت اتصال، حذف انجام خواهد شد.",
-                    parse_mode="HTML",
-                )
-                _waiting_notified = True
-                _last_periodic = now
-            except Exception:
-                pass
-        elif now - _last_periodic >= PERIODIC_INTERVAL:
-            try:
-                bot.send_message(admin_id, "⏳ هنوز در حال تلاش برای اتصال به پنل جهت حذف کانفیگ...",
-                                 parse_mode="HTML")
-                _last_periodic = now
-            except Exception:
-                pass
-
-    def _notify_reconnected():
-        if _waiting_notified:
-            try:
-                bot.send_message(admin_id, "✅ اتصال به پنل برقرار شد، در حال حذف کانفیگ...",
-                                 parse_mode="HTML")
-            except Exception:
-                pass
-
     # ── Step 1: Delete from panel (if panel info available) ──────────────────
-    if panel and cfg.get("client_uuid"):
+    panel_del_ok  = False
+    panel_del_err = None
+
+    if panel and cfg.get("client_uuid") and cfg.get("inbound_id"):
         pc_api = PanelClient(
             protocol=panel["protocol"], host=panel["host"], port=panel["port"],
             path=panel["path"] or "", username=panel["username"], password=panel["password"]
         )
 
-        # Login loop
-        login_err = None
         _t0 = _time.time()
         while True:
-            if _time.time() - _t_start > MAX_WAIT:
-                login_err = "حداکثر زمان انتظار (8 ساعت) تمام شد"
-                break
-            ok, login_err = pc_api.login()
-            if ok:
-                login_err = None
-                _notify_reconnected()
-                break
             elapsed = _time.time() - _t0
-            if _is_conn_err(login_err):
-                _maybe_notify_waiting()
-                log.warning("_execute_pnlcfg_delete: login CONN_ERR (%.0fs), retry in %ds: %s",
-                            elapsed, CONN_RETRY_DELAY, login_err)
-                _time.sleep(CONN_RETRY_DELAY)
-            else:
-                log.warning("_execute_pnlcfg_delete: login failed (%.0fs): %s", elapsed, login_err)
-                if elapsed + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:
-                    break
-                _time.sleep(FUNC_RETRY_DELAY)
 
-        if login_err is not None:
-            _notify_panel_error(uid, None, "login (حذف کانفیگ)", login_err, config_id, cfg["panel_id"])
+            # Try delete directly (PanelClient._api_call handles login internally)
             try:
-                bot.send_message(
-                    admin_id,
-                    f"❌ <b>حذف کانفیگ با خطا مواجه شد</b>\n\n"
-                    f"🔮 سرویس: <b>{esc(client_name)}</b>\n"
-                    f"⚠️ خطا: <code>{esc(str(login_err)[:300])}</code>\n\n"
-                    "کانفیگ از پنل حذف <b>نشد</b>. لطفاً به صورت دستی بررسی کنید.",
-                    parse_mode="HTML",
-                )
+                ok_d, err_d = pc_api.delete_client(cfg["inbound_id"], cfg["client_uuid"])
+            except Exception as _exc:
+                ok_d, err_d = False, str(_exc)
+
+            if ok_d:
+                panel_del_ok  = True
+                panel_del_err = None
+                break
+
+            panel_del_err = str(err_d or "خطای ناشناخته")
+
+            # Connection error → keep retrying (up to 8 h)
+            if _is_conn_err(panel_del_err):
+                if _time.time() - _t_start > MAX_WAIT:
+                    break
+                if not _waiting_notified:
+                    try:
+                        bot.send_message(
+                            admin_id,
+                            "⏳ <b>پنل در دسترس نیست</b>\n\n"
+                            f"حذف کانفیگ <b>{esc(client_name)}</b> در صف انتظار است.\n"
+                            "به محض اتصال، حذف انجام می‌شود.",
+                            parse_mode="HTML",
+                        )
+                        _waiting_notified = True
+                    except Exception:
+                        pass
+                log.warning("_execute_pnlcfg_delete: conn error, retry in %ds: %s",
+                            CONN_RETRY_DELAY, panel_del_err)
+                _time.sleep(CONN_RETRY_DELAY)
+                continue
+
+            # Non-connection error → retry for up to FUNC_RETRY_TIMEOUT
+            log.warning("_execute_pnlcfg_delete: panel error (%.0fs): %s", elapsed, panel_del_err)
+            if elapsed + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:
+                break
+            _time.sleep(FUNC_RETRY_DELAY)
+
+        if panel_del_ok and _waiting_notified:
+            try:
+                bot.send_message(admin_id, "✅ اتصال به پنل برقرار شد، کانفیگ حذف شد.",
+                                 parse_mode="HTML")
             except Exception:
                 pass
-            return
 
-        # delete_client loop
-        del_err = None
-        _t0 = _time.time()
-        while True:
-            if _time.time() - _t_start > MAX_WAIT:
-                del_err = "حداکثر زمان انتظار تمام شد"
-                break
-            ok_d, err_d = pc_api.delete_client(cfg["inbound_id"], cfg["client_uuid"])
-            if ok_d:
-                del_err = None
-                break
-            del_err = str(err_d)
-            elapsed = _time.time() - _t0
-            if _is_conn_err(del_err):
-                _maybe_notify_waiting()
-                log.warning("_execute_pnlcfg_delete: delete_client CONN_ERR (%.0fs), retry in %ds: %s",
-                            elapsed, CONN_RETRY_DELAY, del_err)
-                _time.sleep(CONN_RETRY_DELAY)
-            else:
-                log.warning("_execute_pnlcfg_delete: delete_client failed (%.0fs): %s", elapsed, del_err)
-                if elapsed + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:
-                    break
-                _time.sleep(FUNC_RETRY_DELAY)
-
-        if del_err is not None:
-            _notify_panel_error(uid, None, "delete_client (حذف کانفیگ)", del_err, config_id, cfg["panel_id"])
+        if not panel_del_ok:
+            _notify_panel_error(uid, None, "delete_client (حذف کانفیگ)", panel_del_err, config_id, cfg["panel_id"])
             try:
                 bot.send_message(
                     admin_id,
-                    f"❌ <b>حذف کانفیگ از پنل ناموفق بود</b>\n\n"
+                    f"⚠️ <b>حذف از پنل ناموفق بود</b>\n\n"
                     f"🔮 سرویس: <b>{esc(client_name)}</b>\n"
-                    f"⚠️ خطا: <code>{esc(del_err[:300])}</code>\n\n"
-                    "کانفیگ از <b>دیتابیس</b> حذف شد اما از پنل حذف نشد.\n"
+                    f"⚠️ خطا: <code>{esc(panel_del_err[:300])}</code>\n\n"
+                    "کانفیگ از <b>دیتابیس ربات</b> حذف می‌شود.\n"
                     "لطفاً به صورت دستی از پنل حذف کنید.",
                     parse_mode="HTML",
                 )
             except Exception:
                 pass
-            # Still delete from DB so it's clean on bot side
-            _del_pcfg(config_id)
-            try:
-                bot.send_message(
-                    admin_id,
-                    f"✅ کانفیگ <b>{esc(client_name)}</b> از دیتابیس ربات حذف شد\n"
-                    "(حذف از پنل ناموفق بود — بالا را ببینید)",
-                    parse_mode="HTML",
-                )
-            except Exception:
-                pass
-            return
+    elif not cfg.get("client_uuid"):
+        # Config was never provisioned to the panel (no UUID) — DB-only delete
+        panel_del_ok = True   # nothing to delete from panel
 
-    # ── Step 2: Delete from DB ────────────────────────────────────────────────
+    # ── Step 2: ALWAYS delete from DB ────────────────────────────────────────
     _del_pcfg(config_id)
 
-    # ── Step 3: Notify admin of success ───────────────────────────────────────
-    try:
-        bot.send_message(
-            admin_id,
-            f"✅ <b>کانفیگ با موفقیت حذف شد</b>\n\n"
-            f"🔮 سرویس: <b>{esc(client_name)}</b>",
-            parse_mode="HTML",
-        )
-    except Exception:
-        pass
+    # ── Step 3: Notify admin ──────────────────────────────────────────────────
+    if panel_del_ok:
+        try:
+            bot.send_message(
+                admin_id,
+                f"✅ <b>کانفیگ با موفقیت حذف شد</b>\n\n"
+                f"🔮 سرویس: <b>{esc(client_name)}</b>",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+    else:
+        try:
+            bot.send_message(
+                admin_id,
+                f"🗑 کانفیگ <b>{esc(client_name)}</b> از دیتابیس ربات حذف شد.\n"
+                "(حذف از پنل ناموفق بود — پیام خطا در بالا را ببینید)",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
 
 
 def _show_pnlcfg_renewal_gateways(target, uid, config_id, package_id, price, package_row, cfg):
