@@ -408,14 +408,18 @@ def _show_panel_detail(call, panel_id):
         "unknown":      "❓ بررسی نشده",
     }.get(p["connection_status"], p["connection_status"])
 
-    path_disp = p["path"] or "<i>(ندارد)</i>"
     checked   = p["last_checked_at"] or "—"
-    err_line  = f"\n⚠️ خطا: <code>{esc(p['last_error'])}</code>" if p["last_error"] else ""
+    _err_raw  = (p["last_error"] or "")[:200]
+    # Strip any HTML tags from error text (e.g. urllib3 repr strings or server HTML pages)
+    import re as _re_esc
+    _err_raw  = _re_esc.sub(r"<[^>]+>", "[...]", _err_raw)
+    err_line  = f"\n⚠️ خطا: <code>{esc(_err_raw)}</code>" if _err_raw else ""
 
-    uname_disp  = p['username'] if p['username'] else '—'
-    passwd_disp = p['password'] if p['password'] else '—'
+    uname_disp  = esc(p['username']) if p['username'] else '—'
+    passwd_disp = esc(p['password']) if p['password'] else '—'
     try:
-        sub_url_base_disp = p['sub_url_base'] or "<i>(ندارد — از آدرس پنل استفاده می‌شود)</i>"
+        _sub = p['sub_url_base']
+        sub_url_base_disp = esc(_sub) if _sub else "<i>(ندارد — از آدرس پنل استفاده می‌شود)</i>"
     except (IndexError, KeyError):
         sub_url_base_disp = "<i>(ندارد)</i>"
     try:
@@ -425,7 +429,7 @@ def _show_panel_detail(call, panel_id):
 
     text = (
         f"{icon} <b>{esc(p['name'])}</b>\n\n"
-        f"🔗 آدرس:  <code>{p['protocol']}://{esc(p['host'])}:{p['port']}{esc(p['path'] or '')}</code>\n"
+        f"🔗 آدرس:  <code>{esc(p['protocol'])}://{esc(p['host'])}:{p['port']}{esc(p['path'] or '')}</code>\n"
         f"📡 ساب:   {sub_url_base_disp}\n"
         f"👤 نام کاربری: <code>{uname_disp}</code>\n"
         f"🔑 رمز عبور:   <code>{passwd_disp}</code>\n"

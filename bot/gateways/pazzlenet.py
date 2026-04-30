@@ -266,8 +266,14 @@ def is_pazzlenet_paid(status) -> bool:
             if is_pazzlenet_paid(inner):
                 return True
 
-        if status.get("paid") is True or status.get("paid") == 1:
+        paid_val = status.get("paid")
+        if paid_val is True or paid_val == 1:
             return True
+        # API may return paid as a list: {"paid": ["confirmed"]}
+        if isinstance(paid_val, list):
+            for _item in paid_val:
+                if isinstance(_item, str) and _item.lower() in _PAID_VALUES:
+                    return True
 
         raw_status = status.get("status", "")
         if isinstance(raw_status, str) and raw_status.lower() in _PAID_VALUES:

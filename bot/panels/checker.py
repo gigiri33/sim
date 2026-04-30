@@ -33,6 +33,9 @@ def _check_all_panels() -> None:
         )
         ok, err = client.health_check()
         status = "connected" if ok else "disconnected"
+        if err:
+            import re as _re
+            err = _re.sub(r"<[^>]+>", "[...]", str(err))[:300]
         update_panel_status(panel["id"], status, err or "")
         log.debug("Panel %s → %s", panel["name"], status)
 
