@@ -204,8 +204,7 @@ class PanelClient:
 
     def create_client(self, inbound_id: int, email: str,
                       traffic_bytes: int, expire_ms: int,
-                      inbound_protocol: str = "",
-                      ss_method: str = "") -> tuple:
+                      inbound_protocol: str = "") -> tuple:
         """
         Add a new client to the given inbound.
         API: POST /panel/api/inbounds/addClient
@@ -216,24 +215,12 @@ class PanelClient:
         import uuid as _uuid
         import json as _json
         import secrets as _sec
-        import base64 as _b64
 
         proto = (inbound_protocol or "").lower().strip()
 
         if proto == "shadowsocks":
-            # 3x-ui SS clients use password (not id/UUID).
-            # For ShadowSocks 2022 ciphers, Xray requires the PSK to be
-            # standard base64-encoded (NOT URL-safe) with correct padding,
-            # and decoded length must exactly match the cipher key size:
-            #   128-bit ciphers → 16 bytes → 24-char base64
-            #   256-bit ciphers → 32 bytes → 44-char base64
-            # For legacy SS (non-2022), any printable string is accepted.
-            _method = (ss_method or "").lower()
-            if "2022" in _method:
-                _key_size = 16 if "128" in _method else 32
-                client_id = _b64.b64encode(_sec.token_bytes(_key_size)).decode()
-            else:
-                client_id = _sec.token_urlsafe(16)      # legacy SS: any string OK
+            # 3x-ui SS clients use password (not id/UUID)
+            client_id = _sec.token_urlsafe(16)          # random password
             sub_id    = _sec.token_hex(8)               # 16-char hex sub token
             client_obj = {
                 "password": client_id,
