@@ -295,9 +295,9 @@ def is_pazzlenet_paid(status) -> bool:
                     return True
 
         raw_status = status.get("status", "")
+        # NOTE: PazzleNet uses status=True/False as a boolean API-success flag,
+        # NOT as a payment-paid indicator. Only match string statuses here.
         if isinstance(raw_status, str) and raw_status.lower() in _PAID_VALUES:
-            return True
-        if raw_status is True or raw_status == 1:
             return True
 
         for key in ("payment_status", "state", "result"):

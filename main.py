@@ -292,9 +292,20 @@ def _plisio_webhook_server():
             print("PAZZLENET_WEBHOOK_ERROR:", exc)
         return jsonify({"status": "ok"}), 200
 
+    import time as _time
     port = int(get_plisio_webhook_port())
     print(f"🌐 Payment webhook server (Plisio + NowPayments) starting on port {port}…")
-    _app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+    for _attempt in range(10):
+        try:
+            _app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+            break
+        except OSError as _bind_err:
+            if _attempt < 9 and ("Address already in use" in str(_bind_err) or "Only one usage" in str(_bind_err)):
+                print(f"⚠️ Port {port} still in use, retrying in 3s… (attempt {_attempt+1}/10)")
+                _time.sleep(3)
+            else:
+                print(f"❌ Cannot bind port {port}: {_bind_err}")
+                raise
 
 
 def _start_plisio_webhook_server():
