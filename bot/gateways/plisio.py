@@ -57,11 +57,18 @@ def get_effective_public_base_url() -> str:
     Return the base URL to use for Plisio callbacks.
     Priority:
       1. ``server_public_url`` setting (if admin has set one)
+         If no explicit port is present in the URL, the webhook port is
+         appended automatically (avoids Connection refused on port 80).
       2. Auto-detected ``http://<public_ip>:<plisio_webhook_port>``
     Returns empty string if neither is available.
     """
     base = (setting_get("server_public_url", "") or "").strip().rstrip("/")
     if base:
+        from urllib.parse import urlparse as _urlparse
+        _parsed = _urlparse(base)
+        if not _parsed.port and _parsed.scheme == "http":
+            _port = get_plisio_webhook_port()
+            base = f"http://{_parsed.hostname}:{_port}"
         return base
     ip = detect_public_ip()
     if not ip:
