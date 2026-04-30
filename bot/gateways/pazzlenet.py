@@ -285,6 +285,13 @@ def is_pazzlenet_paid(status) -> bool:
         if status.get("paid") is True or status.get("paid") == 1:
             return True
 
+        # Check paid list: API may return {"paid": ["confirmed"]}
+        paid_val = status.get("paid")
+        if isinstance(paid_val, list):
+            for item in paid_val:
+                if isinstance(item, str) and item.lower() in _PAID_VALUES:
+                    return True
+
         # Check status *string* (webhook: {"status": "confirmed"})
         # Intentionally skip boolean True — that's an API wrapper flag, not here.
         raw_status = status.get("status", "")
