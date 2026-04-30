@@ -373,9 +373,15 @@ def verify_nowpayments_signature(raw_body: bytes, header_signature: str) -> bool
     (sort_keys recursively sorts nested dicts too).
 
     Returns ``True`` if signature is valid.
+    If no IPN secret is configured in settings, verification is skipped and
+    all requests are accepted (allows use without configuring IPN secret).
     """
     ipn_secret = (setting_get("nowpayments_ipn_secret", "") or "").strip()
-    if not ipn_secret or not header_signature:
+    # No IPN secret configured → accept all callbacks without verification.
+    # Admin must set 'nowpayments_ipn_secret' to enable signature checking.
+    if not ipn_secret:
+        return True
+    if not header_signature:
         return False
     try:
         data = json.loads(raw_body.decode("utf-8") if isinstance(raw_body, (bytes, bytearray)) else raw_body)

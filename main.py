@@ -37,6 +37,7 @@ def _plisio_webhook_server():
         print("⚠️ Flask not installed — Plisio webhook disabled. Run: pip install flask")
         return
 
+    from bot.db import get_conn
     from bot.gateways.plisio import (
         verify_plisio_json_callback,
         is_plisio_paid,
@@ -128,20 +129,48 @@ def _plisio_webhook_server():
             raw_body = request.get_data() or b""
             sig = request.headers.get("x-nowpayments-sig", "") or request.headers.get("X-Nowpayments-Sig", "")
             if not verify_nowpayments_signature(raw_body, sig):
-                print("NOWPAYMENTS_WEBHOOK: invalid signature")
+                print("NOWPAYMENTS_WEBHOOK: invalid signature — set nowpayments_ipn_secret in bot settings")
                 return jsonify({"status": "error", "message": "invalid signature"}), 403
             try:
                 data = json.loads(raw_body.decode("utf-8"))
             except Exception:
                 return jsonify({"status": "error", "message": "invalid json"}), 400
-            order_id = data.get("order_id", "")
-            status   = (data.get("payment_status") or "").lower()
-            if not order_id:
+
+            print(f"NOWPAYMENTS_WEBHOOK: received — order_id={data.get('order_id')!r}  "
+                  f"invoice_id={data.get('invoice_id')!r}  "
+                  f"payment_id={data.get('payment_id')!r}  "
+                  f"status={data.get('payment_status')!r}")
+
+            order_id      = str(data.get("order_id") or "").strip()
+            np_invoice_id = str(data.get("invoice_id") or "").strip()
+            status        = (data.get("payment_status") or "").lower()
+
+            # ── Primary lookup: order_id == our internal payment_id ────────
+            payment_id = None
+            if order_id:
+                try:
+                    payment_id = int(order_id)
+                except (ValueError, TypeError):
+                    payment_id = None
+
+            # ── Fallback: look up by NowPayments invoice_id stored in receipt_text ──
+            if not payment_id and np_invoice_id:
+                try:
+                    with get_conn() as _c:
+                        row = _c.execute(
+                            "SELECT id FROM payments WHERE receipt_text=? AND payment_method='nowpayments' AND status='pending'",
+                            (np_invoice_id,)
+                        ).fetchone()
+                    if row:
+                        payment_id = row["id"]
+                        print(f"NOWPAYMENTS_WEBHOOK: resolved via invoice_id fallback → payment_id={payment_id}")
+                except Exception as _le:
+                    print(f"NOWPAYMENTS_WEBHOOK: invoice_id fallback error: {_le}")
+
+            if not payment_id:
+                print("NOWPAYMENTS_WEBHOOK: no matching payment found — dropping")
                 return jsonify({"status": "ok"}), 200
-            try:
-                payment_id = int(order_id)
-            except (ValueError, TypeError):
-                return jsonify({"status": "ok"}), 200
+
             payment = get_payment(payment_id)
             if not payment or payment["status"] != "pending":
                 return jsonify({"status": "ok"}), 200

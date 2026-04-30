@@ -40,6 +40,15 @@ def send_or_edit(call_or_msg, text, reply_markup=None, disable_preview=True):
     """Edit an existing message (from a callback) or send a new one."""
     import logging as _logging
     _log = _logging.getLogger(__name__)
+
+    # Resolve chat_id and thread_id for fallback sends
+    if hasattr(call_or_msg, "message"):
+        _chat_id   = call_or_msg.message.chat.id
+        _thread_id = getattr(call_or_msg.message, "message_thread_id", None)
+    else:
+        _chat_id   = call_or_msg.chat.id
+        _thread_id = getattr(call_or_msg, "message_thread_id", None)
+
     try:
         if hasattr(call_or_msg, "message"):
             bot.edit_message_text(
@@ -55,36 +64,29 @@ def send_or_edit(call_or_msg, text, reply_markup=None, disable_preview=True):
                 call_or_msg.chat.id, text,
                 parse_mode="HTML",
                 reply_markup=reply_markup,
-                disable_web_page_preview=disable_preview
+                disable_web_page_preview=disable_preview,
+                message_thread_id=_thread_id,
             )
     except Exception as _e1:
         _log.warning("send_or_edit primary failed: %s", _e1)
         try:
-            chat_id = (
-                call_or_msg.message.chat.id
-                if hasattr(call_or_msg, "message")
-                else call_or_msg.chat.id
-            )
-            bot.send_message(chat_id, text,
+            bot.send_message(_chat_id, text,
                              parse_mode="HTML",
                              reply_markup=reply_markup,
-                             disable_web_page_preview=disable_preview)
+                             disable_web_page_preview=disable_preview,
+                             message_thread_id=_thread_id)
         except Exception as _e2:
             _log.warning("send_or_edit fallback-HTML failed: %s", _e2)
             # Last-resort: send without HTML parse mode (strip HTML tags)
             try:
                 import re as _re
-                chat_id = (
-                    call_or_msg.message.chat.id
-                    if hasattr(call_or_msg, "message")
-                    else call_or_msg.chat.id
-                )
                 plain = _re.sub(r"<[^>]+>", "", text)
                 plain = plain.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").replace("&quot;", '"')
-                bot.send_message(chat_id, plain,
+                bot.send_message(_chat_id, plain,
                                  parse_mode="",
                                  reply_markup=reply_markup,
-                                 disable_web_page_preview=disable_preview)
+                                 disable_web_page_preview=disable_preview,
+                                 message_thread_id=_thread_id)
             except Exception as _e3:
                 _log.error("send_or_edit last-resort plain failed: %s", _e3)
 
