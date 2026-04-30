@@ -100,27 +100,17 @@ def _post_pazzlenet(path: str, payload: dict, timeout: int = 15):
     """
     api_key = setting_get("pazzlenet_api_key", "").strip()
     url = f"{PAZZLENET_BASE_URL}{path}"
-    # If payload is empty, send no body (so API doesn't reject empty JSON)
-    if payload:
-        data = json.dumps(payload).encode("utf-8")
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "api-key": api_key,
-            "User-Agent": "ConfigFlow/1.0",
-        }
-    else:
-        data = None
-        headers = {
-            "Accept": "application/json",
-            "api-key": api_key,
-            "User-Agent": "ConfigFlow/1.0",
-        }
+    data = json.dumps(payload).encode("utf-8")
 
     req = urllib.request.Request(
         url,
         data=data,
-        headers=headers,
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "api-key": api_key,
+            "User-Agent": "ConfigFlow/1.0",
+        },
         method="POST",
     )
 
@@ -185,8 +175,9 @@ def create_pazzlenet_invoice(amount_toman: int, user_id: int):
     """
     Create a PazzleNet payment request.
 
-    POST /api/payment/create?chat_id={user_id}&amount={amount_toman}
+    POST /api/payment/create
     Headers: api-key: {api_key}
+    Body: {"chat_id": user_id, "amount": amount_toman}
 
     Returns:
         (True, {"payment_id": ..., "payment_link": ...}) on success
@@ -198,9 +189,12 @@ def create_pazzlenet_invoice(amount_toman: int, user_id: int):
             "error": "کلید API پازل‌نت ثبت نشده است. از پنل مدیریت ← تنظیمات ← درگاه‌ها اقدام کنید."
         }
 
-    import urllib.parse
-    qs = urllib.parse.urlencode({"chat_id": int(user_id), "amount": int(amount_toman)})
-    success, result = _post_pazzlenet(f"/api/payment/create?{qs}", {})
+    payload = {
+        "chat_id": int(user_id),
+        "amount": int(amount_toman),
+    }
+
+    success, result = _post_pazzlenet("/api/payment/create", payload)
 
     if not success:
         return False, result
