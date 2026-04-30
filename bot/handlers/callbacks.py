@@ -2068,34 +2068,6 @@ def _build_config_from_template(cpkg, client_uuid, client_name):
     if not tmpl:
         return None
 
-    # ── ShadowSocks: replace password inside base64(method:password) ─────────
-    if tmpl.lower().startswith("ss://"):
-        import base64 as _b64ss
-        try:
-            # ss://BASE64@host:port#remark  or  ss://BASE64#remark
-            after_scheme = tmpl[5:]
-            if "@" in after_scheme:
-                b64_part, rest = after_scheme.split("@", 1)
-            else:
-                # non-standard — just return template as-is; sub URL will handle it
-                return tmpl
-            decoded = _b64ss.b64decode(b64_part + "==").decode("utf-8", errors="replace")
-            if ":" in decoded:
-                method, _old_pw = decoded.split(":", 1)
-                new_userinfo = f"{method}:{client_uuid}"
-            else:
-                new_userinfo = f"{decoded}:{client_uuid}"
-            new_b64 = _b64ss.b64encode(new_userinfo.encode()).decode()
-            # Also replace the #remark with the new client_name
-            if "#" in rest:
-                host_port, _old_remark = rest.rsplit("#", 1)
-                new_remark = _up.quote(client_name, safe="")
-                return f"ss://{new_b64}@{host_port}#{new_remark}"
-            return f"ss://{new_b64}@{rest}"
-        except Exception:
-            # Decoding failed — return template unchanged; sub URL should handle it
-            return tmpl
-
     _UUID_RE = _re.compile(
         r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}',
         _re.IGNORECASE
@@ -2335,24 +2307,6 @@ def _build_config_from_inbound(inbound, client_uuid, client_name, panel, real_po
         elif proto == "trojan":
             return f"trojan://{client_uuid}@{conn_addr}:{conn_port}?{qs}#{remark}"
 
-        elif proto == "shadowsocks":
-            # client_uuid holds the SS password for this protocol
-            ss_settings_raw = inbound.get("settings") or "{}"
-            if isinstance(ss_settings_raw, str):
-                try:
-                    ss_settings = _json.loads(ss_settings_raw)
-                except Exception:
-                    ss_settings = {}
-            else:
-                ss_settings = ss_settings_raw or {}
-            method = (ss_settings.get("method") or "chacha20-ietf-poly1305").lower()
-            # Some multi-user SS inbounds store method at top level
-            if not method or method == "chacha20-ietf-poly1305":
-                method = (inbound.get("method") or method).lower()
-            ss_userinfo = f"{method}:{client_uuid}"
-            ss_b64 = _b64.b64encode(ss_userinfo.encode()).decode()
-            return f"ss://{ss_b64}@{conn_addr}:{conn_port}#{remark}"
-
     except Exception as exc:
         log.warning("_build_config_from_inbound error: %s", exc)
     return None
@@ -2535,7 +2489,6 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
     inbound_id     = inbound["id"]
     real_port      = int(inbound.get("port") or 0)
     inbound_remark = (inbound.get("remark") or inbound.get("tag") or "").strip()
-    inbound_protocol = (inbound.get("protocol") or "").lower().strip()
 
     # Generate config name: use desired_name if provided, else full random
     if desired_name:
@@ -2572,8 +2525,7 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
             # Reset partial timer after waiting for lock (another thread may have
             # held the lock for a long time while the panel was busy).
             _t0 = time.time()
-            ok, result = client.create_client(inbound_id, client_name, traffic_bytes, expire_ms,
-                                              inbound_protocol=inbound_protocol)
+            ok, result = client.create_client(inbound_id, client_name, traffic_bytes, expire_ms)
         if ok:
             create_err = None
             break
@@ -6414,35 +6366,18 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id, "خرید با موفقیت انجام شد.")
         send_or_edit(call, "✅ پرداخت از کیف پول انجام شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
                      back_button("main"))
-        state_clear(uid)
-        try:
+        _chat_id_wallet = call.message.chat.id
+        _snames_wallet_final = _snames_wallet
+        def _do_wallet_deliver():
             purchase_ids, pending_ids = _deliver_bulk_configs(
-                call.message.chat.id, uid, package_id, price, "wallet", quantity, payment_id,
-                service_names=_snames_wallet
+                _chat_id_wallet, uid, package_id, price, "wallet", quantity, payment_id,
+                service_names=_snames_wallet_final
             )
-        except Exception as _wallet_exc:
-            import traceback as _tb
-            print(f"[WALLET_DELIVERY_ERROR] uid={uid} payment={payment_id}: {_wallet_exc}")
-            print(_tb.format_exc())
-            try:
-                bot.send_message(
-                    call.message.chat.id,
-                    "⚠️ <b>خطا در تحویل سرویس</b>\n\n"
-                    "متأسفانه در تحویل سرویس مشکلی پیش آمد.\n"
-                    "لطفاً با پشتیبانی تماس بگیرید.",
-                    parse_mode="HTML", reply_markup=back_button("main"))
-            except Exception:
-                pass
-            return
-        _send_bulk_delivery_result(call.message.chat.id, uid, package_row,
-                                   purchase_ids, pending_ids, "کیف پول")
+            _send_bulk_delivery_result(_chat_id_wallet, uid, package_row,
+                                       purchase_ids, pending_ids, "کیف پول")
+        threading.Thread(target=_do_wallet_deliver, daemon=True).start()
+        state_clear(uid)
         return
-
-    if data.startswith("pay:card:"):
-        if not _check_invoice_valid(uid):
-            _show_invoice_expired(call)
-            return
-        package_id  = int(data.split(":")[2])
 
     if data.startswith("pay:card:"):
         if not _check_invoice_valid(uid):

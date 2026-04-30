@@ -203,53 +203,31 @@ class PanelClient:
         return None
 
     def create_client(self, inbound_id: int, email: str,
-                      traffic_bytes: int, expire_ms: int,
-                      inbound_protocol: str = "") -> tuple:
+                      traffic_bytes: int, expire_ms: int) -> tuple:
         """
         Add a new client to the given inbound.
         API: POST /panel/api/inbounds/addClient
-        Payload: {"id": inbound_id, "settings": "{\"clients\":[...]}"}
-        For Shadowsocks, uses password-based format instead of UUID.
-        Returns (True, (id_or_password, sub_id)) or (False, error_str).
+        Payload: {"id": inbound_id, "settings": "{\"clients\":[...]}"}  
+        Returns (True, (uuid_str, sub_id)) or (False, error_str).
         """
         import uuid as _uuid
         import json as _json
-        import secrets as _sec
-
-        proto = (inbound_protocol or "").lower().strip()
-
-        if proto == "shadowsocks":
-            # 3x-ui SS clients use password (not id/UUID)
-            client_id = _sec.token_urlsafe(16)          # random password
-            sub_id    = _sec.token_hex(8)               # 16-char hex sub token
-            client_obj = {
-                "password": client_id,
-                "email":      email,
-                "limitIp":    0,
-                "totalGB":    traffic_bytes,
+        client_uuid = str(_uuid.uuid4())
+        sub_id = client_uuid.replace("-", "")[:16]
+        settings_obj = {
+            "clients": [{
+                "id": client_uuid,
+                "flow": "",
+                "email": email,
+                "limitIp": 0,
+                "totalGB": traffic_bytes,
                 "expiryTime": expire_ms,
-                "enable":     True,
-                "tgId":       "",
-                "subId":      sub_id,
-                "reset":      0,
-            }
-        else:
-            # VLESS / VMess / Trojan / default: UUID-based
-            client_id = str(_uuid.uuid4())
-            sub_id    = client_id.replace("-", "")[:16]
-            client_obj = {
-                "id":         client_id,
-                "flow":       "",
-                "email":      email,
-                "limitIp":    0,
-                "totalGB":    traffic_bytes,
-                "expiryTime": expire_ms,
-                "enable":     True,
-                "tgId":       "",
-                "subId":      sub_id,
-                "reset":      0,
-            }
-        settings_obj = {"clients": [client_obj]}
+                "enable": True,
+                "tgId": "",
+                "subId": sub_id,
+                "reset": 0,
+            }]
+        }
         payload = {
             "id": inbound_id,
             "settings": _json.dumps(settings_obj),
@@ -263,7 +241,7 @@ class PanelClient:
             if resp.status_code == 200:
                 data = resp.json()
                 if data.get("success"):
-                    return True, (client_id, sub_id)
+                    return True, (client_uuid, sub_id)
                 return False, data.get("msg") or "ساخت کلاینت ناموفق"
             return False, f"HTTP {resp.status_code}"
         except RequestException as exc:

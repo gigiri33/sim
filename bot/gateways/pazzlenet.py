@@ -45,8 +45,6 @@ def get_pazzlenet_callback_url(bot_username: str) -> str:
     Return the callback URL that must be registered in @puzzlenetpay_bot.
     Format: http://{ip}:{port}/pazzlenet/{bot_slug}/callback
     Uses server_public_url setting if set, otherwise auto-detects public IP.
-    If server_public_url has no explicit port (http scheme), the webhook port
-    is appended automatically to avoid Connection refused on port 80.
     """
     base = (setting_get("server_public_url", "") or "").strip().rstrip("/")
     if not base:
@@ -55,13 +53,6 @@ def get_pazzlenet_callback_url(bot_username: str) -> str:
             port = (setting_get("plisio_webhook_port", "") or
                     setting_get("webhook_port", "") or "5050").strip()
             base = f"http://{ip}:{port}"
-    else:
-        from urllib.parse import urlparse as _urlparse
-        _parsed = _urlparse(base)
-        if not _parsed.port and _parsed.scheme == "http":
-            _port = (setting_get("plisio_webhook_port", "") or
-                     setting_get("webhook_port", "") or "5050").strip()
-            base = f"http://{_parsed.hostname}:{_port}"
     if not base:
         return ""
     slug = (bot_username or "").lower().replace("@", "").strip()
@@ -264,31 +255,24 @@ def is_pazzlenet_paid(status) -> bool:
     """
     Best-effort detection of successful payment from PazzleNet check response.
 
-    PazzleNet API check response:  {"status": true, "data": {"paid": true|false, ...}}
-      - outer "status" is a *boolean API-call success flag* — NOT payment status.
-      - payment status lives inside "data".
-
-    PazzleNet webhook callback body: {"payment_id": ..., "status": "confirmed", ...}
-      - flat structure, no "data" key.
-      - "status" here is a *string* like "confirmed".
+    Handles dict (flat or nested under 'data'), string.
+    API returns: {"status": true, "data": {"paid": true}}
+    Callback body: {"status": "confirmed", ...}
     """
     if isinstance(status, dict):
-        # ── Wrapped API response: {"status": true|false, "data": {...}} ──────
-        # The outer "status" bool means "API call OK", not "payment confirmed".
-        # ONLY recurse into "data" — do NOT trust the outer boolean status.
+        # Unwrap common nested wrapper: {"data": {...}}
         inner = status.get("data")
         if isinstance(inner, dict):
-            return is_pazzlenet_paid(inner)
+            if is_pazzlenet_paid(inner):
+                return True
 
-        # ── Flat dict (inner "data" object OR webhook callback body) ─────────
-        # Check paid boolean flag
         if status.get("paid") is True or status.get("paid") == 1:
             return True
 
-        # Check status *string* (webhook: {"status": "confirmed"})
-        # Intentionally skip boolean True — that's an API wrapper flag, not here.
         raw_status = status.get("status", "")
         if isinstance(raw_status, str) and raw_status.lower() in _PAID_VALUES:
+            return True
+        if raw_status is True or raw_status == 1:
             return True
 
         for key in ("payment_status", "state", "result"):

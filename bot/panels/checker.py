@@ -33,12 +33,6 @@ def _check_all_panels() -> None:
         )
         ok, err = client.health_check()
         status = "connected" if ok else "disconnected"
-        # Truncate and clean error: urllib3 errors contain repr-style strings
-        # like <urllib3.connection.HTTPSConnection object at 0x...> that can
-        # break Telegram HTML parsing if stored and displayed verbatim.
-        if err:
-            import re as _re
-            err = _re.sub(r"<[^>]+>", "[...]", str(err))[:300]
         update_panel_status(panel["id"], status, err or "")
         log.debug("Panel %s → %s", panel["name"], status)
 
