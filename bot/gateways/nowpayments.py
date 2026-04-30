@@ -255,12 +255,19 @@ def create_nowpayments_invoice(amount_toman: int, payment_id, user_id,
     }
 
 
-def check_nowpayments_invoice(invoice_id: str):
+def check_nowpayments_invoice(invoice_id: str, order_id=None):
     """
     Look up the latest payment status associated with a NowPayments invoice.
 
-    NowPayments doesn't expose a direct invoice-status endpoint; instead we
-    list payments filtered by ``invoiceId``.
+    Tries three strategies in order:
+      1. ``GET /v1/payment?limit=100`` filtered by ``order_id`` (our payment_id).
+      2. ``GET /v1/payment?limit=100`` filtered by ``invoice_id`` field in results.
+      3. ``GET /v1/invoice/{invoice_id}`` — checks ``payment_status`` then ``status``.
+
+    Args:
+        invoice_id: NowPayments invoice ID stored in ``receipt_text``.
+        order_id:   Our internal payment_id (= NowPayments ``order_id``). Passing
+                    this enables the most reliable lookup strategy.
 
     Returns:
         ``(True,  status_str)``  — status from the most recent associated payment,
@@ -283,42 +290,54 @@ def check_nowpayments_invoice(invoice_id: str):
         "refunded":         5,
     }
 
-    # ── Primary: fetch payments filtered by invoice_id ────────────────────────
-    try:
-        resp = requests.get(
-            f"{NOWPAYMENTS_BASE_URL}/payment",
-            params={"limit": 50, "invoice_id": invoice_id},
-            headers={"x-api-key": api_key},
-            timeout=10,
-        )
-        data = resp.json()
-    except Exception as exc:
-        print(f"[NowPayments check_invoice] request error: {exc}")
-        return False, None
-
-    raw_items = data.get("data") if isinstance(data, dict) else (data if isinstance(data, list) else None)
-
-    # Only trust items that actually belong to this invoice
-    items = []
-    if raw_items:
-        for it in raw_items:
-            if str(it.get("invoice_id") or "") == str(invoice_id):
-                items.append(it)
-
-    if items:
+    def _best_status_from_items(items):
         best_status = ""
         best_rank   = -1
         for it in items:
-            st = (it.get("payment_status") or "").lower()
+            st = (it.get("payment_status") or it.get("status") or "").lower()
             r  = rank.get(st, 0)
             if r > best_rank:
                 best_rank   = r
                 best_status = st
-        return True, best_status
+        return best_status
 
-    # ── Fallback: check the invoice endpoint directly ─────────────────────────
-    # The /payment filter may be unsupported on some API plans; the invoice
-    # endpoint is always available and returns an aggregated status.
+    # ── Strategy 1: list payments and filter by our order_id ─────────────────
+    # order_id == our internal payment_id, sent as NowPayments order_id at creation.
+    if order_id is not None:
+        try:
+            resp = requests.get(
+                f"{NOWPAYMENTS_BASE_URL}/payment",
+                params={"limit": 100, "sortBy": "CREATED_AT", "orderBy": "DESC"},
+                headers={"x-api-key": api_key},
+                timeout=10,
+            )
+            data = resp.json()
+            raw_items = data.get("data") if isinstance(data, dict) else (data if isinstance(data, list) else None)
+            if raw_items:
+                matched = [it for it in raw_items if str(it.get("order_id") or "") == str(order_id)]
+                if matched:
+                    return True, _best_status_from_items(matched)
+        except Exception as exc:
+            print(f"[NowPayments check_invoice] order_id lookup error: {exc}")
+
+    # ── Strategy 2: list payments and filter by invoice_id field ─────────────
+    try:
+        resp = requests.get(
+            f"{NOWPAYMENTS_BASE_URL}/payment",
+            params={"limit": 100, "sortBy": "CREATED_AT", "orderBy": "DESC"},
+            headers={"x-api-key": api_key},
+            timeout=10,
+        )
+        data = resp.json()
+        raw_items = data.get("data") if isinstance(data, dict) else (data if isinstance(data, list) else None)
+        if raw_items:
+            matched = [it for it in raw_items if str(it.get("invoice_id") or "") == str(invoice_id)]
+            if matched:
+                return True, _best_status_from_items(matched)
+    except Exception as exc:
+        print(f"[NowPayments check_invoice] invoice_id list lookup error: {exc}")
+
+    # ── Strategy 3: check the invoice endpoint directly ───────────────────────
     try:
         inv_resp = requests.get(
             f"{NOWPAYMENTS_BASE_URL}/invoice/{invoice_id}",
@@ -326,9 +345,9 @@ def check_nowpayments_invoice(invoice_id: str):
             timeout=10,
         )
         inv_data = inv_resp.json()
-        inv_status = (inv_data.get("status") or "").lower()
+        # Check payment_status first (payment-level), then status (invoice-level)
+        inv_status = (inv_data.get("payment_status") or inv_data.get("status") or "").lower()
         if inv_status:
-            # Map invoice-level statuses to payment-level equivalents
             _inv_map = {
                 "finished":       "finished",
                 "paid":           "confirmed",
@@ -342,11 +361,10 @@ def check_nowpayments_invoice(invoice_id: str):
                 "failed":         "failed",
                 "refunded":       "refunded",
             }
-            mapped = _inv_map.get(inv_status, "")
-            if mapped:
-                return True, mapped
+            mapped = _inv_map.get(inv_status, inv_status)
+            return True, mapped
     except Exception as exc:
-        print(f"[NowPayments check_invoice] invoice fallback error: {exc}")
+        print(f"[NowPayments check_invoice] invoice endpoint error: {exc}")
 
     # No payment created yet → user hasn't paid; treat as waiting.
     return True, ""

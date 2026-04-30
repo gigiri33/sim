@@ -13,7 +13,7 @@ from ..db import (
     get_panel_configs, get_panel_configs_count, get_panel_config_full,
     get_panel_client_packages, get_panel_client_package,
     get_panel,
-    setting_get,
+    setting_get, get_package,
 )
 from ..helpers import esc, fmt_price, display_username, back_button
 from ..ui.keyboards import _btn, _raw_markup
@@ -958,10 +958,18 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
     else:
         # User view: send QR inline if possible, then show buttons
         ar_label = "♻️ تمدید خودکار: ✅" if auto_renew else "♻️ تمدید خودکار: ❌"
-        kb.row(
-            InlineKeyboardButton("⚡ تمدید فوری",  callback_data=f"mypnlcfg:renewconfirm:{config_id}"),
-            InlineKeyboardButton(ar_label,          callback_data=f"mypnlcfg:autorenew:{config_id}"),
-        )
+        # Check package sale_mode — hide renewal buttons if 'sale_only'
+        _pkg_sale_mode = "all"
+        if cfg.get("package_id"):
+            _pkg = get_package(cfg["package_id"])
+            if _pkg and "sale_mode" in _pkg.keys():
+                _pkg_sale_mode = _pkg["sale_mode"] or "all"
+        _show_renew_btns = _pkg_sale_mode not in ("sale_only", "disabled")
+        if _show_renew_btns:
+            kb.row(
+                InlineKeyboardButton("⚡ تمدید فوری",  callback_data=f"mypnlcfg:renewconfirm:{config_id}"),
+                InlineKeyboardButton(ar_label,          callback_data=f"mypnlcfg:autorenew:{config_id}"),
+            )
         kb.add(InlineKeyboardButton("بازگشت", callback_data=back_data,
                                     icon_custom_emoji_id="5253997076169115797"))
 
