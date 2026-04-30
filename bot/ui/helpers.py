@@ -81,6 +81,7 @@ def send_or_edit(call_or_msg, text, reply_markup=None, disable_preview=True):
                 )
                 plain = _re.sub(r"<[^>]+>", "", text)
                 bot.send_message(chat_id, plain,
+                                 parse_mode=None,
                                  reply_markup=reply_markup,
                                  disable_web_page_preview=disable_preview)
             except Exception as _e3:
