@@ -25,7 +25,7 @@ from ..db import (
     set_user_agent, update_balance, get_user_detail, get_user_purchases,
     get_purchase, get_available_configs_for_package,
     get_all_types, get_active_types, get_type, add_type, update_type, update_type_description, update_type_active, delete_type,
-    get_packages, get_package, add_package, update_package_field, toggle_package_active, delete_package, set_package_sale_mode,
+    get_packages, get_package, add_package, update_package_field, toggle_package_active, delete_package,
     get_registered_packages_stock, get_configs_paginated, count_configs,
     expire_config, add_config,
     assign_config_to_user, reserve_first_config, release_reserved_config,
@@ -764,18 +764,6 @@ def _br_ok(p, is_agent: bool) -> bool:
     if br == "public" and is_agent:
         return False
     return True
-
-
-def _sale_mode_allows_buy(p) -> bool:
-    """Return True if the package's sale_mode allows new purchases."""
-    sm = p["sale_mode"] if "sale_mode" in p.keys() else "all"
-    return (sm or "all") not in ("renew_only", "disabled")
-
-
-def _sale_mode_allows_renew(p) -> bool:
-    """Return True if the package's sale_mode allows renewals."""
-    sm = p["sale_mode"] if "sale_mode" in p.keys() else "all"
-    return (sm or "all") not in ("sale_only", "disabled")
 
 
 def _pkg_has_stock(p, stock_only: bool) -> bool:
@@ -2549,17 +2537,6 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
     inbound_remark = (inbound.get("remark") or inbound.get("tag") or "").strip()
     inbound_protocol = (inbound.get("protocol") or "").lower().strip()
 
-    # For ShadowSocks inbounds, extract the cipher method so create_client
-    # can generate the correctly-sized standard base64 PSK (SS 2022 requires this).
-    _ss_method = ""
-    if inbound_protocol == "shadowsocks":
-        try:
-            import json as _json_ib
-            _ib_settings = _json_ib.loads(inbound.get("settings") or "{}")
-            _ss_method = (_ib_settings.get("method") or "").lower()
-        except Exception:
-            pass
-
     # Generate config name: use desired_name if provided, else full random
     if desired_name:
         client_name = desired_name
@@ -2596,8 +2573,7 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
             # held the lock for a long time while the panel was busy).
             _t0 = time.time()
             ok, result = client.create_client(inbound_id, client_name, traffic_bytes, expire_ms,
-                                              inbound_protocol=inbound_protocol,
-                                              ss_method=_ss_method)
+                                              inbound_protocol=inbound_protocol)
         if ok:
             create_err = None
             break
@@ -3406,22 +3382,13 @@ def _render_discount_code_detail(call, uid, code_id):
 def _pkg_edit_text_kb(package_row):
     _BR_LABELS = {"all": "همه", "agents": "فقط نمایندگان", "public": "فقط کاربران عادی", "nobody": "هیچ‌کس (فقط هدیه)"}
     _DM_LABELS = {"config_only": "فقط کانفیگ", "sub_only": "فقط ساب", "both": "کانفیگ + ساب"}
-    _SM_LABELS = {
-        "all":        "فروش و تمدید",
-        "renew_only": "فقط تمدید",
-        "sale_only":  "فقط فروش",
-        "disabled":   "غیر فعال",
-    }
     package_id    = package_row["id"]
     show_name_val = package_row["show_name"] if "show_name" in package_row.keys() else 1
     show_name_lbl = "👁 نمایش نام به کاربر: ✅ بله" if show_name_val else "👁 نمایش نام به کاربر: ❌ خیر"
     pkg_active    = package_row["active"] if "active" in package_row.keys() else 1
+    pkg_status_label = "✅ فعال — کلیک برای غیرفعال" if pkg_active else "❌ غیرفعال — کلیک برای فعال"
     buyer_role    = package_row["buyer_role"] if "buyer_role" in package_row.keys() else "all"
     br_label      = _BR_LABELS.get(buyer_role, "همه")
-    sale_mode     = package_row["sale_mode"] if "sale_mode" in package_row.keys() else "all"
-    if not sale_mode:
-        sale_mode = "all"
-    sm_label = _SM_LABELS.get(sale_mode, "فروش و تمدید")
     try:
         config_source = package_row["config_source"] or "manual"
     except (IndexError, KeyError):
@@ -3445,9 +3412,10 @@ def _pkg_edit_text_kb(package_row):
     kb.add(types.InlineKeyboardButton(f"🔑 خریداران: {br_label} — تغییر", callback_data=f"admin:pkg:set_br:{package_id}"))
     src_lbl = "ثبت دستی" if config_source == "manual" else f"پنل #{panel_id} اینباند {panel_port}"
     kb.add(types.InlineKeyboardButton(f"🔌 منبع کانفیگ: {src_lbl} — تغییر", callback_data=f"admin:pkg:src:{package_id}"))
-    kb.add(types.InlineKeyboardButton(f"🛒 حالت فروش: {sm_label} — تغییر", callback_data=f"admin:pkg:set_sm:{package_id}"))
+    kb.add(types.InlineKeyboardButton(pkg_status_label, callback_data=f"admin:pkg:toggleactive:{package_id}"))
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:types", icon_custom_emoji_id="5253997076169115797"))
     cur_pos      = package_row["position"] if "position" in package_row.keys() else 0
+    pkg_status_line = "✅ فعال" if pkg_active else "❌ غیرفعال"
     sn_line      = "✅ بله" if show_name_val else "❌ خیر"
     mu_val       = package_row["max_users"] if "max_users" in package_row.keys() else 0
     mu_line      = "نامحدود" if not mu_val else f"{mu_val} کاربره"
@@ -3466,7 +3434,7 @@ def _pkg_edit_text_kb(package_row):
         f"نمایش نام به کاربر: {sn_line}\n"
         f"خریداران مجاز: {br_label}\n"
         f"منبع کانفیگ: {src_info}\n"
-        f"حالت فروش: {sm_label}"
+        f"وضعیت: {pkg_status_line}"
     )
     return text, kb
 
@@ -4529,7 +4497,7 @@ def _nowpayments_auto_verify(payment_id, invoice_id, uid, chat_id, message_id, k
         payment = get_payment(payment_id)
         if not payment or payment["status"] != "pending":
             return
-        ok, status = check_nowpayments_invoice(invoice_id, order_id=payment_id)
+        ok, status = check_nowpayments_invoice(invoice_id)
         print(f"[NowPayments auto-verify] attempt={attempt+1} payment={payment_id} ok={ok} status={status!r}")
         if not ok or not is_nowpayments_paid(status):
             if ok and is_nowpayments_failed(status):
@@ -4639,7 +4607,7 @@ def _nowpayments_auto_verify(payment_id, invoice_id, uid, chat_id, message_id, k
     # arrived right at the polling boundary (e.g. slow blockchain networks).
     payment = get_payment(payment_id)
     if payment and payment["status"] == "pending":
-        ok_final, status_final = check_nowpayments_invoice(invoice_id, order_id=payment_id)
+        ok_final, status_final = check_nowpayments_invoice(invoice_id)
         print(f"[NowPayments final-check] payment={payment_id} ok={ok_final} status={status_final!r}")
         if ok_final and is_nowpayments_paid(status_final):
             try:
@@ -5324,7 +5292,7 @@ def _dispatch_callback(call, uid, data):
             type_id = conn.execute("SELECT type_id FROM packages WHERE id=?", (item["package_id"],)).fetchone()["type_id"]
         user = get_user(uid)
         _is_agent = bool(user and user["is_agent"])
-        packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and _br_ok(p, _is_agent) and _sale_mode_allows_renew(p)]
+        packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and _br_ok(p, _is_agent)]
         kb = types.InlineKeyboardMarkup()
         for p in packages:
             price = get_effective_price(uid, p)
@@ -5958,7 +5926,7 @@ def _dispatch_callback(call, uid, data):
                 pass
             return
         invoice_id_rv = payment["receipt_text"]
-        ok_rv, status_rv = check_nowpayments_invoice(invoice_id_rv, order_id=payment_id)
+        ok_rv, status_rv = check_nowpayments_invoice(invoice_id_rv)
         if not ok_rv:
             try:
                 bot.answer_callback_query(call.id, "خطا در بررسی وضعیت فاکتور.", show_alert=True)
@@ -6215,9 +6183,9 @@ def _dispatch_callback(call, uid, data):
         stock_only = setting_get("preorder_mode", "0") == "1"
         user = get_user(uid)
         _is_agent = bool(user and user["is_agent"])
-        packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and _br_ok(p, _is_agent) and _pkg_has_stock(p, stock_only) and _sale_mode_allows_buy(p)]
+        packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and _br_ok(p, _is_agent) and _pkg_has_stock(p, stock_only)]
         # For user-count selector, check ALL packages regardless of stock
-        all_type_packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and _br_ok(p, _is_agent) and _sale_mode_allows_buy(p)]
+        all_type_packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and _br_ok(p, _is_agent)]
         user_limits = sorted(set(p["max_users"] if "max_users" in p.keys() else 0 for p in all_type_packages))
         if any(u != 0 for u in user_limits):
             kb = types.InlineKeyboardMarkup()
@@ -6265,7 +6233,7 @@ def _dispatch_callback(call, uid, data):
         stock_only   = setting_get("preorder_mode", "0") == "1"
         user = get_user(uid)
         _is_agent = bool(user and user["is_agent"])
-        all_pkgs = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and _br_ok(p, _is_agent) and _pkg_has_stock(p, stock_only) and _sale_mode_allows_buy(p)]
+        all_pkgs = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and _br_ok(p, _is_agent) and _pkg_has_stock(p, stock_only)]
         packages = [p for p in all_pkgs if (p["max_users"] if "max_users" in p.keys() else 0) == selected_mu]
         kb   = types.InlineKeyboardMarkup()
         for p in packages:
@@ -7176,7 +7144,7 @@ def _dispatch_callback(call, uid, data):
                 pass
             return
         invoice_id_v = payment["receipt_text"]
-        ok_v, status_v = check_nowpayments_invoice(invoice_id_v, order_id=payment_id)
+        ok_v, status_v = check_nowpayments_invoice(invoice_id_v)
         if not ok_v:
             try:
                 bot.answer_callback_query(call.id, "خطا در بررسی وضعیت فاکتور.", show_alert=True)
@@ -8306,7 +8274,7 @@ def _dispatch_callback(call, uid, data):
                         ok, st = check_plisio_invoice(_inv)
                         paid = ok and is_plisio_paid(st)
                     elif _gw == "nowpayments":
-                        ok, st = check_nowpayments_invoice(_inv, order_id=_pid)
+                        ok, st = check_nowpayments_invoice(_inv)
                         paid = ok and is_nowpayments_paid(st)
                     else:
                         ok, st, paid = False, "?", False
@@ -9012,55 +8980,6 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, text, kb)
         return
 
-    if data.startswith("admin:pkg:set_sm:"):
-        # Show sale_mode selection for a package
-        package_id  = int(data.split(":")[3])
-        package_row = get_package(package_id)
-        if not package_row:
-            bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
-            return
-        sale_mode = package_row["sale_mode"] if "sale_mode" in package_row.keys() else "all"
-        if not sale_mode:
-            sale_mode = "all"
-        _SM = {"all": "فروش و تمدید", "renew_only": "فقط تمدید", "sale_only": "فقط فروش", "disabled": "غیر فعال"}
-        kb = types.InlineKeyboardMarkup()
-        for mode, label in _SM.items():
-            prefix = "✅ " if sale_mode == mode else ""
-            kb.add(types.InlineKeyboardButton(f"{prefix}{label}", callback_data=f"admin:pkg:sm:{mode}:{package_id}"))
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"admin:pkg:edit:{package_id}", icon_custom_emoji_id="5253997076169115797"))
-        bot.answer_callback_query(call.id)
-        send_or_edit(call,
-            f"📦 <b>{esc(package_row['name'])}</b>\n\n"
-            "🛒 حالت فروش این پکیج را انتخاب کنید:\n\n"
-            "• <b>فروش و تمدید</b> — هم خرید هم تمدید مجاز است\n"
-            "• <b>فقط تمدید</b> — در لیست خرید نمایش داده نمی‌شود، فقط تمدید مجاز است\n"
-            "• <b>فقط فروش</b> — خرید مجاز است، دکمه‌های تمدید در سرویس‌ها نمایش داده نمی‌شود\n"
-            "• <b>غیر فعال</b> — نه خرید نه تمدید مجاز است", kb)
-        return
-
-    if data.startswith("admin:pkg:sm:"):
-        # Admin selects sale_mode for existing package
-        parts      = data.split(":")
-        mode       = parts[3]   # 'all' | 'renew_only' | 'sale_only' | 'disabled'
-        package_id = int(parts[4])
-        if mode not in ("all", "renew_only", "sale_only", "disabled"):
-            bot.answer_callback_query(call.id)
-            return
-        package_row = get_package(package_id)
-        if not package_row:
-            bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
-            return
-        set_package_sale_mode(package_id, mode)
-        # Mirror active flag: 'disabled' → active=0, others → active=1
-        with get_conn() as _conn:
-            _conn.execute("UPDATE packages SET active=? WHERE id=?", (0 if mode == "disabled" else 1, package_id))
-        log_admin_action(uid, f"sale_mode پکیج #{package_id} به {mode} تغییر کرد")
-        bot.answer_callback_query(call.id, "✅ حالت فروش بروزرسانی شد.")
-        package_row = get_package(package_id)
-        text, kb = _pkg_edit_text_kb(package_row)
-        send_or_edit(call, text, kb)
-        return
-
     if data.startswith("admin:pkg:ef:"):
         parts      = data.split(":")
         field_key  = parts[3]
@@ -9680,7 +9599,7 @@ def _dispatch_callback(call, uid, data):
             type_id = type_row["type_id"] if type_row else None
             user = get_user(uid)
             _is_agent = bool(user and user["is_agent"])
-            packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and _br_ok(p, _is_agent) and _sale_mode_allows_renew(p)] if type_id else []
+            packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and _br_ok(p, _is_agent)] if type_id else []
             kb = types.InlineKeyboardMarkup()
             for p in packages:
                 price = get_effective_price(uid, p)
@@ -10248,7 +10167,7 @@ def _dispatch_callback(call, uid, data):
                     pass
                 return
             invoice_id_vp = payment["receipt_text"]
-            ok_vp, status_vp = check_nowpayments_invoice(invoice_id_vp, order_id=payment_id)
+            ok_vp, status_vp = check_nowpayments_invoice(invoice_id_vp)
             if not ok_vp:
                 try:
                     bot.answer_callback_query(call.id, "خطا در بررسی وضعیت فاکتور.", show_alert=True)
