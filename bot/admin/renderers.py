@@ -415,7 +415,8 @@ def _show_panel_detail(call, panel_id):
     uname_disp  = esc(p['username']) if p['username'] else '—'
     passwd_disp = esc(p['password']) if p['password'] else '—'
     try:
-        sub_url_base_disp = esc(p['sub_url_base']) if p.get('sub_url_base') else "<i>(ندارد — از آدرس پنل استفاده می‌شود)</i>"
+        _sub = p['sub_url_base']
+        sub_url_base_disp = esc(_sub) if _sub else "<i>(ندارد — از آدرس پنل استفاده می‌شود)</i>"
     except (IndexError, KeyError):
         sub_url_base_disp = "<i>(ندارد)</i>"
     try:
