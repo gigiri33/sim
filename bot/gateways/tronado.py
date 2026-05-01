@@ -11,6 +11,7 @@ import urllib.request
 import urllib.error
 
 from ..db import setting_get
+from .crypto import fetch_crypto_prices
 
 TRONADO_DEFAULT_BASE_URL = "https://bot.tronado.cloud/api/v3"
 TRONADO_PAYMENT_URL_TEMPLATE = "https://t.me/tronado_robot/customerpayment?startapp={token}"
@@ -63,8 +64,15 @@ def get_tronado_order_token(amount_toman: int, order_id: str, user_id: int,
     if not wallet_address:
         return False, {"error": "آدرس کیف پول ترون در درگاه ترونادو ثبت نشده است. از پنل مدیریت ← تنظیمات ← درگاه‌ها تنظیم کنید."}
 
+    # Convert toman → TRX
+    prices = fetch_crypto_prices()
+    trx_irt = prices.get("TRX", 0)
+    if not trx_irt or trx_irt <= 0:
+        return False, {"error": "دریافت نرخ TRX ناموفق بود. لطفاً مجدداً تلاش کنید."}
+    tron_amount = round(amount_toman / trx_irt, 6)
+
     payload = {
-        "Amount":         int(amount_toman),
+        "TronAmount":     tron_amount,
         "PaymentID":      str(order_id),
         "UserTelegramId": int(user_id),
         "WalletAddress":  wallet_address,
