@@ -59,11 +59,16 @@ def get_tronado_order_token(amount_toman: int, order_id: str, user_id: int,
         return False, {"error": "کلید API ترونادو ثبت نشده است. از پنل مدیریت ← تنظیمات ← درگاه‌ها اقدام کنید."}
 
     base_url = get_tronado_base_url()
+    wallet_address = (setting_get("tronado_wallet_address", "") or "").strip()
+    if not wallet_address:
+        return False, {"error": "آدرس کیف پول ترون در درگاه ترونادو ثبت نشده است. از پنل مدیریت ← تنظیمات ← درگاه‌ها تنظیم کنید."}
+
     payload = {
-        "Amount":         int(amount_toman),
-        "PaymentID":      str(order_id),
-        "UserTelegramId": int(user_id),
-        "Description":    (description or "")[:200],
+        "Amount":            int(amount_toman),
+        "PaymentID":         str(order_id),
+        "UserTelegramId":    int(user_id),
+        "TronWalletAddress": wallet_address,
+        "Description":       (description or "")[:200],
     }
     if callback_url:
         payload["CallbackUrl"] = callback_url

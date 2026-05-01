@@ -3447,6 +3447,17 @@ def universal_handler(message):
             bot.send_message(uid, "✅ کلید API ترونادو ذخیره شد.", reply_markup=back_button("adm:set:gw:tronado"))
             return
 
+        if sn == "admin_set_tronado_wallet" and is_admin(uid):
+            val = (message.text or "").strip()
+            if not val:
+                bot.send_message(uid, "⚠️ آدرس کیف پول نمی‌تواند خالی باشد. لطفاً دوباره ارسال کنید:", reply_markup=back_button("adm:set:gw:tronado"))
+                return
+            setting_set("tronado_wallet_address", val)
+            log_admin_action(uid, "آدرس کیف پول ترونادو تغییر کرد")
+            state_clear(uid)
+            bot.send_message(uid, "✅ آدرس کیف پول ترون ذخیره شد.", reply_markup=back_button("adm:set:gw:tronado"))
+            return
+
         if sn == "admin_set_tronpays_rial_cb_url" and is_admin(uid):
             val = (message.text or "").strip()
             if val and not (val.startswith("http://") or val.startswith("https://")):

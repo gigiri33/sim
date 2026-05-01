@@ -16483,6 +16483,7 @@ def _dispatch_callback(call, uid, data):
         )
         kb.add(types.InlineKeyboardButton(f"📊 بازه پرداختی: {range_label}", callback_data="adm:gw:tronado:range"))
         kb.add(types.InlineKeyboardButton("🔑 تنظیم کلید API", callback_data="adm:set:tronado_key"))
+        kb.add(types.InlineKeyboardButton("💼 آدرس کیف پول ترون", callback_data="adm:set:tronado_wallet"))
         kb.add(types.InlineKeyboardButton("🏷 نام نمایشی درگاه", callback_data="adm:gw:tronado:set_name"))
         fee_bonus_lbl = ("🟢 کارمزد" if fee_on else "🔴 کارمزد") + " | " + ("🟢 بونس" if bonus_on else "🔴 بونس")
         kb.add(types.InlineKeyboardButton(f"🎁 کارمزد — {fee_bonus_lbl.split(' | ')[0]}", callback_data="adm:gw:tronado:fee"))
@@ -16492,6 +16493,9 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gateways", icon_custom_emoji_id="5253997076169115797"))
         key_display = (f"<code>{esc(api_key[:8])}...{esc(api_key[-4:])}</code>"
                        if api_key else "❌ <b>ثبت نشده</b>")
+        wallet_addr = (setting_get("tronado_wallet_address", "") or "").strip()
+        wallet_display = (f"<code>{esc(wallet_addr[:6])}...{esc(wallet_addr[-4:])}</code>"
+                          if wallet_addr else "❌ <b>ثبت نشده</b>")
         display_name_td = setting_get("gw_tronado_display_name", "")
         name_display_td = display_name_td or "<i>پیش‌فرض: درگاه ترونادو</i>"
         _cb_line_td = f"🔗 Callback URL Pattern:\n<code>{esc(_cb_url_td_adm)}</code>\n\n" if _cb_url_td_adm else ""
@@ -16500,12 +16504,14 @@ def _dispatch_callback(call, uid, data):
             f"وضعیت: {enabled_label}\n"
             f"نمایش: {vis_label}\n"
             f"نام نمایشی: {name_display_td}\n\n"
-            f"🔑 کلید API: {key_display}\n\n"
+            f"🔑 کلید API: {key_display}\n"
+            f"💼 آدرس کیف پول: {wallet_display}\n\n"
             f"{_cb_line_td}"
             "📋 <b>راهنمای فعال‌سازی درگاه ترونادو:</b>\n"
             "۱. ابتدا از پشتیبانی ترونادو @TrndSupport کلید API را دریافت کنید\n"
             "۲. کلید API را با دکمه «تنظیم کلید API» وارد کنید\n"
-            "۳. درگاه را فعال کنید\n\n"
+            "۳. آدرس کیف پول TRC20 ترون خود را با دکمه «آدرس کیف پول ترون» وارد کنید\n"
+            "۴. درگاه را فعال کنید\n\n"
             "🔗 مستندات API: https://documenter.getpostman.com/view/48018954/2sB3HksMLT\n"
             "🤖 ربات ترونادو: @Tronado_Robot\n"
             "📢 کانال ترونادو: @TronadoCh\n"
@@ -16547,6 +16553,17 @@ def _dispatch_callback(call, uid, data):
         state_set(uid, "admin_set_tronado_key")
         bot.answer_callback_query(call.id)
         send_or_edit(call, "🔑 کلید API ترونادو را ارسال کنید:", back_button("adm:set:gw:tronado"))
+        return
+
+    if data == "adm:set:tronado_wallet":
+        state_set(uid, "admin_set_tronado_wallet")
+        bot.answer_callback_query(call.id)
+        current_w = (setting_get("tronado_wallet_address", "") or "").strip()
+        send_or_edit(call,
+            f"💼 <b>آدرس کیف پول ترون (TRC20)</b>\n\n"
+            f"مقدار فعلی: <code>{esc(current_w) or 'ثبت نشده'}</code>\n\n"
+            "آدرس کیف پول TRC20 خود را ارسال کنید:",
+            back_button("adm:set:gw:tronado"))
         return
 
     if data == "adm:gw:tronado:range":
