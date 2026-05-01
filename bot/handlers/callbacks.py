@@ -16587,10 +16587,6 @@ def _dispatch_callback(call, uid, data):
             back_button("adm:set:gw:tronado"))
         return
 
-    if data == "adm:gw:tronado:range":
-        _handle_gw_range_toggle(call, uid, "tronado")
-        return
-
     # ── Plisio admin settings ─────────────────────────────────────────────────
     if data == "adm:set:gw:plisio":
         enabled     = setting_get("gw_plisio_enabled", "0")

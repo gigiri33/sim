@@ -463,7 +463,7 @@ def _run_init_db_migrations():
             # ── Tronado gateway ────────────────────────────────────────────────
             "gw_tronado_enabled":        "0",
             "gw_tronado_visibility":     "public",
-            "gw_tronado_display_name":   "",
+            "gw_tronado_display_name":   "درگاه کارت به کارت (Tronado)",
             "gw_tronado_range_enabled":  "0",
             "gw_tronado_range_min":      "",
             "gw_tronado_range_max":      "",
