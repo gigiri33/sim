@@ -64,12 +64,25 @@ def get_tronado_order_token(amount_toman: int, order_id: str, user_id: int,
     if not wallet_address:
         return False, {"error": "آدرس کیف پول ترون در درگاه ترونادو ثبت نشده است. از پنل مدیریت ← تنظیمات ← درگاه‌ها تنظیم کنید."}
 
-    # Convert toman → TRX
+    # Convert toman → TRX (case-insensitive lookup)
     prices = fetch_crypto_prices()
-    trx_irt = prices.get("TRX", 0)
+    trx_irt = next((v for k, v in prices.items() if k.upper() == "TRX"), 0)
+    if not trx_irt or trx_irt <= 0:
+        # Fallback: fetch TRX/USDT from CoinGecko + USDT/IRT from SwapWallet
+        try:
+            import urllib.request as _ur
+            with _ur.urlopen("https://api.coingecko.com/api/v3/simple/price?ids=tron&vs_currencies=usd", timeout=8) as _r:
+                _cg = json.loads(_r.read().decode())
+            trx_usd = float(_cg.get("tron", {}).get("usd", 0) or 0)
+            usdt_irt = next((v for k, v in prices.items() if k.upper() in ("USDT", "USDTTRC20")), 0)
+            if trx_usd > 0 and usdt_irt > 0:
+                trx_irt = trx_usd * usdt_irt
+        except Exception:
+            pass
     if not trx_irt or trx_irt <= 0:
         return False, {"error": "دریافت نرخ TRX ناموفق بود. لطفاً مجدداً تلاش کنید."}
     tron_amount = round(amount_toman / trx_irt, 6)
+    print(f"[Tronado] TRX rate: {trx_irt}, toman: {amount_toman}, TronAmount: {tron_amount}")
 
     payload = {
         "TronAmount":     tron_amount,
