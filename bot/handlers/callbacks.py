@@ -5777,8 +5777,10 @@ def _dispatch_callback(call, uid, data):
                 "💡 مطمئن شوید کلید API ترونادو صحیح وارد شده باشد.",
                 back_button(f"renew:{purchase_id}"))
             return
-        token_rtd   = result.get("token", "")
-        pay_url_rtd = result.get("payment_url", "")
+        token_rtd    = result.get("token", "")
+        pay_url_rtd  = result.get("payment_url", "")
+        tron_amt_rtd = result.get("tron_amount", 0)
+        trx_rate_rtd = result.get("trx_rate", 0)
         with get_conn() as conn:
             conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (token_rtd, payment_id))
         state_set(uid, "await_tronado_renewal_verify", payment_id=payment_id, token=token_rtd,
@@ -5786,9 +5788,10 @@ def _dispatch_callback(call, uid, data):
         fee_line_rtd = ""
         if final_rprice_td != price:
             fee_line_rtd = f"\n💸 کارمزد: {fmt_price(final_rprice_td - price)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_rprice_td)}</b> تومان"
+        trx_line_rtd = f"\n💎 معادل TRX: <b>{tron_amt_rtd:.4f} TRX</b> (نرخ هر TRX: {fmt_price(int(trx_rate_rtd))} تومان)" if tron_amt_rtd else ""
         text = (
             "💎 <b>پرداخت با ترونادو — تمدید</b>\n\n"
-            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_rtd}\n\n"
+            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_rtd}{trx_line_rtd}\n\n"
             "برای پرداخت، روی دکمه زیر بزنید و وارد صفحه پرداخت ترونادو شوید."
         )
         kb = types.InlineKeyboardMarkup()
@@ -7034,17 +7037,20 @@ def _dispatch_callback(call, uid, data):
                 "💡 مطمئن شوید کلید API ترونادو صحیح وارد شده باشد.",
                 back_button(f"buy:p:{package_id}"))
             return
-        token_td2   = result.get("token", "")
-        pay_url_td2 = result.get("payment_url", "")
+        token_td2     = result.get("token", "")
+        pay_url_td2   = result.get("payment_url", "")
+        tron_amt_td2  = result.get("tron_amount", 0)
+        trx_rate_td2  = result.get("trx_rate", 0)
         with get_conn() as conn:
             conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (token_td2, payment_id))
         state_set(uid, "await_tronado_verify", payment_id=payment_id, token=token_td2)
         fee_line_td = ""
         if final_td_price != price:
             fee_line_td = f"\n💸 کارمزد: {fmt_price(final_td_price - price)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_td_price)}</b> تومان"
+        trx_line_td2 = f"\n💎 معادل TRX: <b>{tron_amt_td2:.4f} TRX</b> (نرخ هر TRX: {fmt_price(int(trx_rate_td2))} تومان)" if tron_amt_td2 else ""
         text = (
             "💎 <b>پرداخت با ترونادو</b>\n\n"
-            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_td}\n\n"
+            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_td}{trx_line_td2}\n\n"
             "برای پرداخت، روی دکمه زیر بزنید و وارد صفحه پرداخت ترونادو شوید.\n\n"
             "در صفحه پرداخت، شماره کارت را دریافت کنید، مبلغ را دقیق واریز کنید، "
             "تصویر رسید را همان‌جا ارسال کنید و منتظر تأیید تیم ترونادو بمانید.\n\n"
@@ -7884,15 +7890,18 @@ def _dispatch_callback(call, uid, data):
             return
         token_td    = result.get("token", "")
         pay_url_td  = result.get("payment_url", "")
+        tron_amt_td = result.get("tron_amount", 0)
+        trx_rate_td = result.get("trx_rate", 0)
         with get_conn() as conn:
             conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (token_td, payment_id))
         state_set(uid, "await_tronado_verify", payment_id=payment_id, token=token_td)
         fee_line = ""
         if final_amount != amount:
             fee_line = f"\n💸 کارمزد: {fmt_price(final_amount - amount)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_amount)}</b> تومان"
+        trx_line_td = f"\n💎 معادل TRX: <b>{tron_amt_td:.4f} TRX</b> (نرخ هر TRX: {fmt_price(int(trx_rate_td))} تومان)" if tron_amt_td else ""
         text = (
             "💎 <b>پرداخت با ترونادو</b>\n\n"
-            f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان{fee_line}\n\n"
+            f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان{fee_line}{trx_line_td}\n\n"
             "برای پرداخت، روی دکمه زیر بزنید و وارد صفحه پرداخت ترونادو شوید.\n\n"
             "در صفحه پرداخت، شماره کارت را دریافت کنید، مبلغ را دقیق واریز کنید، "
             "تصویر رسید را همان‌جا ارسال کنید و منتظر تأیید تیم ترونادو بمانید.\n\n"
@@ -10161,8 +10170,10 @@ def _dispatch_callback(call, uid, data):
                 send_or_edit(call,
                     f"⚠️ <b>خطا در ایجاد درگاه ترونادو</b>\n\n<code>{esc(err_td_pnl[:400])}</code>",
                     back_button(f"mypnlcfg:renewconfirm:{config_id}")); return
-            token_tpnl   = result_td_pnl.get("token", "")
-            pay_url_tpnl = result_td_pnl.get("payment_url", "")
+            token_tpnl    = result_td_pnl.get("token", "")
+            pay_url_tpnl  = result_td_pnl.get("payment_url", "")
+            tron_amt_tpnl = result_td_pnl.get("tron_amount", 0)
+            trx_rate_tpnl = result_td_pnl.get("trx_rate", 0)
             with get_conn() as conn:
                 conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (token_tpnl, payment_id))
             state_set(uid, "await_pnlcfg_renewal_tronado_verify",
@@ -10170,6 +10181,7 @@ def _dispatch_callback(call, uid, data):
             fee_line_tpnl = ""
             if final_td_pnl != price:
                 fee_line_tpnl = f"\n💸 کارمزد: {fmt_price(final_td_pnl - price)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_td_pnl)}</b> تومان"
+            trx_line_tpnl = f"\n💎 معادل TRX: <b>{tron_amt_tpnl:.4f} TRX</b> (نرخ هر TRX: {fmt_price(int(trx_rate_tpnl))} تومان)" if tron_amt_tpnl else ""
             kb_tpnl = types.InlineKeyboardMarkup()
             kb_tpnl.add(types.InlineKeyboardButton("💎 پرداخت در ترونادو", url=pay_url_tpnl))
             kb_tpnl.add(types.InlineKeyboardButton("🔍 مشاهده وضعیت پرداخت",
@@ -10177,7 +10189,7 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id)
             send_or_edit(call,
                 "💎 <b>پرداخت با ترونادو (تمدید)</b>\n\n"
-                f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_tpnl}\n\n"
+                f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_tpnl}{trx_line_tpnl}\n\n"
                 "برای پرداخت، روی دکمه زیر بزنید و وارد صفحه پرداخت ترونادو شوید.",
                 kb_tpnl)
             return

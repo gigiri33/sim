@@ -143,6 +143,8 @@ def get_tronado_order_token(amount_toman: int, order_id: str, user_id: int,
     return True, {
         "token":       str(token),
         "payment_url": payment_url,
+        "tron_amount": tron_amount,
+        "trx_rate":    trx_irt,
     }
 
 
