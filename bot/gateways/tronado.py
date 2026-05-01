@@ -181,32 +181,17 @@ def is_tronado_callback_valid(payload: dict) -> bool:
 def get_tronado_callback_base_url() -> str:
     """
     Return the base URL for Tronado callback registration.
-    Tries server_public_url setting, then auto-detects public IP.
-    Returns empty string if not determinable.
+    Priority: tronado_callback_url (must be https) > server_public_url if https.
+    Tronado requires https:// — http:// URLs are rejected.
     """
+    # 1. Dedicated Tronado https callback URL
+    dedicated = (setting_get("tronado_callback_url", "") or "").strip().rstrip("/")
+    if dedicated and dedicated.startswith("https://"):
+        return dedicated
+    # 2. Shared server_public_url if it's https
     base = (setting_get("server_public_url", "") or "").strip().rstrip("/")
-    if base:
-        # Ensure port is present for http:// bare URLs
-        try:
-            import urllib.parse as _up
-            parsed = _up.urlparse(base)
-            if parsed.scheme == "http" and parsed.port is None:
-                from ..gateways.nowpayments import get_nowpayments_webhook_port
-                port = get_nowpayments_webhook_port()
-                netloc = f"{parsed.hostname}:{port}"
-                return _up.urlunparse(parsed._replace(netloc=netloc))
-        except Exception:
-            pass
+    if base and base.startswith("https://"):
         return base
-    # Auto-detect
-    try:
-        from ..gateways.nowpayments import detect_public_ip, get_nowpayments_webhook_port
-        ip = detect_public_ip()
-        if ip:
-            port = get_nowpayments_webhook_port()
-            return f"http://{ip}:{port}"
-    except Exception:
-        pass
     return ""
 
 

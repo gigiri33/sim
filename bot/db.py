@@ -476,6 +476,7 @@ def _run_init_db_migrations():
             "tronado_api_key":           "",
             "tronado_api_base_url":      "https://bot.tronado.cloud/api/v3",
             "tronado_wallet_address":    "",
+            "tronado_callback_url":      "",
         }
         for coin, _ in CRYPTO_COINS:
             defaults[f"crypto_{coin}"] = ""

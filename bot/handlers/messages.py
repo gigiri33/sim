@@ -3458,6 +3458,17 @@ def universal_handler(message):
             bot.send_message(uid, "✅ آدرس کیف پول ترون ذخیره شد.", reply_markup=back_button("adm:set:gw:tronado"))
             return
 
+        if sn == "admin_set_tronado_cb_url" and is_admin(uid):
+            val = (message.text or "").strip()
+            if val and not val.startswith("https://"):
+                bot.send_message(uid, "⚠️ Callback URL باید با <code>https://</code> شروع شود. دوباره ارسال کنید:", reply_markup=back_button("adm:set:gw:tronado"))
+                return
+            setting_set("tronado_callback_url", val)
+            log_admin_action(uid, f"Callback URL ترونادو تغییر کرد: {val}")
+            state_clear(uid)
+            bot.send_message(uid, f"✅ Callback URL ذخیره شد:\n<code>{esc(val) if val else 'حذف شد'}</code>", reply_markup=back_button("adm:set:gw:tronado"))
+            return
+
         if sn == "admin_set_tronpays_rial_cb_url" and is_admin(uid):
             val = (message.text or "").strip()
             if val and not (val.startswith("http://") or val.startswith("https://")):
