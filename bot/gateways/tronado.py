@@ -61,7 +61,7 @@ def get_tronado_order_token(amount_toman: int, order_id: str, user_id: int,
     base_url = get_tronado_base_url()
     payload = {
         "Amount":         int(amount_toman),
-        "OrderId":        str(order_id),
+        "PaymentID":      str(order_id),
         "UserTelegramId": int(user_id),
         "Description":    (description or "")[:200],
     }
