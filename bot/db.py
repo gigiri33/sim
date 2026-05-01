@@ -1613,6 +1613,96 @@ def get_user_panel_configs_paged(user_id, page=0, per_page=10, search=None):
         return rows, count
 
 
+def get_user_config_package_groups(user_id):
+    """Return (manual_groups, panel_groups) for grouping a user's configs by package.
+    Each group has keys: pkg_id, pkg_name, cnt.
+    """
+    with get_conn() as conn:
+        manual_groups = conn.execute(
+            """
+            SELECT p.id AS pkg_id, p.name AS pkg_name, COUNT(*) AS cnt
+            FROM purchases pr
+            JOIN packages p ON p.id = pr.package_id
+            WHERE pr.user_id = ?
+            GROUP BY p.id, p.name
+            ORDER BY p.name
+            """,
+            (user_id,)
+        ).fetchall()
+        panel_groups = conn.execute(
+            """
+            SELECT COALESCE(p.id, 0) AS pkg_id,
+                   COALESCE(p.name, '(بدون پکیج)') AS pkg_name,
+                   COUNT(*) AS cnt
+            FROM panel_configs pc
+            LEFT JOIN packages p ON p.id = pc.package_id
+            WHERE pc.user_id = ?
+            GROUP BY p.id, p.name
+            ORDER BY p.name
+            """,
+            (user_id,)
+        ).fetchall()
+    return list(manual_groups), list(panel_groups)
+
+
+def get_user_purchases_for_package(user_id, package_id, page=0, per_page=10):
+    """Return paginated purchases for a specific package."""
+    with get_conn() as conn:
+        base = (
+            "FROM purchases pr "
+            "JOIN packages p ON p.id=pr.package_id "
+            "JOIN config_types t ON t.id=p.type_id "
+            "JOIN configs c ON c.id=pr.config_id "
+            "WHERE pr.user_id=? AND pr.package_id=?"
+        )
+        count = conn.execute("SELECT COUNT(*) AS n " + base, (user_id, package_id)).fetchone()["n"]
+        rows = conn.execute(
+            "SELECT pr.*, p.name AS package_name, p.show_name, p.volume_gb, p.duration_days, p.price,"
+            "       t.name AS type_name, t.description AS type_description,"
+            "       c.service_name, c.config_text, c.inquiry_link,"
+            "       CASE WHEN pr.is_test=1"
+            "            AND (julianday('now') - julianday(pr.created_at)) * 24 >= p.duration_days * 24"
+            "            THEN 1 ELSE c.is_expired END AS is_expired,"
+            "       CASE WHEN pr.is_test=1"
+            "            THEN MAX(0, p.duration_days * 24 - CAST((julianday('now') - julianday(pr.created_at)) * 24 AS INTEGER))"
+            "            ELSE NULL END AS test_hours_left "
+            + base
+            + " ORDER BY pr.id DESC LIMIT ? OFFSET ?",
+            (user_id, package_id, per_page, page * per_page)
+        ).fetchall()
+        return rows, count
+
+
+def get_user_panel_configs_for_package(user_id, package_id, page=0, per_page=10):
+    """Return paginated panel configs for a specific package (0 = no package)."""
+    with get_conn() as conn:
+        if package_id == 0:
+            base = (
+                "FROM panel_configs pc "
+                "LEFT JOIN packages p ON pc.package_id = p.id "
+                "LEFT JOIN config_types t ON t.id = p.type_id "
+                "WHERE pc.user_id=? AND pc.package_id IS NULL"
+            )
+            params = [user_id]
+        else:
+            base = (
+                "FROM panel_configs pc "
+                "LEFT JOIN packages p ON pc.package_id = p.id "
+                "LEFT JOIN config_types t ON t.id = p.type_id "
+                "WHERE pc.user_id=? AND pc.package_id=?"
+            )
+            params = [user_id, package_id]
+        count = conn.execute("SELECT COUNT(*) AS n " + base, params).fetchone()["n"]
+        rows = conn.execute(
+            "SELECT pc.*, p.name AS package_name, p.volume_gb, p.duration_days,"
+            "       t.name AS type_name "
+            + base
+            + " ORDER BY pc.id DESC LIMIT ? OFFSET ?",
+            params + [per_page, page * per_page]
+        ).fetchall()
+        return rows, count
+
+
 def user_has_test_for_type(user_id, type_id):
     with get_conn() as conn:
         row = conn.execute(
