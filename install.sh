@@ -411,6 +411,24 @@ toggle_auto_update() {
   read -r -p "Press Enter to continue..."
 }
 
+rename_bot() {
+  ensure_safe_cwd
+  echo ""
+  echo -e "${Y}Current name: ${B}${BOT_NAME}${N}"
+  read -r -p "$(echo -e "${B}📛 New bot name: ${N}")" NEW_NAME
+  NEW_NAME="${NEW_NAME:-$BOT_NAME}"
+  if [[ -z "$NEW_NAME" ]]; then
+    echo -e "${R}Name cannot be empty.${N}"
+    read -r -p "Press Enter to continue..."
+    return
+  fi
+  BOT_NAME="$NEW_NAME"
+  mkdir -p "$DIR"
+  save_bot_name
+  ok "Bot name updated to: ${B}${BOT_NAME}${N}"
+  read -r -p "Press Enter to continue..."
+}
+
 # ─────────────────────────── install / update / remove ───────────────────────────
 
 install_bot() {
@@ -466,6 +484,9 @@ remove_bot() {
   systemctl daemon-reload
   rm -rf "$DIR"
   ok "${BOT_NAME} has been completely removed"
+  # Renumber remaining bots so there are no gaps
+  info "Renumbering remaining bots..."
+  renumber_instances
 }
 
 
@@ -479,7 +500,57 @@ all_instances() {
     local num; num="$(basename "$d" | sed 's/seamless-//')"
     [[ "$num" =~ ^[0-9]+$ ]] && list+=("$num")
   done
-  echo "${list[@]:-}"
+  # Sort numerically
+  if [[ ${#list[@]} -gt 0 ]]; then
+    local sorted; sorted="$(printf '%s\n' "${list[@]}" | sort -n | tr '\n' ' ')"
+    echo "${sorted% }"
+  else
+    echo ""
+  fi
+}
+
+# Renumber all instances so there are no gaps (1,2,3,...)
+renumber_instances() {
+  local instances; instances="$(all_instances)"
+  [[ -n "$instances" ]] || return 0
+  local new_num=1
+  for old_num in $instances; do
+    if [[ "$old_num" -ne "$new_num" ]]; then
+      local old_dir="${BASE_DIR}-${old_num}"
+      local new_dir="${BASE_DIR}-${new_num}"
+      local old_svc="${BASE_SERVICE}-${old_num}"
+      local new_svc="${BASE_SERVICE}-${new_num}"
+      info "Renaming bot ${old_num} → ${new_num}..."
+      # Stop old service
+      systemctl stop "$old_svc" 2>/dev/null || true
+      systemctl disable "$old_svc" 2>/dev/null || true
+      systemctl stop "${old_svc}-autoupdate.timer" 2>/dev/null || true
+      systemctl disable "${old_svc}-autoupdate.timer" 2>/dev/null || true
+      # Move directory
+      mv "$old_dir" "$new_dir"
+      # Update .env PLISIO port
+      local new_port=$((5050 + new_num - 1))
+      if [[ -f "$new_dir/.env" ]]; then
+        sed -i "s/^PLISIO_WEBHOOK_PORT=.*/PLISIO_WEBHOOK_PORT=${new_port}/" "$new_dir/.env"
+      fi
+      # Recreate systemd service files
+      DIR="$new_dir" SERVICE="$new_svc" BOT_NAME="$(cat "$new_dir/.bot_name" 2>/dev/null || echo "Bot #${new_num}")"
+      INSTANCE_NUM="$new_num"
+      create_systemd_service
+      # Recreate auto-update if it existed
+      if [[ -f "$new_dir/auto_update.sh" ]]; then
+        enable_auto_update
+      fi
+      # Remove old service files
+      rm -f "/etc/systemd/system/${old_svc}.service"
+      rm -f "/etc/systemd/system/${old_svc}-autoupdate.service"
+      rm -f "/etc/systemd/system/${old_svc}-autoupdate.timer"
+      systemctl start "$new_svc" 2>/dev/null || true
+    fi
+    new_num=$((new_num + 1))
+  done
+  systemctl daemon-reload
+  ok "Bots renumbered successfully."
 }
 
 bulk_update_all() {
@@ -602,10 +673,11 @@ list_instances_table() {
   echo -e "${C}┌────┬────────────────────────────┬───────────────┬──────────────────────┐${N}"
   echo -e "${C}│${N} ${B}${W}#${N}  ${C}│${N} ${B}${W}Bot Name${N}                    ${C}│${N} ${B}${W}Status${N}         ${C}│${N} ${B}${W}Last Update${N}          ${C}│${N}"
   echo -e "${C}├────┼────────────────────────────┼───────────────┼──────────────────────┤${N}"
-  for d in /opt/seamless-*/; do
+  # Collect and sort numerically
+  local sorted_nums; sorted_nums="$(for d in /opt/seamless-*/; do [[ -d "$d" ]] || continue; basename "$d" | sed 's/seamless-//'; done | grep '^[0-9]*$' | sort -n)"
+  for num in $sorted_nums; do
+    local d="${BASE_DIR}-${num}"
     [[ -d "$d" ]] || continue
-    local num; num="$(basename "$d" | sed 's/seamless-//')"
-    [[ "$num" =~ ^[0-9]+$ ]] || continue
     local name; name="$(get_bot_name "$num")"
     local svc="${BASE_SERVICE}-${num}"
     local status_raw status_str
@@ -631,17 +703,18 @@ show_global_menu() {
   echo -e "${C}┌──────────────────────────────────────────┐${N}"
   echo -e "${C}│${N}       ${B}${W}🌐 Main Menu — Seamless${N}           ${C}│${N}"
   echo -e "${C}├──────────────────────────────────────────┤${N}"
-  echo -e "${C}│${N}  ${B}${G}m)${N} 🤖 Manage a bot (select number)    ${C}│${N}"
+  echo -e "${C}│${N}  شماره ربات را وارد کنید تا مدیریت شود  ${C}│${N}"
   echo -e "${C}├──────────────────────────────────────────┤${N}"
-  echo -e "${C}│${N}  ${B}${Y}1)${N} 🔄 Update all bots                    ${C}│${N}"
-  echo -e "${C}│${N}  ${B}${Y}2)${N} ⚡ Enable auto-update for all         ${C}│${N}"
-  echo -e "${C}│${N}  ${B}${Y}3)${N} 🔕 Disable auto-update for all     ${C}│${N}"
-  echo -e "${C}│${N}  ${B}${Y}4)${N} 🔁 Restart all bots                     ${C}│${N}"
-  echo -e "${C}│${N}  ${B}${Y}5)${N} ▶️  Start all bots                     ${C}│${N}"
-  echo -e "${C}│${N}  ${B}${Y}6)${N} ⏹️  Stop all bots                     ${C}│${N}"
-  echo -e "${C}│${N}  ${B}${R}7)${N} 🗑️  Remove all bots                          ${C}│${N}"
+  echo -e "${C}│${N}  ${B}${W}── عملیات گروهی ──────────────────${N}  ${C}│${N}"
+  echo -e "${C}│${N}  ${B}${Y}u)${N} 🔄 Update all bots               ${C}│${N}"
+  echo -e "${C}│${N}  ${B}${Y}e)${N} ⚡ Enable auto-update for all    ${C}│${N}"
+  echo -e "${C}│${N}  ${B}${Y}d)${N} 🔕 Disable auto-update for all  ${C}│${N}"
+  echo -e "${C}│${N}  ${B}${Y}r)${N} 🔁 Restart all bots              ${C}│${N}"
+  echo -e "${C}│${N}  ${B}${Y}s)${N} ▶️  Start all bots               ${C}│${N}"
+  echo -e "${C}│${N}  ${B}${Y}p)${N} ⏹️  Stop all bots               ${C}│${N}"
+  echo -e "${C}│${N}  ${B}${R}x)${N} 🗑️  Remove all bots             ${C}│${N}"
   echo -e "${C}├──────────────────────────────────────────┤${N}"
-  echo -e "${C}│${N}  ${B}${R}0)${N} 🚪 Exit                            ${C}│${N}"
+  echo -e "${C}│${N}  ${B}${R}0)${N} 🚪 Exit                          ${C}│${N}"
   echo -e "${C}└──────────────────────────────────────────┘${N}"
   echo ""
 }
@@ -660,18 +733,19 @@ show_bot_header() {
 show_bot_menu() {
   local au_label; au_label="$(get_autoupdate_status_label "$INSTANCE_NUM")"
   echo -e "${C}┌──────────────────────────────────────┐${N}"
-  echo -e "${C}│${N}  ${B}${G}1)${N} 📦 Install / Reinstall                     ${C}│${N}"
-  echo -e "${C}│${N}  ${B}${G}2)${N} 🔄 Update from GitHub                 ${C}│${N}"
-  echo -e "${C}│${N}  ${B}${G}3)${N} ✏️  Edit settings (.env)            ${C}│${N}"
-  echo -e "${C}│${N}  ${B}${G}4)${N} ▶️  Start                                       ${C}│${N}"
-  echo -e "${C}│${N}  ${B}${G}5)${N} ⏹️  Stop                                       ${C}│${N}"
-  echo -e "${C}│${N}  ${B}${G}6)${N} 🔁 Restart                                       ${C}│${N}"
-  echo -e "${C}│${N}  ${B}${G}7)${N} 📜 Live log                                      ${C}│${N}"
-  echo -e "${C}│${N}  ${B}${G}8)${N} 📊 Service status                             ${C}│${N}"
-  echo -e "${C}│${N}  ${B}${G}9)${N} 🗑️  Remove this bot                          ${C}│${N}"
-  echo -e "${C}│${N}  ${B}${C}a)${N} ⚡ Auto-update: $au_label           ${C}│${N}"
-  echo -e "${C}│${N}  ${B}${C}u)${N} 📋 Auto-update log                    ${C}│${N}"
-  echo -e "${C}│${N}  ${B}${R}b)${N} 🔙 Back to main menu               ${C}│${N}"
+  echo -e "${C}│${N}  ${B}${G}1)${N} 📦 Install / Reinstall             ${C}│${N}"
+  echo -e "${C}│${N}  ${B}${G}2)${N} 🔄 Update from GitHub              ${C}│${N}"
+  echo -e "${C}│${N}  ${B}${G}3)${N} ✏️  Edit settings (.env)           ${C}│${N}"
+  echo -e "${C}│${N}  ${B}${G}4)${N} ▶️  Start                          ${C}│${N}"
+  echo -e "${C}│${N}  ${B}${G}5)${N} ⏹️  Stop                           ${C}│${N}"
+  echo -e "${C}│${N}  ${B}${G}6)${N} 🔁 Restart                         ${C}│${N}"
+  echo -e "${C}│${N}  ${B}${G}7)${N} 📜 Live log                        ${C}│${N}"
+  echo -e "${C}│${N}  ${B}${G}8)${N} 📊 Service status                  ${C}│${N}"
+  echo -e "${C}│${N}  ${B}${G}9)${N} 🗑️  Remove this bot                ${C}│${N}"
+  echo -e "${C}│${N}  ${B}${C}n)${N} 📛 Rename this bot                 ${C}│${N}"
+  echo -e "${C}│${N}  ${B}${C}a)${N} ⚡ Auto-update: $au_label${C}│${N}"
+  echo -e "${C}│${N}  ${B}${C}u)${N} 📋 Auto-update log                 ${C}│${N}"
+  echo -e "${C}│${N}  ${B}${R}b)${N} 🔙 Back to main menu              ${C}│${N}"
   echo -e "${C}└──────────────────────────────────────┘${N}"
   echo ""
 }
@@ -718,7 +792,7 @@ bot_loop() {
     show_bot_header
     show_bot_menu
 
-    read -r -p "$(echo -e "${C}${BOT_NAME}${N} ${B}➜${N} option ${W}[0-9/a/u/b]${N}: ")" choice
+    read -r -p "$(echo -e "${C}${BOT_NAME}${N} ${B}➜${N} option ${W}[1-9/n/a/u/b]${N}: ")" choice
 
     case "${choice:-}" in
       1) install_bot; read -r -p "Enter...";;
@@ -730,6 +804,7 @@ bot_loop() {
       7) echo -e "${Y}Press Ctrl+C to exit log${N}"; sleep 1; journalctl -u "$SERVICE" -f;;
       8) systemctl status "$SERVICE" --no-pager -l; read -r -p "Enter...";;
       9) remove_bot; read -r -p "Enter..."; return;;
+      n) rename_bot ;;
       a) toggle_auto_update ;;
       u) echo -e "${Y}Press Ctrl+C to exit log${N}"; sleep 1
          tail -f "$DIR/autoupdate.log" 2>/dev/null || echo -e "${R}Log file not found.${N}"
@@ -753,21 +828,37 @@ main() {
     show_global_menu
 
 
-    read -r -p "$(echo -e "${C}Seamless${N} ${B}➜${N} option ${W}[m/1-7/0]${N}: ")" choice
+    read -r -p "$(echo -e "${C}Seamless${N} ${B}➜${N} bot number or [u/e/d/r/s/p/x/0]: ")" choice
 
     case "${choice:-}" in
-      m)
-        select_instance
-        bot_loop
+      [0-9]*)
+        if [[ "$choice" =~ ^[0-9]+$ ]] && [[ "$choice" -ge 1 ]]; then
+          INSTANCE_NUM="$choice"
+          DIR="${BASE_DIR}-${INSTANCE_NUM}"
+          SERVICE="${BASE_SERVICE}-${INSTANCE_NUM}"
+          if [[ ! -f "$DIR/.bot_name" ]]; then
+            echo ""
+            echo -e "${Y}📌 New bot. Enter a name for easy identification.${N}"
+            read -r -p "$(echo -e "${B}📛 Bot name: ${N}")" INPUT_BOT_NAME
+            INPUT_BOT_NAME="${INPUT_BOT_NAME:-Bot #${INSTANCE_NUM}}"
+            BOT_NAME="$INPUT_BOT_NAME"
+            mkdir -p "$DIR"
+            save_bot_name
+          else
+            BOT_NAME="$(get_bot_name "$INSTANCE_NUM")"
+          fi
+          bot_loop
+        else
+          echo -e "${R}Invalid option${N}"; sleep 1
+        fi
         ;;
-      1) header; bulk_update_all ;;
-      2) header; bulk_enable_autoupdate ;;
-      3) header; bulk_disable_autoupdate ;;
-      4) header; bulk_restart_all ;;
-      5) header; bulk_start_all ;;
-      6) header; bulk_stop_all ;;
-      7) header; bulk_remove_all ;;
-
+      u) header; bulk_update_all ;;
+      e) header; bulk_enable_autoupdate ;;
+      d) header; bulk_disable_autoupdate ;;
+      r) header; bulk_restart_all ;;
+      s) header; bulk_start_all ;;
+      p) header; bulk_stop_all ;;
+      x) header; bulk_remove_all ;;
       0) echo "Goodbye!"; exit 0;;
       *) echo -e "${R}Invalid option${N}"; sleep 1;;
     esac

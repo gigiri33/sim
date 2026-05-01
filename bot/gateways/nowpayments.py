@@ -23,7 +23,7 @@ NOWPAYMENTS_BASE_URL = "https://api.nowpayments.io/v1"
 # Default: all enabled
 NOWPAYMENTS_CURRENCIES = [
     ("usdttrc20",  "💚 USDT (TRC20 — Tron)"),
-    ("usdtbep20",  "🟡 USDT (BEP20 — BSC)"),
+    ("usdtbsc",    "🟡 USDT (BEP20 — BSC)"),
     ("usdterc20",  "🔵 USDT (ERC20 — Ethereum)"),
     ("usdtsol",    "🟣 USDT (Solana)"),
     ("usdttongram","💎 USDT (TON)"),

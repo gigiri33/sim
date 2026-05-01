@@ -499,7 +499,6 @@ def universal_handler(message):
                 api_url=api_url,
                 bot_username=bot_username,
                 owner_telegram_id=uid,
-                owner_username=message.from_user.username or "",
             )
             if result.get("ok"):
                 expires = result.get("expires_at", "نامشخص")
@@ -3371,6 +3370,42 @@ def universal_handler(message):
             bot.send_message(uid, f"✅ مقدار بونس تنظیم شد: {val}", reply_markup=back_button(f"adm:gw:{gw}:bonus"))
             return
 
+        if sn == "admin_set_gw_fee_percent" and is_admin(uid):
+            gw = sd.get("gw", "")
+            raw = (message.text or "").strip().replace(",", ".")
+            try:
+                val = float(raw)
+                assert 0 <= val <= 100
+            except Exception:
+                bot.send_message(uid, "⚠️ درصد معتبر وارد کنید (مثال: 2.5):", reply_markup=back_button(f"adm:gw:{gw}:feebonus"))
+                return
+            setting_set(f"gw_{gw}_fee_percent", str(val))
+            # also sync to generic fee system so calculations work
+            setting_set(f"gw_{gw}_fee_type", "pct")
+            setting_set(f"gw_{gw}_fee_value", str(int(val)) if val == int(val) else str(val))
+            log_admin_action(uid, f"درصد کارمزد درگاه {gw}: {val}%")
+            state_clear(uid)
+            bot.send_message(uid, f"✅ درصد کارمزد ذخیره شد: {val}%", reply_markup=back_button(f"adm:gw:{gw}:feebonus"))
+            return
+
+        if sn == "admin_set_gw_bonus_percent" and is_admin(uid):
+            gw = sd.get("gw", "")
+            raw = (message.text or "").strip().replace(",", ".")
+            try:
+                val = float(raw)
+                assert 0 <= val <= 100
+            except Exception:
+                bot.send_message(uid, "⚠️ درصد معتبر وارد کنید (مثال: 5):", reply_markup=back_button(f"adm:gw:{gw}:feebonus"))
+                return
+            setting_set(f"gw_{gw}_bonus_percent", str(val))
+            # also sync to generic bonus system so calculations work
+            setting_set(f"gw_{gw}_bonus_type", "pct")
+            setting_set(f"gw_{gw}_bonus_value", str(int(val)) if val == int(val) else str(val))
+            log_admin_action(uid, f"درصد بونس درگاه {gw}: {val}%")
+            state_clear(uid)
+            bot.send_message(uid, f"✅ درصد بونس ذخیره شد: {val}%", reply_markup=back_button(f"adm:gw:{gw}:feebonus"))
+            return
+
         if sn == "admin_set_crypto_wallet" and is_admin(uid):
             coin_key = sd["coin_key"]
             val      = (message.text or "").strip()
@@ -3779,15 +3814,15 @@ def universal_handler(message):
                 _tname    = target_info['first_name'] or ''
                 _tuname   = target_info['username'] or ''
                 _new_bal  = target_info['balance']
+                _uname_str = f" (@{_tuname})" if _tuname else ""
+                _name_display = f"<b>{esc(_tname)}</b>{_uname_str}" if _tname else f"@{_tuname}" if _tuname else f"<code>{target_user_id}</code>"
             except Exception:
-                _tname   = str(target_user_id)
-                _tuname  = ''
+                _name_display = f"<code>{target_user_id}</code>"
                 _new_bal = 0
-            _uname_str = f" (@{_tuname})" if _tuname else ""
             bot.send_message(
                 uid,
                 f"✅ موجودی {action_label} یافت.\n\n"
-                f"👤 کاربر: <b>{esc(_tname)}</b>{_uname_str}\n"
+                f"👤 کاربر: {_name_display}\n"
                 f"🆔 آیدی: <code>{target_user_id}</code>\n"
                 f"💰 مبلغ: <b>{fmt_price(abs(amount))}</b> تومان\n"
                 f"💳 موجودی جدید: <b>{fmt_price(_new_bal)}</b> تومان",

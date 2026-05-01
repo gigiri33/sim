@@ -208,7 +208,6 @@ def activate_license(
         "machine_id":        machine_id,
         "bot_username":      bot_username,
         "owner_telegram_id": owner_telegram_id,
-        "owner_username":    owner_username,
     }
 
     try:
@@ -298,7 +297,6 @@ def _check_license_internal(force: bool = False) -> bool:
                 "machine_id":        machine_id,
                 "bot_username":      _setting_get(_SETTINGS_KEY_BOT_USERNAME),
                 "owner_telegram_id": int(_setting_get(_SETTINGS_KEY_OWNER_TG_ID) or 0),
-                "owner_username":    _setting_get(_SETTINGS_KEY_OWNER_USERNAME),
             })
             _setting_set(_SETTINGS_KEY_LAST_CHECK, _now_iso())
             remote_state = result.get("status", "inactive")
