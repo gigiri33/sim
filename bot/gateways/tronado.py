@@ -91,8 +91,10 @@ def get_tronado_order_token(amount_toman: int, order_id: str, user_id: int,
         "WalletAddress":  wallet_address,
         "Description":    (description or "")[:200],
     }
-    if callback_url:
+    if callback_url and callback_url.startswith("https://"):
         payload["CallbackUrl"] = callback_url
+    elif callback_url:
+        print(f"[Tronado] Skipping CallbackUrl — Tronado requires https (got: {callback_url[:50]})")
 
     print(f"[Tronado] Sending payload: {json.dumps(payload)}")
 
