@@ -91,6 +91,10 @@ from ..gateways.tronpays_rial import (
 from ..gateways.pazzlenet import (
     create_pazzlenet_invoice, check_pazzlenet_payment, is_pazzlenet_paid,
 )
+from ..gateways.tronado import (
+    get_tronado_order_token, build_tronado_payment_url,
+    build_tronado_callback_url,
+)
 from ..gateways.plisio import (
     create_plisio_invoice, check_plisio_invoice,
     is_plisio_paid, is_plisio_pending, is_plisio_failed,
@@ -858,6 +862,10 @@ def _show_purchase_gateways(target, uid, package_id, price, package_row):
         _lbl = setting_get("gw_nowpayments_display_name", "").strip() or "💎 پرداخت کریپتو (NowPayments)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:nowpayments:{package_id}"))
         _gw_labels.append(("nowpayments", _lbl))
+    if is_gateway_available("tronado", uid):
+        _lbl = setting_get("gw_tronado_display_name", "").strip() or "💎 درگاه ترونادو"
+        kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:tronado:{package_id}"))
+        _gw_labels.append(("tronado", _lbl))
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"buy:t:{package_row['type_id']}", icon_custom_emoji_id="5253997076169115797"))
     _range_guide = build_gateway_range_guide(_gw_labels)
     _pkg_sn = package_row['show_name'] if 'show_name' in package_row.keys() else 1
@@ -940,6 +948,10 @@ def _show_renewal_gateways(target, uid, purchase_id, package_id, price, package_
         _lbl = setting_get("gw_nowpayments_display_name", "").strip() or "💎 پرداخت کریپتو (NowPayments)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:nowpayments:{purchase_id}:{package_id}"))
         _gw_labels.append(("nowpayments", _lbl))
+    if is_gateway_available("tronado", uid):
+        _lbl = setting_get("gw_tronado_display_name", "").strip() or "💎 درگاه ترونادو"
+        kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:tronado:{purchase_id}:{package_id}"))
+        _gw_labels.append(("tronado", _lbl))
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"renew:{purchase_id}", icon_custom_emoji_id="5253997076169115797"))
     _range_guide = build_gateway_range_guide(_gw_labels)
     _pkg_sn_renew = package_row['show_name'] if 'show_name' in package_row.keys() else 1
@@ -1398,6 +1410,10 @@ def _show_pnlcfg_renewal_gateways(target, uid, config_id, package_id, price, pac
         _lbl = setting_get("gw_nowpayments_display_name", "").strip() or "💎 پرداخت کریپتو (NowPayments)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"mypnlcfgrpay:nowpayments:{config_id}:{package_id}"))
         _gw_labels.append(("nowpayments", _lbl))
+    if is_gateway_available("tronado", uid):
+        _lbl = setting_get("gw_tronado_display_name", "").strip() or "💎 درگاه ترونادو"
+        kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"mypnlcfgrpay:tronado:{config_id}:{package_id}"))
+        _gw_labels.append(("tronado", _lbl))
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"mypnlcfg:renewconfirm:{config_id}",
            icon_custom_emoji_id="5253997076169115797"))
     _range_guide = build_gateway_range_guide(_gw_labels)
@@ -1465,6 +1481,10 @@ def _show_wallet_gateways(target, uid, amount):
         _lbl = setting_get("gw_nowpayments_display_name", "").strip() or "💎 پرداخت کریپتو (NowPayments)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:nowpayments"))
         _gw_labels.append(("nowpayments", _lbl))
+    if is_gateway_available("tronado", uid):
+        _lbl = setting_get("gw_tronado_display_name", "").strip() or "💎 درگاه ترونادو"
+        kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:tronado"))
+        _gw_labels.append(("tronado", _lbl))
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
     _range_guide = build_gateway_range_guide(_gw_labels)
     sd = state_data(uid)
@@ -5701,6 +5721,83 @@ def _dispatch_callback(call, uid, data):
             "renewal", package_id=package_id)
         return
 
+    # ── Tronado: renewal ──────────────────────────────────────────────────────
+    if data.startswith("rpay:tronado:verify:"):
+        payment_id = int(data.split(":")[3])
+        payment = get_payment(payment_id)
+        if not payment or payment["user_id"] != uid:
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        if payment["status"] != "pending":
+            if payment["status"] == "completed":
+                bot.answer_callback_query(call.id, "✅ این پرداخت قبلاً تأیید و پردازش شده است.", show_alert=True)
+            else:
+                bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id, "⏳ پرداخت شما به محض تأیید توسط ترونادو پردازش می‌شود.", show_alert=True)
+        return
+
+    if data.startswith("rpay:tronado:") and not data.startswith("rpay:tronado:verify:"):
+        if not _check_invoice_valid(uid):
+            _show_invoice_expired(call)
+            return
+        parts = data.split(":")
+        purchase_id = int(parts[2])
+        package_id  = int(parts[3])
+        item = get_purchase(purchase_id)
+        package_row = get_package(package_id)
+        if not item or item["user_id"] != uid:
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        if not package_row:
+            bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
+            return
+        price = _get_state_price(uid, package_row, "renew_select_method")
+        if not is_gateway_in_range("tronado", price):
+            _rng = get_gateway_range_text("tronado")
+            bot.answer_callback_query(call.id,
+                f"⛔️ مبلغ {fmt_price(price)} تومان برای درگاه ترونادو مجاز نیست.\n"
+                f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
+                show_alert=True)
+            return
+        final_rprice_td = apply_gateway_fee("tronado", price)
+        payment_id = create_payment("renewal", uid, package_id, final_rprice_td, "tronado",
+                                    status="pending", config_id=item["config_id"])
+        _bot_uname_rtd = bot.get_me().username or ""
+        cb_url_rtd = build_tronado_callback_url(payment_id, _bot_uname_rtd)
+        order_id_rtd = f"tronado-renew-{payment_id}"
+        success, result = get_tronado_order_token(final_rprice_td, order_id_rtd, uid,
+                                                   f"تمدید {package_row['name']}", cb_url_rtd)
+        if not success:
+            err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                f"⚠️ <b>خطا در ایجاد درگاه ترونادو</b>\n\n"
+                f"<code>{esc(err_msg[:400])}</code>\n\n"
+                "💡 مطمئن شوید کلید API ترونادو صحیح وارد شده باشد.",
+                back_button(f"renew:{purchase_id}"))
+            return
+        token_rtd   = result.get("token", "")
+        pay_url_rtd = result.get("payment_url", "")
+        with get_conn() as conn:
+            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (token_rtd, payment_id))
+        state_set(uid, "await_tronado_renewal_verify", payment_id=payment_id, token=token_rtd,
+                  purchase_id=purchase_id)
+        fee_line_rtd = ""
+        if final_rprice_td != price:
+            fee_line_rtd = f"\n💸 کارمزد: {fmt_price(final_rprice_td - price)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_rprice_td)}</b> تومان"
+        text = (
+            "💎 <b>پرداخت با ترونادو — تمدید</b>\n\n"
+            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_rtd}\n\n"
+            "برای پرداخت، روی دکمه زیر بزنید و وارد صفحه پرداخت ترونادو شوید."
+        )
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("💎 پرداخت در ترونادو", url=pay_url_rtd))
+        kb.add(types.InlineKeyboardButton("🔍 مشاهده وضعیت پرداخت", callback_data=f"rpay:tronado:verify:{payment_id}"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, text, kb)
+        return
+
     # ── Plisio: renewal ───────────────────────────────────────────────────────
     if data.startswith("rpay:plisio:verify:"):
         payment_id = int(data.split(":")[3])
@@ -6881,6 +6978,86 @@ def _dispatch_callback(call, uid, data):
             "config_purchase", package_id=package_id)
         return
 
+    # ── Tronado: purchase ─────────────────────────────────────────────────────
+    if data.startswith("pay:tronado:verify:"):
+        payment_id = int(data.split(":")[3])
+        payment = get_payment(payment_id)
+        if not payment or payment["user_id"] != uid:
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        if payment["status"] != "pending":
+            if payment["status"] == "completed":
+                bot.answer_callback_query(call.id, "✅ این پرداخت قبلاً تأیید و پردازش شده است.", show_alert=True)
+            else:
+                bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+            return
+        token_td_v = payment["receipt_text"]
+        pay_url_td_v = build_tronado_payment_url(token_td_v) if token_td_v else ""
+        bot.answer_callback_query(call.id, "⏳ پرداخت شما به محض تأیید توسط ترونادو پردازش می‌شود.", show_alert=True)
+        return
+
+    if data.startswith("pay:tronado:"):
+        if not _check_invoice_valid(uid):
+            _show_invoice_expired(call)
+            return
+        package_id  = int(data.split(":")[2])
+        package_row = get_package(package_id)
+        if not package_row or not _pkg_has_stock(package_row, setting_get("preorder_mode", "0") == "1"):
+            bot.answer_callback_query(call.id, "موجودی این پکیج تمام شده است.", show_alert=True)
+            return
+        price          = _get_state_price(uid, package_row, "buy_select_method")
+        _qty_td_buy    = int(state_data(uid).get("quantity", 1) or 1)
+        if not is_gateway_in_range("tronado", price):
+            _rng = get_gateway_range_text("tronado")
+            bot.answer_callback_query(call.id,
+                f"⛔️ مبلغ {fmt_price(price)} تومان برای درگاه ترونادو مجاز نیست.\n"
+                f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
+                show_alert=True)
+            return
+        final_td_price = apply_gateway_fee("tronado", price)
+        payment_id = create_payment("config_purchase", uid, package_id, final_td_price, "tronado",
+                                    status="pending", quantity=_qty_td_buy)
+        _snames_td = state_data(uid).get("service_names")
+        if _snames_td:
+            set_payment_service_names(payment_id, _snames_td)
+        _bot_uname_td = bot.get_me().username or ""
+        cb_url_td = build_tronado_callback_url(payment_id, _bot_uname_td)
+        order_id_td2 = f"tronado-cfg-{payment_id}"
+        success, result = get_tronado_order_token(final_td_price, order_id_td2, uid,
+                                                   f"خرید {package_row['name']}", cb_url_td)
+        if not success:
+            err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                f"⚠️ <b>خطا در ایجاد درگاه ترونادو</b>\n\n"
+                f"<code>{esc(err_msg[:400])}</code>\n\n"
+                "💡 مطمئن شوید کلید API ترونادو صحیح وارد شده باشد.",
+                back_button(f"buy:p:{package_id}"))
+            return
+        token_td2   = result.get("token", "")
+        pay_url_td2 = result.get("payment_url", "")
+        with get_conn() as conn:
+            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (token_td2, payment_id))
+        state_set(uid, "await_tronado_verify", payment_id=payment_id, token=token_td2)
+        fee_line_td = ""
+        if final_td_price != price:
+            fee_line_td = f"\n💸 کارمزد: {fmt_price(final_td_price - price)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_td_price)}</b> تومان"
+        text = (
+            "💎 <b>پرداخت با ترونادو</b>\n\n"
+            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_td}\n\n"
+            "برای پرداخت، روی دکمه زیر بزنید و وارد صفحه پرداخت ترونادو شوید.\n\n"
+            "در صفحه پرداخت، شماره کارت را دریافت کنید، مبلغ را دقیق واریز کنید، "
+            "تصویر رسید را همان‌جا ارسال کنید و منتظر تأیید تیم ترونادو بمانید.\n\n"
+            "<b>نکته مهم:</b>\n"
+            "برای استفاده از پرداخت درون‌برنامه‌ای، لازم است قبلاً ربات ترونادو را Start کرده باشید."
+        )
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("💎 پرداخت در ترونادو", url=pay_url_td2))
+        kb.add(types.InlineKeyboardButton("🔍 مشاهده وضعیت پرداخت", callback_data=f"pay:tronado:verify:{payment_id}"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, text, kb)
+        return
+
     # ── Plisio: purchase ──────────────────────────────────────────────────────
     if data.startswith("pay:plisio:verify:"):
         payment_id = int(data.split(":")[3])
@@ -7674,7 +7851,63 @@ def _dispatch_callback(call, uid, data):
             send_or_edit(call, "💎 <b>پرداخت NowPayments</b>\n\nارز مورد نظر را برای پرداخت انتخاب کنید:", kb)
         return
 
-    if data.startswith("pay:swapwallet_crypto:verify:"):
+    if data == "wallet:charge:tronado":
+        if not _check_invoice_valid(uid):
+            _show_invoice_expired(call)
+            return
+        sd     = state_data(uid)
+        amount = sd.get("amount")
+        if not amount:
+            bot.answer_callback_query(call.id, "ابتدا مبلغ را وارد کنید.", show_alert=True)
+            return
+        if not is_gateway_in_range("tronado", amount):
+            _rng = get_gateway_range_text("tronado")
+            bot.answer_callback_query(call.id,
+                f"⛔️ مبلغ {fmt_price(amount)} تومان برای درگاه ترونادو مجاز نیست.\n"
+                f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
+                show_alert=True)
+            return
+        final_amount = apply_gateway_fee("tronado", amount)
+        payment_id = create_payment("wallet_charge", uid, None, final_amount, "tronado", status="pending")
+        _bot_username_td = bot.get_me().username or ""
+        cb_url = build_tronado_callback_url(payment_id, _bot_username_td)
+        order_id_td = f"tronado-wc-{payment_id}"
+        success, result = get_tronado_order_token(final_amount, order_id_td, uid, "شارژ کیف پول", cb_url)
+        if not success:
+            err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                f"⚠️ <b>خطا در ایجاد درگاه ترونادو</b>\n\n"
+                f"<code>{esc(err_msg[:400])}</code>\n\n"
+                "💡 مطمئن شوید کلید API ترونادو صحیح وارد شده باشد.",
+                back_button("wallet:charge"))
+            return
+        token_td    = result.get("token", "")
+        pay_url_td  = result.get("payment_url", "")
+        with get_conn() as conn:
+            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (token_td, payment_id))
+        state_set(uid, "await_tronado_verify", payment_id=payment_id, token=token_td)
+        fee_line = ""
+        if final_amount != amount:
+            fee_line = f"\n💸 کارمزد: {fmt_price(final_amount - amount)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_amount)}</b> تومان"
+        text = (
+            "💎 <b>پرداخت با ترونادو</b>\n\n"
+            f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان{fee_line}\n\n"
+            "برای پرداخت، روی دکمه زیر بزنید و وارد صفحه پرداخت ترونادو شوید.\n\n"
+            "در صفحه پرداخت، شماره کارت را دریافت کنید، مبلغ را دقیق واریز کنید، "
+            "تصویر رسید را همان‌جا ارسال کنید و منتظر تأیید تیم ترونادو بمانید.\n\n"
+            "<b>نکته مهم:</b>\n"
+            "برای استفاده از پرداخت درون‌برنامه‌ای، لازم است قبلاً ربات ترونادو را Start کرده باشید "
+            "و به Mini App اجازه ارسال پیام داده باشید. اگر پرداخت شما رد شود دلیل آن نمایش داده می‌شود "
+            "و در صورت تأیید، کد تراکنش در اختیار شما قرار می‌گیرد.\n\n"
+            "ممکن است در صورت واریز اشتباه/کمتر/نامعتبر، تراکنش تا ۴ ساعت در انتظار بررسی بماند."
+        )
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("💎 پرداخت در ترونادو", url=pay_url_td))
+        kb.add(types.InlineKeyboardButton("🔍 مشاهده وضعیت پرداخت", url=pay_url_td))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, text, kb)
+        return
         payment_id = int(data.split(":")[3])
         payment = get_payment(payment_id)
         if not payment or payment["user_id"] != uid:
@@ -9891,6 +10124,79 @@ def _dispatch_callback(call, uid, data):
                 bot.answer_callback_query(call.id, "❌ پرداخت هنوز تأیید نشده. لطفاً ابتدا پرداخت را انجام دهید.", show_alert=True)
             return
 
+        # mypnlcfgrpay:tronado:{config_id}:{package_id}
+        if data.startswith("mypnlcfgrpay:tronado:") and not data.startswith("mypnlcfgrpay:tronado:verify:"):
+            if not _check_invoice_valid(uid):
+                _show_invoice_expired(call); return
+            parts = data.split(":")
+            config_id  = int(parts[2])
+            package_id = int(parts[3])
+            cfg = get_panel_config(config_id)
+            if not cfg or cfg["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            package_row = get_package(package_id)
+            if not package_row:
+                bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True); return
+            sd = state_data(uid)
+            price = sd.get("amount") or get_effective_price(uid, package_row)
+            if not is_gateway_in_range("tronado", price):
+                _rng = get_gateway_range_text("tronado")
+                bot.answer_callback_query(call.id,
+                    f"⛔️ مبلغ {fmt_price(price)} تومان برای درگاه ترونادو مجاز نیست.\n"
+                    f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
+                    show_alert=True); return
+            final_td_pnl = apply_gateway_fee("tronado", price)
+            payment_id = create_payment("pnlcfg_renewal", uid, package_id, final_td_pnl, "tronado",
+                                        status="pending", config_id=config_id)
+            _bot_uname_tpnl = bot.get_me().username or ""
+            cb_url_tpnl = build_tronado_callback_url(payment_id, _bot_uname_tpnl)
+            order_id_tpnl = f"tronado-pnl-{payment_id}"
+            success_td_pnl, result_td_pnl = get_tronado_order_token(
+                final_td_pnl, order_id_tpnl, uid,
+                f"تمدید {package_row['name']}", cb_url_tpnl
+            )
+            if not success_td_pnl:
+                err_td_pnl = result_td_pnl.get("error", "خطای ناشناخته") if isinstance(result_td_pnl, dict) else str(result_td_pnl)
+                bot.answer_callback_query(call.id)
+                send_or_edit(call,
+                    f"⚠️ <b>خطا در ایجاد درگاه ترونادو</b>\n\n<code>{esc(err_td_pnl[:400])}</code>",
+                    back_button(f"mypnlcfg:renewconfirm:{config_id}")); return
+            token_tpnl   = result_td_pnl.get("token", "")
+            pay_url_tpnl = result_td_pnl.get("payment_url", "")
+            with get_conn() as conn:
+                conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (token_tpnl, payment_id))
+            state_set(uid, "await_pnlcfg_renewal_tronado_verify",
+                      payment_id=payment_id, token=token_tpnl, config_id=config_id)
+            fee_line_tpnl = ""
+            if final_td_pnl != price:
+                fee_line_tpnl = f"\n💸 کارمزد: {fmt_price(final_td_pnl - price)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_td_pnl)}</b> تومان"
+            kb_tpnl = types.InlineKeyboardMarkup()
+            kb_tpnl.add(types.InlineKeyboardButton("💎 پرداخت در ترونادو", url=pay_url_tpnl))
+            kb_tpnl.add(types.InlineKeyboardButton("🔍 مشاهده وضعیت پرداخت",
+                        callback_data=f"mypnlcfgrpay:tronado:verify:{payment_id}"))
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                "💎 <b>پرداخت با ترونادو (تمدید)</b>\n\n"
+                f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_tpnl}\n\n"
+                "برای پرداخت، روی دکمه زیر بزنید و وارد صفحه پرداخت ترونادو شوید.",
+                kb_tpnl)
+            return
+
+        # mypnlcfgrpay:tronado:verify:{payment_id}
+        if data.startswith("mypnlcfgrpay:tronado:verify:"):
+            payment_id = int(data.split(":")[-1])
+            payment = get_payment(payment_id)
+            if not payment or payment["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            if payment["status"] != "pending":
+                if payment["status"] == "completed":
+                    bot.answer_callback_query(call.id, "✅ این پرداخت قبلاً تأیید شده است.", show_alert=True)
+                else:
+                    bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+                return
+            bot.answer_callback_query(call.id, "⏳ پرداخت شما به محض تأیید توسط ترونادو پردازش می‌شود.", show_alert=True)
+            return
+
         # mypnlcfgrpay:plisio:{config_id}:{package_id}
         if data.startswith("mypnlcfgrpay:plisio:") and not data.startswith("mypnlcfgrpay:plisio:verify:"):
             if not _check_invoice_valid(uid):
@@ -10179,6 +10485,74 @@ def _dispatch_callback(call, uid, data):
                 _show_panel_config_detail(call, config_id_sv, back_data="my_configs", is_user_view=True)
             else:
                 bot.answer_callback_query(call.id, "❌ پرداخت هنوز تأیید نشده.", show_alert=True)
+            return
+
+        # mypnlcfgrpay:tronado:{config_id}:{package_id}
+        if data.startswith("mypnlcfgrpay:tronado:") and not data.startswith("mypnlcfgrpay:tronado:verify:"):
+            if not _check_invoice_valid(uid):
+                _show_invoice_expired(call); return
+            parts = data.split(":")
+            config_id  = int(parts[2])
+            package_id = int(parts[3])
+            cfg = get_panel_config(config_id)
+            if not cfg or cfg["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            package_row = get_package(package_id)
+            if not package_row:
+                bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True); return
+            sd = state_data(uid)
+            price = sd.get("amount") or get_effective_price(uid, package_row)
+            if not is_gateway_in_range("tronado", price):
+                _rng = get_gateway_range_text("tronado")
+                bot.answer_callback_query(call.id,
+                    f"⛔️ مبلغ {fmt_price(price)} تومان برای درگاه ترونادو مجاز نیست.\n"
+                    f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
+                    show_alert=True); return
+            final_price_td = apply_gateway_fee("tronado", price)
+            payment_id = create_payment("pnlcfg_renewal", uid, package_id, final_price_td, "tronado",
+                                        status="pending", config_id=config_id)
+            _bot_uname_td_pnl = bot.get_me().username or ""
+            cb_url_td_pnl = build_tronado_callback_url(payment_id, _bot_uname_td_pnl)
+            order_id_td_pnl = f"tronado-pnlrenew-{payment_id}"
+            success_td, result_td = get_tronado_order_token(final_price_td, order_id_td_pnl, uid,
+                                                             f"تمدید {package_row['name']}", cb_url_td_pnl)
+            if not success_td:
+                err_td = result_td.get("error", "خطای ناشناخته") if isinstance(result_td, dict) else str(result_td)
+                bot.answer_callback_query(call.id)
+                send_or_edit(call,
+                    f"⚠️ <b>خطا در ایجاد فاکتور ترونادو</b>\n\n<code>{esc(err_td[:400])}</code>",
+                    back_button(f"mypnlcfg:renewconfirm:{config_id}")); return
+            token_td_pnl   = result_td.get("token", "")
+            pay_url_td_pnl = result_td.get("payment_url", "")
+            with get_conn() as conn:
+                conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (token_td_pnl, payment_id))
+            state_set(uid, "await_pnlcfg_renewal_tronado_verify",
+                      payment_id=payment_id, token=token_td_pnl, config_id=config_id)
+            kb_td = types.InlineKeyboardMarkup()
+            kb_td.add(types.InlineKeyboardButton("💎 پرداخت در ترونادو", url=pay_url_td_pnl))
+            kb_td.add(types.InlineKeyboardButton("🔍 مشاهده وضعیت",
+                        callback_data=f"mypnlcfgrpay:tronado:verify:{payment_id}"))
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                "💎 <b>پرداخت ترونادو (تمدید)</b>\n\n"
+                f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n\n"
+                "برای پرداخت روی دکمه زیر بزنید و منتظر تأیید ترونادو بمانید.",
+                kb_td)
+            return
+
+        # mypnlcfgrpay:tronado:verify:{payment_id}
+        if data.startswith("mypnlcfgrpay:tronado:verify:"):
+            payment_id = int(data.split(":")[-1])
+            payment = get_payment(payment_id)
+            if not payment or payment["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            if payment["status"] != "pending":
+                if payment["status"] == "completed":
+                    bot.answer_callback_query(call.id, "✅ این پرداخت قبلاً تأیید شده است.", show_alert=True)
+                else:
+                    bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+                return
+            bot.answer_callback_query(call.id, "⏳ پرداخت شما به محض تأیید توسط ترونادو پردازش می‌شود.", show_alert=True)
             return
 
         # mypnlcfg:autorenew:{config_id}
@@ -15118,6 +15492,7 @@ def _dispatch_callback(call, uid, data):
             ("pazzlenet",        "💳 درگاه کارت به کارت (PazzleNet)"),
             ("plisio",           "💎 پرداخت کریپتو (Plisio)"),
             ("nowpayments",      "💎 پرداخت کریپتو (NowPayments)"),
+            ("tronado",          "💎 درگاه ترونادو"),
         ]:
             enabled = setting_get(f"gw_{gw_key}_enabled", "0")
             status_icon = "🟢" if enabled == "1" else "🔴"
@@ -15412,6 +15787,7 @@ def _dispatch_callback(call, uid, data):
         "tronpays_rial":     "💳 TronPays",
         "plisio":            "💎 Plisio",
         "nowpayments":       "💎 NowPayments",
+        "tronado":           "💎 ترونادو",
     }
 
     def _feebonus_text(gw):
@@ -15491,7 +15867,7 @@ def _dispatch_callback(call, uid, data):
         return kb2
 
     # feebonus entry for each gateway (adm:gw:<gw>:feebonus or adm:gw:card:feebonus)
-    for _gw_fb in ("card", "crypto", "tetrapay", "swapwallet_crypto", "tronpays_rial", "plisio", "nowpayments"):
+    for _gw_fb in ("card", "crypto", "tetrapay", "swapwallet_crypto", "tronpays_rial", "plisio", "nowpayments", "tronado"):
         if data == f"adm:gw:{_gw_fb}:feebonus":
             if not admin_has_perm(uid, "settings"):
                 bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
@@ -15953,7 +16329,7 @@ def _dispatch_callback(call, uid, data):
             back_button("adm:set:gw:tronpays_rial"))
         return
 
-    _GW_RANGE_LABELS = {"card": "💳 کارت به کارت", "crypto": "💎 ارز دیجیتال", "tetrapay": "🏦 TetraPay", "swapwallet": "💎 SwapWallet", "swapwallet_crypto": "💎 SwapWallet کریپتو", "tronpays_rial": "💳 TronPays", "pazzlenet": "💳 PazzleNet", "plisio": "💎 Plisio", "nowpayments": "💎 NowPayments"}
+    _GW_RANGE_LABELS = {"card": "💳 کارت به کارت", "crypto": "💎 ارز دیجیتال", "tetrapay": "🏦 TetraPay", "swapwallet": "💎 SwapWallet", "swapwallet_crypto": "💎 SwapWallet کریپتو", "tronpays_rial": "💳 TronPays", "pazzlenet": "💳 PazzleNet", "plisio": "💎 Plisio", "nowpayments": "💎 NowPayments", "tronado": "💎 ترونادو"}
 
     # ── PazzleNet admin settings ──────────────────────────────────────────────
     if data == "adm:set:gw:pazzlenet":
@@ -16081,6 +16457,100 @@ def _dispatch_callback(call, uid, data):
         state_set(uid, "admin_set_gw_bonus_percent", gw="pazzlenet")
         bot.answer_callback_query(call.id)
         send_or_edit(call, "🎁 درصد بونس PazzleNet را وارد کنید (مثال: 5):", back_button("adm:gw:pazzlenet:feebonus"))
+        return
+
+    # ── Tronado admin settings ────────────────────────────────────────────────
+    if data == "adm:set:gw:tronado":
+        enabled  = setting_get("gw_tronado_enabled", "0")
+        vis      = setting_get("gw_tronado_visibility", "public")
+        api_key  = setting_get("tronado_api_key", "")
+        range_en = setting_get("gw_tronado_range_enabled", "0")
+        enabled_label = "🟢 فعال" if enabled == "1" else "🔴 غیرفعال"
+        vis_label     = "👥 عمومی" if vis == "public" else "🔒 کاربران امن"
+        range_label   = "🟢 فعال" if range_en == "1" else "🔴 غیرفعال"
+        fee_on   = setting_get("gw_tronado_fee_enabled", "0") == "1"
+        bonus_on = setting_get("gw_tronado_bonus_enabled", "0") == "1"
+        try:
+            _bot_uname_td_adm = bot.get_me().username or ""
+            _cb_url_td_adm = build_tronado_callback_url(0, _bot_uname_td_adm)
+            _cb_url_td_adm = _cb_url_td_adm.replace("/0/callback", "/{payment_id}/callback")
+        except Exception:
+            _cb_url_td_adm = ""
+        kb = types.InlineKeyboardMarkup()
+        kb.row(
+            types.InlineKeyboardButton(f"وضعیت: {enabled_label}", callback_data="adm:gw:tronado:toggle"),
+            types.InlineKeyboardButton(f"نمایش: {vis_label}",     callback_data="adm:gw:tronado:vis"),
+        )
+        kb.add(types.InlineKeyboardButton(f"📊 بازه پرداختی: {range_label}", callback_data="adm:gw:tronado:range"))
+        kb.add(types.InlineKeyboardButton("🔑 تنظیم کلید API", callback_data="adm:set:tronado_key"))
+        kb.add(types.InlineKeyboardButton("🏷 نام نمایشی درگاه", callback_data="adm:gw:tronado:set_name"))
+        fee_bonus_lbl = ("🟢 کارمزد" if fee_on else "🔴 کارمزد") + " | " + ("🟢 بونس" if bonus_on else "🔴 بونس")
+        kb.add(types.InlineKeyboardButton(f"🎁 کارمزد — {fee_bonus_lbl.split(' | ')[0]}", callback_data="adm:gw:tronado:fee"))
+        kb.add(types.InlineKeyboardButton(f"🎁 بونس — {fee_bonus_lbl.split(' | ')[1]}", callback_data="adm:gw:tronado:bonus"))
+        kb.add(types.InlineKeyboardButton("🤖 ربات ترونادو", url="https://t.me/Tronado_Robot"))
+        kb.add(types.InlineKeyboardButton("📞 پشتیبانی ترونادو", url="https://t.me/TrndSupport"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gateways", icon_custom_emoji_id="5253997076169115797"))
+        key_display = (f"<code>{esc(api_key[:8])}...{esc(api_key[-4:])}</code>"
+                       if api_key else "❌ <b>ثبت نشده</b>")
+        display_name_td = setting_get("gw_tronado_display_name", "")
+        name_display_td = display_name_td or "<i>پیش‌فرض: درگاه ترونادو</i>"
+        _cb_line_td = f"🔗 Callback URL Pattern:\n<code>{esc(_cb_url_td_adm)}</code>\n\n" if _cb_url_td_adm else ""
+        text = (
+            "💎 <b>درگاه ترونادو (Tronado)</b>\n\n"
+            f"وضعیت: {enabled_label}\n"
+            f"نمایش: {vis_label}\n"
+            f"نام نمایشی: {name_display_td}\n\n"
+            f"🔑 کلید API: {key_display}\n\n"
+            f"{_cb_line_td}"
+            "📋 <b>راهنمای فعال‌سازی درگاه ترونادو:</b>\n"
+            "۱. ابتدا از پشتیبانی ترونادو @TrndSupport کلید API را دریافت کنید\n"
+            "۲. کلید API را با دکمه «تنظیم کلید API» وارد کنید\n"
+            "۳. درگاه را فعال کنید\n\n"
+            "🔗 مستندات API: https://documenter.getpostman.com/view/48018954/2sB3HksMLT\n"
+            "🤖 ربات ترونادو: @Tronado_Robot\n"
+            "📢 کانال ترونادو: @TronadoCh\n"
+            "📞 پشتیبانی: @TrndSupport"
+        )
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, text, kb)
+        return
+
+    if data == "adm:gw:tronado:set_name":
+        state_set(uid, "admin_set_gw_display_name", gw="tronado")
+        bot.answer_callback_query(call.id)
+        current = setting_get("gw_tronado_display_name", "")
+        send_or_edit(call,
+            f"🏷 <b>نام نمایشی درگاه ترونادو</b>\n\n"
+            f"مقدار فعلی: <code>{esc(current or 'پیش‌فرض')}</code>\n\n"
+            "نام دلخواه را ارسال کنید.\n"
+            "برای بازگشت به پیش‌فرض، <code>-</code> ارسال کنید.",
+            back_button("adm:set:gw:tronado"))
+        return
+
+    if data == "adm:gw:tronado:toggle":
+        enabled = setting_get("gw_tronado_enabled", "0")
+        setting_set("gw_tronado_enabled", "0" if enabled == "1" else "1")
+        log_admin_action(uid, f"درگاه ترونادو {'غیرفعال' if enabled == '1' else 'فعال'} شد")
+        bot.answer_callback_query(call.id, "تغییر یافت.")
+        _fake_call(call, "adm:set:gw:tronado")
+        return
+
+    if data == "adm:gw:tronado:vis":
+        vis = setting_get("gw_tronado_visibility", "public")
+        setting_set("gw_tronado_visibility", "secure" if vis == "public" else "public")
+        log_admin_action(uid, f"نمایش درگاه ترونادو به {'secure' if vis == 'public' else 'public'} تغییر کرد")
+        bot.answer_callback_query(call.id, "تغییر یافت.")
+        _fake_call(call, "adm:set:gw:tronado")
+        return
+
+    if data == "adm:set:tronado_key":
+        state_set(uid, "admin_set_tronado_key")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "🔑 کلید API ترونادو را ارسال کنید:", back_button("adm:set:gw:tronado"))
+        return
+
+    if data == "adm:gw:tronado:range":
+        _handle_gw_range_toggle(call, uid, "tronado")
         return
 
     # ── Plisio admin settings ─────────────────────────────────────────────────

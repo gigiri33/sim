@@ -292,6 +292,49 @@ def _plisio_webhook_server():
             print("PAZZLENET_WEBHOOK_ERROR:", exc)
         return jsonify({"status": "ok"}), 200
 
+    # ── Tronado routes ────────────────────────────────────────────────────────
+    @_app.route("/tronado/<bot_username>/<int:payment_id>/callback", methods=["POST"])
+    def _tronado_callback(bot_username, payment_id):
+        try:
+            payload = request.get_json(force=True, silent=True) or {}
+            from bot.gateways.tronado import is_tronado_callback_valid as _td_valid
+            if not _td_valid(payload):
+                return jsonify({"status": "ok"}), 200
+
+            payment = get_payment(payment_id)
+            if not payment or payment["status"] != "pending" or payment["payment_method"] != "tronado":
+                return jsonify({"status": "ok"}), 200
+
+            kind   = payment["kind"]
+            uid    = payment["user_id"]
+            amount = payment["amount"]
+
+            if kind == "wallet_charge":
+                if not complete_payment(payment_id):
+                    return jsonify({"status": "ok"}), 200
+                update_balance(uid, amount)
+                try:
+                    apply_gateway_bonus_if_needed(uid, "tronado", amount)
+                except Exception:
+                    pass
+                try:
+                    bot.send_message(
+                        uid,
+                        f"✅ پرداخت ترونادو شما تأیید شد و کیف پول شارژ شد.\n\n💰 مبلغ: {fmt_price(amount)} تومان",
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    pass
+            else:
+                threading.Thread(
+                    target=_run_fulfillment,
+                    args=("tronado", payment_id),
+                    daemon=True,
+                ).start()
+        except Exception as exc:
+            print("TRONADO_WEBHOOK_ERROR:", exc)
+        return jsonify({"status": "ok"}), 200
+
     import time as _time
     port = int(get_plisio_webhook_port())
     print(f"🌐 Payment webhook server (Plisio + NowPayments) starting on port {port}…")

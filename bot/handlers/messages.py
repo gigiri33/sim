@@ -3436,6 +3436,17 @@ def universal_handler(message):
             bot.send_message(uid, "✅ کلید API PazzleNet ذخیره شد.", reply_markup=back_button("adm:set:gw:pazzlenet"))
             return
 
+        if sn == "admin_set_tronado_key" and is_admin(uid):
+            val = (message.text or "").strip()
+            if not val:
+                bot.send_message(uid, "⚠️ کلید API نمی‌تواند خالی باشد. لطفاً دوباره ارسال کنید:", reply_markup=back_button("adm:set:gw:tronado"))
+                return
+            setting_set("tronado_api_key", val)
+            log_admin_action(uid, "کلید API ترونادو تغییر کرد")
+            state_clear(uid)
+            bot.send_message(uid, "✅ کلید API ترونادو ذخیره شد.", reply_markup=back_button("adm:set:gw:tronado"))
+            return
+
         if sn == "admin_set_tronpays_rial_cb_url" and is_admin(uid):
             val = (message.text or "").strip()
             if val and not (val.startswith("http://") or val.startswith("https://")):

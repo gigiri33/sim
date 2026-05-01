@@ -460,6 +460,21 @@ def _run_init_db_migrations():
             "gw_tronpays_rial_bonus_enabled":    "0",
             "gw_tronpays_rial_bonus_type":       "fixed",
             "gw_tronpays_rial_bonus_value":      "0",
+            # ── Tronado gateway ────────────────────────────────────────────────
+            "gw_tronado_enabled":        "0",
+            "gw_tronado_visibility":     "public",
+            "gw_tronado_display_name":   "",
+            "gw_tronado_range_enabled":  "0",
+            "gw_tronado_range_min":      "",
+            "gw_tronado_range_max":      "",
+            "gw_tronado_fee_enabled":    "0",
+            "gw_tronado_fee_type":       "fixed",
+            "gw_tronado_fee_value":      "0",
+            "gw_tronado_bonus_enabled":  "0",
+            "gw_tronado_bonus_type":     "fixed",
+            "gw_tronado_bonus_value":    "0",
+            "tronado_api_key":           "",
+            "tronado_api_base_url":      "https://bot.tronado.cloud/api/v3",
         }
         for coin, _ in CRYPTO_COINS:
             defaults[f"crypto_{coin}"] = ""

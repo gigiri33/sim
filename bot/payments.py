@@ -46,6 +46,7 @@ _GW_DISPLAY_NAMES = {
     "tetrapay":          "TetraPay",
     "swapwallet_crypto": "SwapWallet",
     "tronpays_rial":     "TronPays",
+    "tronado":           "ترونادو",
 }
 
 
@@ -193,6 +194,7 @@ def show_payment_method_selection(target, uid, context_data):
         "tetrapay":          ("درگاه کارت به کارت (TetraPay)",              "5796315849241403403"),
         "swapwallet_crypto": ("درگاه کارت به کارت و ارز دیجیتال (SwapWallet)", "5796315849241403403"),
         "tronpays_rial":     ("درگاه کارت به کارت (TronPay)",               "5796315849241403403"),
+        "tronado":           ("درگاه ترونادو",                              "5796315849241403403"),
     }
 
     def _add_gw(key, cb, extra_check=True):
@@ -213,6 +215,7 @@ def show_payment_method_selection(target, uid, context_data):
     _add_gw("tetrapay", "pm:tetrapay")
     _add_gw("swapwallet_crypto", "pm:swapwallet_crypto")
     _add_gw("tronpays_rial", "pm:tronpays_rial")
+    _add_gw("tronado", "pm:tronado")
 
     rows.append([_btn("بازگشت", callback_data="nav:main", emoji_id="5352759161945867747")])
     kb = _raw_markup(rows)
