@@ -434,6 +434,70 @@ rename_bot() {
   read -r -p "Press Enter to continue..."
 }
 
+change_bot_number() {
+  ensure_safe_cwd
+  echo ""
+  echo -e "${Y}Current bot number: ${B}${INSTANCE_NUM}${N}  (dir: $DIR)"
+  echo ""
+  read -r -p "$(echo -e "${B}🔢 New bot number: ${N}")" NEW_NUM
+  NEW_NUM="${NEW_NUM// /}"
+  [[ "$NEW_NUM" =~ ^[0-9]+$ ]] || { echo -e "${R}Must be a positive integer.${N}"; read -r -p "Press Enter..."; return; }
+  [[ "$NEW_NUM" -ge 1 ]]       || { echo -e "${R}Must be >= 1.${N}"; read -r -p "Press Enter..."; return; }
+  if [[ "$NEW_NUM" -eq "$INSTANCE_NUM" ]]; then
+    echo -e "${Y}Same number — nothing to do.${N}"; read -r -p "Press Enter..."; return
+  fi
+  local NEW_DIR="${BASE_DIR}-${NEW_NUM}"
+  local NEW_SVC="${BASE_SERVICE}-${NEW_NUM}"
+  if [[ -d "$NEW_DIR" ]]; then
+    echo -e "${R}Bot #${NEW_NUM} already exists. Remove it first or choose another number.${N}"
+    read -r -p "Press Enter to continue..."; return
+  fi
+
+  echo ""
+  info "Changing bot number ${INSTANCE_NUM} → ${NEW_NUM}…"
+
+  # Stop and disable old services
+  systemctl stop    "$SERVICE"                    2>/dev/null || true
+  systemctl disable "$SERVICE"                    2>/dev/null || true
+  systemctl stop    "${SERVICE}-autoupdate.timer" 2>/dev/null || true
+  systemctl disable "${SERVICE}-autoupdate.timer" 2>/dev/null || true
+  systemctl stop    "${SERVICE}-autoupdate.service" 2>/dev/null || true
+
+  # Move the directory
+  mv "$DIR" "$NEW_DIR"
+
+  # Update PLISIO_WEBHOOK_PORT in .env
+  local NEW_PORT=$((5050 + NEW_NUM - 1))
+  if [[ -f "$NEW_DIR/.env" ]]; then
+    sed -i "s/^PLISIO_WEBHOOK_PORT=.*/PLISIO_WEBHOOK_PORT=${NEW_PORT}/" "$NEW_DIR/.env"
+  fi
+
+  # Remove old systemd files
+  rm -f "/etc/systemd/system/${SERVICE}.service"
+  rm -f "/etc/systemd/system/${SERVICE}-autoupdate.service"
+  rm -f "/etc/systemd/system/${SERVICE}-autoupdate.timer"
+
+  # Update globals to new values
+  INSTANCE_NUM="$NEW_NUM"
+  DIR="$NEW_DIR"
+  SERVICE="$NEW_SVC"
+
+  # Recreate systemd service
+  create_systemd_service
+
+  # Recreate auto-update timer if it existed
+  if [[ -f "$DIR/auto_update.sh" ]]; then
+    enable_auto_update
+  fi
+
+  systemctl daemon-reload
+  systemctl start "$SERVICE" 2>/dev/null || true
+
+  ok "Bot number changed to ${B}${INSTANCE_NUM}${N}  (dir: $DIR  port: ${NEW_PORT})"
+  echo -e "${Y}ℹ️  Remember to update firewall rules if the webhook port changed.${N}"
+  read -r -p "Press Enter to continue..."
+}
+
 # ─────────────────────────── install / update / remove ───────────────────────────
 
 install_bot() {
@@ -748,6 +812,7 @@ show_bot_menu() {
   echo -e "${C}│${N}  ${B}${G}8)${N} 📊 Service status                  ${C}│${N}"
   echo -e "${C}│${N}  ${B}${G}9)${N} 🗑️  Remove this bot                ${C}│${N}"
   echo -e "${C}│${N}  ${B}${C}n)${N} 📛 Rename this bot                 ${C}│${N}"
+  echo -e "${C}│${N}  ${B}${C}c)${N} 🔢 Change bot number               ${C}│${N}"
   echo -e "${C}│${N}  ${B}${C}a)${N} ⚡ Auto-update: $au_label${C}│${N}"
   echo -e "${C}│${N}  ${B}${C}u)${N} 📋 Auto-update log                 ${C}│${N}"
   echo -e "${C}│${N}  ${B}${R}b)${N} 🔙 Back to main menu              ${C}│${N}"
@@ -797,7 +862,7 @@ bot_loop() {
     show_bot_header
     show_bot_menu
 
-    read -r -p "$(echo -e "${C}${BOT_NAME}${N} ${B}➜${N} option ${W}[1-9/n/a/u/b]${N}: ")" choice
+    read -r -p "$(echo -e "${C}${BOT_NAME}${N} ${B}➜${N} option ${W}[1-9/n/c/a/u/b]${N}: ")" choice
 
     case "${choice:-}" in
       1) install_bot; read -r -p "Enter...";;
@@ -810,6 +875,7 @@ bot_loop() {
       8) systemctl status "$SERVICE" --no-pager -l; read -r -p "Enter...";;
       9) remove_bot; read -r -p "Enter..."; return;;
       n) rename_bot ;;
+      c) change_bot_number ;;
       a) toggle_auto_update ;;
       u) echo -e "${Y}Press Ctrl+C to exit log${N}"; sleep 1
          tail -f "$DIR/autoupdate.log" 2>/dev/null || echo -e "${R}Log file not found.${N}"
