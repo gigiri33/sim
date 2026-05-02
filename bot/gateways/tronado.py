@@ -109,13 +109,13 @@ def get_tronado_order_token(amount_toman: int, order_id: str, user_id: int,
 
     print(f"[Tronado] Sending payload: {payload}")
 
-    # API docs show form-data (--form) for GetOrderToken, not JSON
-    form_data = urllib.parse.urlencode(payload).encode("utf-8")
+    # GetOrderToken accepts JSON body
+    data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         f"{base_url}/GetOrderToken",
-        data=form_data,
+        data=data,
         headers={
-            "Content-Type": "application/x-www-form-urlencoded",
+            "Content-Type": "application/json",
             "Accept":       "application/json",
             "x-api-key":    api_key,
             "User-Agent":   "ConfigFlow/1.0",
@@ -224,7 +224,7 @@ def get_tronado_payment_status(order_id_or_token: str) -> dict:
     if not api_key or not order_id_or_token:
         return {}
     url = _tronado_order_status_url()
-    # API docs show form-data (--form) for GetStatus, not JSON
+    # GetStatus requires form-data (JSON returns HTTP 500)
     form_data = urllib.parse.urlencode({"Id": order_id_or_token}).encode("utf-8")
     req = urllib.request.Request(
         url,
@@ -239,11 +239,18 @@ def get_tronado_payment_status(order_id_or_token: str) -> dict:
     )
     try:
         with urllib.request.urlopen(req, timeout=12) as resp:
-            _, parsed = _decode_response_body(resp)
-        print(f"[Tronado] GetStatus({order_id_or_token[:16]}…): {str(parsed)[:200]}")
+            raw, parsed = _decode_response_body(resp)
+        print(f"[Tronado] GetStatus({order_id_or_token[:30]}): raw={raw[:300]}")
         return parsed if isinstance(parsed, dict) else {}
+    except urllib.error.HTTPError as e:
+        try:
+            raw_body = e.read().decode("utf-8", errors="replace").strip()
+        except Exception:
+            raw_body = ""
+        print(f"[Tronado] GetStatus HTTP {e.code} for {order_id_or_token[:30]}: {raw_body[:200]}")
+        return {}
     except Exception as exc:
-        print(f"[Tronado] GetStatus error: {exc}")
+        print(f"[Tronado] GetStatus error for {order_id_or_token[:30]}: {exc}")
         return {}
 
 

@@ -5772,8 +5772,11 @@ def _dispatch_callback(call, uid, data):
             run_crypto_fulfillment_async("tronado", payment_id)
             bot.send_message(uid, "✅ پرداخت تأیید شد! تمدید سرویس شما در حال انجام است…", parse_mode="HTML")
         else:
-            _rtd_error = (td_resp_r.get("Error") or td_resp_r.get("error") or "") if td_resp_r else ""
-            _rtd_expired = not td_resp_r or "no order found" in str(_rtd_error).lower()
+            # Only show 'expired' if we actually got a non-empty API error saying so.
+            _rtd_error = ""
+            if isinstance(td_resp_r, dict) and td_resp_r:
+                _rtd_error = str(td_resp_r.get("Error") or td_resp_r.get("Message") or td_resp_r.get("message") or td_resp_r.get("error") or "")
+            _rtd_expired = bool(_rtd_error) and "no order found" in _rtd_error.lower()
             if _rtd_expired:
                 _kb_rexp = types.InlineKeyboardMarkup()
                 _kb_rexp.add(types.InlineKeyboardButton("🔄 ساخت سفارش جدید", callback_data=f"rpay:tronado:cancel_retry:{payment_id}"))
@@ -7077,8 +7080,12 @@ def _dispatch_callback(call, uid, data):
             bot.send_message(uid, "✅ پرداخت تأیید شد! کانفیگ شما در حال آماده‌سازی است…", parse_mode="HTML")
         else:
             # Check if the order is expired/not found on Tronado's side
-            _td_error = (td_resp.get("Error") or td_resp.get("error") or "") if td_resp else ""
-            _td_expired = not td_resp or "no order found" in str(_td_error).lower()
+            # Only show 'expired' if we actually got a non-empty API error saying so.
+            # Empty td_resp ({}) means API failure — show 'not confirmed yet', not 'expired'.
+            _td_error = ""
+            if isinstance(td_resp, dict) and td_resp:
+                _td_error = str(td_resp.get("Error") or td_resp.get("Message") or td_resp.get("message") or td_resp.get("error") or "")
+            _td_expired = bool(_td_error) and "no order found" in _td_error.lower()
             if _td_expired:
                 pkg_id_td_v = payment["package_id"] or 0
                 _kb_exp = types.InlineKeyboardMarkup()
