@@ -960,11 +960,14 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
         send_or_edit(call, text, kb)
     else:
         # User view: send QR inline if possible, then show buttons
-        ar_label = "♻️ تمدید خودکار: ✅" if auto_renew else "♻️ تمدید خودکار: ❌"
-        kb.row(
-            InlineKeyboardButton("⚡ تمدید فوری",  callback_data=f"mypnlcfg:renewconfirm:{config_id}"),
-            InlineKeyboardButton(ar_label,          callback_data=f"mypnlcfg:autorenew:{config_id}"),
-        )
+        from ..db import setting_get as _sg
+        _renewal_on = _sg("panel_renewal_enabled", "1") == "1"
+        if _renewal_on:
+            ar_label = "♻️ تمدید خودکار: ✅" if auto_renew else "♻️ تمدید خودکار: ❌"
+            kb.row(
+                InlineKeyboardButton("⚡ تمدید فوری",  callback_data=f"mypnlcfg:renewconfirm:{config_id}"),
+                InlineKeyboardButton(ar_label,          callback_data=f"mypnlcfg:autorenew:{config_id}"),
+            )
         kb.add(InlineKeyboardButton("بازگشت", callback_data=back_data,
                                     icon_custom_emoji_id="5253997076169115797"))
 

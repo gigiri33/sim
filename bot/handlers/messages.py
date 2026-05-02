@@ -918,7 +918,20 @@ def universal_handler(message):
                             self.data      = cb_data
                             self.id        = "0"
 
-                    _dc(_FakeCall(message, uid, pending_callback), uid, pending_callback)
+                    # bot.answer_callback_query("0") would fail with a Telegram API error
+                    # because "0" is not a valid callback query ID.  Temporarily replace it
+                    # with a version that silently ignores our fake sentinel so the rest of
+                    # the dispatched handler (send_or_edit, create_payment, …) can proceed.
+                    _orig_acq = bot.answer_callback_query
+                    def _silent_acq(cid, *_a, **_kw):
+                        if str(cid) == "0":
+                            return None
+                        return _orig_acq(cid, *_a, **_kw)
+                    bot.answer_callback_query = _silent_acq
+                    try:
+                        _dc(_FakeCall(message, uid, pending_callback), uid, pending_callback)
+                    finally:
+                        bot.answer_callback_query = _orig_acq
                 else:
                     state_clear(uid)
                     show_main_menu(message)

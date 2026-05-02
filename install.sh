@@ -172,12 +172,17 @@ clone_or_update_repo() {
 
 setup_venv() {
   info "Setting up Python environment..."
+
+  # Rebuild venv if it exists but pip is missing or broken
+  if [[ -d "$DIR/venv" ]] && ! "$DIR/venv/bin/python" -m pip --version &>/dev/null; then
+    info "Existing venv is broken — rebuilding..."
+    rm -rf "$DIR/venv"
+  fi
+
   [[ -d "$DIR/venv" ]] || python3 -m venv "$DIR/venv"
 
-
-
-  "$DIR/venv/bin/pip" install --upgrade pip wheel
-  "$DIR/venv/bin/pip" install -r "$DIR/requirements.txt"
+  "$DIR/venv/bin/python" -m pip install --upgrade pip wheel
+  "$DIR/venv/bin/python" -m pip install -r "$DIR/requirements.txt"
 }
 
 # ─────────────────────────── configure ───────────────────────────

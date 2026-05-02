@@ -10569,6 +10569,8 @@ def _dispatch_callback(call, uid, data):
             cfg = get_panel_config(config_id)
             if not cfg or cfg["user_id"] != uid:
                 bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            if setting_get("panel_renewal_enabled", "1") != "1" and not is_admin(uid):
+                bot.answer_callback_query(call.id, "⛔ تمدید پنل در حال حاضر غیرفعال است.", show_alert=True); return
             cfg = dict(cfg)
             new_val = 0 if int(cfg["auto_renew"] or 0) else 1
             # When enabling auto-renew, check if user has enough balance

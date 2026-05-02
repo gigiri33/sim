@@ -44,7 +44,7 @@ def _check_panel_configs_expiry() -> None:
     """
     Check all non-expired panel_configs:
     1. If expire_at has passed (local check):
-       - If auto_renew is enabled: deduct balance first, then renew on panel.
+       - If auto_renew is enabled AND panel_renewal_enabled=1: deduct balance first, then renew on panel.
          If balance is insufficient: disable auto_renew, mark expired, notify user.
        - Otherwise: mark expired and notify user.
     2. Also verify against panel API (client.enable == False).
@@ -53,7 +53,7 @@ def _check_panel_configs_expiry() -> None:
         get_unexpired_panel_configs, get_panel,
         mark_panel_config_expired, mark_panel_config_notified,
         get_package, get_user, update_balance,
-        update_panel_config_field,
+        update_panel_config_field, setting_get,
     )
     from ..bot_instance import bot
     from .client import PanelClient
@@ -73,7 +73,8 @@ def _check_panel_configs_expiry() -> None:
                 if exp_dt and datetime.now() >= exp_dt:
                     # ── Auto-renew attempt ─────────────────────────────────────
                     auto_renewed = False
-                    if int(cfg.get("auto_renew") or 0) and cfg.get("package_id"):
+                    panel_renewal_on = setting_get("panel_renewal_enabled", "1") == "1"
+                    if int(cfg.get("auto_renew") or 0) and cfg.get("package_id") and panel_renewal_on:
                         try:
                             from ..payments import get_effective_price
                             pkg  = get_package(cfg["package_id"])
