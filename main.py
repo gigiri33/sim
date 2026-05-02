@@ -336,19 +336,26 @@ def _plisio_webhook_server():
         return jsonify({"status": "ok"}), 200
 
     import time as _time
+    import socket as _socket
     port = int(get_plisio_webhook_port())
     print(f"🌐 Payment webhook server (Plisio + NowPayments) starting on port {port}…")
-    for _attempt in range(10):
+    for _attempt in range(20):
         try:
-            _app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+            from werkzeug.serving import make_server as _make_server
+            _srv = _make_server("0.0.0.0", port, _app)
+            _srv.socket.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+            print(f" * Serving Flask app '{_app.name}' on port {port}")
+            _srv.serve_forever()
             break
-        except OSError as _bind_err:
-            if _attempt < 9 and ("Address already in use" in str(_bind_err) or "Only one usage" in str(_bind_err)):
-                print(f"⚠️ Port {port} still in use, retrying in 3s… (attempt {_attempt+1}/10)")
+        except (OSError, SystemExit) as _bind_err:
+            if _attempt < 19:
+                print(f"⚠️ Port {port} still in use, retrying in 3s… (attempt {_attempt + 1}/20)")
                 _time.sleep(3)
             else:
-                print(f"❌ Cannot bind port {port}: {_bind_err}")
-                raise
+                print(f"❌ Cannot bind port {port} after 20 attempts: {_bind_err}")
+        except Exception as _bind_err:
+            print(f"❌ Webhook server error: {_bind_err}")
+            break
 
 
 def _start_plisio_webhook_server():
