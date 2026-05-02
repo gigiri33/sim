@@ -7926,7 +7926,7 @@ def _dispatch_callback(call, uid, data):
         if not success:
             bot.answer_callback_query(call.id, "خطا در بررسی وضعیت فاکتور.", show_alert=True)
             return
-        inv_status = inv.get("status", "")
+        inv_status = (inv.get("status") or "").upper()
         if inv_status in ("PAID", "COMPLETED") or inv.get("paidAt"):
             if payment["kind"] == "wallet_charge":
                 if not complete_payment(payment_id):  # atomic: only one path wins
@@ -8041,7 +8041,7 @@ def _dispatch_callback(call, uid, data):
         if not success:
             bot.answer_callback_query(call.id, "خطا در بررسی وضعیت فاکتور.", show_alert=True)
             return
-        if inv.get("status") in ("PAID", "COMPLETED") or inv.get("paidAt"):
+        if (inv.get("status") or "").upper() in ("PAID", "COMPLETED") or inv.get("paidAt"):
             if not complete_payment(payment_id):
                 bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
                 return
@@ -10478,7 +10478,7 @@ def _dispatch_callback(call, uid, data):
             success_sv, inv_sv = check_swapwallet_crypto_invoice(invoice_id_sv)
             if not success_sv:
                 bot.answer_callback_query(call.id, "خطا در بررسی وضعیت فاکتور.", show_alert=True); return
-            if inv_sv.get("status") in ("PAID", "COMPLETED") or inv_sv.get("paidAt"):
+            if (inv_sv.get("status") or "").upper() in ("PAID", "COMPLETED") or inv_sv.get("paidAt"):
                 if not complete_payment(payment_id):
                     bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True); return
                 config_id_sv  = payment["config_id"]

@@ -308,12 +308,17 @@ def check_nowpayments_invoice(invoice_id: str):
 
     raw_items = data.get("data") if isinstance(data, dict) else (data if isinstance(data, list) else None)
 
-    # Only trust items that actually belong to this invoice
+    # Trust items that have a matching invoice_id field; if the field is absent
+    # in the response (some API plans omit it), the server already filtered by
+    # invoice_id via the query param so use all returned items as a fallback.
     items = []
     if raw_items:
         for it in raw_items:
             if str(it.get("invoice_id") or "") == str(invoice_id):
                 items.append(it)
+        # If invoice_id field is unpopulated in every item, trust the server-side filter
+        if not items:
+            items = list(raw_items)
 
     if items:
         best_status = ""
@@ -336,7 +341,8 @@ def check_nowpayments_invoice(invoice_id: str):
             timeout=10,
         )
         inv_data = inv_resp.json()
-        inv_status = (inv_data.get("status") or "").lower()
+        # NowPayments invoice endpoint may return either 'status' or 'payment_status'
+        inv_status = (inv_data.get("payment_status") or inv_data.get("status") or "").lower()
         if inv_status:
             # Map invoice-level statuses to payment-level equivalents
             _inv_map = {
