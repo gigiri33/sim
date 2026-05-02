@@ -338,13 +338,35 @@ def _plisio_webhook_server():
     import time as _time
     import socket as _socket
     port = int(get_plisio_webhook_port())
-    print(f"🌐 Payment webhook server (Plisio + NowPayments) starting on port {port}…")
+    print(f"🌐 Payment webhook server starting on port {port}…")
+
+    def _make_reuse_server(host, p, app):
+        """Create a Werkzeug server with SO_REUSEADDR (and SO_REUSEPORT on Linux)
+        set on the socket *before* bind so the port is immediately available
+        even if a previous instance just closed."""
+        from werkzeug.serving import make_server as _wz_make_server
+        import wsgiref.simple_server as _wsr
+        # Build the socket manually with reuse options, then hand it to Werkzeug
+        sock = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+        sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+        try:
+            # SO_REUSEPORT (Linux ≥ 3.9) lets multiple sockets share the port—
+            # more importantly it allows immediate rebind after kill -9.
+            sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEPORT, 1)
+        except (AttributeError, OSError):
+            pass  # not available on all platforms
+        sock.bind((host, p))
+        sock.listen(128)
+        srv = _wz_make_server(host, p, app)
+        # Replace the socket Werkzeug already opened with our pre-bound one
+        srv.socket.close()
+        srv.socket = sock
+        return srv
+
     for _attempt in range(20):
         try:
-            from werkzeug.serving import make_server as _make_server
-            _srv = _make_server("0.0.0.0", port, _app)
-            _srv.socket.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
-            print(f" * Serving Flask app '{_app.name}' on port {port}")
+            _srv = _make_reuse_server("0.0.0.0", port, _app)
+            print(f" * Webhook server listening on 0.0.0.0:{port}")
             _srv.serve_forever()
             break
         except (OSError, SystemExit) as _bind_err:
