@@ -1394,6 +1394,7 @@ def universal_handler(message):
                 send_payment_to_admins(payment_id)
             except Exception as _e:
                 print(f"[wallet_receipt] send_payment_to_admins failed: {_e}")
+                import traceback as _tb; print(_tb.format_exc())
             return
 
         # ── Purchase receipt ───────────────────────────────────────────────────
@@ -1426,6 +1427,7 @@ def universal_handler(message):
                 send_payment_to_admins(payment_id)
             except Exception as _e:
                 print(f"[purchase_receipt] send_payment_to_admins failed: {_e}")
+                import traceback as _tb; print(_tb.format_exc())
             return
 
         # ── Renewal receipt ────────────────────────────────────────────────────
@@ -1458,7 +1460,53 @@ def universal_handler(message):
                 send_payment_to_admins(payment_id)
             except Exception as _e:
                 print(f"[renewal_receipt] send_payment_to_admins failed: {_e}")
+                import traceback as _tb; print(_tb.format_exc())
             return
+
+        # ── Fallback: user sends photo/text but no receipt state ──────────────
+        # Handles the case where the user pressed "بازگشت" (which clears state)
+        # and then sends their receipt — we recover by looking up their latest
+        # pending manual payment (card or manual crypto) that still needs a receipt.
+        _is_receipt_content = bool(
+            message.photo or message.document or
+            (message.text and len((message.text or "").strip()) > 5)
+        )
+        if _is_receipt_content and not is_admin(uid):
+            with get_conn() as _rc:
+                _pending_pay = _rc.execute(
+                    "SELECT * FROM payments WHERE user_id=? AND status='pending'"
+                    " AND payment_method IN ('card','crypto')"
+                    " AND (receipt_file_id IS NULL OR receipt_file_id='')"
+                    " ORDER BY id DESC LIMIT 1",
+                    (uid,)
+                ).fetchone()
+            if _pending_pay:
+                _rc_payment_id = _pending_pay["id"]
+                _rc_file_id    = None
+                _rc_text       = (message.caption or message.text or "").strip()
+                if message.photo:
+                    _rc_file_id = message.photo[-1].file_id
+                elif message.document:
+                    _rc_file_id = message.document.file_id
+                if _rc_file_id or _rc_text:
+                    try:
+                        update_payment_receipt(_rc_payment_id, _rc_file_id, _rc_text)
+                    except Exception as _re:
+                        print(f"[fallback_receipt] update_payment_receipt failed: {_re}")
+                        bot.send_message(uid, "⚠️ خطایی در ثبت رسید رخ داد. لطفاً دوباره تلاش کنید.",
+                                         reply_markup=kb_main(uid))
+                        return
+                    _kind_label = "تمدید" if _pending_pay["kind"] in ("renewal", "pnlcfg_renewal") else \
+                                  "شارژ کیف پول" if _pending_pay["kind"] == "wallet_charge" else "خرید"
+                    bot.send_message(uid,
+                        f"✅ رسید {_kind_label} شما ثبت شد و ارسال به ادمین در حال انجام است.\n"
+                        "لطفاً تا تأیید صبر کنید.",
+                        reply_markup=kb_main(uid))
+                    try:
+                        send_payment_to_admins(_rc_payment_id)
+                    except Exception as _re2:
+                        print(f"[fallback_receipt] send_payment_to_admins failed: {_re2}")
+                    return
 
         # ── Admin: Discount codes ─────────────────────────────────────────────
         if sn == "admin_discount_add_code" and is_admin(uid):
@@ -3962,6 +4010,28 @@ def universal_handler(message):
             return
 
         # ── Admin: Agency price (per-package, mode=package) ─────────────────
+        if sn == "admin_set_agency_price_cfg" and is_admin(uid):
+            target_user_id = sd["target_user_id"]
+            package_id     = sd["package_id"]
+            val            = parse_int(message.text or "")
+            if val is None or val < 0:
+                bot.send_message(uid, "⚠️ مبلغ معتبر وارد کنید.",
+                                 reply_markup=back_button(f"adm:agcfg:pkg:{target_user_id}"))
+                return
+            if val == 0:
+                with get_conn() as conn:
+                    conn.execute("DELETE FROM agency_prices WHERE user_id=? AND package_id=?",
+                                 (target_user_id, package_id))
+                state_clear(uid)
+                bot.send_message(uid, "✅ قیمت اختصاصی حذف شد (قیمت پیش‌فرض اعمال می‌شود).",
+                                 reply_markup=back_button(f"adm:agcfg:pkg:{target_user_id}"))
+            else:
+                set_agency_price(target_user_id, package_id, val)
+                state_clear(uid)
+                bot.send_message(uid, f"✅ قیمت اختصاصی {fmt_price(val)} تومان ثبت شد.",
+                                 reply_markup=back_button(f"adm:agcfg:pkg:{target_user_id}"))
+            return
+
         if sn == "admin_set_agency_price" and is_admin(uid):
             target_user_id = sd["target_user_id"]
             package_id     = sd["package_id"]

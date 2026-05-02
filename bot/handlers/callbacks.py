@@ -3076,7 +3076,7 @@ def _render_voucher_admin_list(call, uid):
             types.InlineKeyboardButton(f"🎫 {b['name']} ({remain}/{total})", callback_data=f"admin:vch:view:{b['id']}"),
             types.InlineKeyboardButton("📋 اطلاعات", callback_data=f"admin:vch:view:{b['id']}"),
         )
-    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:gifts", icon_custom_emoji_id="5253997076169115797"))
     text = (
         "🎫 <b>مدیریت کارت‌های هدیه</b>\n\n"
         f"وضعیت سیستم: {'✅ فعال' if enabled else '❌ غیرفعال'}\n"
@@ -3220,7 +3220,7 @@ def _render_discount_admin_list(call, uid):
             types.InlineKeyboardButton(f"{status_icon} {aud_icon} {row['code']}", callback_data=f"admin:disc:view:{row['id']}"),
             types.InlineKeyboardButton("⚙️ تنظیمات", callback_data=f"admin:disc:view:{row['id']}"),
         )
-    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:gifts", icon_custom_emoji_id="5253997076169115797"))
     total = len(codes)
     text = (
         "🎟 <b>مدیریت کدهای تخفیف</b>\n\n"
@@ -4840,6 +4840,35 @@ def _dispatch_callback(call, uid, data):
                 if not pkg_id:
                     failed_config += 1
                     continue  # leave unclaimed — admin must fix package config
+                pkg_row_ref = get_package(int(pkg_id))
+                if not pkg_row_ref:
+                    failed_config += 1
+                    continue
+                _cfg_source_ref = "manual"
+                try:
+                    _cfg_source_ref = (pkg_row_ref["config_source"] or "manual")
+                except Exception:
+                    pass
+
+                if _cfg_source_ref == "panel":
+                    # Panel package — deliver via _deliver_bulk_configs
+                    try:
+                        _ref_delivered, _ref_pending = _deliver_bulk_configs(
+                            chat_id=uid, uid=uid, package_id=int(pkg_id),
+                            total_amount=0, payment_method="referral_gift",
+                            quantity=1, payment_id=None,
+                        )
+                        if _ref_delivered:
+                            mark_reward_claimed_by_id(row["id"])
+                            delivered_config += 1
+                        else:
+                            failed_config += 1  # pending order created — leave reward unclaimed for retry
+                    except Exception as _exc_ref:
+                        print(f"[claim_reward] panel delivery error uid={uid} pkg={pkg_id}: {_exc_ref}")
+                        failed_config += 1
+                    continue
+
+                # Manual/stock packages
                 available = get_available_configs_for_package(int(pkg_id))
                 if not available:
                     failed_config += 1
@@ -13602,7 +13631,7 @@ def _dispatch_callback(call, uid, data):
     if data.startswith("adm:agt:u:"):
         target_uid = int(data.split(":")[3])
         bot.answer_callback_query(call.id)
-        _show_admin_user_detail(call, target_uid)
+        _show_admin_user_detail(call, target_uid, back_cb="admin:agents")
         return
 
     if data.startswith("adm:agt:rm:"):
@@ -14070,10 +14099,27 @@ def _dispatch_callback(call, uid, data):
             ap    = get_agency_price(target_id, p["id"])
             price = fmt_price(ap) if ap is not None else fmt_price(p["price"])
             label = f"{p['name']} | {price} ت"
-            kb.add(types.InlineKeyboardButton(label, callback_data=f"adm:usr:agpe:{target_id}:{p['id']}"))
+            kb.add(types.InlineKeyboardButton(label, callback_data=f"adm:agcfg:pkge:{target_id}:{p['id']}"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:agcfg:{target_id}", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "📦 <b>قیمت هر پکیج</b>\n\nبرای ویرایش روی پکیج بزنید:", kb)
+        return
+
+    if data.startswith("adm:agcfg:pkge:"):
+        # adm:agcfg:pkge:{target_id}:{pkg_id}  — edit one package price (back → pkg list)
+        parts      = data.split(":")
+        target_id  = int(parts[3])
+        package_id = int(parts[4])
+        state_set(uid, "admin_set_agency_price_cfg", target_user_id=target_id, package_id=package_id)
+        bot.answer_callback_query(call.id)
+        ap = get_agency_price(target_id, package_id)
+        cur_label = f"{fmt_price(ap)} تومان" if ap is not None else "قیمت پیش‌فرض"
+        send_or_edit(call,
+            f"📦 <b>قیمت اختصاصی پکیج</b>\n\n"
+            f"تنظیم فعلی: <b>{cur_label}</b>\n\n"
+            "💰 قیمت (تومان) را وارد کنید.\n"
+            "برای بازگشت به قیمت عادی، عدد <b>0</b> بفرستید:",
+            back_button(f"adm:agcfg:pkg:{target_id}"))
         return
 
     if data.startswith("adm:agcfg:pergb:") and data.count(":") == 3:
@@ -14124,8 +14170,7 @@ def _dispatch_callback(call, uid, data):
             return
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("📣 فوروارد همگانی", callback_data="adm:bc:fwd"))
-        kb.add(types.InlineKeyboardButton("📌 پین همگانی",     callback_data="adm:bc:pin"))
-        kb.add(types.InlineKeyboardButton("📋 مدیریت پیام‌های پین شده", callback_data="adm:pin"))
+        kb.add(types.InlineKeyboardButton(" مدیریت پیام‌های پین شده", callback_data="adm:pin"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "📣 <b>فوروارد و پین همگانی</b>\n\nیک گزینه را انتخاب کنید:", kb)
@@ -17679,7 +17724,7 @@ def _dispatch_callback(call, uid, data):
                 types.InlineKeyboardButton("✏️", callback_data=f"adm:pin:edit:{p['id']}"),
                 types.InlineKeyboardButton("🗑", callback_data=f"adm:pin:del:{p['id']}"),
             )
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:broadcast", icon_custom_emoji_id="5253997076169115797"))
         count_text = f"{len(pins)} پیام" if pins else "هیچ پیامی ثبت نشده"
         send_or_edit(call, f"📌 <b>پیام‌های پین شده</b>\n\n{count_text}", kb)
         return
@@ -17806,6 +17851,18 @@ def _dispatch_callback(call, uid, data):
         return
 
     # ── Admin: Discount Codes ─────────────────────────────────────────────────
+    if data == "admin:gifts":
+        if not is_admin(uid):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("🎟 مدیریت کد تخفیف", callback_data="admin:discounts"))
+        kb.add(types.InlineKeyboardButton("🎁 مدیریت کارت هدیه", callback_data="admin:vouchers"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
+        send_or_edit(call, "🎁 <b>کارت هدیه / کد تخفیف</b>\n\nیک گزینه را انتخاب کنید:", kb)
+        return
+
     if data == "admin:discounts":
         if not is_admin(uid):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)

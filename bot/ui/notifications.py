@@ -813,6 +813,61 @@ def _give_referral_reward(referrer_id, reward_prefix):
         pkg = get_package(int(pkg_id))
         if not pkg:
             return
+        config_source = (pkg["config_source"] or "manual") if "config_source" in (pkg.keys() if hasattr(pkg, "keys") else {}) else "manual"
+
+        if config_source == "panel":
+            # Panel package — create config dynamically via _deliver_bulk_configs
+            try:
+                from ..handlers.callbacks import _deliver_bulk_configs
+                delivered_ids, pending_ids = _deliver_bulk_configs(
+                    chat_id=referrer_id,
+                    uid=referrer_id,
+                    package_id=int(pkg_id),
+                    total_amount=0,
+                    payment_method="referral_gift",
+                    quantity=1,
+                    payment_id=None,
+                )
+            except Exception as _exc:
+                print(f"[referral_reward] panel delivery failed for uid={referrer_id} pkg={pkg_id}: {_exc}")
+                import traceback as _tb; print(_tb.format_exc())
+                add_pending_reward(referrer_id, "config", 0, int(pkg_id), source)
+                try:
+                    bot.send_message(
+                        referrer_id,
+                        "🎁 <b>پاداش زیرمجموعه‌گیری!</b>\n\n"
+                        "⚠️ در حال حاضر امکان ساخت سرویس وجود ندارد.\n"
+                        "پاداش شما ذخیره شد و از بخش دعوت دوستان → «🎁 دریافت پاداش» قابل دریافت است.",
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    pass
+            else:
+                if delivered_ids:
+                    try:
+                        bot.send_message(
+                            referrer_id,
+                            "🎁 <b>پاداش زیرمجموعه‌گیری!</b>\n\n"
+                            "✅ یک کانفیگ رایگان به سرویس‌های شما اضافه شد! 🎉",
+                            parse_mode="HTML"
+                        )
+                    except Exception:
+                        pass
+                else:
+                    # Create pending if panel delivery queued it
+                    add_pending_reward(referrer_id, "config", 0, int(pkg_id), source)
+                    try:
+                        bot.send_message(
+                            referrer_id,
+                            "🎁 <b>پاداش زیرمجموعه‌گیری!</b>\n\n"
+                            "⚠️ سفارش شما ثبت شد و به محض آماده شدن تحویل داده خواهد شد.",
+                            parse_mode="HTML"
+                        )
+                    except Exception:
+                        pass
+            return
+
+        # Manual/stock packages
         available = get_available_configs_for_package(int(pkg_id))
         if available:
             cfg = available[0]
