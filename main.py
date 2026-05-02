@@ -471,6 +471,10 @@ def main():
     # Start Plisio webhook server (only if server_public_url is set)
     _start_plisio_webhook_server()
 
+    # Start Tronado auto-poll loop (checks pending payments every 2 min)
+    from bot.crypto_fulfillment import start_tronado_poll_loop
+    start_tronado_poll_loop()
+
     # Remove any active webhook before starting long-polling (prevents 409 conflict)
     try:
         bot.delete_webhook(drop_pending_updates=True)

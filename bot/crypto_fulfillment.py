@@ -152,3 +152,60 @@ def run_crypto_fulfillment_async(gateway: str, payment_id: int):
         args=(gateway, payment_id),
         daemon=True,
     ).start()
+
+
+# ── Tronado auto-polling loop ─────────────────────────────────────────────────
+_TRONADO_POLL_INTERVAL = 120   # seconds between each sweep
+_TRONADO_MAX_AGE_HOURS = 1     # ignore payments older than this (likely abandoned)
+
+def _tronado_poll_loop():
+    """
+    Background thread: every 2 minutes scan all pending Tronado payments and
+    auto-confirm any that are paid, so users don't need to press the verify button.
+    Only payments created in the last hour are checked (older ones are considered
+    abandoned and skipped to avoid unnecessary API calls).
+    """
+    import time as _time
+    from .db import get_conn
+    from .gateways.tronado import (
+        get_tronado_payment_status,
+        get_tronado_status_by_payment_id,
+        is_tronado_response_paid,
+    )
+
+    _time.sleep(30)  # initial delay — let bot fully start first
+    while True:
+        try:
+            import datetime as _dt
+            _cutoff = (_dt.datetime.utcnow() - _dt.timedelta(hours=_TRONADO_MAX_AGE_HOURS)).strftime("%Y-%m-%d %H:%M:%S")
+            with get_conn() as _conn:
+                rows = _conn.execute(
+                    "SELECT id, receipt_text FROM payments"
+                    " WHERE status='pending' AND payment_method='tronado'"
+                    " AND (created_at IS NULL OR created_at = '' OR created_at >= ?)",
+                    (_cutoff,)
+                ).fetchall()
+
+            for row in rows:
+                pay_id    = row["id"]
+                token     = row["receipt_text"] or ""
+                try:
+                    resp = get_tronado_payment_status(token) if token else {}
+                    if not is_tronado_response_paid(resp):
+                        resp = get_tronado_status_by_payment_id(str(pay_id))
+                    if is_tronado_response_paid(resp):
+                        print(f"[Tronado] Auto-poll: payment {pay_id} is PAID — running fulfillment")
+                        run_crypto_fulfillment_async("tronado", pay_id)
+                except Exception as _pe:
+                    print(f"[Tronado] Auto-poll error for payment {pay_id}: {_pe}")
+
+        except Exception as _le:
+            print(f"[Tronado] Auto-poll loop error: {_le}")
+
+        _time.sleep(_TRONADO_POLL_INTERVAL)
+
+
+def start_tronado_poll_loop():
+    """Start the Tronado auto-polling background thread. Call once from main()."""
+    threading.Thread(target=_tronado_poll_loop, daemon=True, name="tronado-poll").start()
+    print("✅ Tronado auto-poll loop started (interval: 2 min, max age: 1h)")
