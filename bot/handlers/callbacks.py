@@ -5772,10 +5772,39 @@ def _dispatch_callback(call, uid, data):
             run_crypto_fulfillment_async("tronado", payment_id)
             bot.send_message(uid, "✅ پرداخت تأیید شد! تمدید سرویس شما در حال انجام است…", parse_mode="HTML")
         else:
-            bot.send_message(uid,
-                "⏳ پرداخت هنوز تأیید نشده است.\n"
-                "لطفاً چند دقیقه صبر کنید و دوباره وضعیت را بررسی کنید.",
-                parse_mode="HTML")
+            _rtd_error = (td_resp_r.get("Error") or td_resp_r.get("error") or "") if td_resp_r else ""
+            _rtd_expired = not td_resp_r or "no order found" in str(_rtd_error).lower()
+            if _rtd_expired:
+                _kb_rexp = types.InlineKeyboardMarkup()
+                _kb_rexp.add(types.InlineKeyboardButton("🔄 ساخت سفارش جدید", callback_data=f"rpay:tronado:cancel_retry:{payment_id}"))
+                bot.send_message(uid,
+                    "⚠️ <b>سفارش ترونادو منقضی یا یافت نشد</b>\n\n"
+                    "این لینک پرداخت منقضی شده است. روی دکمه زیر بزنید تا سفارش جدید ایجاد شود:",
+                    parse_mode="HTML", reply_markup=_kb_rexp)
+            else:
+                bot.send_message(uid,
+                    "⏳ پرداخت هنوز تأیید نشده است.\n"
+                    "لطفاً چند دقیقه صبر کنید و دوباره وضعیت را بررسی کنید.",
+                    parse_mode="HTML")
+        return
+
+    if data.startswith("rpay:tronado:cancel_retry:"):
+        payment_id = int(data.split(":")[3])
+        payment = get_payment(payment_id)
+        if not payment or payment["user_id"] != uid:
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        if payment["status"] == "pending":
+            reject_payment(payment_id, "منقضی شده — لغو توسط کاربر برای ایجاد سفارش جدید")
+        config_id_rretry  = payment.get("config_id") or 0
+        package_id_rretry = payment.get("package_id") or 0
+        bot.answer_callback_query(call.id, "✅ سفارش قبلی لغو شد.", show_alert=False)
+        if config_id_rretry and package_id_rretry:
+            send_or_edit(call, "✅ سفارش قبلی لغو شد.\n\nدرحال انتقال به صفحه تمدید…",
+                         back_button(f"renew:{config_id_rretry}:{package_id_rretry}"))
+        else:
+            send_or_edit(call, "✅ سفارش قبلی لغو شد. لطفاً دوباره از منوی سرویس‌های من اقدام کنید.",
+                         back_button("my_configs"))
         return
 
     if data.startswith("rpay:tronado:") and not data.startswith("rpay:tronado:verify:"):
@@ -7047,10 +7076,43 @@ def _dispatch_callback(call, uid, data):
             run_crypto_fulfillment_async("tronado", payment_id)
             bot.send_message(uid, "✅ پرداخت تأیید شد! کانفیگ شما در حال آماده‌سازی است…", parse_mode="HTML")
         else:
-            bot.send_message(uid,
-                "⏳ پرداخت هنوز تأیید نشده است.\n"
-                "لطفاً چند دقیقه صبر کنید و دوباره وضعیت را بررسی کنید.",
-                parse_mode="HTML")
+            # Check if the order is expired/not found on Tronado's side
+            _td_error = (td_resp.get("Error") or td_resp.get("error") or "") if td_resp else ""
+            _td_expired = not td_resp or "no order found" in str(_td_error).lower()
+            if _td_expired:
+                pkg_id_td_v = payment.get("package_id") or 0
+                _kb_exp = types.InlineKeyboardMarkup()
+                if pkg_id_td_v:
+                    _kb_exp.add(types.InlineKeyboardButton("🔄 ساخت سفارش جدید", callback_data=f"pay:tronado:cancel_retry:{payment_id}"))
+                bot.send_message(uid,
+                    "⚠️ <b>سفارش ترونادو منقضی یا یافت نشد</b>\n\n"
+                    "این لینک پرداخت منقضی شده است. برای پرداخت باید سفارش جدیدی ایجاد کنید.\n\n"
+                    "روی دکمه زیر بزنید تا سفارش قبلی لغو شود و یک لینک پرداخت جدید دریافت کنید:",
+                    parse_mode="HTML", reply_markup=_kb_exp)
+            else:
+                bot.send_message(uid,
+                    "⏳ پرداخت هنوز تأیید نشده است.\n"
+                    "لطفاً چند دقیقه صبر کنید و دوباره وضعیت را بررسی کنید.",
+                    parse_mode="HTML")
+        return
+
+    if data.startswith("pay:tronado:cancel_retry:"):
+        payment_id = int(data.split(":")[3])
+        payment = get_payment(payment_id)
+        if not payment or payment["user_id"] != uid:
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        if payment["status"] == "pending":
+            reject_payment(payment_id, "منقضی شده — لغو توسط کاربر برای ایجاد سفارش جدید")
+        pkg_id_retry = payment.get("package_id") or 0
+        bot.answer_callback_query(call.id, "✅ سفارش قبلی لغو شد.", show_alert=False)
+        if pkg_id_retry:
+            send_or_edit(call,
+                "✅ سفارش قبلی لغو شد.\n\nدرحال انتقال به صفحه خرید…",
+                back_button(f"buy:p:{pkg_id_retry}"))
+        else:
+            send_or_edit(call, "✅ سفارش قبلی لغو شد. لطفاً دوباره از منوی خرید اقدام کنید.",
+                         back_button("show_packages"))
         return
 
     if data.startswith("pay:tronado:"):

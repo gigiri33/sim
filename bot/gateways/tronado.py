@@ -9,6 +9,7 @@ Payment URL: https://t.me/tronado_robot/customerpayment?startapp={TOKEN}
 import json
 import urllib.request
 import urllib.error
+import urllib.parse
 
 from ..db import setting_get
 from .crypto import fetch_crypto_prices
@@ -106,14 +107,15 @@ def get_tronado_order_token(amount_toman: int, order_id: str, user_id: int,
     elif callback_url:
         print(f"[Tronado] Skipping CallbackUrl — unexpected scheme (got: {callback_url[:50]})")
 
-    print(f"[Tronado] Sending payload: {json.dumps(payload)}")
+    print(f"[Tronado] Sending payload: {payload}")
 
-    data = json.dumps(payload).encode("utf-8")
+    # API docs show form-data (--form) for GetOrderToken, not JSON
+    form_data = urllib.parse.urlencode(payload).encode("utf-8")
     req = urllib.request.Request(
         f"{base_url}/GetOrderToken",
-        data=data,
+        data=form_data,
         headers={
-            "Content-Type": "application/json",
+            "Content-Type": "application/x-www-form-urlencoded",
             "Accept":       "application/json",
             "x-api-key":    api_key,
             "User-Agent":   "ConfigFlow/1.0",
@@ -222,12 +224,13 @@ def get_tronado_payment_status(order_id_or_token: str) -> dict:
     if not api_key or not order_id_or_token:
         return {}
     url = _tronado_order_status_url()
-    payload_data = json.dumps({"Id": order_id_or_token}).encode("utf-8")
+    # API docs show form-data (--form) for GetStatus, not JSON
+    form_data = urllib.parse.urlencode({"Id": order_id_or_token}).encode("utf-8")
     req = urllib.request.Request(
         url,
-        data=payload_data,
+        data=form_data,
         headers={
-            "Content-Type": "application/json",
+            "Content-Type": "application/x-www-form-urlencoded",
             "Accept":       "application/json",
             "x-api-key":    api_key,
             "User-Agent":   "ConfigFlow/1.0",
