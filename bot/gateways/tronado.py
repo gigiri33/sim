@@ -91,10 +91,10 @@ def get_tronado_order_token(amount_toman: int, order_id: str, user_id: int,
         "WalletAddress":  wallet_address,
         "Description":    (description or "")[:200],
     }
-    if callback_url and callback_url.startswith("https://"):
+    if callback_url and (callback_url.startswith("https://") or callback_url.startswith("http://")):
         payload["CallbackUrl"] = callback_url
     elif callback_url:
-        print(f"[Tronado] Skipping CallbackUrl — Tronado requires https (got: {callback_url[:50]})")
+        print(f"[Tronado] Skipping CallbackUrl — unexpected scheme (got: {callback_url[:50]})")
 
     print(f"[Tronado] Sending payload: {json.dumps(payload)}")
 
@@ -167,30 +167,109 @@ def is_tronado_callback_valid(payload: dict) -> bool:
     """
     Return True if the incoming POST payload looks like a valid Tronado payment callback.
     Tronado only sends a callback on SUCCESSFUL payment, so any valid callback = paid.
-    A valid callback must have PaymentID and either TronAmount or Wallet.
+    Accept any payload that has at least one recognisable id or token field.
     """
     if not isinstance(payload, dict):
         return False
     has_id = bool(
         payload.get("PaymentID") or payload.get("paymentId")
         or payload.get("payment_id") or payload.get("OrderId") or payload.get("orderId")
+        or payload.get("Token") or payload.get("token")
     )
     return has_id
+
+
+def get_tronado_payment_status(token: str) -> dict:
+    """
+    Call POST /GetStatus with the order token.
+    Returns parsed response dict, or {} on failure.
+    A paid payment has Status == 'Paid' (case-insensitive) in the data.
+    """
+    api_key = (setting_get("tronado_api_key", "") or "").strip()
+    if not api_key or not token:
+        return {}
+    base_url = get_tronado_base_url()
+    payload_data = json.dumps({"Token": token}).encode("utf-8")
+    req = urllib.request.Request(
+        f"{base_url}/GetStatus",
+        data=payload_data,
+        headers={
+            "Content-Type": "application/json",
+            "Accept":       "application/json",
+            "x-api-key":    api_key,
+            "User-Agent":   "ConfigFlow/1.0",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            _, parsed = _decode_response_body(resp)
+        print(f"[Tronado] GetStatus({token[:12]}…): {str(parsed)[:200]}")
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception as exc:
+        print(f"[Tronado] GetStatus error: {exc}")
+        return {}
+
+
+def get_tronado_status_by_payment_id(payment_id_str: str) -> dict:
+    """
+    Call POST /GetStatusByPaymentID with the PaymentID we originally sent.
+    Returns parsed response dict, or {} on failure.
+    """
+    api_key = (setting_get("tronado_api_key", "") or "").strip()
+    if not api_key or not payment_id_str:
+        return {}
+    base_url = get_tronado_base_url()
+    payload_data = json.dumps({"PaymentID": payment_id_str}).encode("utf-8")
+    req = urllib.request.Request(
+        f"{base_url}/GetStatusByPaymentID",
+        data=payload_data,
+        headers={
+            "Content-Type": "application/json",
+            "Accept":       "application/json",
+            "x-api-key":    api_key,
+            "User-Agent":   "ConfigFlow/1.0",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            _, parsed = _decode_response_body(resp)
+        print(f"[Tronado] GetStatusByPaymentID({payment_id_str}): {str(parsed)[:200]}")
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception as exc:
+        print(f"[Tronado] GetStatusByPaymentID error: {exc}")
+        return {}
+
+
+def is_tronado_response_paid(resp: dict) -> bool:
+    """
+    Return True if a GetStatus / GetStatusByPaymentID response indicates a paid/confirmed payment.
+    """
+    if not resp:
+        return False
+    # Check nested data object first
+    data = resp.get("data") or resp.get("Data") or resp
+    if isinstance(data, dict):
+        status_val = (
+            data.get("Status") or data.get("status")
+            or data.get("PaymentStatus") or data.get("paymentStatus") or ""
+        )
+        return str(status_val).lower() in ("paid", "completed", "success", "confirmed", "finish", "finished")
+    return False
 
 
 def get_tronado_callback_base_url() -> str:
     """
     Return the base URL for Tronado callback registration.
-    Priority: tronado_callback_url (must be https) > server_public_url if https.
-    Tronado requires https:// — http:// URLs are rejected.
+    Accepts both https:// and http:// — use dedicated tronado_callback_url first,
+    then fall back to server_public_url.
     """
-    # 1. Dedicated Tronado https callback URL
     dedicated = (setting_get("tronado_callback_url", "") or "").strip().rstrip("/")
-    if dedicated and dedicated.startswith("https://"):
+    if dedicated and (dedicated.startswith("https://") or dedicated.startswith("http://")):
         return dedicated
-    # 2. Shared server_public_url if it's https
     base = (setting_get("server_public_url", "") or "").strip().rstrip("/")
-    if base and base.startswith("https://"):
+    if base and (base.startswith("https://") or base.startswith("http://")):
         return base
     return ""
 

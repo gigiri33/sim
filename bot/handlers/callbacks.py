@@ -95,6 +95,7 @@ from ..gateways.pazzlenet import (
 from ..gateways.tronado import (
     get_tronado_order_token, build_tronado_payment_url,
     build_tronado_callback_url,
+    get_tronado_payment_status, get_tronado_status_by_payment_id, is_tronado_response_paid,
 )
 from ..gateways.plisio import (
     create_plisio_invoice, check_plisio_invoice,
@@ -5760,7 +5761,21 @@ def _dispatch_callback(call, uid, data):
             else:
                 bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
             return
-        bot.answer_callback_query(call.id, "⏳ پرداخت شما به محض تأیید توسط ترونادو پردازش می‌شود.", show_alert=True)
+        bot.answer_callback_query(call.id, "⏳ در حال بررسی وضعیت پرداخت…", show_alert=False)
+        token_rtd_v = payment["receipt_text"] or ""
+        order_id_rtd_v = f"tronado-renew-{payment_id}"
+        td_resp_r = get_tronado_payment_status(token_rtd_v) if token_rtd_v else {}
+        if not is_tronado_response_paid(td_resp_r):
+            td_resp_r = get_tronado_status_by_payment_id(order_id_rtd_v)
+        if is_tronado_response_paid(td_resp_r):
+            from ..crypto_fulfillment import run_crypto_fulfillment_async
+            run_crypto_fulfillment_async("tronado", payment_id)
+            bot.send_message(uid, "✅ پرداخت تأیید شد! تمدید سرویس شما در حال انجام است…", parse_mode="HTML")
+        else:
+            bot.send_message(uid,
+                "⏳ پرداخت هنوز تأیید نشده است.\n"
+                "لطفاً چند دقیقه صبر کنید و دوباره وضعیت را بررسی کنید.",
+                parse_mode="HTML")
         return
 
     if data.startswith("rpay:tronado:") and not data.startswith("rpay:tronado:verify:"):
@@ -7020,9 +7035,22 @@ def _dispatch_callback(call, uid, data):
             else:
                 bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
             return
-        token_td_v = payment["receipt_text"]
-        pay_url_td_v = build_tronado_payment_url(token_td_v) if token_td_v else ""
-        bot.answer_callback_query(call.id, "⏳ پرداخت شما به محض تأیید توسط ترونادو پردازش می‌شود.", show_alert=True)
+        bot.answer_callback_query(call.id, "⏳ در حال بررسی وضعیت پرداخت…", show_alert=False)
+        token_td_v = payment["receipt_text"] or ""
+        order_id_td_v = f"tronado-cfg-{payment_id}"
+        # Try GetStatus (by token), then GetStatusByPaymentID
+        td_resp = get_tronado_payment_status(token_td_v) if token_td_v else {}
+        if not is_tronado_response_paid(td_resp):
+            td_resp = get_tronado_status_by_payment_id(order_id_td_v)
+        if is_tronado_response_paid(td_resp):
+            from ..crypto_fulfillment import run_crypto_fulfillment_async
+            run_crypto_fulfillment_async("tronado", payment_id)
+            bot.send_message(uid, "✅ پرداخت تأیید شد! کانفیگ شما در حال آماده‌سازی است…", parse_mode="HTML")
+        else:
+            bot.send_message(uid,
+                "⏳ پرداخت هنوز تأیید نشده است.\n"
+                "لطفاً چند دقیقه صبر کنید و دوباره وضعیت را بررسی کنید.",
+                parse_mode="HTML")
         return
 
     if data.startswith("pay:tronado:"):
@@ -10232,7 +10260,31 @@ def _dispatch_callback(call, uid, data):
                 else:
                     bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
                 return
-            bot.answer_callback_query(call.id, "⏳ پرداخت شما به محض تأیید توسط ترونادو پردازش می‌شود.", show_alert=True)
+            bot.answer_callback_query(call.id, "⏳ در حال بررسی وضعیت پرداخت…", show_alert=False)
+            token_pnltd_v = payment["receipt_text"] or ""
+            td_resp_pnl = get_tronado_payment_status(token_pnltd_v) if token_pnltd_v else {}
+            if not is_tronado_response_paid(td_resp_pnl):
+                td_resp_pnl = get_tronado_status_by_payment_id(f"tronado-pnl-{payment_id}")
+            if not is_tronado_response_paid(td_resp_pnl):
+                td_resp_pnl = get_tronado_status_by_payment_id(f"tronado-pnlrenew-{payment_id}")
+            if is_tronado_response_paid(td_resp_pnl):
+                if not complete_payment(payment_id):
+                    bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True); return
+                config_id_pnltd  = payment["config_id"]
+                package_id_pnltd = payment["package_id"]
+                bot.send_message(uid, "✅ پرداخت تأیید شد! در حال تمدید سرویس…", parse_mode="HTML")
+                ok_r_pnltd, _ = _execute_pnlcfg_renewal(config_id_pnltd, package_id_pnltd, chat_id=uid, uid=uid)
+                state_clear(uid)
+                if not ok_r_pnltd:
+                    send_or_edit(call, "❌ پرداخت انجام شد اما تمدید سرویس با خطا مواجه شد.\nلطفاً با پشتیبانی ارتباط بگیرید.",
+                                 back_button("my_configs"))
+                    return
+                _show_panel_config_detail(call, config_id_pnltd, back_data="my_configs", is_user_view=True)
+            else:
+                bot.send_message(uid,
+                    "⏳ پرداخت هنوز تأیید نشده است.\n"
+                    "لطفاً چند دقیقه صبر کنید و دوباره وضعیت را بررسی کنید.",
+                    parse_mode="HTML")
             return
 
         # mypnlcfgrpay:plisio:{config_id}:{package_id}
@@ -10590,7 +10642,31 @@ def _dispatch_callback(call, uid, data):
                 else:
                     bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
                 return
-            bot.answer_callback_query(call.id, "⏳ پرداخت شما به محض تأیید توسط ترونادو پردازش می‌شود.", show_alert=True)
+            bot.answer_callback_query(call.id, "⏳ در حال بررسی وضعیت پرداخت…", show_alert=False)
+            token_pnltd2_v = payment["receipt_text"] or ""
+            td_resp_pnl2 = get_tronado_payment_status(token_pnltd2_v) if token_pnltd2_v else {}
+            if not is_tronado_response_paid(td_resp_pnl2):
+                td_resp_pnl2 = get_tronado_status_by_payment_id(f"tronado-pnlrenew-{payment_id}")
+            if not is_tronado_response_paid(td_resp_pnl2):
+                td_resp_pnl2 = get_tronado_status_by_payment_id(f"tronado-pnl-{payment_id}")
+            if is_tronado_response_paid(td_resp_pnl2):
+                if not complete_payment(payment_id):
+                    bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True); return
+                config_id_pnltd2  = payment["config_id"]
+                package_id_pnltd2 = payment["package_id"]
+                bot.send_message(uid, "✅ پرداخت تأیید شد! در حال تمدید سرویس…", parse_mode="HTML")
+                ok_r_pnltd2, _ = _execute_pnlcfg_renewal(config_id_pnltd2, package_id_pnltd2, chat_id=uid, uid=uid)
+                state_clear(uid)
+                if not ok_r_pnltd2:
+                    send_or_edit(call, "❌ پرداخت انجام شد اما تمدید سرویس با خطا مواجه شد.\nلطفاً با پشتیبانی ارتباط بگیرید.",
+                                 back_button("my_configs"))
+                    return
+                _show_panel_config_detail(call, config_id_pnltd2, back_data="my_configs", is_user_view=True)
+            else:
+                bot.send_message(uid,
+                    "⏳ پرداخت هنوز تأیید نشده است.\n"
+                    "لطفاً چند دقیقه صبر کنید و دوباره وضعیت را بررسی کنید.",
+                    parse_mode="HTML")
             return
 
         # mypnlcfg:autorenew:{config_id}
