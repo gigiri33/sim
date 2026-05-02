@@ -80,6 +80,7 @@ from .callbacks import (
     _ovpn_send_file_group, _ovpn_caption, _fmt_users_label,
     _wg_finish_single, _wg_deliver_bulk_shared, _wg_deliver_bulk_diff,
     _wg_send_file_group, _wg_caption, _wg_service_name_from_filename,
+    _wg_extract_name_from_text, _wg_upload_conf,
     _qty_order_summary_text,
     _v2_name_from_config, _v2_name_from_sub, _v2_bulk_data_prompt,
     _is_panel_package, _show_naming_prompt,
@@ -2923,7 +2924,120 @@ def universal_handler(message):
             _wg_finish_single(uid, sd, inquiry)
             return
 
-        # ── WireGuard: Bulk shared — collect files ────────────────────────────
+        # ── WireGuard: Single — text config input ─────────────────────────────
+        if sn == "wg_single_text" and is_admin(uid):
+            config_text = (message.text or "").strip()
+            if not config_text or "[Interface]" not in config_text:
+                bot.send_message(uid,
+                    "⚠️ متن کانفیگ معتبر نیست.\n"
+                    "لطفاً یک کانفیگ WireGuard کامل (با بخش <code>[Interface]</code>) ارسال کنید.",
+                    parse_mode="HTML")
+                return
+            file_id, fname = _wg_upload_conf(uid, config_text)
+            state_set(uid, "wg_single_sub_yn",
+                      package_id=sd["package_id"],
+                      wg_files=[file_id], wg_names=[fname],
+                      wg_config_text=config_text)
+            sub_kb = types.InlineKeyboardMarkup()
+            sub_kb.row(
+                types.InlineKeyboardButton("✅ بله، دارد", callback_data=f"adm:wg:sinq:y:{sd['package_id']}"),
+                types.InlineKeyboardButton("❌ خیر", callback_data=f"adm:wg:sinq:n:{sd['package_id']}"),
+            )
+            bot.send_message(uid,
+                f"✅ فایل <code>{esc(fname)}</code> ساخته شد.\n\n"
+                "🔗 آیا این کانفیگ <b>لینک ساب</b> دارد؟",
+                reply_markup=sub_kb, parse_mode="HTML")
+            return
+
+        # ── WireGuard: Bulk text — how many configs ───────────────────────────
+        if sn == "wg_bulk_text_count" and is_admin(uid):
+            total = parse_int(message.text or "")
+            if not total or total <= 0:
+                bot.send_message(uid, "⚠️ عدد معتبر وارد کنید.")
+                return
+            state_set(uid, "wg_bulk_text_collect",
+                      package_id=sd["package_id"],
+                      total_accts=total,
+                      collected_texts=[], collected_names=[])
+            bot.send_message(uid,
+                f"✏️ <b>پیام ۱ از {total}:</b>\n"
+                "متن کانفیگ اول را ارسال کنید:",
+                parse_mode="HTML")
+            return
+
+        # ── WireGuard: Bulk text — collect config texts ───────────────────────
+        if sn == "wg_bulk_text_collect" and is_admin(uid):
+            config_text = (message.text or "").strip()
+            if not config_text or "[Interface]" not in config_text:
+                bot.send_message(uid,
+                    "⚠️ متن کانفیگ معتبر نیست.\n"
+                    "لطفاً یک کانفیگ WireGuard کامل (با بخش <code>[Interface]</code>) ارسال کنید.",
+                    parse_mode="HTML")
+                return
+            total    = sd.get("total_accts", 0)
+            texts    = sd.get("collected_texts", [])
+            names_l  = sd.get("collected_names", [])
+            fids     = sd.get("collected_file_ids", [])
+            # Upload .conf file
+            file_id, fname = _wg_upload_conf(uid, config_text)
+            texts.append(config_text)
+            names_l.append(fname)
+            fids.append(file_id)
+            current = len(texts)
+            if current < total:
+                state_set(uid, "wg_bulk_text_collect",
+                          package_id=sd["package_id"],
+                          total_accts=total,
+                          collected_texts=texts,
+                          collected_names=names_l,
+                          collected_file_ids=fids)
+                bot.send_message(uid,
+                    f"✅ کانفیگ {current} دریافت شد.\n\n"
+                    f"✏️ <b>پیام {current + 1} از {total}:</b>\n"
+                    "متن کانفیگ بعدی را ارسال کنید:",
+                    parse_mode="HTML")
+            else:
+                # All collected → build acct_files/acct_names/acct_texts
+                acct_files = {i + 1: [fids[i]] for i in range(total)}
+                acct_names = {i + 1: [names_l[i]] for i in range(total)}
+                acct_texts = {i + 1: texts[i] for i in range(total)}
+                state_set(uid, "wg_bulk_text_sub_yn",
+                          package_id=sd["package_id"],
+                          total_accts=total,
+                          acct_files=acct_files,
+                          acct_names=acct_names,
+                          acct_texts=acct_texts)
+                sub_kb = types.InlineKeyboardMarkup()
+                sub_kb.row(
+                    types.InlineKeyboardButton("✅ بله، دارند", callback_data=f"adm:wg:btextsub:y:{sd['package_id']}"),
+                    types.InlineKeyboardButton("❌ خیر", callback_data=f"adm:wg:btextsub:n:{sd['package_id']}"),
+                )
+                bot.send_message(uid,
+                    f"✅ همه {total} کانفیگ دریافت شد.\n\n"
+                    "🔗 آیا کانفیگ‌ها <b>لینک ساب</b> دارند؟",
+                    reply_markup=sub_kb, parse_mode="HTML")
+            return
+
+        # ── WireGuard: Bulk text — sub link collection ────────────────────────
+        if sn == "wg_bulk_text_sub" and is_admin(uid):
+            raw   = (message.text or "").strip()
+            total = sd.get("total_accts", 0)
+            inquiries = [l.strip() for l in raw.splitlines() if l.strip()]
+            if len(inquiries) != total:
+                bot.send_message(uid,
+                    f"⚠️ تعداد لینک‌های ساب ({len(inquiries)}) با تعداد کانفیگ‌ها ({total}) مطابقت ندارد.\n"
+                    "لطفاً دوباره وارد کنید.")
+                return
+            pkg_row = get_package(sd["package_id"])
+            _wg_deliver_bulk_diff(uid, pkg_row,
+                                  sd.get("acct_files", {}),
+                                  sd.get("acct_names", {}),
+                                  inquiries,
+                                  sd.get("acct_texts", {}))
+            state_clear(uid)
+            return
+
+
         if sn == "wg_bulk_shared_file" and is_admin(uid):
             if message.document:
                 doc   = message.document

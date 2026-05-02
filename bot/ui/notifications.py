@@ -224,7 +224,7 @@ def deliver_purchase_message(chat_id, purchase_id):
         vol_text    = "نامحدود" if not item["volume_gb"] else f"{item['volume_gb']} گیگ"
         dur_text    = "نامحدود" if not item["duration_days"] else f"{item['duration_days']} روز"
         users_label = _fmt_users_label_d(item["max_users"] if "max_users" in item.keys() else 0)
-        inq_line    = f"\n🔋 Volume web: {inquiry_link}" if inquiry_link else ""
+        inq_line    = f"\n� پنل استعلام حجم و زمان: {inquiry_link}" if inquiry_link else ""
 
         if cfg_type == "ovpn":
             username = cfg_data.get("username", "")
@@ -243,6 +243,7 @@ def deliver_purchase_message(chat_id, purchase_id):
                 f"{inq_line}"
                 f"{expired_note}"
             )
+            _send_file_group_delivery(chat_id, file_ids, caption, kb)
         else:  # wg
             caption = (
                 f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(service_name)}</b>\n"
@@ -254,7 +255,26 @@ def deliver_purchase_message(chat_id, purchase_id):
                 f"{inq_line}"
                 f"{expired_note}"
             )
-        _send_file_group_delivery(chat_id, file_ids, caption, kb)
+            # Generate QR from stored config text or downloaded file content
+            qr_content = cfg_data.get("config_text", "").strip()
+            if not qr_content and file_ids:
+                try:
+                    file_info = bot.get_file(file_ids[0])
+                    downloaded = bot.download_file(file_info.file_path)
+                    qr_content = downloaded.decode("utf-8", errors="ignore").strip()
+                except Exception:
+                    qr_content = ""
+            if qr_content:
+                try:
+                    qr_img = qrcode.make(qr_content)
+                    qr_bio = io.BytesIO()
+                    qr_img.save(qr_bio, format="PNG")
+                    qr_bio.seek(0)
+                    qr_bio.name = "wg_qr.png"
+                    bot.send_photo(chat_id, qr_bio, caption="📷 QR کانفیگ WireGuard", parse_mode="HTML")
+                except Exception:
+                    pass
+            _send_file_group_delivery(chat_id, file_ids, caption, kb)
     else:
         # V2Ray / text-based delivery
         _vol_text_v2  = "نامحدود" if not item["volume_gb"] else f"{item['volume_gb']} گیگ"
