@@ -337,44 +337,65 @@ def _plisio_webhook_server():
 
     import time as _time
     import socket as _socket
+    import os as _os
+    import signal as _signal
     port = int(get_plisio_webhook_port())
     print(f"🌐 Payment webhook server starting on port {port}…")
 
+    # ── Kill only OUR OWN previous instance via PID file ──────────────────────
+    # Do NOT use fuser -k — that would kill other bots on the same server
+    # that happen to share this port number.
+    _pid_file = _os.path.join(_os.path.dirname(__file__), f".webhook_{port}.pid")
+    try:
+        if _os.path.exists(_pid_file):
+            _old_pid = int(open(_pid_file).read().strip())
+            if _old_pid != _os.getpid():
+                try:
+                    _os.kill(_old_pid, _signal.SIGTERM)
+                    print(f"[Webhook] Sent SIGTERM to previous webhook process (PID {_old_pid})")
+                    _time.sleep(1)
+                    try:
+                        _os.kill(_old_pid, _signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                except ProcessLookupError:
+                    pass
+    except Exception as _pid_err:
+        print(f"[Webhook] PID cleanup warning: {_pid_err}")
+    try:
+        open(_pid_file, "w").write(str(_os.getpid()))
+    except Exception:
+        pass
+
     def _make_reuse_server(host, p, app):
-        """Create a Werkzeug server with SO_REUSEADDR (and SO_REUSEPORT on Linux)
-        set on the socket *before* bind so the port is immediately available
-        even if a previous instance just closed."""
+        """Create a Werkzeug server with SO_REUSEADDR + SO_REUSEPORT set on the
+        socket *before* bind so the port is immediately available after restart."""
         from werkzeug.serving import make_server as _wz_make_server
-        import wsgiref.simple_server as _wsr
-        # Build the socket manually with reuse options, then hand it to Werkzeug
         sock = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
         sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
         try:
-            # SO_REUSEPORT (Linux ≥ 3.9) lets multiple sockets share the port—
-            # more importantly it allows immediate rebind after kill -9.
             sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEPORT, 1)
         except (AttributeError, OSError):
-            pass  # not available on all platforms
+            pass
         sock.bind((host, p))
         sock.listen(128)
         srv = _wz_make_server(host, p, app)
-        # Replace the socket Werkzeug already opened with our pre-bound one
         srv.socket.close()
         srv.socket = sock
         return srv
 
-    for _attempt in range(20):
+    for _attempt in range(10):
         try:
             _srv = _make_reuse_server("0.0.0.0", port, _app)
             print(f" * Webhook server listening on 0.0.0.0:{port}")
             _srv.serve_forever()
             break
         except (OSError, SystemExit) as _bind_err:
-            if _attempt < 19:
-                print(f"⚠️ Port {port} still in use, retrying in 3s… (attempt {_attempt + 1}/20)")
-                _time.sleep(3)
+            if _attempt < 9:
+                print(f"⚠️ Port {port} still in use, retrying in 2s… (attempt {_attempt + 1}/10)")
+                _time.sleep(2)
             else:
-                print(f"❌ Cannot bind port {port} after 20 attempts: {_bind_err}")
+                print(f"❌ Cannot bind port {port} after 10 attempts: {_bind_err}")
         except Exception as _bind_err:
             print(f"❌ Webhook server error: {_bind_err}")
             break
