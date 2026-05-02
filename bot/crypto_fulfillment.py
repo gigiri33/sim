@@ -155,8 +155,8 @@ def run_crypto_fulfillment_async(gateway: str, payment_id: int):
 
 
 # ── Tronado auto-polling loop ─────────────────────────────────────────────────
-_TRONADO_POLL_INTERVAL = 120   # seconds between each sweep
-_TRONADO_MAX_AGE_HOURS = 1     # ignore payments older than this (likely abandoned)
+_TRONADO_POLL_INTERVAL = 60    # seconds between each sweep
+_TRONADO_MAX_AGE_HOURS = 2     # ignore payments older than this (likely abandoned)
 
 def _tronado_poll_loop():
     """
@@ -190,12 +190,20 @@ def _tronado_poll_loop():
                 pay_id    = row["id"]
                 token     = row["receipt_text"] or ""
                 try:
-                    resp = get_tronado_payment_status(token) if token else {}
+                    resp = {}
+                    # Try by token first (most specific)
+                    if token:
+                        resp = get_tronado_payment_status(token)
+                    # Always also try by our payment_id prefix (more reliable after confirmation)
                     if not is_tronado_response_paid(resp):
-                        resp = get_tronado_status_by_payment_id(str(pay_id))
+                        resp2 = get_tronado_status_by_payment_id(str(pay_id))
+                        if resp2 and not resp2.get("__http_error"):
+                            resp = resp2
                     if is_tronado_response_paid(resp):
-                        print(f"[Tronado] Auto-poll: payment {pay_id} is PAID — running fulfillment")
+                        print(f"[Tronado] Auto-poll: payment {pay_id} PAID — fulfilling")
                         run_crypto_fulfillment_async("tronado", pay_id)
+                    else:
+                        print(f"[Tronado] Auto-poll: payment {pay_id} not paid yet resp={str(resp)[:120]}")
                 except Exception as _pe:
                     print(f"[Tronado] Auto-poll error for payment {pay_id}: {_pe}")
 

@@ -224,13 +224,13 @@ def get_tronado_payment_status(order_id_or_token: str) -> dict:
     if not api_key or not order_id_or_token:
         return {}
     url = _tronado_order_status_url()
-    # GetStatus requires form-data (JSON returns HTTP 500)
-    form_data = urllib.parse.urlencode({"Id": order_id_or_token}).encode("utf-8")
+    # Per API docs: Content-Type: application/json for all endpoints
+    payload_data = json.dumps({"Id": order_id_or_token}).encode("utf-8")
     req = urllib.request.Request(
         url,
-        data=form_data,
+        data=payload_data,
         headers={
-            "Content-Type": "application/x-www-form-urlencoded",
+            "Content-Type": "application/json",
             "Accept":       "application/json",
             "x-api-key":    api_key,
             "User-Agent":   "ConfigFlow/1.0",
@@ -238,19 +238,20 @@ def get_tronado_payment_status(order_id_or_token: str) -> dict:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=12) as resp:
+        with urllib.request.urlopen(req, timeout=15) as resp:
             raw, parsed = _decode_response_body(resp)
-        print(f"[Tronado] GetStatus({order_id_or_token[:30]}): raw={raw[:300]}")
+        print(f"[Tronado] GetStatus({order_id_or_token[:40]}) HTTP200 raw={raw[:400]}")
         return parsed if isinstance(parsed, dict) else {}
     except urllib.error.HTTPError as e:
         try:
             raw_body = e.read().decode("utf-8", errors="replace").strip()
         except Exception:
             raw_body = ""
-        print(f"[Tronado] GetStatus HTTP {e.code} for {order_id_or_token[:30]}: {raw_body[:200]}")
-        return {}
+        print(f"[Tronado] GetStatus HTTP {e.code} for {order_id_or_token[:40]}: {raw_body[:300]}")
+        # On HTTP error, return a dict with the error text so callers can inspect
+        return {"__http_error": e.code, "__body": raw_body}
     except Exception as exc:
-        print(f"[Tronado] GetStatus error for {order_id_or_token[:30]}: {exc}")
+        print(f"[Tronado] GetStatus network error for {order_id_or_token[:40]}: {exc}")
         return {}
 
 
@@ -267,30 +268,34 @@ def get_tronado_status_by_payment_id(payment_id_str: str) -> dict:
 def is_tronado_response_paid(resp: dict) -> bool:
     """
     Return True if a GetStatus response indicates a paid/confirmed payment.
-    Per API docs the response Data has IsPaid (bool) and OrderStatusTitle (string).
-    Tronado also returns a flat dict with UniqueCode+Hash+Wallet when the payment
-    is confirmed (same structure as the callback payload).
+    Handles every known Tronado response variant.
     """
-    if not resp:
+    if not resp or not isinstance(resp, dict):
         return False
-    # Flat paid-callback format: has UniqueCode and Hash at top level (no Error key)
-    if isinstance(resp, dict) and resp.get("UniqueCode") and resp.get("Hash") and "Error" not in resp:
+    # Skip internal error markers
+    if resp.get("__http_error"):
+        return False
+    # Flat paid-callback format: UniqueCode + Hash at top level (no Error key)
+    if resp.get("UniqueCode") and resp.get("Hash") and "Error" not in resp and "__http_error" not in resp:
         return True
-    data = resp.get("Data") or resp.get("data") or resp
-    if isinstance(data, dict):
-        # Primary check: IsPaid boolean (from API docs)
-        is_paid = data.get("IsPaid") or data.get("isPaid")
-        if is_paid is True:
-            return True
-        # Flat paid format nested inside Data
-        if data.get("UniqueCode") and data.get("Hash") and "Error" not in data:
-            return True
-        # Fallback: check status title string
-        status_val = (
-            data.get("OrderStatusTitle") or data.get("Status") or data.get("status")
-            or data.get("PaymentStatus") or data.get("paymentStatus") or ""
-        )
-        if str(status_val).lower() in ("paid", "completed", "success", "confirmed", "finish", "finished"):
+    # Also: PaymentID + TronAmount flat at top level (classic callback)
+    if resp.get("PaymentID") and resp.get("TronAmount") and "Error" not in resp:
+        return True
+    # Data-wrapped response
+    data = resp.get("Data") or resp.get("data")
+    if not isinstance(data, dict):
+        data = resp
+    # IsPaid boolean (from API docs)
+    is_paid = data.get("IsPaid") or data.get("isPaid")
+    if is_paid is True:
+        return True
+    # UniqueCode+Hash inside Data
+    if data.get("UniqueCode") and data.get("Hash") and "Error" not in data:
+        return True
+    # Status string check
+    for key in ("OrderStatusTitle", "Status", "status", "PaymentStatus", "paymentStatus", "State", "state"):
+        val = data.get(key) or ""
+        if str(val).lower() in ("paid", "completed", "success", "confirmed", "finish", "finished", "done"):
             return True
     return False
 

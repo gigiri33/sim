@@ -296,8 +296,19 @@ def _plisio_webhook_server():
     @_app.route("/tronado/<bot_username>/<int:payment_id>/callback", methods=["POST"])
     def _tronado_callback(bot_username, payment_id):
         try:
-            payload = request.get_json(force=True, silent=True) or {}
-            print(f"[Tronado] Callback HIT payment_id={payment_id} keys={list(payload.keys())} data={str(payload)[:300]}")
+            # Try JSON first, then form-data (Tronado may send either)
+            payload = request.get_json(force=True, silent=True)
+            if not payload:
+                payload = request.form.to_dict() or {}
+            if not payload:
+                # last resort: try to parse raw body
+                try:
+                    import urllib.parse as _up
+                    raw_body = request.get_data(as_text=True)
+                    payload = dict(_up.parse_qsl(raw_body)) if raw_body else {}
+                except Exception:
+                    payload = {}
+            print(f"[Tronado] Callback HIT payment_id={payment_id} content_type={request.content_type} keys={list(payload.keys())} data={str(payload)[:300]}")
             from bot.gateways.tronado import is_tronado_callback_valid as _td_valid
             if not _td_valid(payload):
                 print(f"[Tronado] Callback REJECTED as invalid for payment_id={payment_id}")

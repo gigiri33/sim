@@ -5765,8 +5765,10 @@ def _dispatch_callback(call, uid, data):
         token_rtd_v = payment["receipt_text"] or ""
         order_id_rtd_v = str(payment_id)
         td_resp_r = get_tronado_payment_status(token_rtd_v) if token_rtd_v else {}
+        print(f"[Tronado] verify-renew btn pay_id={payment_id} token_resp={str(td_resp_r)[:200]}")
         if not is_tronado_response_paid(td_resp_r):
             td_resp_r = get_tronado_status_by_payment_id(order_id_rtd_v)
+            print(f"[Tronado] verify-renew btn pay_id={payment_id} id_resp={str(td_resp_r)[:200]}")
         if is_tronado_response_paid(td_resp_r):
             from ..crypto_fulfillment import run_crypto_fulfillment_async
             run_crypto_fulfillment_async("tronado", payment_id)
@@ -7072,8 +7074,10 @@ def _dispatch_callback(call, uid, data):
         order_id_td_v = str(payment_id)
         # Try GetStatus (by token), then GetStatusByPaymentID
         td_resp = get_tronado_payment_status(token_td_v) if token_td_v else {}
+        print(f"[Tronado] verify btn pay_id={payment_id} token_resp={str(td_resp)[:200]}")
         if not is_tronado_response_paid(td_resp):
             td_resp = get_tronado_status_by_payment_id(order_id_td_v)
+            print(f"[Tronado] verify btn pay_id={payment_id} id_resp={str(td_resp)[:200]}")
         if is_tronado_response_paid(td_resp):
             from ..crypto_fulfillment import run_crypto_fulfillment_async
             run_crypto_fulfillment_async("tronado", payment_id)
