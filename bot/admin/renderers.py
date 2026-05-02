@@ -217,10 +217,10 @@ def _user_status_label(status):
         return "⚠️ ناامن"
 
 
-def _show_admin_user_detail(call, user_id, back_to="admin:users"):
+def _show_admin_user_detail(call, user_id):
     row = get_user_detail(user_id)
     if not row:
-        send_or_edit(call, "کاربر یافت نشد.", back_button(back_to))
+        send_or_edit(call, "کاربر یافت نشد.", back_button("admin:users"))
         return
     status_label = _user_status_label(row["status"])
     agent_label  = "🤝 نمایندگی فعال" if row["is_agent"] else "❌ نمایندگی غیرفعال"
@@ -268,7 +268,7 @@ def _show_admin_user_detail(call, user_id, back_to="admin:users"):
     kb.add(types.InlineKeyboardButton("👥 زیرمجموعه‌ها",      callback_data=f"adm:usr:refs:{uid_t}:0"))
     kb.add(types.InlineKeyboardButton("💰 قیمت نمایندگی کاربر", callback_data=f"adm:agcfg:{uid_t}"))
     kb.add(types.InlineKeyboardButton("✉️ پیام خصوصی به کاربر", callback_data=f"adm:usr:dm:{uid_t}"))
-    kb.add(types.InlineKeyboardButton("بازگشت", callback_data=back_to, icon_custom_emoji_id="5253997076169115797"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:users", icon_custom_emoji_id="5253997076169115797"))
     send_or_edit(call, text, kb)
 
 

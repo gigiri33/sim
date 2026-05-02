@@ -1782,7 +1782,7 @@ def _execute_addon_update(config_id, addon_type, sd, uid):
     return True, None
 
 
-def _notify_panel_error(uid, package_row, stage, detail, panel_config_id=None, panel_id=None):
+
     """
     Alert owner admins (ADMIN_IDS) and the error_log group topic
     when a panel config creation or delivery fails.
@@ -4840,38 +4840,6 @@ def _dispatch_callback(call, uid, data):
                 if not pkg_id:
                     failed_config += 1
                     continue  # leave unclaimed — admin must fix package config
-
-                pkg_row = get_package(int(pkg_id))
-                if not pkg_row:
-                    failed_config += 1
-                    continue
-
-                # Check config source — panel packages are generated dynamically
-                try:
-                    config_source = (pkg_row["config_source"] or "manual")
-                except Exception:
-                    config_source = "manual"
-
-                if config_source == "panel":
-                    # Panel package — create config via panel API
-                    try:
-                        ok, result, pc_id, _c_name = _create_panel_config(
-                            uid, int(pkg_id), 0, chat_id=uid, is_test=0
-                        )
-                        if ok and pc_id:
-                            mark_reward_claimed_by_id(row["id"])
-                            delivered_config += 1
-                            try:
-                                _deliver_panel_config_to_user(uid, pc_id, pkg_row)
-                            except Exception:
-                                pass
-                        else:
-                            failed_config += 1
-                    except Exception:
-                        failed_config += 1
-                    continue
-
-                # Manual/stock packages
                 available = get_available_configs_for_package(int(pkg_id))
                 if not available:
                     failed_config += 1
@@ -13561,7 +13529,7 @@ def _dispatch_callback(call, uid, data):
     if data.startswith("adm:agt:u:"):
         target_uid = int(data.split(":")[3])
         bot.answer_callback_query(call.id)
-        _show_admin_user_detail(call, target_uid, back_to="admin:agents")
+        _show_admin_user_detail(call, target_uid)
         return
 
     if data.startswith("adm:agt:rm:"):
@@ -14083,7 +14051,8 @@ def _dispatch_callback(call, uid, data):
             return
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("📣 فوروارد همگانی", callback_data="adm:bc:fwd"))
-        kb.add(types.InlineKeyboardButton(" مدیریت پیام‌های پین شده", callback_data="adm:pin"))
+        kb.add(types.InlineKeyboardButton("📌 پین همگانی",     callback_data="adm:bc:pin"))
+        kb.add(types.InlineKeyboardButton("📋 مدیریت پیام‌های پین شده", callback_data="adm:pin"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "📣 <b>فوروارد و پین همگانی</b>\n\nیک گزینه را انتخاب کنید:", kb)
@@ -17637,7 +17606,7 @@ def _dispatch_callback(call, uid, data):
                 types.InlineKeyboardButton("✏️", callback_data=f"adm:pin:edit:{p['id']}"),
                 types.InlineKeyboardButton("🗑", callback_data=f"adm:pin:del:{p['id']}"),
             )
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:broadcast", icon_custom_emoji_id="5253997076169115797"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
         count_text = f"{len(pins)} پیام" if pins else "هیچ پیامی ثبت نشده"
         send_or_edit(call, f"📌 <b>پیام‌های پین شده</b>\n\n{count_text}", kb)
         return
@@ -17764,18 +17733,6 @@ def _dispatch_callback(call, uid, data):
         return
 
     # ── Admin: Discount Codes ─────────────────────────────────────────────────
-    if data == "admin:gifts_menu":
-        if not is_admin(uid):
-            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
-            return
-        bot.answer_callback_query(call.id)
-        kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("🎟 کد تخفیف",  callback_data="admin:discounts"))
-        kb.add(types.InlineKeyboardButton("🎁 کارت هدیه", callback_data="admin:vouchers"))
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
-        send_or_edit(call, "🎁 <b>تخفیف و کارت هدیه</b>\n\nیک گزینه را انتخاب کنید:", kb)
-        return
-
     if data == "admin:discounts":
         if not is_admin(uid):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)

@@ -186,13 +186,10 @@ def is_tronado_callback_valid(payload: dict) -> bool:
     """
     if not isinstance(payload, dict):
         return False
-    print(f"[Tronado] Incoming callback payload keys: {list(payload.keys())} | data: {str(payload)[:400]}")
     has_id = bool(
         payload.get("PaymentID") or payload.get("paymentId")
         or payload.get("payment_id") or payload.get("OrderId") or payload.get("orderId")
         or payload.get("TronAmount") or payload.get("tronAmount")
-        or payload.get("Token") or payload.get("token")
-        or payload.get("OrderToken") or payload.get("orderToken")
     )
     return has_id
 

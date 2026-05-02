@@ -297,10 +297,8 @@ def _plisio_webhook_server():
     def _tronado_callback(bot_username, payment_id):
         try:
             payload = request.get_json(force=True, silent=True) or {}
-            print(f"[Tronado] Callback received for payment_id={payment_id}, bot={bot_username}, payload={str(payload)[:400]}")
             from bot.gateways.tronado import is_tronado_callback_valid as _td_valid
             if not _td_valid(payload):
-                print(f"[Tronado] Callback rejected as invalid for payment_id={payment_id}")
                 return jsonify({"status": "ok"}), 200
 
             payment = get_payment(payment_id)
@@ -347,7 +345,7 @@ def _plisio_webhook_server():
     # ── Kill only OUR OWN previous instance via PID file ──────────────────────
     # Do NOT use fuser -k — that would kill other bots on the same server
     # that happen to share this port number.
-    _pid_file = _os.path.join(_os.path.dirname(__file__), f".webhook_{port}.pid")
+    _pid_file = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), f".webhook_{port}.pid")
     try:
         if _os.path.exists(_pid_file):
             _old_pid = int(open(_pid_file).read().strip())
@@ -370,21 +368,21 @@ def _plisio_webhook_server():
         pass
 
     def _make_reuse_server(host, p, app):
-        """Create a Werkzeug server with SO_REUSEADDR + SO_REUSEPORT set on the
-        socket *before* bind so the port is immediately available after restart."""
-        from werkzeug.serving import make_server as _wz_make_server
-        sock = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
-        sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
-        try:
-            sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEPORT, 1)
-        except (AttributeError, OSError):
-            pass
-        sock.bind((host, p))
-        sock.listen(128)
-        srv = _wz_make_server(host, p, app)
-        srv.socket.close()
-        srv.socket = sock
-        return srv
+        """Subclass Werkzeug's server to set SO_REUSEADDR + SO_REUSEPORT
+        *before* the actual bind call inside server_bind(), so Linux allows
+        multiple bot processes to co-exist on the same port."""
+        from werkzeug.serving import BaseWSGIServer as _WS, WSGIRequestHandler as _RH
+
+        class _ReuseServer(_WS):
+            def server_bind(self):
+                self.socket.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+                try:
+                    self.socket.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEPORT, 1)
+                except (AttributeError, OSError):
+                    pass
+                super().server_bind()
+
+        return _ReuseServer(host, p, app, _RH)
 
     for _attempt in range(10):
         try:
