@@ -68,7 +68,11 @@ def send_or_edit(call_or_msg, text, reply_markup=None, disable_preview=True):
                 message_thread_id=_thread_id,
             )
     except Exception as _e1:
-        _log.warning("send_or_edit primary failed: %s", _e1)
+        _e1_str = str(_e1)
+        # "no text in the message to edit" means the message has no text (photo/sticker).
+        # Skip the warning for this expected case and go straight to send_message.
+        if "no text in the message" not in _e1_str.lower():
+            _log.warning("send_or_edit primary failed: %s", _e1)
         try:
             bot.send_message(_chat_id, text,
                              parse_mode="HTML",

@@ -5763,7 +5763,7 @@ def _dispatch_callback(call, uid, data):
             return
         bot.answer_callback_query(call.id, "⏳ در حال بررسی وضعیت پرداخت…", show_alert=False)
         token_rtd_v = payment["receipt_text"] or ""
-        order_id_rtd_v = f"tronado-renew-{payment_id}"
+        order_id_rtd_v = str(payment_id)
         td_resp_r = get_tronado_payment_status(token_rtd_v) if token_rtd_v else {}
         if not is_tronado_response_paid(td_resp_r):
             td_resp_r = get_tronado_status_by_payment_id(order_id_rtd_v)
@@ -5806,7 +5806,7 @@ def _dispatch_callback(call, uid, data):
                                     status="pending", config_id=item["config_id"])
         _bot_uname_rtd = bot.get_me().username or ""
         cb_url_rtd = build_tronado_callback_url(payment_id, _bot_uname_rtd)
-        order_id_rtd = f"tronado-renew-{payment_id}"
+        order_id_rtd = str(payment_id)
         success, result = get_tronado_order_token(final_rprice_td, order_id_rtd, uid,
                                                    f"تمدید {package_row['name']}", cb_url_rtd)
         if not success:
@@ -7037,7 +7037,7 @@ def _dispatch_callback(call, uid, data):
             return
         bot.answer_callback_query(call.id, "⏳ در حال بررسی وضعیت پرداخت…", show_alert=False)
         token_td_v = payment["receipt_text"] or ""
-        order_id_td_v = f"tronado-cfg-{payment_id}"
+        order_id_td_v = str(payment_id)
         # Try GetStatus (by token), then GetStatusByPaymentID
         td_resp = get_tronado_payment_status(token_td_v) if token_td_v else {}
         if not is_tronado_response_paid(td_resp):
@@ -7079,7 +7079,7 @@ def _dispatch_callback(call, uid, data):
             set_payment_service_names(payment_id, _snames_td)
         _bot_uname_td = bot.get_me().username or ""
         cb_url_td = build_tronado_callback_url(payment_id, _bot_uname_td)
-        order_id_td2 = f"tronado-cfg-{payment_id}"
+        order_id_td2 = str(payment_id)
         success, result = get_tronado_order_token(final_td_price, order_id_td2, uid,
                                                    f"خرید {package_row['name']}", cb_url_td)
         if not success:
@@ -10213,7 +10213,7 @@ def _dispatch_callback(call, uid, data):
                                         status="pending", config_id=config_id)
             _bot_uname_tpnl = bot.get_me().username or ""
             cb_url_tpnl = build_tronado_callback_url(payment_id, _bot_uname_tpnl)
-            order_id_tpnl = f"tronado-pnl-{payment_id}"
+            order_id_tpnl = str(payment_id)
             success_td_pnl, result_td_pnl = get_tronado_order_token(
                 final_td_pnl, order_id_tpnl, uid,
                 f"تمدید {package_row['name']}", cb_url_tpnl
@@ -10264,9 +10264,9 @@ def _dispatch_callback(call, uid, data):
             token_pnltd_v = payment["receipt_text"] or ""
             td_resp_pnl = get_tronado_payment_status(token_pnltd_v) if token_pnltd_v else {}
             if not is_tronado_response_paid(td_resp_pnl):
-                td_resp_pnl = get_tronado_status_by_payment_id(f"tronado-pnl-{payment_id}")
+                td_resp_pnl = get_tronado_status_by_payment_id(str(payment_id))
             if not is_tronado_response_paid(td_resp_pnl):
-                td_resp_pnl = get_tronado_status_by_payment_id(f"tronado-pnlrenew-{payment_id}")
+                pass  # single ID lookup is sufficient
             if is_tronado_response_paid(td_resp_pnl):
                 if not complete_payment(payment_id):
                     bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True); return
@@ -10603,7 +10603,7 @@ def _dispatch_callback(call, uid, data):
                                         status="pending", config_id=config_id)
             _bot_uname_td_pnl = bot.get_me().username or ""
             cb_url_td_pnl = build_tronado_callback_url(payment_id, _bot_uname_td_pnl)
-            order_id_td_pnl = f"tronado-pnlrenew-{payment_id}"
+            order_id_td_pnl = str(payment_id)
             success_td, result_td = get_tronado_order_token(final_price_td, order_id_td_pnl, uid,
                                                              f"تمدید {package_row['name']}", cb_url_td_pnl)
             if not success_td:
@@ -10646,9 +10646,9 @@ def _dispatch_callback(call, uid, data):
             token_pnltd2_v = payment["receipt_text"] or ""
             td_resp_pnl2 = get_tronado_payment_status(token_pnltd2_v) if token_pnltd2_v else {}
             if not is_tronado_response_paid(td_resp_pnl2):
-                td_resp_pnl2 = get_tronado_status_by_payment_id(f"tronado-pnlrenew-{payment_id}")
+                td_resp_pnl2 = get_tronado_status_by_payment_id(str(payment_id))
             if not is_tronado_response_paid(td_resp_pnl2):
-                td_resp_pnl2 = get_tronado_status_by_payment_id(f"tronado-pnl-{payment_id}")
+                pass  # single ID lookup is sufficient
             if is_tronado_response_paid(td_resp_pnl2):
                 if not complete_payment(payment_id):
                     bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True); return
