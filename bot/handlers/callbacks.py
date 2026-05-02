@@ -5796,8 +5796,8 @@ def _dispatch_callback(call, uid, data):
             return
         if payment["status"] == "pending":
             reject_payment(payment_id, "منقضی شده — لغو توسط کاربر برای ایجاد سفارش جدید")
-        config_id_rretry  = payment.get("config_id") or 0
-        package_id_rretry = payment.get("package_id") or 0
+        config_id_rretry  = payment["config_id"] or 0
+        package_id_rretry = payment["package_id"] or 0
         bot.answer_callback_query(call.id, "✅ سفارش قبلی لغو شد.", show_alert=False)
         if config_id_rretry and package_id_rretry:
             send_or_edit(call, "✅ سفارش قبلی لغو شد.\n\nدرحال انتقال به صفحه تمدید…",
@@ -7080,7 +7080,7 @@ def _dispatch_callback(call, uid, data):
             _td_error = (td_resp.get("Error") or td_resp.get("error") or "") if td_resp else ""
             _td_expired = not td_resp or "no order found" in str(_td_error).lower()
             if _td_expired:
-                pkg_id_td_v = payment.get("package_id") or 0
+                pkg_id_td_v = payment["package_id"] or 0
                 _kb_exp = types.InlineKeyboardMarkup()
                 if pkg_id_td_v:
                     _kb_exp.add(types.InlineKeyboardButton("🔄 ساخت سفارش جدید", callback_data=f"pay:tronado:cancel_retry:{payment_id}"))
@@ -7104,7 +7104,7 @@ def _dispatch_callback(call, uid, data):
             return
         if payment["status"] == "pending":
             reject_payment(payment_id, "منقضی شده — لغو توسط کاربر برای ایجاد سفارش جدید")
-        pkg_id_retry = payment.get("package_id") or 0
+        pkg_id_retry = payment["package_id"] or 0
         bot.answer_callback_query(call.id, "✅ سفارش قبلی لغو شد.", show_alert=False)
         if pkg_id_retry:
             send_or_edit(call,
