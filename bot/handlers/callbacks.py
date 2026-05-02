@@ -17764,6 +17764,18 @@ def _dispatch_callback(call, uid, data):
         return
 
     # ── Admin: Discount Codes ─────────────────────────────────────────────────
+    if data == "admin:gifts_menu":
+        if not is_admin(uid):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("🎟 کد تخفیف",  callback_data="admin:discounts"))
+        kb.add(types.InlineKeyboardButton("🎁 کارت هدیه", callback_data="admin:vouchers"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
+        send_or_edit(call, "🎁 <b>تخفیف و کارت هدیه</b>\n\nیک گزینه را انتخاب کنید:", kb)
+        return
+
     if data == "admin:discounts":
         if not is_admin(uid):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
