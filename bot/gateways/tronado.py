@@ -84,12 +84,22 @@ def get_tronado_order_token(amount_toman: int, order_id: str, user_id: int,
     tron_amount = round(amount_toman / trx_irt, 6)
     print(f"[Tronado] TRX rate: {trx_irt}, toman: {amount_toman}, TronAmount: {tron_amount}")
 
+    # wageFromBusinessPercentage: 100 = merchant absorbs Tronado's 20% fee
+    # (customer pays exactly TronAmount — no surprise surcharges)
+    # Set lower if you want Tronado to add part of their fee to the customer's bill.
+    try:
+        wage_pct = int(setting_get("tronado_wage_from_business", "100") or "100")
+        wage_pct = max(0, min(100, wage_pct))
+    except ValueError:
+        wage_pct = 100
     payload = {
-        "TronAmount":     tron_amount,
-        "PaymentID":      str(order_id),
-        "UserTelegramId": int(user_id),
-        "WalletAddress":  wallet_address,
-        "Description":    (description or "")[:200],
+        "TronAmount":              tron_amount,
+        "PaymentID":               str(order_id),
+        "UserTelegramId":          int(user_id),
+        "WalletAddress":           wallet_address,
+        "Description":             (description or "")[:200],
+        "wageFromBusinessPercentage": wage_pct,
+        "apiVersion":              1,
     }
     if callback_url and (callback_url.startswith("https://") or callback_url.startswith("http://")):
         payload["CallbackUrl"] = callback_url
@@ -134,15 +144,19 @@ def get_tronado_order_token(amount_toman: int, order_id: str, user_id: int,
     if not isinstance(parsed, dict):
         return False, {"error": f"پاسخ ناشناخته از API ترونادو: {str(parsed)[:300]}", "raw": parsed}
 
-    # Normalize token field — API may use different capitalizations
-    data_inner = parsed.get("data") or parsed.get("Data")
+    # Normalize token field — API returns Data.Token and Data.FullPaymentUrl
+    data_inner = parsed.get("Data") or parsed.get("data")
     if isinstance(data_inner, dict):
         token = (
             data_inner.get("Token") or data_inner.get("token")
             or data_inner.get("OrderToken") or data_inner.get("orderToken")
         )
+        full_pay_url = (
+            data_inner.get("FullPaymentUrl") or data_inner.get("fullPaymentUrl") or ""
+        )
     else:
         token = None
+        full_pay_url = ""
 
     if not token:
         token = (
@@ -154,7 +168,8 @@ def get_tronado_order_token(amount_toman: int, order_id: str, user_id: int,
         err_msg = _extract_error(parsed)
         return False, {"error": f"خطا در دریافت توکن از ترونادو:\n{err_msg}", "raw": parsed}
 
-    payment_url = build_tronado_payment_url(str(token))
+    # Prefer FullPaymentUrl from API; fall back to building from token
+    payment_url = full_pay_url if full_pay_url else build_tronado_payment_url(str(token))
     return True, {
         "token":       str(token),
         "payment_url": payment_url,
@@ -167,31 +182,43 @@ def is_tronado_callback_valid(payload: dict) -> bool:
     """
     Return True if the incoming POST payload looks like a valid Tronado payment callback.
     Tronado only sends a callback on SUCCESSFUL payment, so any valid callback = paid.
-    Accept any payload that has at least one recognisable id or token field.
+    Per docs callback body includes: PaymentID, TronAmount, ActualTronAmount, Wallet, CallbackUrl.
     """
     if not isinstance(payload, dict):
         return False
     has_id = bool(
         payload.get("PaymentID") or payload.get("paymentId")
         or payload.get("payment_id") or payload.get("OrderId") or payload.get("orderId")
-        or payload.get("Token") or payload.get("token")
+        or payload.get("TronAmount") or payload.get("tronAmount")
     )
     return has_id
 
 
-def get_tronado_payment_status(token: str) -> dict:
+TRONADO_STATUS_BASE_URL = "https://bot.tronado.cloud"
+
+
+def _tronado_order_status_url() -> str:
+    """The GetStatus endpoint lives outside the versioned API path."""
+    base = (setting_get("tronado_api_base_url", "") or "").strip().rstrip("/")
+    # Strip /api/vN suffix if present — GetStatus uses /Order/GetStatus without versioning
+    import re as _re
+    root = _re.sub(r"/api/v\d+$", "", base) if base else TRONADO_STATUS_BASE_URL
+    return f"{root}/Order/GetStatus"
+
+
+def get_tronado_payment_status(order_id_or_token: str) -> dict:
     """
-    Call POST /GetStatus with the order token.
+    Call POST /Order/GetStatus with the order token (or Tronado order ID).
+    Per docs: Id can be the Tronado order token, or trndorderid_{our_payment_id}, or TXID.
     Returns parsed response dict, or {} on failure.
-    A paid payment has Status == 'Paid' (case-insensitive) in the data.
     """
     api_key = (setting_get("tronado_api_key", "") or "").strip()
-    if not api_key or not token:
+    if not api_key or not order_id_or_token:
         return {}
-    base_url = get_tronado_base_url()
-    payload_data = json.dumps({"Token": token}).encode("utf-8")
+    url = _tronado_order_status_url()
+    payload_data = json.dumps({"Id": order_id_or_token}).encode("utf-8")
     req = urllib.request.Request(
-        f"{base_url}/GetStatus",
+        url,
         data=payload_data,
         headers={
             "Content-Type": "application/json",
@@ -204,7 +231,7 @@ def get_tronado_payment_status(token: str) -> dict:
     try:
         with urllib.request.urlopen(req, timeout=12) as resp:
             _, parsed = _decode_response_body(resp)
-        print(f"[Tronado] GetStatus({token[:12]}…): {str(parsed)[:200]}")
+        print(f"[Tronado] GetStatus({order_id_or_token[:16]}…): {str(parsed)[:200]}")
         return parsed if isinstance(parsed, dict) else {}
     except Exception as exc:
         print(f"[Tronado] GetStatus error: {exc}")
@@ -213,49 +240,34 @@ def get_tronado_payment_status(token: str) -> dict:
 
 def get_tronado_status_by_payment_id(payment_id_str: str) -> dict:
     """
-    Call POST /GetStatusByPaymentID with the PaymentID we originally sent.
-    Returns parsed response dict, or {} on failure.
+    Call POST /Order/GetStatus using the trndorderid_ prefix with our original PaymentID.
+    Per docs: Id can be 'trndorderid_{our_order_id}'.
     """
-    api_key = (setting_get("tronado_api_key", "") or "").strip()
-    if not api_key or not payment_id_str:
+    if not payment_id_str:
         return {}
-    base_url = get_tronado_base_url()
-    payload_data = json.dumps({"PaymentID": payment_id_str}).encode("utf-8")
-    req = urllib.request.Request(
-        f"{base_url}/GetStatusByPaymentID",
-        data=payload_data,
-        headers={
-            "Content-Type": "application/json",
-            "Accept":       "application/json",
-            "x-api-key":    api_key,
-            "User-Agent":   "ConfigFlow/1.0",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=12) as resp:
-            _, parsed = _decode_response_body(resp)
-        print(f"[Tronado] GetStatusByPaymentID({payment_id_str}): {str(parsed)[:200]}")
-        return parsed if isinstance(parsed, dict) else {}
-    except Exception as exc:
-        print(f"[Tronado] GetStatusByPaymentID error: {exc}")
-        return {}
+    return get_tronado_payment_status(f"trndorderid_{payment_id_str}")
 
 
 def is_tronado_response_paid(resp: dict) -> bool:
     """
-    Return True if a GetStatus / GetStatusByPaymentID response indicates a paid/confirmed payment.
+    Return True if a GetStatus response indicates a paid/confirmed payment.
+    Per API docs the response Data has IsPaid (bool) and OrderStatusTitle (string).
     """
     if not resp:
         return False
-    # Check nested data object first
-    data = resp.get("data") or resp.get("Data") or resp
+    data = resp.get("Data") or resp.get("data") or resp
     if isinstance(data, dict):
+        # Primary check: IsPaid boolean (from API docs)
+        is_paid = data.get("IsPaid") or data.get("isPaid")
+        if is_paid is True:
+            return True
+        # Fallback: check status title string
         status_val = (
-            data.get("Status") or data.get("status")
+            data.get("OrderStatusTitle") or data.get("Status") or data.get("status")
             or data.get("PaymentStatus") or data.get("paymentStatus") or ""
         )
-        return str(status_val).lower() in ("paid", "completed", "success", "confirmed", "finish", "finished")
+        if str(status_val).lower() in ("paid", "completed", "success", "confirmed", "finish", "finished"):
+            return True
     return False
 
 
