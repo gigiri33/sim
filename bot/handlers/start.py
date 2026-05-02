@@ -65,6 +65,7 @@ def start_handler(message):
                         notify_referral_join,
                         _channel_reward_required,
                         send_captcha_prompt,
+                        has_pending_captcha,
                     )
                     try:
                         notify_referral_join(referrer_id, uid)
@@ -79,7 +80,6 @@ def start_handler(message):
                         if check_channel_membership(uid):
                             # Mark channel_joined and potentially give reward / show captcha
                             try_give_referral_start_reward_for_channel_join(uid)
-                        # else: reward deferred until user confirms channel membership
                     else:
                         # start_only mode — give reward immediately (or show captcha first)
                         captcha_enabled = setting_get("referral_captcha_enabled", "1") == "1"
@@ -87,6 +87,13 @@ def start_handler(message):
                             send_captcha_prompt(uid)
                         else:
                             check_and_give_referral_start_reward(referrer_id)
+
+                    # If a captcha was sent, stop here — do NOT show main menu yet
+                    try:
+                        if has_pending_captcha(uid):
+                            return
+                    except Exception:
+                        pass
             except (ValueError, Exception):
                 pass
 
@@ -128,8 +135,11 @@ def start_handler(message):
     # the channel externally and then hit /start again instead of the button).
     _invalidate_channel_cache(uid)
     try:
-        from ..ui.notifications import try_give_referral_start_reward_for_channel_join
+        from ..ui.notifications import try_give_referral_start_reward_for_channel_join, has_pending_captcha
         try_give_referral_start_reward_for_channel_join(uid)
+        # If a captcha was sent as part of the reward flow, stop here
+        if has_pending_captcha(uid):
+            return
     except Exception:
         pass
 

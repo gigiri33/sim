@@ -139,7 +139,6 @@ def kb_admin_panel(uid=None):
 
     # License management — always visible to owner
     if is_owner:
-        rows.append([_btn("🔍 بررسی پرداخت‌های کریپتو", callback_data="admin:crypto_pay_check")])
         from ..license_manager import is_limited_mode as _is_limited
         if _is_limited():
             rows.append([_btn("🔐 فعال‌سازی لایسنس", callback_data="license:activate")])

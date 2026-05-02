@@ -813,6 +813,52 @@ def _give_referral_reward(referrer_id, reward_prefix):
         pkg = get_package(int(pkg_id))
         if not pkg:
             return
+
+        # Determine config source — panel packages are created dynamically
+        try:
+            config_source = (pkg["config_source"] if hasattr(pkg, "__getitem__") else "manual") or "manual"
+        except Exception:
+            config_source = "manual"
+
+        if config_source == "panel":
+            # Panel package — create config dynamically via panel API
+            try:
+                from ..handlers.callbacks import _create_panel_config, _deliver_panel_config_to_user
+                ok, result, pc_id, _c_name = _create_panel_config(
+                    referrer_id, int(pkg_id), 0, chat_id=referrer_id, is_test=0
+                )
+                if ok and pc_id:
+                    try:
+                        bot.send_message(
+                            referrer_id,
+                            "🎁 <b>پاداش زیرمجموعه‌گیری!</b>\n\n"
+                            "✅ یک کانفیگ رایگان به سرویس‌های شما اضافه شد! 🎉",
+                            parse_mode="HTML"
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        _deliver_panel_config_to_user(referrer_id, pc_id, pkg)
+                    except Exception:
+                        pass
+                    return
+            except Exception:
+                pass
+            # Panel config creation failed — queue as pending for later retry
+            add_pending_reward(referrer_id, "config", 0, int(pkg_id), source)
+            try:
+                bot.send_message(
+                    referrer_id,
+                    "🎁 <b>پاداش زیرمجموعه‌گیری!</b>\n\n"
+                    "⚠️ در حال حاضر امکان ساخت سرویس وجود ندارد.\n"
+                    "پاداش شما ذخیره شد و به محض رفع مشکل، از بخش دعوت دوستان → «🎁 دریافت پاداش» قابل دریافت است.",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+            return
+
+        # Manual/stock packages — deliver from stock
         available = get_available_configs_for_package(int(pkg_id))
         if available:
             cfg = available[0]
