@@ -297,8 +297,10 @@ def _plisio_webhook_server():
     def _tronado_callback(bot_username, payment_id):
         try:
             payload = request.get_json(force=True, silent=True) or {}
+            print(f"[Tronado] Callback received for payment_id={payment_id}, bot={bot_username}, payload={str(payload)[:400]}")
             from bot.gateways.tronado import is_tronado_callback_valid as _td_valid
             if not _td_valid(payload):
+                print(f"[Tronado] Callback rejected as invalid for payment_id={payment_id}")
                 return jsonify({"status": "ok"}), 200
 
             payment = get_payment(payment_id)
