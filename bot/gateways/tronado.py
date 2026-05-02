@@ -85,14 +85,14 @@ def get_tronado_order_token(amount_toman: int, order_id: str, user_id: int,
     tron_amount = round(amount_toman / trx_irt, 6)
     print(f"[Tronado] TRX rate: {trx_irt}, toman: {amount_toman}, TronAmount: {tron_amount}")
 
-    # wageFromBusinessPercentage: 100 = merchant absorbs Tronado's 20% fee
-    # (customer pays exactly TronAmount — no surprise surcharges)
-    # Set lower if you want Tronado to add part of their fee to the customer's bill.
+    # wageFromBusinessPercentage: 0 = customer pays Tronado's fee on top
+    # (merchant absorbs nothing — customer sees the surcharge)
+    # Default is 0; configurable via tronado_wage_from_business setting.
     try:
-        wage_pct = int(setting_get("tronado_wage_from_business", "100") or "100")
+        wage_pct = int(setting_get("tronado_wage_from_business", "0") or "0")
         wage_pct = max(0, min(100, wage_pct))
     except ValueError:
-        wage_pct = 100
+        wage_pct = 0
     payload = {
         "TronAmount":              tron_amount,
         "PaymentID":               str(order_id),
@@ -100,7 +100,7 @@ def get_tronado_order_token(amount_toman: int, order_id: str, user_id: int,
         "WalletAddress":           wallet_address,
         "Description":             (description or "")[:200],
         "wageFromBusinessPercentage": wage_pct,
-        "apiVersion":              1,
+        "apiVersion":              3,
     }
     if callback_url and (callback_url.startswith("https://") or callback_url.startswith("http://")):
         payload["CallbackUrl"] = callback_url

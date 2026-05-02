@@ -53,13 +53,14 @@ def kb_main(user_id):
     ])
     ref_on     = setting_get("referral_enabled", "1") == "1"
     voucher_on = setting_get("vouchers_enabled", "1") == "1"
+    _ref_btn_title = setting_get("referral_button_title", "").strip() or "💼 زیرمجموعه‌گیری 🎉"
     if ref_on and voucher_on:
         rows.append([
-            _btn("دعوت دوستان",    callback_data="referral:menu",   emoji_id="5453957997418004470"),
+            _btn(_ref_btn_title,    callback_data="referral:menu",   emoji_id="5453957997418004470"),
             _btn("ثبت کارت هدیه", callback_data="voucher:redeem",  emoji_id="5418010521309815154"),
         ])
     elif ref_on:
-        rows.append([_btn("دعوت دوستان",    callback_data="referral:menu",  emoji_id="5453957997418004470")])
+        rows.append([_btn(_ref_btn_title,    callback_data="referral:menu",  emoji_id="5453957997418004470")])
     elif voucher_on:
         rows.append([_btn("ثبت کارت هدیه", callback_data="voucher:redeem", emoji_id="5418010521309815154")])
     rows.append([_btn("ارتباط با پشتیبانی", callback_data="support", emoji_id="5467539229468793355")])

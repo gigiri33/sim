@@ -32,6 +32,7 @@ from ..db import (
     set_user_restricted,
     set_referral_captcha_verified,
     set_referral_captcha_failed,
+    claim_invitee_reward,
 )
 from ..helpers import esc, fmt_price, now_str, move_leading_emoji
 from ..bot_instance import bot
@@ -1160,6 +1161,75 @@ def check_and_give_referral_purchase_reward(buyer_user_id):
     # Loop: give one reward per complete batch claimed atomically
     while try_claim_purchase_reward_batch(referrer_id, required_count):
         _give_referral_reward(referrer_id, "referral_purchase_reward")
+
+
+def give_invitee_reward(referee_id: int, referrer_id: int) -> None:
+    """
+    Give a one-time welcome reward to a new user (referee) who joined via referral link.
+    Atomically idempotent: safe to call multiple times, only rewards on first call.
+    """
+    if setting_get("referral_enabled", "1") != "1":
+        return
+    if setting_get("ref_invitee_reward_enabled", "0") != "1":
+        return
+    if not claim_invitee_reward(referee_id):
+        # already claimed or no referral row
+        return
+
+    ir_type = setting_get("ref_invitee_reward_type", "wallet")
+    inviter_user = get_user(referrer_id)
+    inviter_name = esc(inviter_user.get("full_name", "") or str(referrer_id)) if inviter_user else esc(str(referrer_id))
+
+    if ir_type == "wallet":
+        amount = int(setting_get("ref_invitee_reward_amount", "0") or "0")
+        if amount <= 0:
+            return
+        update_balance(referee_id, amount)
+        try:
+            bot.send_message(
+                referee_id,
+                f"🎁 <b>هدیه خوش‌آمدگویی!</b>\n\n"
+                f"به دعوت {inviter_name} عضو شدید و "
+                f"<b>{fmt_price(amount)} تومان</b> به کیف پول شما اضافه شد. 🎉",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+    else:
+        pkg_id_str = setting_get("ref_invitee_reward_package_id", "")
+        if not pkg_id_str or not pkg_id_str.isdigit():
+            return
+        pkg_id = int(pkg_id_str)
+        pkg = get_package(pkg_id)
+        if not pkg:
+            return
+        configs = get_available_configs_for_package(pkg_id, 1)
+        if configs:
+            cfg = configs[0]
+            assign_config_to_user(cfg["id"], referee_id)
+            try:
+                bot.send_message(
+                    referee_id,
+                    f"🎁 <b>هدیه خوش‌آمدگویی!</b>\n\n"
+                    f"به دعوت {inviter_name} عضو شدید و یک کانفیگ رایگان "
+                    f"از پکیج <b>{esc(pkg['name'])}</b> برای شما فعال شد. 🎉",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+        else:
+            # No config available right now – add to pending
+            add_pending_reward(referee_id, pkg_id)
+            try:
+                bot.send_message(
+                    referee_id,
+                    f"🎁 <b>هدیه خوش‌آمدگویی!</b>\n\n"
+                    f"به دعوت {inviter_name} عضو شدید. "
+                    f"کانفیگ رایگان شما به‌زودی ارسال می‌شود. ⏳",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
 
 
 # ── Referral Anti-Spam Detection ───────────────────────────────────────────────

@@ -311,6 +311,15 @@ def show_referral_menu(target, user_id):
     if not reward_text:
         reward_text = f"{ce('🎁', '5215628200578655810')} هدیه‌ها هنوز توسط ادمین تنظیم نشده است.\n"
 
+    # Invitee reward info (shown in the referral menu for the current user as well)
+    if setting_get("ref_invitee_reward_enabled", "0") == "1":
+        ir_type = setting_get("ref_invitee_reward_type", "wallet")
+        if ir_type == "wallet":
+            ir_amount = int(setting_get("ref_invitee_reward_amount", "0") or "0")
+            reward_text += f"🎁 <b>هدیه دعوت‌شونده:</b> دوستان دعوت‌شده <b>{fmt_price(ir_amount)} تومان</b> موجودی کیف پول هدیه می‌گیرند\n"
+        else:
+            reward_text += f"🎁 <b>هدیه دعوت‌شونده:</b> دوستان دعوت‌شده یک کانفیگ رایگان هدیه می‌گیرند\n"
+
     # ── Pending reward summary ─────────────────────────────────────────────────
     pending_summary = get_pending_rewards_summary(user_id)
     pending_wallet  = pending_summary["wallet_total"]
@@ -353,9 +362,16 @@ def show_referral_menu(target, user_id):
             f"✅ سرعت فوق‌العاده\n"
             f"✅ پایداری بالا\n"
             f"✅ پشتیبانی ۲۴ ساعته\n\n"
-            # NOTE: share text uses plain emojis (custom emojis can't render outside bot context)
-            f"تو هم از لینک من وارد شو و سرویست رو بخر 👇"
         )
+        if setting_get("ref_invitee_reward_enabled", "0") == "1":
+            ir_type_sb = setting_get("ref_invitee_reward_type", "wallet")
+            if ir_type_sb == "wallet":
+                ir_amount_sb = int(setting_get("ref_invitee_reward_amount", "0") or "0")
+                share_body += f"🎁 با این لینک ثبت‌نام کنی {fmt_price(ir_amount_sb)} تومان موجودی هدیه می‌گیری!\n\n"
+            else:
+                share_body += f"🎁 با این لینک ثبت‌نام کنی یک کانفیگ رایگان هدیه می‌گیری!\n\n"
+        # NOTE: share text uses plain emojis (custom emojis can't render outside bot context)
+        share_body += f"تو هم از لینک من وارد شو و سرویست رو بخر 👇"
 
     import urllib.parse as _up
     share_url = (

@@ -3290,6 +3290,33 @@ def universal_handler(message):
             bot.send_message(uid, f"✅ مبلغ هدیه خرید: {fmt_price(amount)} تومان", reply_markup=back_button("adm:ref:settings"))
             return
 
+        if sn == "admin_ref_btn_title" and is_admin(uid):
+            raw = (message.text or "").strip()
+            if raw.lower() == "default":
+                setting_set("referral_button_title", "")
+                log_admin_action(uid, "نام دکمه دعوت دوستان به پیش‌فرض بازگشت")
+                state_clear(uid)
+                bot.send_message(uid, "✅ نام دکمه به پیش‌فرض بازگشت.", reply_markup=back_button("adm:ref:settings"))
+            elif not raw:
+                bot.send_message(uid, "⚠️ نام دکمه نمی‌تواند خالی باشد.", reply_markup=back_button("adm:ref:settings"))
+            else:
+                setting_set("referral_button_title", raw)
+                log_admin_action(uid, f"نام دکمه دعوت دوستان: {raw}")
+                state_clear(uid)
+                bot.send_message(uid, f"✅ نام دکمه تنظیم شد: {esc(raw)}", parse_mode="HTML", reply_markup=back_button("adm:ref:settings"))
+            return
+
+        if sn == "admin_ref_ir_amount" and is_admin(uid):
+            amount = parse_int(message.text or "")
+            if amount is None or amount < 0:
+                bot.send_message(uid, "⚠️ مبلغ معتبر وارد کنید.", reply_markup=back_button("adm:ref:settings"))
+                return
+            setting_set("ref_invitee_reward_amount", str(amount))
+            log_admin_action(uid, f"مبلغ جایزه دعوت‌شونده: {amount} تومان")
+            state_clear(uid)
+            bot.send_message(uid, f"✅ مبلغ جایزه دعوت‌شونده: {fmt_price(amount)} تومان", reply_markup=back_button("adm:ref:settings"))
+            return
+
         # ── Anti-Spam Settings ────────────────────────────────────────────────
         if sn == "admin_ref_as_window" and is_admin(uid):
             val = parse_int(normalize_text_number(message.text or ""))

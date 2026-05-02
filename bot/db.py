@@ -427,6 +427,13 @@ def _run_init_db_migrations():
             "referral_antispam_action":     "report_only",
             # ── Referral Captcha ───────────────────────────────────────────────
             "referral_captcha_enabled":     "1",
+            # ── Referral Button Title ──────────────────────────────────────────
+            "referral_button_title":         "",
+            # ── Referral Invitee Reward ────────────────────────────────────────
+            "ref_invitee_reward_enabled":    "0",
+            "ref_invitee_reward_type":       "wallet",
+            "ref_invitee_reward_amount":     "0",
+            "ref_invitee_reward_package_id": "",
             # ── Payment Card Management ────────────────────────────────────────
             "gw_card_rotation_enabled":     "0",
             # ── Gateway Fee / Bonus ────────────────────────────────────────────
@@ -685,6 +692,8 @@ def _run_init_db_migrations():
             "ALTER TABLE referrals ADD COLUMN captcha_verified INTEGER NOT NULL DEFAULT 0",
             # ── Referral captcha failure tracking ─────────────────────────────
             "ALTER TABLE referrals ADD COLUMN captcha_failed INTEGER NOT NULL DEFAULT 0",
+            # ── Invitee reward tracking ────────────────────────────────────────
+            "ALTER TABLE referrals ADD COLUMN invitee_reward_claimed INTEGER NOT NULL DEFAULT 0",
             # ── Reseller per-GB pricing ────────────────────────────────────────
             (
                 "CREATE TABLE IF NOT EXISTS reseller_per_gb_prices ("
@@ -2720,6 +2729,21 @@ def set_referral_channel_joined(referee_id: int) -> bool:
     with get_conn() as conn:
         cur = conn.execute(
             "UPDATE referrals SET channel_joined=1 WHERE referee_id=? AND channel_joined=0",
+            (referee_id,)
+        )
+        return cur.rowcount > 0
+
+
+def claim_invitee_reward(referee_id: int) -> bool:
+    """
+    Atomically mark invitee_reward_claimed 0→1 for a referee.
+    Returns True only if this call performed the transition (first time).
+    Idempotent: safe to call multiple times.
+    """
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE referrals SET invitee_reward_claimed=1 "
+            "WHERE referee_id=? AND invitee_reward_claimed=0",
             (referee_id,)
         )
         return cur.rowcount > 0

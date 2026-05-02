@@ -79,6 +79,12 @@ def start_handler(message):
                     except Exception:
                         pass
 
+                    try:
+                        from ..ui.notifications import give_invitee_reward
+                        give_invitee_reward(uid, referrer_id)
+                    except Exception:
+                        pass
+
                     if _channel_reward_required():
                         # Channel condition is active.
                         # If the user is ALREADY a channel member right now,

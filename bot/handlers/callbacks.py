@@ -96,6 +96,7 @@ from ..gateways.tronado import (
     get_tronado_order_token, build_tronado_payment_url,
     build_tronado_callback_url,
     get_tronado_payment_status, get_tronado_status_by_payment_id, is_tronado_response_paid,
+    normalize_tronado_status,
 )
 from ..gateways.plisio import (
     create_plisio_invoice, check_plisio_invoice,
@@ -134,6 +135,7 @@ from ..admin.renderers import (
     _show_panel_edit_menu, _show_cpkg_edit_menu,
 )
 from ..admin.backup import _send_backup
+from ..crypto_fulfillment import process_tronado_verified_payment
 from ..db import (
     get_all_panels, get_panel, add_panel, update_panel_field,
     toggle_panel_active, update_panel_status, delete_panel,
@@ -154,6 +156,44 @@ from ..db import (
 
 
 # ── OpenVPN helpers (shared with messages.py) ─────────────────────────────────
+
+def _verify_tronado_payment(payment_id: int) -> dict:
+    """
+    Shared Tronado payment verification logic used by all :verify: handlers.
+
+    Strategy (per spec):
+      1. Try get_tronado_status_by_payment_id(payment_id) first.
+      2. If not paid and a token is stored in receipt_text, try get_tronado_payment_status(token).
+      3. If paid → call process_tronado_verified_payment and return its result.
+
+    Returns a dict with:
+      "verify": "ok" | "already_processed" | "process_error" | "pending" | "rejected" | "unknown"
+      "process_result": dict from process_tronado_verified_payment (or {} if not reached)
+      "raw_resp": the tronado API response dict
+    """
+    payment = get_payment(payment_id)
+    token = (payment or {}).get("receipt_text") or ""
+
+    # 1. Try by payment ID first
+    td_resp = get_tronado_status_by_payment_id(str(payment_id))
+    # 2. Fallback to token-based lookup
+    if not is_tronado_response_paid(td_resp) and token:
+        td_resp_tok = get_tronado_payment_status(token)
+        if is_tronado_response_paid(td_resp_tok):
+            td_resp = td_resp_tok
+
+    if is_tronado_response_paid(td_resp):
+        proc = process_tronado_verified_payment(payment_id, source="manual_verify", raw_payload=td_resp)
+        verify_status = proc.get("status", "process_error")
+        # normalise to our keys
+        if verify_status not in ("ok", "already_processed"):
+            verify_status = "process_error"
+        return {"verify": verify_status, "process_result": proc, "raw_resp": td_resp}
+
+    norm = normalize_tronado_status(td_resp)
+    return {"verify": norm if norm in ("pending", "rejected") else "unknown",
+            "process_result": {}, "raw_resp": td_resp}
+
 
 def _fmt_users_label(max_users):
     if not max_users or max_users == 0:
@@ -5801,40 +5841,25 @@ def _dispatch_callback(call, uid, data):
                 bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
             return
         bot.answer_callback_query(call.id, "⏳ در حال بررسی وضعیت پرداخت…", show_alert=False)
-        token_rtd_v = payment["receipt_text"] or ""
-        order_id_rtd_v = str(payment_id)
-        td_resp_r = get_tronado_payment_status(token_rtd_v) if token_rtd_v else {}
-        print(f"[Tronado] verify-renew btn pay_id={payment_id} token_resp={str(td_resp_r)[:200]}")
-        if not is_tronado_response_paid(td_resp_r):
-            td_resp_r = get_tronado_status_by_payment_id(order_id_rtd_v)
-            print(f"[Tronado] verify-renew btn pay_id={payment_id} id_resp={str(td_resp_r)[:200]}")
-        if is_tronado_response_paid(td_resp_r):
-            from ..crypto_fulfillment import process_tronado_verified_payment
-            result = process_tronado_verified_payment(payment_id, source="manual_verify", raw_payload=td_resp_r)
-            if result.get("status") == "already_processed":
-                bot.send_message(uid, "✅ پرداخت شما قبلاً تأیید و تحویل داده شده است.", parse_mode="HTML")
-            elif result.get("status") == "ok":
-                bot.send_message(uid, "✅ پرداخت تأیید شد! تمدید سرویس شما در حال انجام است…", parse_mode="HTML")
-            else:
-                bot.send_message(uid, "⚠️ خطا در پردازش پرداخت. لطفاً با پشتیبانی تماس بگیرید.", parse_mode="HTML")
+        _vr = _verify_tronado_payment(payment_id)
+        if _vr["verify"] == "ok":
+            bot.send_message(uid, "✅ پرداخت تأیید شد! تمدید سرویس شما در حال انجام است…", parse_mode="HTML")
+        elif _vr["verify"] == "already_processed":
+            bot.send_message(uid, "✅ پرداخت شما قبلاً تأیید و تحویل داده شده است.", parse_mode="HTML")
+        elif _vr["verify"] == "process_error":
+            bot.send_message(uid, "⚠️ خطا در پردازش پرداخت. لطفاً با پشتیبانی تماس بگیرید.", parse_mode="HTML")
+        elif _vr["verify"] == "rejected":
+            _kb_rexp = types.InlineKeyboardMarkup()
+            _kb_rexp.add(types.InlineKeyboardButton("🔄 ساخت سفارش جدید", callback_data=f"rpay:tronado:cancel_retry:{payment_id}"))
+            bot.send_message(uid,
+                "⚠️ <b>سفارش ترونادو منقضی یا یافت نشد</b>\n\n"
+                "این لینک پرداخت منقضی شده است. روی دکمه زیر بزنید تا سفارش جدید ایجاد شود:",
+                parse_mode="HTML", reply_markup=_kb_rexp)
         else:
-            # Only show 'expired' if we actually got a non-empty API error saying so.
-            _rtd_error = ""
-            if isinstance(td_resp_r, dict) and td_resp_r:
-                _rtd_error = str(td_resp_r.get("Error") or td_resp_r.get("Message") or td_resp_r.get("message") or td_resp_r.get("error") or "")
-            _rtd_expired = bool(_rtd_error) and "no order found" in _rtd_error.lower()
-            if _rtd_expired:
-                _kb_rexp = types.InlineKeyboardMarkup()
-                _kb_rexp.add(types.InlineKeyboardButton("🔄 ساخت سفارش جدید", callback_data=f"rpay:tronado:cancel_retry:{payment_id}"))
-                bot.send_message(uid,
-                    "⚠️ <b>سفارش ترونادو منقضی یا یافت نشد</b>\n\n"
-                    "این لینک پرداخت منقضی شده است. روی دکمه زیر بزنید تا سفارش جدید ایجاد شود:",
-                    parse_mode="HTML", reply_markup=_kb_rexp)
-            else:
-                bot.send_message(uid,
-                    "⏳ پرداخت هنوز تأیید نشده است.\n"
-                    "لطفاً چند دقیقه صبر کنید و دوباره وضعیت را بررسی کنید.",
-                    parse_mode="HTML")
+            bot.send_message(uid,
+                "⏳ پرداخت هنوز تأیید نشده است.\n"
+                "لطفاً چند دقیقه صبر کنید و دوباره وضعیت را بررسی کنید.",
+                parse_mode="HTML")
         return
 
     if data.startswith("rpay:tronado:cancel_retry:"):
@@ -7114,42 +7139,27 @@ def _dispatch_callback(call, uid, data):
                 bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
             return
         bot.answer_callback_query(call.id, "⏳ در حال بررسی وضعیت پرداخت…", show_alert=False)
-        token_td_v = payment["receipt_text"] or ""
-        order_id_td_v = str(payment_id)
-        # Try GetStatus (by token), then GetStatusByPaymentID
-        td_resp = get_tronado_payment_status(token_td_v) if token_td_v else {}
-        print(f"[Tronado] verify btn pay_id={payment_id} token_resp={str(td_resp)[:200]}")
-        if not is_tronado_response_paid(td_resp):
-            td_resp = get_tronado_status_by_payment_id(order_id_td_v)
-            print(f"[Tronado] verify btn pay_id={payment_id} id_resp={str(td_resp)[:200]}")
-        if is_tronado_response_paid(td_resp):
-            from ..crypto_fulfillment import process_tronado_verified_payment
-            result = process_tronado_verified_payment(payment_id, source="manual_verify", raw_payload=td_resp)
-            if result.get("status") == "already_processed":
-                bot.send_message(uid, "✅ پرداخت شما قبلاً تأیید و تحویل داده شده است.", parse_mode="HTML")
-            elif result.get("status") == "ok":
-                bot.send_message(uid, "✅ پرداخت تأیید شد! کانفیگ شما در حال آماده‌سازی است…", parse_mode="HTML")
-            else:
-                bot.send_message(uid, "⚠️ خطا در پردازش پرداخت. لطفاً با پشتیبانی تماس بگیرید.", parse_mode="HTML")
+        _vp = _verify_tronado_payment(payment_id)
+        if _vp["verify"] == "ok":
+            bot.send_message(uid, "✅ پرداخت تأیید شد! کانفیگ شما در حال آماده‌سازی است…", parse_mode="HTML")
+        elif _vp["verify"] == "already_processed":
+            bot.send_message(uid, "✅ پرداخت شما قبلاً تأیید و تحویل داده شده است.", parse_mode="HTML")
+        elif _vp["verify"] == "process_error":
+            bot.send_message(uid, "⚠️ خطا در پردازش پرداخت. لطفاً با پشتیبانی تماس بگیرید.", parse_mode="HTML")
+        elif _vp["verify"] == "rejected":
+            pkg_id_td_v = payment["package_id"] or 0
+            _kb_exp = types.InlineKeyboardMarkup()
+            if pkg_id_td_v:
+                _kb_exp.add(types.InlineKeyboardButton("🔄 ساخت سفارش جدید", callback_data=f"pay:tronado:cancel_retry:{payment_id}"))
+            bot.send_message(uid,
+                "⚠️ <b>سفارش ترونادو منقضی یا یافت نشد</b>\n\n"
+                "این لینک پرداخت منقضی شده است. برای پرداخت باید سفارش جدیدی ایجاد کنید.\n\n"
+                "روی دکمه زیر بزنید تا سفارش قبلی لغو شود و یک لینک پرداخت جدید دریافت کنید:",
+                parse_mode="HTML", reply_markup=_kb_exp)
         else:
-            _td_error = ""
-            if isinstance(td_resp, dict) and td_resp:
-                _td_error = str(td_resp.get("Error") or td_resp.get("Message") or td_resp.get("message") or td_resp.get("error") or "")
-            _td_expired = bool(_td_error) and "no order found" in _td_error.lower()
-            if _td_expired:
-                pkg_id_td_v = payment["package_id"] or 0
-                _kb_exp = types.InlineKeyboardMarkup()
-                if pkg_id_td_v:
-                    _kb_exp.add(types.InlineKeyboardButton("🔄 ساخت سفارش جدید", callback_data=f"pay:tronado:cancel_retry:{payment_id}"))
-                bot.send_message(uid,
-                    "⚠️ <b>سفارش ترونادو منقضی یا یافت نشد</b>\n\n"
-                    "این لینک پرداخت منقضی شده است. برای پرداخت باید سفارش جدیدی ایجاد کنید.\n\n"
-                    "روی دکمه زیر بزنید تا سفارش قبلی لغو شود و یک لینک پرداخت جدید دریافت کنید:",
-                    parse_mode="HTML", reply_markup=_kb_exp)
-            else:
-                bot.send_message(uid,
-                    "⏳ پرداخت شما هنوز تأیید نشده است. چند دقیقه دیگر دوباره بررسی کنید.",
-                    parse_mode="HTML")
+            bot.send_message(uid,
+                "⏳ پرداخت شما هنوز تأیید نشده است. چند دقیقه دیگر دوباره بررسی کنید.",
+                parse_mode="HTML")
         return
 
     if data.startswith("pay:tronado:cancel_retry:"):
@@ -8042,29 +8052,17 @@ def _dispatch_callback(call, uid, data):
                 bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
             return
         bot.answer_callback_query(call.id, "⏳ در حال بررسی وضعیت پرداخت…", show_alert=False)
-        from ..gateways.tronado import get_tronado_payment_status, get_tronado_status_by_payment_id, normalize_tronado_status
-        token_wctd = payment["receipt_text"] or ""
-        td_resp_wc = get_tronado_payment_status(token_wctd) if token_wctd else {}
-        norm_wc = normalize_tronado_status(td_resp_wc)
-        if norm_wc != "paid":
-            td_resp_wc2 = get_tronado_status_by_payment_id(str(payment_id))
-            norm_wc2 = normalize_tronado_status(td_resp_wc2)
-            if norm_wc2 == "paid":
-                td_resp_wc = td_resp_wc2
-                norm_wc = norm_wc2
-        if norm_wc == "paid":
-            from ..crypto_fulfillment import process_tronado_verified_payment
-            result = process_tronado_verified_payment(payment_id, source="manual_verify", raw_payload=td_resp_wc)
-            if result.get("status") == "already_processed":
-                bot.send_message(uid, "✅ پرداخت شما قبلاً تأیید و کیف پول شارژ شده است.", parse_mode="HTML")
-            elif result.get("status") == "ok":
-                bot.send_message(uid,
-                    f"✅ پرداخت ترونادو تأیید شد و کیف پول شارژ شد.\n\n"
-                    f"💰 مبلغ: {fmt_price(payment['amount'])} تومان",
-                    parse_mode="HTML")
-            else:
-                bot.send_message(uid, "⚠️ خطا در پردازش پرداخت. لطفاً با پشتیبانی تماس بگیرید.", parse_mode="HTML")
-        elif norm_wc == "rejected":
+        _vwc = _verify_tronado_payment(payment_id)
+        if _vwc["verify"] == "ok":
+            bot.send_message(uid,
+                f"✅ پرداخت ترونادو تأیید شد و کیف پول شارژ شد.\n\n"
+                f"💰 مبلغ: {fmt_price(payment['amount'])} تومان",
+                parse_mode="HTML")
+        elif _vwc["verify"] == "already_processed":
+            bot.send_message(uid, "✅ پرداخت شما قبلاً تأیید و کیف پول شارژ شده است.", parse_mode="HTML")
+        elif _vwc["verify"] == "process_error":
+            bot.send_message(uid, "⚠️ خطا در پردازش پرداخت. لطفاً با پشتیبانی تماس بگیرید.", parse_mode="HTML")
+        elif _vwc["verify"] == "rejected":
             bot.send_message(uid, "❌ پرداخت شما تایید نشد یا رد شده است.", parse_mode="HTML")
         else:
             bot.send_message(uid, "⏳ پرداخت شما هنوز تأیید نشده است. چند دقیقه دیگر دوباره بررسی کنید.", parse_mode="HTML")
@@ -10416,25 +10414,17 @@ def _dispatch_callback(call, uid, data):
                     bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
                 return
             bot.answer_callback_query(call.id, "⏳ در حال بررسی وضعیت پرداخت…", show_alert=False)
-            token_pnltd_v = payment["receipt_text"] or ""
-            td_resp_pnl = get_tronado_payment_status(token_pnltd_v) if token_pnltd_v else {}
-            if not is_tronado_response_paid(td_resp_pnl):
-                td_resp_pnl = get_tronado_status_by_payment_id(str(payment_id))
-            if not is_tronado_response_paid(td_resp_pnl):
-                pass  # single ID lookup is sufficient
-            if is_tronado_response_paid(td_resp_pnl):
-                from ..crypto_fulfillment import process_tronado_verified_payment
-                result = process_tronado_verified_payment(payment_id, source="manual_verify", raw_payload=td_resp_pnl)
-                state_clear(uid)
-                if result.get("status") == "already_processed":
-                    bot.send_message(uid, "✅ پرداخت شما قبلاً تأیید و تحویل داده شده است.", parse_mode="HTML")
-                elif result.get("status") == "ok":
-                    config_id_pnltd = payment["config_id"]
-                    bot.send_message(uid, "✅ پرداخت تأیید شد! سرویس تمدید شد.", parse_mode="HTML")
-                    _show_panel_config_detail(call, config_id_pnltd, back_data="my_configs", is_user_view=True)
-                else:
-                    send_or_edit(call, "❌ پرداخت انجام شد اما پردازش با خطا مواجه شد.\nلطفاً با پشتیبانی ارتباط بگیرید.",
-                                 back_button("my_configs"))
+            _vpnl = _verify_tronado_payment(payment_id)
+            state_clear(uid)
+            if _vpnl["verify"] == "ok":
+                config_id_pnltd = payment["config_id"]
+                bot.send_message(uid, "✅ پرداخت تأیید شد! سرویس تمدید شد.", parse_mode="HTML")
+                _show_panel_config_detail(call, config_id_pnltd, back_data="my_configs", is_user_view=True)
+            elif _vpnl["verify"] == "already_processed":
+                bot.send_message(uid, "✅ پرداخت شما قبلاً تأیید و تحویل داده شده است.", parse_mode="HTML")
+            elif _vpnl["verify"] == "process_error":
+                send_or_edit(call, "❌ پرداخت انجام شد اما پردازش با خطا مواجه شد.\nلطفاً با پشتیبانی ارتباط بگیرید.",
+                             back_button("my_configs"))
             else:
                 bot.send_message(uid,
                     "⏳ پرداخت هنوز تأیید نشده است.\n"
@@ -10798,25 +10788,17 @@ def _dispatch_callback(call, uid, data):
                     bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
                 return
             bot.answer_callback_query(call.id, "⏳ در حال بررسی وضعیت پرداخت…", show_alert=False)
-            token_pnltd2_v = payment["receipt_text"] or ""
-            td_resp_pnl2 = get_tronado_payment_status(token_pnltd2_v) if token_pnltd2_v else {}
-            if not is_tronado_response_paid(td_resp_pnl2):
-                td_resp_pnl2 = get_tronado_status_by_payment_id(str(payment_id))
-            if not is_tronado_response_paid(td_resp_pnl2):
-                pass  # single ID lookup is sufficient
-            if is_tronado_response_paid(td_resp_pnl2):
-                from ..crypto_fulfillment import process_tronado_verified_payment
-                result = process_tronado_verified_payment(payment_id, source="manual_verify", raw_payload=td_resp_pnl2)
-                state_clear(uid)
-                if result.get("status") == "already_processed":
-                    bot.send_message(uid, "✅ پرداخت شما قبلاً تأیید و تحویل داده شده است.", parse_mode="HTML")
-                elif result.get("status") == "ok":
-                    config_id_pnltd2 = payment["config_id"]
-                    bot.send_message(uid, "✅ پرداخت تأیید شد! سرویس تمدید شد.", parse_mode="HTML")
-                    _show_panel_config_detail(call, config_id_pnltd2, back_data="my_configs", is_user_view=True)
-                else:
-                    send_or_edit(call, "❌ پرداخت انجام شد اما پردازش با خطا مواجه شد.\nلطفاً با پشتیبانی ارتباط بگیرید.",
-                                 back_button("my_configs"))
+            _vpnl2 = _verify_tronado_payment(payment_id)
+            state_clear(uid)
+            if _vpnl2["verify"] == "ok":
+                config_id_pnltd2 = payment["config_id"]
+                bot.send_message(uid, "✅ پرداخت تأیید شد! سرویس تمدید شد.", parse_mode="HTML")
+                _show_panel_config_detail(call, config_id_pnltd2, back_data="my_configs", is_user_view=True)
+            elif _vpnl2["verify"] == "already_processed":
+                bot.send_message(uid, "✅ پرداخت شما قبلاً تأیید و تحویل داده شده است.", parse_mode="HTML")
+            elif _vpnl2["verify"] == "process_error":
+                send_or_edit(call, "❌ پرداخت انجام شد اما پردازش با خطا مواجه شد.\nلطفاً با پشتیبانی ارتباط بگیرید.",
+                             back_button("my_configs"))
             else:
                 bot.send_message(uid,
                     "⏳ پرداخت هنوز تأیید نشده است.\n"
@@ -15266,6 +15248,7 @@ def _dispatch_callback(call, uid, data):
         rc_label = "📢 دعوت + عضویت در کانال" if reward_condition == "channel" else "🚀 فقط دعوت به ربات"
 
         kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("✏️ تغییر نام دکمه", callback_data="adm:ref:btn_title"))
         kb.add(types.InlineKeyboardButton("📸 تنظیم بنر اشتراک‌گذاری", callback_data="adm:ref:banner"))
         # Reward condition
         kb.add(types.InlineKeyboardButton("── 🔐 شرط دریافت پاداش ──", callback_data="adm:ops:noop"))
@@ -15313,6 +15296,29 @@ def _dispatch_callback(call, uid, data):
                     pkg_name = _p["name"]
             kb.add(types.InlineKeyboardButton(f"📦 پکیج: {pkg_name}", callback_data="adm:ref:pr:pkg"))
 
+        # Invitee reward section
+        kb.add(types.InlineKeyboardButton("── 🎁 جایزه دعوت‌شونده ──", callback_data="adm:ops:noop"))
+        ir_enabled = setting_get("ref_invitee_reward_enabled", "0")
+        ir_label = "✅ فعال" if ir_enabled == "1" else "❌ غیرفعال"
+        ir_type = setting_get("ref_invitee_reward_type", "wallet")
+        ir_type_label = "💰 کیف پول" if ir_type == "wallet" else "📦 کانفیگ"
+        kb.row(
+            types.InlineKeyboardButton(ir_label, callback_data="adm:ref:ir:toggle"),
+            types.InlineKeyboardButton("وضعیت جایزه دعوت‌شونده", callback_data="adm:ops:noop"),
+        )
+        kb.add(types.InlineKeyboardButton(f"🎯 نوع جایزه: {ir_type_label}", callback_data="adm:ref:ir:type"))
+        if ir_type == "wallet":
+            ir_amount = setting_get("ref_invitee_reward_amount", "0")
+            kb.add(types.InlineKeyboardButton(f"💵 مبلغ: {fmt_price(int(ir_amount or '0'))} تومان", callback_data="adm:ref:ir:amount"))
+        else:
+            ir_pkg_id = setting_get("ref_invitee_reward_package_id", "")
+            ir_pkg_name = "انتخاب نشده"
+            if ir_pkg_id and ir_pkg_id.isdigit():
+                _irp = get_package(int(ir_pkg_id))
+                if _irp:
+                    ir_pkg_name = _irp["name"]
+            kb.add(types.InlineKeyboardButton(f"📦 پکیج: {ir_pkg_name}", callback_data="adm:ref:ir:pkg"))
+
         # Anti-spam section
         kb.add(types.InlineKeyboardButton("── 🛡 سیستم ضد اسپم ──", callback_data="adm:ops:noop"))
         as_enabled = setting_get("referral_antispam_enabled", "0")
@@ -15327,11 +15333,13 @@ def _dispatch_callback(call, uid, data):
         pr_enabled = "✅ فعال" if setting_get("referral_purchase_reward_enabled", "0") == "1" else "❌ غیرفعال"
         reward_condition = setting_get("referral_reward_condition", "channel")
         rc_fa = "📢 دعوت + عضویت در کانال" if reward_condition == "channel" else "🚀 فقط دعوت به ربات"
+        ir_enabled = "✅ فعال" if setting_get("ref_invitee_reward_enabled", "0") == "1" else "❌ غیرفعال"
         return (
             "⚙️ <b>تنظیمات زیرمجموعه‌گیری</b>\n\n"
             f"🔐 <b>شرط دریافت پاداش:</b> {rc_fa}\n"
             f"🎁 هدیه استارت: {sr_enabled}\n"
-            f"💸 هدیه خرید زیرمجموعه: {pr_enabled}\n\n"
+            f"💸 هدیه خرید زیرمجموعه: {pr_enabled}\n"
+            f"🎁 جایزه دعوت‌شونده: {ir_enabled}\n\n"
             "هر بخش را با دکمه‌های زیر تنظیم کنید."
         )
 
@@ -15547,6 +15555,94 @@ def _dispatch_callback(call, uid, data):
         setting_set("referral_purchase_reward_package", pkg_id)
         log_admin_action(uid, f"پکیج هدیه خرید به #{pkg_id} تنظیم شد")
         bot.answer_callback_query(call.id, "پکیج هدیه خرید تنظیم شد.")
+        send_or_edit(call, _ref_settings_text(), _ref_settings_kb())
+        return
+
+    # ── Referral Button Title ─────────────────────────────────────────────────
+
+    if data == "adm:ref:btn_title":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        state_set(uid, "admin_ref_btn_title")
+        bot.answer_callback_query(call.id)
+        cur = setting_get("referral_button_title", "").strip() or "💼 زیرمجموعه‌گیری 🎉"
+        send_or_edit(call,
+            "✏️ <b>تغییر نام دکمه دعوت دوستان</b>\n\n"
+            "نام جدید دکمه را وارد کنید:\n\n"
+            f"مقدار فعلی: <b>{esc(cur)}</b>\n\n"
+            "💡 برای بازگشت به پیش‌فرض، عبارت <code>default</code> را بفرستید.",
+            back_button("adm:ref:settings"))
+        return
+
+    # ── Invitee Reward Handlers ───────────────────────────────────────────────
+
+    if data == "adm:ref:ir:toggle":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        cur = setting_get("ref_invitee_reward_enabled", "0")
+        new_val = "0" if cur == "1" else "1"
+        setting_set("ref_invitee_reward_enabled", new_val)
+        state_fa = "فعال" if new_val == "1" else "غیرفعال"
+        log_admin_action(uid, f"جایزه دعوت‌شونده {state_fa} شد")
+        bot.answer_callback_query(call.id, f"جایزه دعوت‌شونده {state_fa} شد.")
+        send_or_edit(call, _ref_settings_text(), _ref_settings_kb())
+        return
+
+    if data == "adm:ref:ir:type":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        cur = setting_get("ref_invitee_reward_type", "wallet")
+        new_val = "config" if cur == "wallet" else "wallet"
+        setting_set("ref_invitee_reward_type", new_val)
+        label = "کیف پول" if new_val == "wallet" else "کانفیگ"
+        log_admin_action(uid, f"نوع جایزه دعوت‌شونده به «{label}» تغییر کرد")
+        bot.answer_callback_query(call.id, f"نوع جایزه: {label}")
+        send_or_edit(call, _ref_settings_text(), _ref_settings_kb())
+        return
+
+    if data == "adm:ref:ir:amount":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        state_set(uid, "admin_ref_ir_amount")
+        bot.answer_callback_query(call.id)
+        cur_amount = setting_get("ref_invitee_reward_amount", "0")
+        send_or_edit(call,
+            "💵 <b>مبلغ جایزه دعوت‌شونده</b>\n\n"
+            "مبلغ (تومان) را وارد کنید:\n\n"
+            f"مقدار فعلی: <b>{fmt_price(int(cur_amount or '0'))} تومان</b>",
+            back_button("adm:ref:settings"))
+        return
+
+    if data == "adm:ref:ir:pkg":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        pkgs = get_packages(include_inactive=True)
+        if not pkgs:
+            bot.answer_callback_query(call.id, "هیچ پکیجی تعریف نشده است.", show_alert=True)
+            return
+        kb2 = types.InlineKeyboardMarkup()
+        for p in pkgs:
+            kb2.add(types.InlineKeyboardButton(p["name"],
+                                                callback_data=f"adm:ref:ir:pkgsel:{p['id']}"))
+        kb2.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:ref:settings",
+                                            icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "📦 <b>انتخاب پکیج جایزه دعوت‌شونده</b>\n\nیک پکیج را انتخاب کنید:", kb2)
+        return
+
+    if data.startswith("adm:ref:ir:pkgsel:"):
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        pkg_id = data.split(":")[4]
+        setting_set("ref_invitee_reward_package_id", pkg_id)
+        log_admin_action(uid, f"پکیج جایزه دعوت‌شونده به #{pkg_id} تنظیم شد")
+        bot.answer_callback_query(call.id, "پکیج جایزه دعوت‌شونده تنظیم شد.")
         send_or_edit(call, _ref_settings_text(), _ref_settings_kb())
         return
 
