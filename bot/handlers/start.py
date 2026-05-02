@@ -48,8 +48,16 @@ def _send_phone_request(chat_id: int, uid: int):
 def start_handler(message):
     is_new = ensure_user(message.from_user)
     notify_first_start_if_needed(message.from_user)
-    state_clear(message.from_user.id)
     uid = message.from_user.id
+    # Cancel any active panel connection thread before clearing state
+    try:
+        from .callbacks import _pnl_connect_events
+        ev = _pnl_connect_events.pop(uid, None)
+        if ev:
+            ev.set()
+    except Exception:
+        pass
+    state_clear(uid)
 
     # Handle referral link: /start ref_12345
     if is_new and message.text:

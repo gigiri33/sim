@@ -739,6 +739,12 @@ def _run_init_db_migrations():
             "ALTER TABLE payments ADD COLUMN service_names_json TEXT",
             "INSERT OR IGNORE INTO settings(key,value) VALUES('panel_renewal_enabled','1')",
             "ALTER TABLE panel_configs ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0",
+            # ── Tronado idempotency + audit columns ───────────────────────────
+            "ALTER TABLE payments ADD COLUMN gateway_ref TEXT",
+            "ALTER TABLE payments ADD COLUMN external_txid TEXT",
+            "ALTER TABLE payments ADD COLUMN raw_callback TEXT",
+            "ALTER TABLE payments ADD COLUMN callback_received_at TEXT",
+            "ALTER TABLE payments ADD COLUMN fulfilled_at TEXT",
         ]
         for sql in migrations:
             try:
@@ -1982,11 +1988,47 @@ def complete_payment(payment_id):
     """Mark payment completed. Returns True if this call won the race, False if already processed."""
     with get_conn() as conn:
         conn.execute(
-            "UPDATE payments SET status='completed', approved_at=? WHERE id=? AND status IN ('pending', 'approved')",
-            (now_str(), payment_id)
+            "UPDATE payments SET status='completed', approved_at=?, fulfilled_at=? WHERE id=? AND status IN ('pending', 'approved', 'processing')",
+            (now_str(), now_str(), payment_id)
         )
         changed = conn.execute("SELECT changes() AS c").fetchone()["c"]
         return changed > 0
+
+
+def lock_tronado_payment(payment_id: int) -> bool:
+    """
+    Atomically move a pending tronado payment to 'processing'.
+    Returns True if this call won the race (was pending before this call).
+    Returns False if already processing, completed, or any other non-pending status.
+    Must be called inside a BEGIN IMMEDIATE transaction for true isolation.
+    """
+    with get_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            "UPDATE payments SET status='processing' WHERE id=? AND gateway='tronado' AND status='pending'",
+            (payment_id,)
+        )
+        changed = conn.execute("SELECT changes() AS c").fetchone()["c"]
+        conn.execute("COMMIT")
+        return changed > 0
+
+
+def save_tronado_callback_data(payment_id: int, raw_payload: str,
+                                gateway_ref: str = "", external_txid: str = ""):
+    """Persist raw IPN payload and reference IDs for audit."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE payments SET raw_callback=?, callback_received_at=?,"
+            " gateway_ref=COALESCE(NULLIF(?, ''), gateway_ref),"
+            " external_txid=COALESCE(NULLIF(?, ''), external_txid)"
+            " WHERE id=?",
+            (raw_payload[:4000] if raw_payload else None,
+             now_str(),
+             gateway_ref or "",
+             external_txid or "",
+             payment_id)
+        )
+
 
 
 # ── Admin Users ────────────────────────────────────────────────────────────────

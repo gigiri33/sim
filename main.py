@@ -293,68 +293,91 @@ def _plisio_webhook_server():
         return jsonify({"status": "ok"}), 200
 
     # ── Tronado routes ────────────────────────────────────────────────────────
-    @_app.route("/tronado/<bot_username>/<int:payment_id>/callback", methods=["POST"])
+    @_app.route("/tronado/<bot_username>/<int:payment_id>/callback", methods=["POST", "GET"])
     def _tronado_callback(bot_username, payment_id):
+        import json as _json
         try:
-            # Try JSON first, then form-data (Tronado may send either)
+            # Read payload: JSON → form-data → query params → urlencoded body
             payload = request.get_json(force=True, silent=True)
             if not payload:
                 payload = request.form.to_dict() or {}
             if not payload:
-                # last resort: try to parse raw body
                 try:
                     import urllib.parse as _up
                     raw_body = request.get_data(as_text=True)
                     payload = dict(_up.parse_qsl(raw_body)) if raw_body else {}
                 except Exception:
                     payload = {}
-            print(f"[Tronado] Callback HIT payment_id={payment_id} content_type={request.content_type} keys={list(payload.keys())} data={str(payload)[:300]}")
-            from bot.gateways.tronado import is_tronado_callback_valid as _td_valid
-            if not _td_valid(payload):
-                print(f"[Tronado] Callback REJECTED as invalid for payment_id={payment_id}")
-                return jsonify({"status": "ok"}), 200
+            if not payload:
+                payload = request.args.to_dict() or {}
+
+            print(f"[Tronado] IPN HIT payment_id={payment_id} method={request.method}"
+                  f" content_type={request.content_type} keys={list(payload.keys())}"
+                  f" data={str(payload)[:300]}")
+
+            # Validate basic structure — accept any payload with a recognisable field
+            from bot.gateways.tronado import (
+                is_tronado_callback_valid as _td_valid,
+                get_tronado_payment_status,
+                get_tronado_status_by_payment_id,
+                normalize_tronado_status,
+            )
+            if not _td_valid(payload) and not payload:
+                print(f"[Tronado] IPN REJECTED invalid payload for payment_id={payment_id}")
+                return jsonify({"ok": False, "error": "invalid payment"}), 200
 
             payment = get_payment(payment_id)
             if not payment:
-                print(f"[Tronado] Callback: payment_id={payment_id} not found in DB")
-                return jsonify({"status": "ok"}), 200
-            if payment["status"] != "pending":
-                print(f"[Tronado] Callback: payment_id={payment_id} already {payment['status']}")
-                return jsonify({"status": "ok"}), 200
+                print(f"[Tronado] IPN: payment_id={payment_id} not found in DB")
+                return jsonify({"ok": True}), 200
             if payment["payment_method"] != "tronado":
-                print(f"[Tronado] Callback: payment_id={payment_id} wrong method {payment['payment_method']}")
-                return jsonify({"status": "ok"}), 200
+                print(f"[Tronado] IPN: payment_id={payment_id} wrong method {payment['payment_method']}")
+                return jsonify({"ok": True}), 200
+            if payment["status"] not in ("pending",):
+                print(f"[Tronado] IPN: payment_id={payment_id} already {payment['status']}")
+                return jsonify({"ok": True, "already_processed": True}), 200
 
-            kind   = payment["kind"]
-            uid    = payment["user_id"]
-            amount = payment["amount"]
-            print(f"[Tronado] Callback: processing payment_id={payment_id} uid={uid} kind={kind} amount={amount}")
+            # PaymentID mismatch check — if IPN body has a PaymentID, it must match
+            ipn_pid = (payload.get("PaymentID") or payload.get("paymentId") or
+                       payload.get("payment_id") or "")
+            if ipn_pid and str(ipn_pid) not in (str(payment_id),
+                                                 f"tronado-wc-{payment_id}",
+                                                 str(payment_id)):
+                print(f"[Tronado] IPN: PaymentID mismatch url={payment_id} body={ipn_pid}")
+                return jsonify({"ok": False, "error": "payment id mismatch"}), 200
 
-            if kind == "wallet_charge":
-                if not complete_payment(payment_id):
-                    return jsonify({"status": "ok"}), 200
-                update_balance(uid, amount)
-                try:
-                    apply_gateway_bonus_if_needed(uid, "tronado", amount)
-                except Exception:
-                    pass
-                try:
-                    bot.send_message(
-                        uid,
-                        f"✅ پرداخت ترونادو شما تأیید شد و کیف پول شارژ شد.\n\n💰 مبلغ: {fmt_price(amount)} تومان",
-                        parse_mode="HTML",
-                    )
-                except Exception:
-                    pass
+            # Always double-check with GetStatus before fulfilling
+            token = payment["receipt_text"] or ""
+            td_status_resp = {}
+            if token:
+                td_status_resp = get_tronado_payment_status(token)
+            norm = normalize_tronado_status(td_status_resp)
+            if norm != "paid":
+                td_status_resp2 = get_tronado_status_by_payment_id(str(payment_id))
+                norm = normalize_tronado_status(td_status_resp2)
+                if norm == "paid":
+                    td_status_resp = td_status_resp2
+
+            if norm == "paid":
+                from bot.crypto_fulfillment import process_tronado_verified_payment
+                result = process_tronado_verified_payment(payment_id, source="ipn",
+                                                           raw_payload=payload or td_status_resp)
+                if result.get("status") == "already_processed":
+                    return jsonify({"ok": True, "already_processed": True}), 200
+                return jsonify({"ok": True}), 200
             else:
-                threading.Thread(
-                    target=_run_fulfillment,
-                    args=("tronado", payment_id),
-                    daemon=True,
-                ).start()
+                # IPN arrived but GetStatus doesn't confirm paid yet — log and return OK
+                # (Tronado might send early IPN for pending states)
+                print(f"[Tronado] IPN: GetStatus for {payment_id} returned norm={norm}"
+                      f" resp={str(td_status_resp)[:200]} — not fulfilling yet")
+                return jsonify({"ok": True}), 200
+
         except Exception as exc:
-            print("TRONADO_WEBHOOK_ERROR:", exc)
-        return jsonify({"status": "ok"}), 200
+            import traceback as _tb
+            _tb.print_exc()
+            print("TRONADO_IPN_ERROR:", exc)
+            # Always 200 to stop Tronado from infinite retry
+            return jsonify({"ok": True}), 200
 
     import time as _time
     import socket as _socket

@@ -300,6 +300,57 @@ def is_tronado_response_paid(resp: dict) -> bool:
     return False
 
 
+_PAID_STATUSES     = frozenset({"paid", "success", "successful", "confirmed", "completed",
+                                "done", "finish", "finished", "approved", "تایید شده",
+                                "پرداخت موفق", "موفق"})
+_PENDING_STATUSES  = frozenset({"pending", "waiting", "created", "processing", "in_progress",
+                                 "new", "در انتظار", "در حال بررسی"})
+_REJECTED_STATUSES = frozenset({"rejected", "failed", "canceled", "cancelled", "expired",
+                                  "failed_to_pay", "رد شده", "لغو شده", "منقضی"})
+
+
+def normalize_tronado_status(resp: dict) -> str:
+    """
+    Normalise a GetStatus response to one of:
+      "paid" | "pending" | "rejected" | "unknown" | "error"
+    """
+    if not resp or not isinstance(resp, dict):
+        return "unknown"
+    if resp.get("__http_error"):
+        return "error"
+    # Direct paid indicators at top level
+    if resp.get("UniqueCode") and resp.get("Hash") and "Error" not in resp:
+        return "paid"
+    if resp.get("PaymentID") and resp.get("TronAmount") and "Error" not in resp:
+        return "paid"
+    data = resp.get("Data") or resp.get("data")
+    if not isinstance(data, dict):
+        data = resp
+    if data.get("IsPaid") is True or data.get("isPaid") is True:
+        return "paid"
+    if data.get("UniqueCode") and data.get("Hash") and "Error" not in data:
+        return "paid"
+    for key in ("OrderStatusTitle", "Status", "status", "PaymentStatus",
+                "paymentStatus", "State", "state"):
+        val = str(data.get(key) or resp.get(key) or "").strip().lower()
+        if val in _PAID_STATUSES:
+            return "paid"
+        if val in _PENDING_STATUSES:
+            return "pending"
+        if val in _REJECTED_STATUSES:
+            return "rejected"
+    # Check error text for "no order found" = expired/rejected
+    err_txt = str(
+        resp.get("Error") or resp.get("Message") or resp.get("message") or
+        data.get("Error") or data.get("Message") or ""
+    ).lower()
+    if "no order found" in err_txt or "order not found" in err_txt:
+        return "rejected"
+    if err_txt:
+        return "unknown"
+    return "unknown"
+
+
 def get_tronado_callback_base_url() -> str:
     """
     Return the base URL for Tronado callback registration.

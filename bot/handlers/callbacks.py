@@ -655,6 +655,9 @@ def _render_bulk_page(call, uid):
 _USER_CB_LOCKS: dict = {}
 _USER_CB_LOCKS_MUTEX = threading.Lock()
 
+# Per-user cancel events for long-running panel connection threads
+_pnl_connect_events: dict = {}
+
 def _get_user_cb_lock(uid: int) -> threading.Lock:
     with _USER_CB_LOCKS_MUTEX:
         if uid not in _USER_CB_LOCKS:
@@ -1838,7 +1841,8 @@ def _execute_addon_update(config_id, addon_type, sd, uid):
 
 
 def _panel_connect_with_retry(uid, protocol, host, port, path, username, password,
-                               panel_name="", panel_id=None, notify_chat_id=None):
+                               panel_name="", panel_id=None, notify_chat_id=None,
+                               cancel_event=None):
     """
     Try to connect (login) to a panel, retrying on connection errors indefinitely.
     If the panel is still unreachable after ADMIN_NOTIFY_AFTER seconds,
@@ -1849,6 +1853,7 @@ def _panel_connect_with_retry(uid, protocol, host, port, path, username, passwor
     from ..panels.client import PanelClient as _PC
 
     CONN_RETRY_DELAY   = 15    # seconds between retries on connection error
+    CONN_RETRY_TIMEOUT = 60    # max total seconds to spend on connection errors
     FUNC_RETRY_TIMEOUT = 120   # 2 min cap for non-connection errors before giving up
     FUNC_RETRY_DELAY   = 10
     ADMIN_NOTIFY_AFTER = 300   # 5 minutes before alerting admin
@@ -1873,6 +1878,9 @@ def _panel_connect_with_retry(uid, protocol, host, port, path, username, passwor
 
     while True:
         elapsed_total = _t.time() - _t_start
+        # Check for external cancellation
+        if cancel_event and cancel_event.is_set():
+            return False, "cancelled"
         # Admin notification after 5 minutes of continuous failure
         if not _admin_notified and elapsed_total >= ADMIN_NOTIFY_AFTER:
             _admin_notified = True
@@ -1911,6 +1919,8 @@ def _panel_connect_with_retry(uid, protocol, host, port, path, username, passwor
 
         elapsed_step = _t.time() - _t0
         if _is_conn_err(err):
+            if elapsed_total + CONN_RETRY_DELAY >= CONN_RETRY_TIMEOUT:
+                return False, err
             log.warning("_panel_connect_with_retry: CONN_ERR (%.0fs total): %s", elapsed_total, err)
             _t.sleep(CONN_RETRY_DELAY)
         else:
@@ -5799,9 +5809,14 @@ def _dispatch_callback(call, uid, data):
             td_resp_r = get_tronado_status_by_payment_id(order_id_rtd_v)
             print(f"[Tronado] verify-renew btn pay_id={payment_id} id_resp={str(td_resp_r)[:200]}")
         if is_tronado_response_paid(td_resp_r):
-            from ..crypto_fulfillment import run_crypto_fulfillment_async
-            run_crypto_fulfillment_async("tronado", payment_id)
-            bot.send_message(uid, "✅ پرداخت تأیید شد! تمدید سرویس شما در حال انجام است…", parse_mode="HTML")
+            from ..crypto_fulfillment import process_tronado_verified_payment
+            result = process_tronado_verified_payment(payment_id, source="manual_verify", raw_payload=td_resp_r)
+            if result.get("status") == "already_processed":
+                bot.send_message(uid, "✅ پرداخت شما قبلاً تأیید و تحویل داده شده است.", parse_mode="HTML")
+            elif result.get("status") == "ok":
+                bot.send_message(uid, "✅ پرداخت تأیید شد! تمدید سرویس شما در حال انجام است…", parse_mode="HTML")
+            else:
+                bot.send_message(uid, "⚠️ خطا در پردازش پرداخت. لطفاً با پشتیبانی تماس بگیرید.", parse_mode="HTML")
         else:
             # Only show 'expired' if we actually got a non-empty API error saying so.
             _rtd_error = ""
@@ -5900,7 +5915,7 @@ def _dispatch_callback(call, uid, data):
         )
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("💎 پرداخت در ترونادو", url=pay_url_rtd))
-        kb.add(types.InlineKeyboardButton("🔍 مشاهده وضعیت پرداخت", callback_data=f"rpay:tronado:verify:{payment_id}"))
+        kb.add(types.InlineKeyboardButton("🔍 بررسی پرداخت", callback_data=f"rpay:tronado:verify:{payment_id}"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
         return
@@ -7108,13 +7123,15 @@ def _dispatch_callback(call, uid, data):
             td_resp = get_tronado_status_by_payment_id(order_id_td_v)
             print(f"[Tronado] verify btn pay_id={payment_id} id_resp={str(td_resp)[:200]}")
         if is_tronado_response_paid(td_resp):
-            from ..crypto_fulfillment import run_crypto_fulfillment_async
-            run_crypto_fulfillment_async("tronado", payment_id)
-            bot.send_message(uid, "✅ پرداخت تأیید شد! کانفیگ شما در حال آماده‌سازی است…", parse_mode="HTML")
+            from ..crypto_fulfillment import process_tronado_verified_payment
+            result = process_tronado_verified_payment(payment_id, source="manual_verify", raw_payload=td_resp)
+            if result.get("status") == "already_processed":
+                bot.send_message(uid, "✅ پرداخت شما قبلاً تأیید و تحویل داده شده است.", parse_mode="HTML")
+            elif result.get("status") == "ok":
+                bot.send_message(uid, "✅ پرداخت تأیید شد! کانفیگ شما در حال آماده‌سازی است…", parse_mode="HTML")
+            else:
+                bot.send_message(uid, "⚠️ خطا در پردازش پرداخت. لطفاً با پشتیبانی تماس بگیرید.", parse_mode="HTML")
         else:
-            # Check if the order is expired/not found on Tronado's side
-            # Only show 'expired' if we actually got a non-empty API error saying so.
-            # Empty td_resp ({}) means API failure — show 'not confirmed yet', not 'expired'.
             _td_error = ""
             if isinstance(td_resp, dict) and td_resp:
                 _td_error = str(td_resp.get("Error") or td_resp.get("Message") or td_resp.get("message") or td_resp.get("error") or "")
@@ -7131,8 +7148,7 @@ def _dispatch_callback(call, uid, data):
                     parse_mode="HTML", reply_markup=_kb_exp)
             else:
                 bot.send_message(uid,
-                    "⏳ پرداخت هنوز تأیید نشده است.\n"
-                    "لطفاً چند دقیقه صبر کنید و دوباره وضعیت را بررسی کنید.",
+                    "⏳ پرداخت شما هنوز تأیید نشده است. چند دقیقه دیگر دوباره بررسی کنید.",
                     parse_mode="HTML")
         return
 
@@ -7215,7 +7231,7 @@ def _dispatch_callback(call, uid, data):
         )
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("💎 پرداخت در ترونادو", url=pay_url_td2))
-        kb.add(types.InlineKeyboardButton("🔍 مشاهده وضعیت پرداخت", callback_data=f"pay:tronado:verify:{payment_id}"))
+        kb.add(types.InlineKeyboardButton("🔍 بررسی پرداخت", callback_data=f"pay:tronado:verify:{payment_id}"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
         return
@@ -8013,6 +8029,47 @@ def _dispatch_callback(call, uid, data):
             send_or_edit(call, "💎 <b>پرداخت NowPayments</b>\n\nارز مورد نظر را برای پرداخت انتخاب کنید:", kb)
         return
 
+    if data.startswith("wallet:charge:tronado:verify:"):
+        payment_id = int(data.split(":")[-1])
+        payment = get_payment(payment_id)
+        if not payment or payment["user_id"] != uid:
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        if payment["status"] != "pending":
+            if payment["status"] == "completed":
+                bot.answer_callback_query(call.id, "✅ پرداخت شما قبلاً تأیید و کیف پول شارژ شده است.", show_alert=True)
+            else:
+                bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id, "⏳ در حال بررسی وضعیت پرداخت…", show_alert=False)
+        from ..gateways.tronado import get_tronado_payment_status, get_tronado_status_by_payment_id, normalize_tronado_status
+        token_wctd = payment["receipt_text"] or ""
+        td_resp_wc = get_tronado_payment_status(token_wctd) if token_wctd else {}
+        norm_wc = normalize_tronado_status(td_resp_wc)
+        if norm_wc != "paid":
+            td_resp_wc2 = get_tronado_status_by_payment_id(str(payment_id))
+            norm_wc2 = normalize_tronado_status(td_resp_wc2)
+            if norm_wc2 == "paid":
+                td_resp_wc = td_resp_wc2
+                norm_wc = norm_wc2
+        if norm_wc == "paid":
+            from ..crypto_fulfillment import process_tronado_verified_payment
+            result = process_tronado_verified_payment(payment_id, source="manual_verify", raw_payload=td_resp_wc)
+            if result.get("status") == "already_processed":
+                bot.send_message(uid, "✅ پرداخت شما قبلاً تأیید و کیف پول شارژ شده است.", parse_mode="HTML")
+            elif result.get("status") == "ok":
+                bot.send_message(uid,
+                    f"✅ پرداخت ترونادو تأیید شد و کیف پول شارژ شد.\n\n"
+                    f"💰 مبلغ: {fmt_price(payment['amount'])} تومان",
+                    parse_mode="HTML")
+            else:
+                bot.send_message(uid, "⚠️ خطا در پردازش پرداخت. لطفاً با پشتیبانی تماس بگیرید.", parse_mode="HTML")
+        elif norm_wc == "rejected":
+            bot.send_message(uid, "❌ پرداخت شما تایید نشد یا رد شده است.", parse_mode="HTML")
+        else:
+            bot.send_message(uid, "⏳ پرداخت شما هنوز تأیید نشده است. چند دقیقه دیگر دوباره بررسی کنید.", parse_mode="HTML")
+        return
+
     if data == "wallet:charge:tronado":
         if not _check_invoice_valid(uid):
             _show_invoice_expired(call)
@@ -8057,19 +8114,15 @@ def _dispatch_callback(call, uid, data):
         trx_line_td = f"\n💎 معادل TRX: <b>{tron_amt_td:.4f} TRX</b> (نرخ هر TRX: {fmt_price(int(trx_rate_td))} تومان)" if tron_amt_td else ""
         text = (
             "💎 <b>پرداخت با ترونادو</b>\n\n"
-            f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان{fee_line}{trx_line_td}\n\n"
-            "برای پرداخت، روی دکمه زیر بزنید و وارد صفحه پرداخت ترونادو شوید.\n\n"
-            "در صفحه پرداخت، شماره کارت را دریافت کنید، مبلغ را دقیق واریز کنید، "
-            "تصویر رسید را همان‌جا ارسال کنید و منتظر تأیید تیم ترونادو بمانید.\n\n"
-            "<b>نکته مهم:</b>\n"
-            "برای استفاده از پرداخت درون‌برنامه‌ای، لازم است قبلاً ربات ترونادو را Start کرده باشید "
-            "و به Mini App اجازه ارسال پیام داده باشید. اگر پرداخت شما رد شود دلیل آن نمایش داده می‌شود "
-            "و در صورت تأیید، کد تراکنش در اختیار شما قرار می‌گیرد.\n\n"
-            "ممکن است در صورت واریز اشتباه/کمتر/نامعتبر، تراکنش تا ۴ ساعت در انتظار بررسی بماند."
+            f"💰 مبلغ قابل پرداخت: <b>{fmt_price(final_amount)}</b> تومان{fee_line}{trx_line_td}\n\n"
+            "ابتدا روی دکمه «پرداخت با ترونادو» بزنید و پرداخت را در صفحه ترونادو انجام دهید.\n"
+            "پس از پرداخت و ارسال رسید، به ربات برگردید و روی «🔍 بررسی پرداخت» بزنید.\n\n"
+            "اگر پرداخت شما توسط ترونادو تأیید شده باشد، کیف پول به‌صورت خودکار شارژ می‌شود.\n"
+            "در غیر این صورت، چند دقیقه بعد دوباره بررسی کنید."
         )
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("💎 پرداخت در ترونادو", url=pay_url_td))
-        kb.add(types.InlineKeyboardButton("🔍 مشاهده وضعیت پرداخت", url=pay_url_td))
+        kb.add(types.InlineKeyboardButton("💎 پرداخت با ترونادو", url=pay_url_td))
+        kb.add(types.InlineKeyboardButton("🔍 بررسی پرداخت", callback_data=f"wallet:charge:tronado:verify:{payment_id}"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
         return
@@ -10340,7 +10393,7 @@ def _dispatch_callback(call, uid, data):
             trx_line_tpnl = f"\n💎 معادل TRX: <b>{tron_amt_tpnl:.4f} TRX</b> (نرخ هر TRX: {fmt_price(int(trx_rate_tpnl))} تومان)" if tron_amt_tpnl else ""
             kb_tpnl = types.InlineKeyboardMarkup()
             kb_tpnl.add(types.InlineKeyboardButton("💎 پرداخت در ترونادو", url=pay_url_tpnl))
-            kb_tpnl.add(types.InlineKeyboardButton("🔍 مشاهده وضعیت پرداخت",
+            kb_tpnl.add(types.InlineKeyboardButton("🔍 بررسی پرداخت",
                         callback_data=f"mypnlcfgrpay:tronado:verify:{payment_id}"))
             bot.answer_callback_query(call.id)
             send_or_edit(call,
@@ -10370,18 +10423,18 @@ def _dispatch_callback(call, uid, data):
             if not is_tronado_response_paid(td_resp_pnl):
                 pass  # single ID lookup is sufficient
             if is_tronado_response_paid(td_resp_pnl):
-                if not complete_payment(payment_id):
-                    bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True); return
-                config_id_pnltd  = payment["config_id"]
-                package_id_pnltd = payment["package_id"]
-                bot.send_message(uid, "✅ پرداخت تأیید شد! در حال تمدید سرویس…", parse_mode="HTML")
-                ok_r_pnltd, _ = _execute_pnlcfg_renewal(config_id_pnltd, package_id_pnltd, chat_id=uid, uid=uid)
+                from ..crypto_fulfillment import process_tronado_verified_payment
+                result = process_tronado_verified_payment(payment_id, source="manual_verify", raw_payload=td_resp_pnl)
                 state_clear(uid)
-                if not ok_r_pnltd:
-                    send_or_edit(call, "❌ پرداخت انجام شد اما تمدید سرویس با خطا مواجه شد.\nلطفاً با پشتیبانی ارتباط بگیرید.",
+                if result.get("status") == "already_processed":
+                    bot.send_message(uid, "✅ پرداخت شما قبلاً تأیید و تحویل داده شده است.", parse_mode="HTML")
+                elif result.get("status") == "ok":
+                    config_id_pnltd = payment["config_id"]
+                    bot.send_message(uid, "✅ پرداخت تأیید شد! سرویس تمدید شد.", parse_mode="HTML")
+                    _show_panel_config_detail(call, config_id_pnltd, back_data="my_configs", is_user_view=True)
+                else:
+                    send_or_edit(call, "❌ پرداخت انجام شد اما پردازش با خطا مواجه شد.\nلطفاً با پشتیبانی ارتباط بگیرید.",
                                  back_button("my_configs"))
-                    return
-                _show_panel_config_detail(call, config_id_pnltd, back_data="my_configs", is_user_view=True)
             else:
                 bot.send_message(uid,
                     "⏳ پرداخت هنوز تأیید نشده است.\n"
@@ -10722,7 +10775,7 @@ def _dispatch_callback(call, uid, data):
                       payment_id=payment_id, token=token_td_pnl, config_id=config_id)
             kb_td = types.InlineKeyboardMarkup()
             kb_td.add(types.InlineKeyboardButton("💎 پرداخت در ترونادو", url=pay_url_td_pnl))
-            kb_td.add(types.InlineKeyboardButton("🔍 مشاهده وضعیت",
+            kb_td.add(types.InlineKeyboardButton("🔍 بررسی پرداخت",
                         callback_data=f"mypnlcfgrpay:tronado:verify:{payment_id}"))
             bot.answer_callback_query(call.id)
             send_or_edit(call,
@@ -10752,18 +10805,18 @@ def _dispatch_callback(call, uid, data):
             if not is_tronado_response_paid(td_resp_pnl2):
                 pass  # single ID lookup is sufficient
             if is_tronado_response_paid(td_resp_pnl2):
-                if not complete_payment(payment_id):
-                    bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True); return
-                config_id_pnltd2  = payment["config_id"]
-                package_id_pnltd2 = payment["package_id"]
-                bot.send_message(uid, "✅ پرداخت تأیید شد! در حال تمدید سرویس…", parse_mode="HTML")
-                ok_r_pnltd2, _ = _execute_pnlcfg_renewal(config_id_pnltd2, package_id_pnltd2, chat_id=uid, uid=uid)
+                from ..crypto_fulfillment import process_tronado_verified_payment
+                result = process_tronado_verified_payment(payment_id, source="manual_verify", raw_payload=td_resp_pnl2)
                 state_clear(uid)
-                if not ok_r_pnltd2:
-                    send_or_edit(call, "❌ پرداخت انجام شد اما تمدید سرویس با خطا مواجه شد.\nلطفاً با پشتیبانی ارتباط بگیرید.",
+                if result.get("status") == "already_processed":
+                    bot.send_message(uid, "✅ پرداخت شما قبلاً تأیید و تحویل داده شده است.", parse_mode="HTML")
+                elif result.get("status") == "ok":
+                    config_id_pnltd2 = payment["config_id"]
+                    bot.send_message(uid, "✅ پرداخت تأیید شد! سرویس تمدید شد.", parse_mode="HTML")
+                    _show_panel_config_detail(call, config_id_pnltd2, back_data="my_configs", is_user_view=True)
+                else:
+                    send_or_edit(call, "❌ پرداخت انجام شد اما پردازش با خطا مواجه شد.\nلطفاً با پشتیبانی ارتباط بگیرید.",
                                  back_button("my_configs"))
-                    return
-                _show_panel_config_detail(call, config_id_pnltd2, back_data="my_configs", is_user_view=True)
             else:
                 bot.send_message(uid,
                     "⏳ پرداخت هنوز تأیید نشده است.\n"
@@ -19731,29 +19784,47 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id, "پنل یافت نشد.", show_alert=True)
             return
         bot.answer_callback_query(call.id, "در حال بررسی…")
-        try:
-            from ..panels.client import PanelClient
+        from telebot.types import InlineKeyboardMarkup as _IKM2, InlineKeyboardButton as _IKB2
+        _kb_rc = _IKM2()
+        _kb_rc.add(_IKB2("❌ لغو", callback_data="adm:pnl:connect_cancel"))
+        _rc_msg = bot.send_message(uid, "⏳ در حال بررسی اتصال به پنل…", reply_markup=_kb_rc)
+        _cancel_ev_rc = threading.Event()
+        _pnl_connect_events[uid] = _cancel_ev_rc
+        _call_rc = call
+        _panel_id_rc = panel_id
+        def _do_recheck(_p=p, _pid=_panel_id_rc, _ev=_cancel_ev_rc, _m=_rc_msg, _c=_call_rc):
             try:
-                _pname = p["name"]
+                try:
+                    _pname = _p["name"]
+                except Exception:
+                    _pname = ""
+                ok, err = _panel_connect_with_retry(
+                    uid=uid, protocol=_p["protocol"], host=_p["host"], port=_p["port"],
+                    path=_p["path"] or "", username=_p["username"], password=_p["password"],
+                    panel_name=_pname or "", panel_id=_pid, notify_chat_id=uid,
+                    cancel_event=_ev,
+                )
+                status = "connected" if ok else "disconnected"
+                update_panel_status(_pid, status, err or "")
+            except Exception as exc:
+                update_panel_status(_pid, "disconnected", str(exc))
+            finally:
+                _pnl_connect_events.pop(uid, None)
+            if _ev.is_set():
+                return
+            try:
+                bot.delete_message(uid, _m.message_id)
             except Exception:
-                _pname = ""
-            ok, err = _panel_connect_with_retry(
-                uid=uid, protocol=p["protocol"], host=p["host"], port=p["port"],
-                path=p["path"] or "", username=p["username"], password=p["password"],
-                panel_name=_pname or "", panel_id=panel_id, notify_chat_id=uid,
-            )
-            status = "connected" if ok else "disconnected"
-            update_panel_status(panel_id, status, err or "")
-        except Exception as exc:
-            update_panel_status(panel_id, "disconnected", str(exc))
-        _show_panel_detail(call, panel_id)
+                pass
+            _show_panel_detail(_c, _pid)
+        threading.Thread(target=_do_recheck, daemon=True).start()
         return
 
     if data == "adm:pnl:save_as_inactive":
         if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
             bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
             return
-        if state_name(uid) != "pnl_add_save_fail":
+        if state_name(uid) not in ("pnl_add_save_fail", "pnl_connecting"):
             bot.answer_callback_query(call.id, "عملیات منقضی شده.", show_alert=True)
             return
         sd = state_data(uid)
@@ -19793,36 +19864,70 @@ def _dispatch_callback(call, uid, data):
         username = sd.get("username", "")
         password = sd.get("password", "")
         bot.answer_callback_query(call.id)
-        bot.send_message(uid, "⏳ در حال بررسی اتصال به پنل…")
-        ok, err = _panel_connect_with_retry(
-            uid=uid, protocol=protocol, host=host, port=int(port),
-            path=path, username=username, password=password,
-            panel_name=pnl_name, notify_chat_id=uid,
-        )
-        if ok:
-            state_clear(uid)
-            panel_id = add_panel(name=pnl_name or "بدون نام", protocol=protocol,
-                                 host=host, port=int(port or 2053), path=path,
-                                 username=username, password=password, sub_url_base="")
-            update_panel_status(panel_id, "connected", "")
-            _adopted = adopt_all_orphaned_configs(panel_id)
-            _adopted_note = f"\n📥 {_adopted} کانفیگ قدیمی به این پنل منتقل شدند." if _adopted else ""
-            bot.send_message(uid, f"✅ اتصال موفق! پنل ذخیره شد.{_adopted_note}", parse_mode="HTML")
-            _show_panel_detail(call, panel_id)
-        else:
-            state_set(uid, "pnl_add_save_fail",
-                      pnl_name=pnl_name, protocol=protocol, host=host, port=int(port or 2053),
-                      path=path, username=username, password=password, sub_url_base="", error=err or "")
-            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-            kb_fail = InlineKeyboardMarkup()
-            kb_fail.row(
-                InlineKeyboardButton("💾 ذخیره به‌عنوان غیرفعال", callback_data="adm:pnl:save_as_inactive"),
-                InlineKeyboardButton("❌ لغو", callback_data="adm:pnl:add_cancel"),
+        from telebot.types import InlineKeyboardMarkup as _IKMsc, InlineKeyboardButton as _IKBsc
+        _kb_sc = _IKMsc()
+        _kb_sc.add(_IKBsc("❌ لغو اتصال", callback_data="adm:pnl:connect_cancel"))
+        bot.send_message(uid,
+            "⏳ در حال بررسی اتصال به پنل…\n"
+            "در صورت عدم موفقیت، پس از چند ثانیه نتیجه اعلام می‌شود.",
+            parse_mode="HTML", reply_markup=_kb_sc)
+        state_set(uid, "pnl_connecting",
+                  pnl_name=pnl_name, protocol=protocol, host=host, port=int(port or 2053),
+                  path=path, username=username, password=password, sub_url_base="")
+        _cancel_ev_sc = threading.Event()
+        _pnl_connect_events[uid] = _cancel_ev_sc
+        _call_sc = call
+        def _do_skip_connect(_ev=_cancel_ev_sc, _c=_call_sc,
+                              _pnl=pnl_name, _proto=protocol, _h=host,
+                              _p=int(port or 2053), _path=path,
+                              _user=username, _pw=password):
+            ok, err = _panel_connect_with_retry(
+                uid=uid, protocol=_proto, host=_h, port=_p,
+                path=_path, username=_user, password=_pw,
+                panel_name=_pnl, notify_chat_id=uid,
+                cancel_event=_ev,
             )
-            bot.send_message(uid,
-                "❌ <b>اتصال ناموفق</b>\n\n"
-                "می‌توانید پنل را به‌صورت غیرفعال ذخیره کنید تا بعداً ویرایش شود.",
-                parse_mode="HTML", reply_markup=kb_fail)
+            _pnl_connect_events.pop(uid, None)
+            if _ev.is_set():
+                return
+            if ok:
+                state_clear(uid)
+                _pid2 = add_panel(name=_pnl or "بدون نام", protocol=_proto,
+                                  host=_h, port=_p, path=_path,
+                                  username=_user, password=_pw, sub_url_base="")
+                update_panel_status(_pid2, "connected", "")
+                _adopted = adopt_all_orphaned_configs(_pid2)
+                _adopted_note = f"\n📥 {_adopted} کانفیگ قدیمی به این پنل منتقل شدند." if _adopted else ""
+                bot.send_message(uid, f"✅ اتصال موفق! پنل ذخیره شد.{_adopted_note}", parse_mode="HTML")
+                _show_panel_detail(_c, _pid2)
+            else:
+                state_set(uid, "pnl_add_save_fail",
+                          pnl_name=_pnl, protocol=_proto, host=_h, port=_p,
+                          path=_path, username=_user, password=_pw,
+                          sub_url_base="", error=err or "")
+                from telebot.types import InlineKeyboardMarkup as _IKMf, InlineKeyboardButton as _IKBf
+                kb_fail = _IKMf()
+                kb_fail.row(
+                    _IKBf("💾 ذخیره به‌عنوان غیرفعال", callback_data="adm:pnl:save_as_inactive"),
+                    _IKBf("❌ لغو", callback_data="adm:pnl:add_cancel"),
+                )
+                bot.send_message(uid,
+                    "❌ <b>اتصال ناموفق</b>\n\n"
+                    "می‌توانید پنل را به‌صورت غیرفعال ذخیره کنید تا بعداً ویرایش شود.",
+                    parse_mode="HTML", reply_markup=kb_fail)
+        threading.Thread(target=_do_skip_connect, daemon=True).start()
+        return
+
+    if data == "adm:pnl:connect_cancel":
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+            return
+        ev = _pnl_connect_events.pop(uid, None)
+        if ev:
+            ev.set()
+        state_clear(uid)
+        bot.answer_callback_query(call.id, "✅ اتصال لغو شد.")
+        _show_admin_panels(call)
         return
 
     if data == "adm:pnl:add_cancel":
