@@ -117,8 +117,9 @@ def kb_admin_panel(uid=None):
 
     # ── تخفیف+کارت هدیه  |  فوروارد و پین ───────────────────────────────────
     show_broadcast = is_owner or (uid and (admin_has_perm(uid, "broadcast_all") or admin_has_perm(uid, "broadcast_cust")))
+    show_gifts     = is_owner or (uid and is_admin(uid))
     disc_bc_row = []
-    if is_owner:
+    if show_gifts:
         disc_bc_row.append(_btn("تخفیف و کارت هدیه", callback_data="admin:gifts_menu", emoji_id="5377599075237502153"))
     if show_broadcast:
         disc_bc_row.append(_btn("فوروارد و پین همگانی", callback_data="admin:broadcast", emoji_id="5416106115630918483"))

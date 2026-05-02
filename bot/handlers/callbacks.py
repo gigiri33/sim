@@ -1782,7 +1782,7 @@ def _execute_addon_update(config_id, addon_type, sd, uid):
     return True, None
 
 
-
+def _notify_panel_error(uid, package_row, stage, detail, panel_config_id=None, panel_id=None):
     """
     Alert owner admins (ADMIN_IDS) and the error_log group topic
     when a panel config creation or delivery fails.
