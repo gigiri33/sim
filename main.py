@@ -297,17 +297,27 @@ def _plisio_webhook_server():
     def _tronado_callback(bot_username, payment_id):
         try:
             payload = request.get_json(force=True, silent=True) or {}
+            print(f"[Tronado] Callback HIT payment_id={payment_id} keys={list(payload.keys())} data={str(payload)[:300]}")
             from bot.gateways.tronado import is_tronado_callback_valid as _td_valid
             if not _td_valid(payload):
+                print(f"[Tronado] Callback REJECTED as invalid for payment_id={payment_id}")
                 return jsonify({"status": "ok"}), 200
 
             payment = get_payment(payment_id)
-            if not payment or payment["status"] != "pending" or payment["payment_method"] != "tronado":
+            if not payment:
+                print(f"[Tronado] Callback: payment_id={payment_id} not found in DB")
+                return jsonify({"status": "ok"}), 200
+            if payment["status"] != "pending":
+                print(f"[Tronado] Callback: payment_id={payment_id} already {payment['status']}")
+                return jsonify({"status": "ok"}), 200
+            if payment["payment_method"] != "tronado":
+                print(f"[Tronado] Callback: payment_id={payment_id} wrong method {payment['payment_method']}")
                 return jsonify({"status": "ok"}), 200
 
             kind   = payment["kind"]
             uid    = payment["user_id"]
             amount = payment["amount"]
+            print(f"[Tronado] Callback: processing payment_id={payment_id} uid={uid} kind={kind} amount={amount}")
 
             if kind == "wallet_charge":
                 if not complete_payment(payment_id):

@@ -182,10 +182,16 @@ def is_tronado_callback_valid(payload: dict) -> bool:
     """
     Return True if the incoming POST payload looks like a valid Tronado payment callback.
     Tronado only sends a callback on SUCCESSFUL payment, so any valid callback = paid.
-    Per docs callback body includes: PaymentID, TronAmount, ActualTronAmount, Wallet, CallbackUrl.
+    Observed formats:
+      - {PaymentID, TronAmount, ActualTronAmount, Wallet, CallbackUrl}
+      - {UniqueCode, Hash, Wallet, PaymentID, UserTelegramId}  (same as GetStatus paid response)
     """
     if not isinstance(payload, dict):
         return False
+    # Format 1: has UniqueCode + Hash (confirmed paid response format)
+    if payload.get("UniqueCode") and payload.get("Hash"):
+        return True
+    # Format 2: classic callback fields
     has_id = bool(
         payload.get("PaymentID") or payload.get("paymentId")
         or payload.get("payment_id") or payload.get("OrderId") or payload.get("orderId")
@@ -252,14 +258,22 @@ def is_tronado_response_paid(resp: dict) -> bool:
     """
     Return True if a GetStatus response indicates a paid/confirmed payment.
     Per API docs the response Data has IsPaid (bool) and OrderStatusTitle (string).
+    Tronado also returns a flat dict with UniqueCode+Hash+Wallet when the payment
+    is confirmed (same structure as the callback payload).
     """
     if not resp:
         return False
+    # Flat paid-callback format: has UniqueCode and Hash at top level (no Error key)
+    if isinstance(resp, dict) and resp.get("UniqueCode") and resp.get("Hash") and "Error" not in resp:
+        return True
     data = resp.get("Data") or resp.get("data") or resp
     if isinstance(data, dict):
         # Primary check: IsPaid boolean (from API docs)
         is_paid = data.get("IsPaid") or data.get("isPaid")
         if is_paid is True:
+            return True
+        # Flat paid format nested inside Data
+        if data.get("UniqueCode") and data.get("Hash") and "Error" not in data:
             return True
         # Fallback: check status title string
         status_val = (
