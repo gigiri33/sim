@@ -32,6 +32,7 @@ from ..db import (
     assign_config_to_user, reserve_first_config, release_reserved_config,
     update_config_field,
     get_payment, get_pending_payments_page, create_payment, approve_payment, reject_payment, complete_payment,
+    is_payment_expired, format_payment_expire_text,
     update_payment_final_amount,
     get_agency_price, set_agency_price,
     get_agency_price_config, set_agency_price_config,
@@ -180,6 +181,8 @@ def _verify_tronado_payment(payment_id: int) -> dict:
         return {"verify": "pending", "process_result": proc, "raw_resp": proc.get("raw_resp", {})}
     if status == "rejected":
         return {"verify": "rejected", "process_result": proc, "raw_resp": proc.get("raw_resp", {})}
+    if status == "expired":
+        return {"verify": "expired", "process_result": proc, "raw_resp": proc.get("raw_resp", {})}
     return {"verify": "process_error", "process_result": proc, "raw_resp": proc.get("raw_resp", {})}
 
 
@@ -203,6 +206,8 @@ def _verify_centralpay_payment(payment_id: int) -> dict:
         return {"verify": "amount_mismatch", "process_result": proc}
     if status == "not_paid":
         return {"verify": "not_paid", "process_result": proc}
+    if status == "expired":
+        return {"verify": "expired", "process_result": proc}
     return {"verify": "process_error", "process_result": proc}
 
 
@@ -762,10 +767,9 @@ def _invoice_expiry_line() -> str:
     if not _invoice_expiry_enabled():
         return ""
     mins = _invoice_expiry_minutes()
-    expiry_dt = datetime.now(_TZ_TEHRAN) + timedelta(minutes=mins)
-    expiry_str = expiry_dt.strftime("%H:%M")
     return (
-        f"\n\n⏳ اعتبار این فاکتور تا ساعت <b>{expiry_str}</b> است."
+        f"\n\n⏰ مهلت پرداخت: <b>{mins} دقیقه</b>\n"
+        "پس از پایان این زمان، فاکتور در تمامی درگاه‌ها غیرقابل استفاده خواهد بود."
     )
 
 
@@ -3684,6 +3688,30 @@ def on_callback(call):
         except Exception:
             pass
 
+        # ── Invoice expiration guard for every gateway verify button ─────────
+        try:
+            if ":verify:" in data and data.startswith(("pay:", "rpay:", "wallet:charge:", "mypnlcfgrpay:")):
+                _pid = int(data.rsplit(":", 1)[-1])
+                _payment = get_payment(_pid)
+                if _payment and is_payment_expired(_payment):
+                    print(f"[EXPIRED PAYMENT IGNORED] payment_id={_pid}")
+                    bot.answer_callback_query(
+                        call.id,
+                        "⏳ زمان این فاکتور به پایان رسیده است. لطفاً مجدداً خرید خود را انجام دهید.",
+                        show_alert=True,
+                    )
+                    try:
+                        bot.edit_message_text(
+                            "⏳ زمان پرداخت شما به پایان رسید\nلطفاً مجدداً خرید خود را انجام دهید",
+                            call.message.chat.id,
+                            call.message.message_id,
+                        )
+                    except Exception:
+                        pass
+                    return
+        except Exception:
+            pass
+
         if not check_channel_membership(uid):
             bot.answer_callback_query(call.id)
             channel_lock_message(call)
@@ -6037,6 +6065,8 @@ def _dispatch_callback(call, uid, data):
         pay_url_rcp = res_cp.get("redirect_url", "")
         with get_conn() as conn:
             conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (pay_url_rcp, payment_id))
+        expiry_line_rcp = format_payment_expire_text(get_payment(payment_id))
+        expiry_line_rcp = f"\n\n{expiry_line_rcp}" if expiry_line_rcp else ""
         fee_line_rcp = ""
         if final_rprice_cp != price:
             fee_line_rcp = f"\n💸 کارمزد: {fmt_price(final_rprice_cp - price)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_rprice_cp)}</b> تومان"
@@ -6044,6 +6074,7 @@ def _dispatch_callback(call, uid, data):
             "💳 <b>پرداخت با سنترال‌پی — تمدید</b>\n\n"
             f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_rcp}\n\n"
             "برای پرداخت روی دکمه زیر بزنید. پس از اتمام پرداخت به ربات برگردید و روی «🔍 بررسی پرداخت» بزنید."
+            f"{expiry_line_rcp}"
         )
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("💳 پرداخت با سنترال‌پی", url=pay_url_rcp))
@@ -7413,6 +7444,8 @@ def _dispatch_callback(call, uid, data):
         pay_url_cp = res_cp.get("redirect_url", "")
         with get_conn() as conn:
             conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (pay_url_cp, payment_id))
+        expiry_line_cp = format_payment_expire_text(get_payment(payment_id))
+        expiry_line_cp = f"\n\n{expiry_line_cp}" if expiry_line_cp else ""
         fee_line_cp = ""
         if final_cp_price != price:
             fee_line_cp = f"\n💸 کارمزد: {fmt_price(final_cp_price - price)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_cp_price)}</b> تومان"
@@ -7420,6 +7453,7 @@ def _dispatch_callback(call, uid, data):
             "💳 <b>پرداخت با سنترال‌پی</b>\n\n"
             f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_cp}\n\n"
             "برای پرداخت روی دکمه زیر بزنید. پس از اتمام پرداخت به ربات برگردید و روی «🔍 بررسی پرداخت» بزنید."
+            f"{expiry_line_cp}"
         )
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("💳 پرداخت با سنترال‌پی", url=pay_url_cp))
@@ -8367,6 +8401,8 @@ def _dispatch_callback(call, uid, data):
         pay_url_cpwc = res_cp.get("redirect_url", "")
         with get_conn() as conn:
             conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (pay_url_cpwc, payment_id))
+        expiry_line_cpwc = format_payment_expire_text(get_payment(payment_id))
+        expiry_line_cpwc = f"\n\n{expiry_line_cpwc}" if expiry_line_cpwc else ""
         fee_line_cpwc = ""
         if final_amount_cp != amount:
             fee_line_cpwc = f"\n💸 کارمزد: {fmt_price(final_amount_cp - amount)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_amount_cp)}</b> تومان"
@@ -8375,6 +8411,7 @@ def _dispatch_callback(call, uid, data):
             f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان{fee_line_cpwc}\n\n"
             "روی دکمه زیر بزنید و پرداخت را انجام دهید. پس از اتمام، روی «🔍 بررسی پرداخت» بزنید.\n\n"
             "اگر پرداخت تأیید شده باشد، کیف پول به‌صورت خودکار شارژ می‌شود."
+            f"{expiry_line_cpwc}"
         )
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("💳 پرداخت با سنترال‌پی", url=pay_url_cpwc))
@@ -10728,6 +10765,8 @@ def _dispatch_callback(call, uid, data):
             pay_url_cpnl = res_cp_pnl.get("redirect_url", "")
             with get_conn() as conn:
                 conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (pay_url_cpnl, payment_id))
+            expiry_line_cpnl = format_payment_expire_text(get_payment(payment_id))
+            expiry_line_cpnl = f"\n\n{expiry_line_cpnl}" if expiry_line_cpnl else ""
             fee_line_cpnl = ""
             if final_cp_pnl != price:
                 fee_line_cpnl = f"\n💸 کارمزد: {fmt_price(final_cp_pnl - price)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_cp_pnl)}</b> تومان"
@@ -10739,7 +10778,8 @@ def _dispatch_callback(call, uid, data):
             send_or_edit(call,
                 "💳 <b>پرداخت با سنترال‌پی (تمدید)</b>\n\n"
                 f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_cpnl}\n\n"
-                "برای پرداخت روی دکمه زیر بزنید. پس از اتمام پرداخت روی «🔍 بررسی پرداخت» بزنید.",
+                "برای پرداخت روی دکمه زیر بزنید. پس از اتمام پرداخت روی «🔍 بررسی پرداخت» بزنید."
+                f"{expiry_line_cpnl}",
                 kb_cpnl)
             return
 
@@ -11188,6 +11228,8 @@ def _dispatch_callback(call, uid, data):
             pay_url_cp2 = res_cp2.get("redirect_url", "")
             with get_conn() as conn:
                 conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (pay_url_cp2, payment_id))
+            expiry_line_cp2 = format_payment_expire_text(get_payment(payment_id))
+            expiry_line_cp2 = f"\n\n{expiry_line_cp2}" if expiry_line_cp2 else ""
             fee_line_cp2 = ""
             if final_cp_pnl2 != price:
                 fee_line_cp2 = f"\n💸 کارمزد: {fmt_price(final_cp_pnl2 - price)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_cp_pnl2)}</b> تومان"
@@ -11199,7 +11241,8 @@ def _dispatch_callback(call, uid, data):
             send_or_edit(call,
                 "💳 <b>پرداخت با سنترال‌پی (تمدید)</b>\n\n"
                 f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_cp2}\n\n"
-                "برای پرداخت روی دکمه زیر بزنید. پس از اتمام پرداخت روی «🔍 بررسی پرداخت» بزنید.",
+                "برای پرداخت روی دکمه زیر بزنید. پس از اتمام پرداخت روی «🔍 بررسی پرداخت» بزنید."
+                f"{expiry_line_cp2}",
                 kb_cp2)
             return
 
@@ -15475,6 +15518,8 @@ def _dispatch_callback(call, uid, data):
             "وقتی فعال باشد، هر فاکتور پرداخت (خرید، تمدید، شارژ کیف پول) "
             "فقط تا مدت تعیین‌شده معتبر است. پس از اتمام زمان، کاربر نمی‌تواند "
             "از آن فاکتور برای پرداخت استفاده کند.\n\n"
+            "در صورت فعال بودن، این زمان در تمام مراحل پرداخت نمایش داده شده و "
+            "پس از پایان آن، فاکتور در تمامی درگاه‌ها غیرقابل استفاده خواهد بود.\n\n"
             "مقدار پیش‌فرض: <b>30 دقیقه</b>"
         )
 
@@ -16719,6 +16764,7 @@ def _dispatch_callback(call, uid, data):
         "plisio":            "💎 Plisio",
         "nowpayments":       "💎 NowPayments",
         "tronado":           "💎 ترونادو",
+        "centralpay":        "💳 CentralPay",
     }
 
     def _feebonus_text(gw):
@@ -16798,7 +16844,7 @@ def _dispatch_callback(call, uid, data):
         return kb2
 
     # feebonus entry for each gateway (adm:gw:<gw>:feebonus or adm:gw:card:feebonus)
-    for _gw_fb in ("card", "crypto", "tetrapay", "swapwallet_crypto", "tronpays_rial", "plisio", "nowpayments", "tronado"):
+    for _gw_fb in ("card", "crypto", "tetrapay", "swapwallet_crypto", "tronpays_rial", "plisio", "nowpayments", "tronado", "centralpay"):
         if data == f"adm:gw:{_gw_fb}:feebonus":
             if not admin_has_perm(uid, "settings"):
                 bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
@@ -17260,7 +17306,7 @@ def _dispatch_callback(call, uid, data):
             back_button("adm:set:gw:tronpays_rial"))
         return
 
-    _GW_RANGE_LABELS = {"card": "💳 کارت به کارت", "crypto": "💎 ارز دیجیتال", "tetrapay": "🏦 TetraPay", "swapwallet": "💎 SwapWallet", "swapwallet_crypto": "💎 SwapWallet کریپتو", "tronpays_rial": "💳 TronPays", "pazzlenet": "💳 PazzleNet", "plisio": "💎 Plisio", "nowpayments": "💎 NowPayments", "tronado": "💎 ترونادو"}
+    _GW_RANGE_LABELS = {"card": "💳 کارت به کارت", "crypto": "💎 ارز دیجیتال", "tetrapay": "🏦 TetraPay", "swapwallet": "💎 SwapWallet", "swapwallet_crypto": "💎 SwapWallet کریپتو", "tronpays_rial": "💳 TronPays", "pazzlenet": "💳 PazzleNet", "plisio": "💎 Plisio", "nowpayments": "💎 NowPayments", "tronado": "💎 ترونادو", "centralpay": "💳 CentralPay"}
 
     # ── PazzleNet admin settings ──────────────────────────────────────────────
     if data == "adm:set:gw:pazzlenet":
@@ -17614,18 +17660,6 @@ def _dispatch_callback(call, uid, data):
             "اگر خالی باشد از setting_server_public_url استفاده می‌شود.\n"
             "برای حذف، <code>-</code> ارسال کنید.",
             back_button("adm:set:gw:centralpay"))
-        return
-
-    if data == "adm:gw:centralpay:range":
-        from ..payments import show_gateway_range_settings
-        bot.answer_callback_query(call.id)
-        show_gateway_range_settings(call, "centralpay")
-        return
-
-    if data == "adm:gw:centralpay:feebonus":
-        from ..payments import show_gateway_feebonus_settings
-        bot.answer_callback_query(call.id)
-        show_gateway_feebonus_settings(call, "centralpay")
         return
 
     # ── Plisio admin settings ─────────────────────────────────────────────────

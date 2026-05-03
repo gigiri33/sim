@@ -6,8 +6,10 @@ import time
 import uuid
 from datetime import datetime, timedelta
 
+import jdatetime
+
 from .config import DB_NAME, CRYPTO_COINS
-from .helpers import now_str
+from .helpers import now_str, _TZ_TEHRAN
 
 
 # ── Per-thread persistent connection ──────────────────────────────────────────
@@ -502,6 +504,9 @@ def _run_init_db_migrations():
             "centralpay_verify_url":              "https://centralapi.org/webservice/basic/verify.php",
             "centralpay_callback_base_url":       "",
             "centralpay_link_type":               "deposit",
+            # ── Invoice expiration ───────────────────────────────────────────
+            "invoice_expiry_enabled":             "1",
+            "invoice_expiry_minutes":             "30",
         }
         for coin, _ in CRYPTO_COINS:
             defaults[f"crypto_{coin}"] = ""
@@ -772,6 +777,7 @@ def _run_init_db_migrations():
             "ALTER TABLE payments ADD COLUMN raw_callback TEXT",
             "ALTER TABLE payments ADD COLUMN callback_received_at TEXT",
             "ALTER TABLE payments ADD COLUMN fulfilled_at TEXT",
+            "ALTER TABLE payments ADD COLUMN expires_at TEXT",
         ]
         for sql in migrations:
             try:
@@ -1864,14 +1870,103 @@ def get_agencies():
 
 
 # ── Payments ───────────────────────────────────────────────────────────────────
+def get_invoice_expire_minutes() -> int:
+    """Configured invoice lifetime in minutes."""
+    try:
+        return max(1, int(setting_get("invoice_expiry_minutes", "30") or "30"))
+    except Exception:
+        return 30
+
+
+def is_invoice_expiry_enabled() -> bool:
+    return setting_get("invoice_expiry_enabled", "1") == "1"
+
+
+def _jalali_datetime_str(dt: datetime) -> str:
+    return jdatetime.datetime.fromgregorian(datetime=dt).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _calculate_invoice_expires_at():
+    if not is_invoice_expiry_enabled():
+        return None
+    expires_dt = datetime.now(_TZ_TEHRAN) + timedelta(minutes=get_invoice_expire_minutes())
+    return _jalali_datetime_str(expires_dt)
+
+
+def _row_value(row, key, default=None):
+    try:
+        if hasattr(row, "keys") and key not in row.keys():
+            return default
+        value = row[key]
+        return default if value is None else value
+    except Exception:
+        try:
+            return row.get(key, default)
+        except Exception:
+            return default
+
+
+def _parse_payment_datetime(value):
+    if not value:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"):
+        try:
+            if int(text[:4]) < 1700:
+                return jdatetime.datetime.strptime(text, fmt).togregorian().replace(tzinfo=_TZ_TEHRAN)
+        except Exception:
+            pass
+        try:
+            return datetime.strptime(text, fmt).replace(tzinfo=_TZ_TEHRAN)
+        except Exception:
+            pass
+    try:
+        parsed = datetime.fromisoformat(text)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=_TZ_TEHRAN)
+        return parsed.astimezone(_TZ_TEHRAN)
+    except Exception:
+        return None
+
+
+def get_payment_expires_at(payment):
+    """Return the immutable invoice expiration timestamp stored on the payment."""
+    return _row_value(payment, "expires_at") if payment else None
+
+
+def is_payment_expired(payment) -> bool:
+    """True when expiry is enabled and this payment's stored expires_at is in the past."""
+    if not payment or not is_invoice_expiry_enabled():
+        return False
+    expires_dt = _parse_payment_datetime(get_payment_expires_at(payment))
+    if not expires_dt:
+        return False
+    return datetime.now(_TZ_TEHRAN) >= expires_dt
+
+
+def format_payment_expire_text(payment) -> str:
+    """Persian UI line for an existing payment invoice expiration."""
+    if not payment or not is_invoice_expiry_enabled():
+        return ""
+    expires_at = get_payment_expires_at(payment)
+    if not expires_at:
+        return ""
+    if is_payment_expired(payment):
+        return "⏳ زمان پرداخت شما به پایان رسید\nلطفاً مجدداً خرید خود را انجام دهید"
+    return f"⏰ مهلت پرداخت تا: {expires_at}"
+
+
 def create_payment(kind, user_id, package_id, amount, payment_method,
                    status="pending", config_id=None, crypto_coin=None, final_amount=None, quantity=1):
+    expires_at = _calculate_invoice_expires_at()
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO payments(kind,user_id,package_id,amount,payment_method,"
-            "status,created_at,config_id,crypto_coin,final_amount,quantity) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            "status,created_at,expires_at,config_id,crypto_coin,final_amount,quantity) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
             (kind, user_id, package_id, amount, payment_method,
-             status, now_str(), config_id, crypto_coin, final_amount, max(1, int(quantity or 1)))
+             status, now_str(), expires_at, config_id, crypto_coin, final_amount, max(1, int(quantity or 1)))
         )
         return conn.execute("SELECT last_insert_rowid() AS x").fetchone()["x"]
 
@@ -1997,6 +2092,10 @@ def update_payment_receipt(payment_id, file_id, text_value):
 
 def approve_payment(payment_id, admin_note):
     with get_conn() as conn:
+        payment = conn.execute("SELECT * FROM payments WHERE id=?", (payment_id,)).fetchone()
+        if is_payment_expired(payment):
+            print(f"[EXPIRED PAYMENT IGNORED] payment_id={payment_id}")
+            return
         conn.execute(
             "UPDATE payments SET status='approved', admin_note=?, approved_at=? WHERE id=? AND status='pending'",
             (admin_note, now_str(), payment_id)
@@ -2014,6 +2113,10 @@ def reject_payment(payment_id, admin_note):
 def complete_payment(payment_id):
     """Mark payment completed. Returns True if this call won the race, False if already processed."""
     with get_conn() as conn:
+        payment = conn.execute("SELECT * FROM payments WHERE id=?", (payment_id,)).fetchone()
+        if is_payment_expired(payment):
+            print(f"[EXPIRED PAYMENT IGNORED] payment_id={payment_id}")
+            return False
         conn.execute(
             "UPDATE payments SET status='completed', approved_at=?, fulfilled_at=? WHERE id=? AND status IN ('pending', 'approved', 'processing')",
             (now_str(), now_str(), payment_id)
@@ -3760,12 +3863,12 @@ def get_gateway_fee_amount(gw_name: str, base_amount: int) -> int:
         return 0
     fee_type = setting_get(f"gw_{gw_name}_fee_type", "fixed")
     try:
-        fee_value = int(setting_get(f"gw_{gw_name}_fee_value", "0") or "0")
+        fee_value = float(setting_get(f"gw_{gw_name}_fee_value", "0") or "0")
     except ValueError:
         return 0
     if fee_type == "pct":
         return round(base_amount * fee_value / 100)
-    return fee_value
+    return round(fee_value)
 
 
 def get_gateway_bonus_amount(gw_name: str, base_amount: int) -> int:
@@ -3774,12 +3877,12 @@ def get_gateway_bonus_amount(gw_name: str, base_amount: int) -> int:
         return 0
     bonus_type = setting_get(f"gw_{gw_name}_bonus_type", "fixed")
     try:
-        bonus_value = int(setting_get(f"gw_{gw_name}_bonus_value", "0") or "0")
+        bonus_value = float(setting_get(f"gw_{gw_name}_bonus_value", "0") or "0")
     except ValueError:
         return 0
     if bonus_type == "pct":
         return round(base_amount * bonus_value / 100)
-    return bonus_value
+    return round(bonus_value)
 
 
 def apply_gateway_fee(gw_name: str, base_amount: int) -> int:

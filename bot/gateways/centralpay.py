@@ -9,8 +9,9 @@ Payment: GET redirect to returnUrl after payment
 import json
 import urllib.request
 import urllib.error
+import urllib.parse
 
-from ..db import setting_get
+from ..db import setting_get, get_user
 
 CENTRALPAY_DEFAULT_GETLINK_URL = "https://centralapi.org/webservice/basic/getLink.php"
 CENTRALPAY_DEFAULT_VERIFY_URL  = "https://centralapi.org/webservice/basic/verify.php"
@@ -96,6 +97,29 @@ def _extract_message(data) -> str:
     return str(data)[:300]
 
 
+def _bot_username_from_return_url(return_url: str) -> str:
+    try:
+        parts = [p for p in urllib.parse.urlparse(return_url).path.split("/") if p]
+        if "centralpay" in parts:
+            idx = parts.index("centralpay")
+            if len(parts) > idx + 1:
+                return parts[idx + 1].lstrip("@").strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _user_identifier(user_id: int) -> str:
+    try:
+        row = get_user(user_id)
+        username = (row["username"] if row and "username" in row.keys() else "") or ""
+        if username.strip():
+            return username.strip().lstrip("@")
+    except Exception:
+        pass
+    return str(user_id)
+
+
 def create_centralpay_link(amount_toman: int, user_id: int, order_id, return_url: str):
     """
     Call POST /getLink.php to create a CentralPay payment link.
@@ -112,6 +136,9 @@ def create_centralpay_link(amount_toman: int, user_id: int, order_id, return_url
         return False, {"error": _ERR_MESSAGES["callback_not_set"], "raw": {}}
 
     link_type = _get_link_type()
+    bot_username = _bot_username_from_return_url(return_url) or "unknown"
+    user_identifier = _user_identifier(user_id)
+    description = f"Bot: @{bot_username} | User: @{user_identifier} | PaymentID: {order_id}"
     payload_dict = {
         "api_key":   api_key,
         "type":      link_type,
@@ -119,6 +146,7 @@ def create_centralpay_link(amount_toman: int, user_id: int, order_id, return_url
         "userId":    user_id,
         "orderId":   str(order_id),
         "returnUrl": return_url,
+        "description": description,
     }
     payload = json.dumps(payload_dict).encode("utf-8")
 
@@ -134,7 +162,7 @@ def create_centralpay_link(amount_toman: int, user_id: int, order_id, return_url
         method="POST",
     )
     try:
-        print(f"[CentralPay] getLink request: type={link_type} amount={int(amount_toman)} userId={user_id} orderId={order_id} returnUrl={return_url}")
+        print(f"[CentralPay] getLink request: type={link_type} amount={int(amount_toman)} userId={user_id} orderId={order_id} returnUrl={return_url} description={description}")
         with urllib.request.urlopen(req, timeout=15) as resp:
             raw, parsed = _decode_response(resp)
         print(f"[CentralPay] getLink response: {raw[:500]}")
