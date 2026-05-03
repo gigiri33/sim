@@ -172,7 +172,7 @@ def _verify_tronado_payment(payment_id: int) -> dict:
       "raw_resp": the tronado API response dict
     """
     payment = get_payment(payment_id)
-    token = (payment or {}).get("receipt_text") or ""
+    token = (payment["receipt_text"] if payment else None) or ""
 
     # 1. Try by payment ID first
     td_resp = get_tronado_status_by_payment_id(str(payment_id))

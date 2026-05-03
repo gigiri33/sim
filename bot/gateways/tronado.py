@@ -47,6 +47,68 @@ def build_tronado_payment_url(token: str) -> str:
     return TRONADO_PAYMENT_URL_TEMPLATE.format(token=token)
 
 
+def fetch_tronado_tron_amount(amount_toman: int, wallet_address: str) -> tuple:
+    """
+    Call POST /Toman/ConvertToTronWageSubtracted on Tronado API.
+    Returns the TronAmount that already includes wage deduction.
+
+    Returns:
+        (tron_amount: float, rate_irt: float)  on success — rate_irt may be 0 if not returned
+        raises ValueError with Persian message on failure
+    """
+    api_key = (setting_get("tronado_api_key", "") or "").strip()
+    if not api_key:
+        raise ValueError("کلید API ترونادو ثبت نشده است.")
+
+    # This endpoint lives under the root base, not /api/v3
+    base = "https://bot.tronado.cloud"
+    url = f"{base}/Toman/ConvertToTronWageSubtracted"
+
+    # Send as multipart/form-data (as documented)
+    form_data = urllib.parse.urlencode({
+        "Toman":  str(int(amount_toman)),
+        "Wallet": wallet_address,
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        url,
+        data=form_data,
+        headers={
+            "x-api-key":    api_key,
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept":       "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            raw, parsed = _decode_response_body(resp)
+    except urllib.error.HTTPError as e:
+        raw, parsed = _decode_response_body(e)
+        raise ValueError(f"خطای API ترونادو (ConvertToTron): {_extract_error(parsed) or raw[:300]}")
+    except Exception as e:
+        raise ValueError(f"خطا در اتصال به ترونادو: {e}")
+
+    # Parse response — field may be at top level or inside Data
+    data = parsed if isinstance(parsed, dict) else {}
+    inner = data.get("Data") or data.get("data") or data
+    if not isinstance(inner, dict):
+        inner = data
+
+    tron_amount = (
+        inner.get("TronAmount") or inner.get("tronAmount") or
+        data.get("TronAmount") or data.get("tronAmount")
+    )
+    if not tron_amount:
+        raise ValueError(f"ترونادو مقدار TronAmount را برنگرداند: {raw[:300]}")
+
+    tron_amount = float(tron_amount)
+    # Rate is informational — may or may not be returned
+    rate_irt = float(inner.get("TronPriceInToman") or inner.get("Rate") or 0)
+    print(f"[Tronado] ConvertToTron: {amount_toman} toman → {tron_amount} TRX (rate fallback={rate_irt})")
+    return tron_amount, rate_irt
+
+
 def get_tronado_order_token(amount_toman: int, order_id: str, user_id: int,
                              description: str = "", callback_url: str = ""):
     """
@@ -65,25 +127,12 @@ def get_tronado_order_token(amount_toman: int, order_id: str, user_id: int,
     if not wallet_address:
         return False, {"error": "آدرس کیف پول ترون در درگاه ترونادو ثبت نشده است. از پنل مدیریت ← تنظیمات ← درگاه‌ها تنظیم کنید."}
 
-    # Convert toman → TRX (case-insensitive lookup)
-    prices = fetch_crypto_prices()
-    trx_irt = next((v for k, v in prices.items() if k.upper() == "TRX"), 0)
-    if not trx_irt or trx_irt <= 0:
-        # Fallback: fetch TRX/USDT from CoinGecko + USDT/IRT from SwapWallet
-        try:
-            import urllib.request as _ur
-            with _ur.urlopen("https://api.coingecko.com/api/v3/simple/price?ids=tron&vs_currencies=usd", timeout=8) as _r:
-                _cg = json.loads(_r.read().decode())
-            trx_usd = float(_cg.get("tron", {}).get("usd", 0) or 0)
-            usdt_irt = next((v for k, v in prices.items() if k.upper() in ("USDT", "USDTTRC20")), 0)
-            if trx_usd > 0 and usdt_irt > 0:
-                trx_irt = trx_usd * usdt_irt
-        except Exception:
-            pass
-    if not trx_irt or trx_irt <= 0:
-        return False, {"error": "دریافت نرخ TRX ناموفق بود. لطفاً مجدداً تلاش کنید."}
-    tron_amount = round(amount_toman / trx_irt, 6)
-    print(f"[Tronado] TRX rate: {trx_irt}, toman: {amount_toman}, TronAmount: {tron_amount}")
+    # Convert toman → TRX using Tronado's own ConvertToTronWageSubtracted endpoint
+    try:
+        tron_amount, _ = fetch_tronado_tron_amount(amount_toman, wallet_address)
+        tron_amount = round(tron_amount, 6)
+    except ValueError as e:
+        return False, {"error": str(e)}
 
     # wageFromBusinessPercentage: 0 = customer pays Tronado's fee on top
     # (merchant absorbs nothing — customer sees the surcharge)
