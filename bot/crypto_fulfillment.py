@@ -26,7 +26,6 @@ def run_crypto_fulfillment(gateway: str, payment_id: int):
             get_payment, complete_payment, update_balance,
             get_package, get_purchase, get_conn,
             get_payment_service_names,
-            is_payment_expired,
         )
         from .helpers import fmt_price
         from .payments import apply_gateway_bonus_if_needed
@@ -34,9 +33,6 @@ def run_crypto_fulfillment(gateway: str, payment_id: int):
 
         payment = get_payment(payment_id)
         if not payment or payment["status"] != "pending":
-            return
-        if is_payment_expired(payment):
-            print(f"[EXPIRED PAYMENT IGNORED] payment_id={payment_id}")
             return
         if not complete_payment(payment_id):
             return  # already handled by another path
@@ -238,7 +234,6 @@ def process_centralpay_verified_payment(payment_id: int,
         get_payment_service_names,
         get_package, get_purchase,
         lock_centralpay_payment,
-        is_payment_expired,
     )
     from .helpers import fmt_price, now_str
     from .payments import apply_gateway_bonus_if_needed
@@ -257,10 +252,6 @@ def process_centralpay_verified_payment(payment_id: int,
     if payment["status"] not in ("pending",):
         print(f"[CentralPay] process_verified: payment {payment_id} already {payment['status']} (source={source})")
         return {"status": "already_processed"}
-
-    if is_payment_expired(payment):
-        print(f"[EXPIRED PAYMENT IGNORED] payment_id={payment_id}")
-        return {"status": "expired"}
 
     # ── Atomic lock ───────────────────────────────────────────────────────────
     try:
@@ -496,7 +487,6 @@ def process_tronado_verified_payment(payment_id: int,
         get_payment, get_conn, update_balance,
         get_payment_service_names, save_tronado_callback_data,
         get_package, get_purchase,
-        is_payment_expired,
     )
     from .helpers import fmt_price, now_str
     from .payments import apply_gateway_bonus_if_needed
@@ -525,10 +515,6 @@ def process_tronado_verified_payment(payment_id: int,
     if payment["status"] not in ("pending", "rejected", "failed"):
         print(f"[Tronado] process_verified: payment {payment_id} already {payment['status']} (source={source})")
         return {"status": "already_processed"}
-
-    if is_payment_expired(payment):
-        print(f"[EXPIRED PAYMENT IGNORED] payment_id={payment_id}")
-        return {"status": "expired"}
 
     # ── Atomically lock the payment (BEGIN IMMEDIATE) ─────────────────────────
     try:

@@ -17,7 +17,7 @@ except Exception:
 from bot.db import init_db
 from bot.db import cleanup_stale_reservations
 from bot.ui.helpers import set_bot_commands
-from bot.db import setting_get, setting_set, add_locked_channel, get_payment, complete_payment, update_balance, is_payment_expired
+from bot.db import setting_get, setting_set, add_locked_channel, get_payment, complete_payment, update_balance
 from bot.admin.backup import _backup_loop
 from bot.group_manager import _group_topic_loop
 from bot.panels.checker import start_panel_checker
@@ -83,9 +83,6 @@ def _plisio_webhook_server():
             payment = get_payment(payment_id)
             if not payment or payment["status"] != "pending":
                 return jsonify({"status": "ok"}), 200
-            if payment["status"] == "pending" and is_payment_expired(payment):
-                print(f"[EXPIRED PAYMENT IGNORED] payment_id={payment_id}")
-                return jsonify({"ok": True, "expired": True}), 200
             if not is_plisio_paid(status):
                 # Not yet paid — ack so Plisio stops retrying for this status
                 return jsonify({"status": "ok"}), 200
@@ -184,9 +181,6 @@ def _plisio_webhook_server():
             payment = get_payment(payment_id)
             if not payment or payment["status"] != "pending":
                 return jsonify({"status": "ok"}), 200
-            if payment["status"] == "pending" and is_payment_expired(payment):
-                print(f"[EXPIRED PAYMENT IGNORED] payment_id={payment_id}")
-                return jsonify({"ok": True, "expired": True}), 200
             if not is_nowpayments_paid(status):
                 return jsonify({"status": "ok"}), 200
 
@@ -268,9 +262,6 @@ def _plisio_webhook_server():
             payment = get_payment(payment_id)
             if not payment or payment["status"] != "pending":
                 return jsonify({"status": "ok"}), 200
-            if payment["status"] == "pending" and is_payment_expired(payment):
-                print(f"[EXPIRED PAYMENT IGNORED] payment_id={payment_id}")
-                return jsonify({"ok": True, "expired": True}), 200
 
             from bot.gateways.pazzlenet import is_pazzlenet_paid as _pz_paid
             if not _pz_paid(data):
@@ -330,10 +321,6 @@ def _plisio_webhook_server():
             if payment["payment_method"] != "tronado":
                 print(f"[Tronado] IPN: payment_id={payment_id} wrong method {payment['payment_method']}")
                 return jsonify({"ok": True, "gateway_mismatch": True}), 200
-
-            if payment["status"] == "pending" and is_payment_expired(payment):
-                print(f"[EXPIRED PAYMENT IGNORED] payment_id={payment_id}")
-                return jsonify({"ok": True, "expired": True}), 200
 
             try:
                 import json as _json
@@ -416,10 +403,6 @@ def _plisio_webhook_server():
             if payment["payment_method"] != "centralpay":
                 print(f"[CentralPay] returnUrl: payment_id={payment_id} wrong method {payment['payment_method']}")
                 return "پرداخت شما قبلاً تأیید شده است. لطفاً به ربات برگردید.", 200
-
-            if payment["status"] == "pending" and is_payment_expired(payment):
-                print(f"[EXPIRED PAYMENT IGNORED] payment_id={payment_id}")
-                return jsonify({"ok": True, "expired": True}), 200
 
             if payment["status"] not in ("pending",):
                 print(f"[CentralPay] returnUrl: payment_id={payment_id} already status={payment['status']}")
