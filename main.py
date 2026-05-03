@@ -376,21 +376,34 @@ def _plisio_webhook_server():
         We verify the order and fulfill, then show a simple HTML response.
         """
         import traceback as _tb2
+        print(f"[CentralPay Callback HIT] payment_id={payment_id} bot={bot_username} method={request.method} args={dict(request.args)} json={request.get_json(silent=True)} form={dict(request.form)}")
         try:
             from bot.crypto_fulfillment import process_centralpay_verified_payment
 
+            payload = {
+                "args": dict(request.args),
+                "form": dict(request.form),
+                "json": request.get_json(silent=True),
+                "method": request.method,
+                "bot_username": bot_username,
+            }
+
             payment = get_payment(payment_id)
             if not payment:
+                print(f"[CentralPay] returnUrl: payment_id={payment_id} not found")
                 return "پرداختی با این شناسه یافت نشد. لطفاً به ربات برگردید.", 200
 
             if payment["payment_method"] != "centralpay":
+                print(f"[CentralPay] returnUrl: payment_id={payment_id} wrong method {payment['payment_method']}")
                 return "پرداخت شما قبلاً تأیید شده است. لطفاً به ربات برگردید.", 200
 
             if payment["status"] not in ("pending",):
+                print(f"[CentralPay] returnUrl: payment_id={payment_id} already status={payment['status']}")
                 return "پرداخت شما قبلاً تأیید شده است. لطفاً به ربات برگردید.", 200
 
-            result = process_centralpay_verified_payment(payment_id, source="return_url", raw_payload=None)
+            result = process_centralpay_verified_payment(payment_id, source="return_url", raw_payload=payload)
             status = result.get("status", "")
+            print(f"[CentralPay] returnUrl result payment_id={payment_id}: {result}")
 
             if status == "ok":
                 return "پرداخت شما با موفقیت تأیید شد. لطفاً به ربات برگردید.", 200
