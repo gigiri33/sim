@@ -49,19 +49,23 @@ def create_rialpay_invoice(amount_toman: int, user_id, order_id, callback_url: s
 
     create_url = (setting_get("rialpay_create_invoice_url", "") or RIALPAY_DEFAULT_CREATE_URL).strip()
 
-    payload = json.dumps({
+    # Try form-encoded first (most PHP APIs expect this), fallback to JSON
+    import urllib.parse as _urlparse
+    form_data = _urlparse.urlencode({
         "api_key":  api_key,
         "amount":   int(amount_toman),
         "callback": callback_url,
         "order_id": str(order_id),
     }).encode("utf-8")
 
+    print(f"[RialPay] create_invoice → POST {create_url} | order_id={order_id} amount={amount_toman}")
+
     req = urllib.request.Request(
         create_url,
-        data=payload,
+        data=form_data,
         headers={
-            "Content-Type": "application/json",
-            "Accept":       "application/json",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept":       "application/json, text/plain, */*",
             "User-Agent":   "ConfigFlow/1.0",
         },
         method="POST",
@@ -75,6 +79,7 @@ def create_rialpay_invoice(amount_toman: int, user_id, order_id, callback_url: s
             raw_body = e.read().decode("utf-8", errors="replace").strip()
         except Exception:
             pass
+        print(f"[RialPay] create_invoice HTTP error {e.code}: {raw_body[:400]}")
         try:
             parsed = json.loads(raw_body) if raw_body else {}
         except Exception:
@@ -84,7 +89,7 @@ def create_rialpay_invoice(amount_toman: int, user_id, order_id, callback_url: s
     except Exception as e:
         return False, {"status": "error", "error": f"خطا در اتصال به ریال‌پی: {e}", "raw": {}}
 
-    print(f"[RialPay] create_invoice order_id={order_id} response: {raw[:400]}")
+    print(f"[RialPay] create_invoice order_id={order_id} response: {raw[:600]}")
 
     data = parsed if isinstance(parsed, dict) else {}
     api_status = data.get("status")
@@ -107,7 +112,8 @@ def create_rialpay_invoice(amount_toman: int, user_id, order_id, callback_url: s
         }
 
     err_msg = _extract_error(data) or raw[:300]
-    return False, {"status": "error", "error": f"ساخت فاکتور ریال‌پی ناموفق بود: {err_msg}", "raw": data}
+    print(f"[RialPay] create_invoice FAILED order_id={order_id}: status={api_status!r} raw={raw[:400]}")
+    return False, {"status": "error", "error": f"ساخت فاکتور ریال‌پی ناموفق بود: {err_msg}\n\nپاسخ سرور: {raw[:200]}", "raw": data}
 
 
 def verify_rialpay_webhook_signature(raw_body: bytes, signature: str) -> bool:
