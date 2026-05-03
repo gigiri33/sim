@@ -129,7 +129,7 @@ def get_tronado_order_token(amount_toman: int, order_id: str, user_id: int,
 
     # Convert toman → TRX using Tronado's own ConvertToTronWageSubtracted endpoint
     try:
-        tron_amount, _ = fetch_tronado_tron_amount(amount_toman, wallet_address)
+        tron_amount, trx_irt = fetch_tronado_tron_amount(amount_toman, wallet_address)
         tron_amount = round(tron_amount, 6)
     except ValueError as e:
         return False, {"error": str(e)}
