@@ -104,6 +104,7 @@ from ..gateways.centralpay import (
 )
 from ..gateways.rialpay import (
     create_rialpay_invoice, normalize_rialpay_status, process_rialpay_verified_payment,
+    get_rialpay_callback_base_url,
 )
 from ..gateways.plisio import (
     create_plisio_invoice, check_plisio_invoice,
@@ -6142,8 +6143,7 @@ def _dispatch_callback(call, uid, data):
         payment_id = create_payment("renewal", uid, package_id, final_rprice_rp, "rialpay",
                                     status="pending", config_id=item["config_id"])
         _bot_uname_rp2 = bot.get_me().username or ""
-        _base_url_rp2  = (setting_get("rialpay_callback_base_url", "") or "").rstrip("/")
-        _cb_url_rp2    = f"{_base_url_rp2}/rialpay/{_bot_uname_rp2}/{payment_id}/webhook"
+        _cb_url_rp2    = f"{get_rialpay_callback_base_url()}/rialpay/{_bot_uname_rp2}/{payment_id}/webhook"
         ok_rp2, res_rp2 = create_rialpay_invoice(final_rprice_rp, uid, payment_id, _cb_url_rp2)
         if not ok_rp2:
             err_msg_rp2 = res_rp2.get("error", "خطای ناشناخته") if isinstance(res_rp2, dict) else str(res_rp2)
@@ -7591,8 +7591,7 @@ def _dispatch_callback(call, uid, data):
         if _snames_rp:
             set_payment_service_names(payment_id, _snames_rp)
         _bot_uname_rp = bot.get_me().username or ""
-        _base_url_rp  = (setting_get("rialpay_callback_base_url", "") or "").rstrip("/")
-        _cb_url_rp    = f"{_base_url_rp}/rialpay/{_bot_uname_rp}/{payment_id}/webhook"
+        _cb_url_rp    = f"{get_rialpay_callback_base_url()}/rialpay/{_bot_uname_rp}/{payment_id}/webhook"
         ok_rp, res_rp = create_rialpay_invoice(final_rp_price, uid, payment_id, _cb_url_rp)
         if not ok_rp:
             err_msg_rp = res_rp.get("error", "خطای ناشناخته") if isinstance(res_rp, dict) else str(res_rp)
@@ -8613,8 +8612,7 @@ def _dispatch_callback(call, uid, data):
         final_amount_rp3 = apply_gateway_fee("rialpay", amount)
         payment_id = create_payment("wallet_charge", uid, None, final_amount_rp3, "rialpay", status="pending")
         _bot_uname_rp3 = bot.get_me().username or ""
-        _base_url_rp3  = (setting_get("rialpay_callback_base_url", "") or "").rstrip("/")
-        _cb_url_rp3    = f"{_base_url_rp3}/rialpay/{_bot_uname_rp3}/{payment_id}/webhook"
+        _cb_url_rp3    = f"{get_rialpay_callback_base_url()}/rialpay/{_bot_uname_rp3}/{payment_id}/webhook"
         ok_rp3, res_rp3 = create_rialpay_invoice(final_amount_rp3, uid, payment_id, _cb_url_rp3)
         if not ok_rp3:
             err_rp3 = res_rp3.get("error", "خطای ناشناخته") if isinstance(res_rp3, dict) else str(res_rp3)
@@ -11066,8 +11064,7 @@ def _dispatch_callback(call, uid, data):
             payment_id = create_payment("pnlcfg_renewal", uid, package_id, final_rp_pnl, "rialpay",
                                         status="pending", config_id=config_id)
             _bot_uname_rpnl = bot.get_me().username or ""
-            _base_url_rpnl  = (setting_get("rialpay_callback_base_url", "") or "").rstrip("/")
-            _cb_url_rpnl    = f"{_base_url_rpnl}/rialpay/{_bot_uname_rpnl}/{payment_id}/webhook"
+            _cb_url_rpnl    = f"{get_rialpay_callback_base_url()}/rialpay/{_bot_uname_rpnl}/{payment_id}/webhook"
             ok_rp_pnl, res_rp_pnl = create_rialpay_invoice(final_rp_pnl, uid, payment_id, _cb_url_rpnl)
             if not ok_rp_pnl:
                 err_rp_pnl = res_rp_pnl.get("error", "خطای ناشناخته") if isinstance(res_rp_pnl, dict) else str(res_rp_pnl)
@@ -11605,8 +11602,7 @@ def _dispatch_callback(call, uid, data):
             payment_id = create_payment("pnlcfg_renewal", uid, package_id, final_rp_pnl2, "rialpay",
                                         status="pending", config_id=config_id)
             _bot_uname_rpnl2 = bot.get_me().username or ""
-            _base_url_rpnl2  = (setting_get("rialpay_callback_base_url", "") or "").rstrip("/")
-            _cb_url_rpnl2    = f"{_base_url_rpnl2}/rialpay/{_bot_uname_rpnl2}/{payment_id}/webhook"
+            _cb_url_rpnl2    = f"{get_rialpay_callback_base_url()}/rialpay/{_bot_uname_rpnl2}/{payment_id}/webhook"
             ok_rp_pnl2, res_rp_pnl2 = create_rialpay_invoice(final_rp_pnl2, uid, payment_id, _cb_url_rpnl2)
             if not ok_rp_pnl2:
                 err_rp_pnl2 = res_rp_pnl2.get("error", "خطای ناشناخته") if isinstance(res_rp_pnl2, dict) else str(res_rp_pnl2)

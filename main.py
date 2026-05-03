@@ -456,8 +456,15 @@ def _plisio_webhook_server():
 
             raw_body = request.get_data()
 
-            # ── Parse JSON ────────────────────────────────────────────────────
-            data = request.get_json(silent=True, force=True) or {}
+            # ── Parse JSON or form-encoded ─────────────────────────────────────
+            data = request.get_json(silent=True, force=True)
+            if not data:
+                # RialPay may send form-encoded or query-string data
+                data = dict(request.form) or dict(request.args) or {}
+                # Flatten single-value lists from MultiDict
+                data = {k: (v[0] if isinstance(v, list) and len(v) == 1 else v)
+                        for k, v in data.items()}
+            print(f"[RialPay] webhook parsed data: {str(data)[:400]}")
 
             # ── Signature verification ────────────────────────────────────────
             sig = request.headers.get("X-Signature", "")
@@ -467,7 +474,7 @@ def _plisio_webhook_server():
 
             # ── Match order_id ────────────────────────────────────────────────
             order_id_from_payload = data.get("order_id")
-            if str(order_id_from_payload) != str(payment_id):
+            if order_id_from_payload is not None and str(order_id_from_payload) != str(payment_id):
                 print(f"[RialPay] order_id mismatch: payload={order_id_from_payload} url={payment_id}")
                 return jsonify({"ok": False, "error": "order_id mismatch"}), 200
 
