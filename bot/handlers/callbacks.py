@@ -102,6 +102,9 @@ from ..gateways.tronado import (
 from ..gateways.centralpay import (
     create_centralpay_link, build_centralpay_return_url,
 )
+from ..gateways.rialpay import (
+    create_rialpay_invoice, normalize_rialpay_status, process_rialpay_verified_payment,
+)
 from ..gateways.plisio import (
     create_plisio_invoice, check_plisio_invoice,
     is_plisio_paid, is_plisio_pending, is_plisio_failed,
@@ -961,6 +964,10 @@ def _show_purchase_gateways(target, uid, package_id, price, package_row):
         _lbl = setting_get("gw_centralpay_display_name", "").strip() or "درگاه کارت به کارت (CentralPay)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:centralpay:{package_id}"))
         _gw_labels.append(("centralpay", _lbl))
+    if is_gateway_available("rialpay", uid):
+        _lbl = setting_get("gw_rialpay_display_name", "").strip() or "درگاه ریال‌پی"
+        kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:rialpay:{package_id}"))
+        _gw_labels.append(("rialpay", _lbl))
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"buy:t:{package_row['type_id']}", icon_custom_emoji_id="5253997076169115797"))
     _range_guide = build_gateway_range_guide(_gw_labels)
     _pkg_sn = package_row['show_name'] if 'show_name' in package_row.keys() else 1
@@ -1051,6 +1058,10 @@ def _show_renewal_gateways(target, uid, purchase_id, package_id, price, package_
         _lbl = setting_get("gw_centralpay_display_name", "").strip() or "درگاه کارت به کارت (CentralPay)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:centralpay:{purchase_id}:{package_id}"))
         _gw_labels.append(("centralpay", _lbl))
+    if is_gateway_available("rialpay", uid):
+        _lbl = setting_get("gw_rialpay_display_name", "").strip() or "درگاه ریال‌پی"
+        kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:rialpay:{purchase_id}:{package_id}"))
+        _gw_labels.append(("rialpay", _lbl))
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"renew:{purchase_id}", icon_custom_emoji_id="5253997076169115797"))
     _range_guide = build_gateway_range_guide(_gw_labels)
     _pkg_sn_renew = package_row['show_name'] if 'show_name' in package_row.keys() else 1
@@ -1517,6 +1528,10 @@ def _show_pnlcfg_renewal_gateways(target, uid, config_id, package_id, price, pac
         _lbl = setting_get("gw_centralpay_display_name", "").strip() or "درگاه کارت به کارت (CentralPay)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"mypnlcfgrpay:centralpay:{config_id}:{package_id}"))
         _gw_labels.append(("centralpay", _lbl))
+    if is_gateway_available("rialpay", uid):
+        _lbl = setting_get("gw_rialpay_display_name", "").strip() or "درگاه ریال‌پی"
+        kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"mypnlcfgrpay:rialpay:{config_id}:{package_id}"))
+        _gw_labels.append(("rialpay", _lbl))
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"mypnlcfg:renewconfirm:{config_id}",
            icon_custom_emoji_id="5253997076169115797"))
     _range_guide = build_gateway_range_guide(_gw_labels)
@@ -1592,6 +1607,10 @@ def _show_wallet_gateways(target, uid, amount):
         _lbl = setting_get("gw_centralpay_display_name", "").strip() or "درگاه کارت به کارت (CentralPay)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:centralpay"))
         _gw_labels.append(("centralpay", _lbl))
+    if is_gateway_available("rialpay", uid):
+        _lbl = setting_get("gw_rialpay_display_name", "").strip() or "درگاه ریال‌پی"
+        kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:rialpay"))
+        _gw_labels.append(("rialpay", _lbl))
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
     _range_guide = build_gateway_range_guide(_gw_labels)
     sd = state_data(uid)
@@ -6083,6 +6102,77 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, text, kb)
         return
 
+    # ── RialPay: renewal ──────────────────────────────────────────────────────
+    if data.startswith("rpay:rialpay:verify:"):
+        payment_id = int(data.split(":")[3])
+        payment = get_payment(payment_id)
+        if not payment or payment["user_id"] != uid:
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+        status_v = payment["status"]
+        if status_v == "completed":
+            bot.answer_callback_query(call.id, "✅ این پرداخت قبلاً تأیید و پردازش شده است.", show_alert=True); return
+        if status_v == "rejected":
+            bot.answer_callback_query(call.id, "❌ این پرداخت رد شده است.", show_alert=True); return
+        if status_v != "pending":
+            bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True); return
+        bot.answer_callback_query(call.id, "⏳ در حال بررسی وضعیت پرداخت…", show_alert=False)
+        bot.send_message(uid, "⏳ پرداخت شما هنوز از طریق وب‌هوک تأیید نشده است.\n\nپس از پرداخت تأیید به صورت خودکار انجام می‌شود. چند دقیقه صبر کنید.", parse_mode="HTML")
+        return
+
+    if data.startswith("rpay:rialpay:") and not data.startswith("rpay:rialpay:verify:"):
+        if not _check_invoice_valid(uid):
+            _show_invoice_expired(call); return
+        parts       = data.split(":")
+        purchase_id = int(parts[2])
+        package_id  = int(parts[3])
+        item        = get_purchase(purchase_id)
+        package_row = get_package(package_id)
+        if not item or item["user_id"] != uid:
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+        if not package_row:
+            bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True); return
+        price = _get_state_price(uid, package_row, "renew_select_method")
+        if not is_gateway_in_range("rialpay", price):
+            _rng = get_gateway_range_text("rialpay")
+            bot.answer_callback_query(call.id,
+                f"⛔️ مبلغ {fmt_price(price)} تومان برای درگاه ریال‌پی مجاز نیست.\n"
+                f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
+                show_alert=True); return
+        final_rprice_rp = apply_gateway_fee("rialpay", price)
+        payment_id = create_payment("renewal", uid, package_id, final_rprice_rp, "rialpay",
+                                    status="pending", config_id=item["config_id"])
+        _bot_uname_rp2 = bot.get_me().username or ""
+        _base_url_rp2  = (setting_get("rialpay_callback_base_url", "") or "").rstrip("/")
+        _cb_url_rp2    = f"{_base_url_rp2}/rialpay/{_bot_uname_rp2}/{payment_id}/webhook"
+        ok_rp2, res_rp2 = create_rialpay_invoice(final_rprice_rp, uid, payment_id, _cb_url_rp2)
+        if not ok_rp2:
+            err_msg_rp2 = res_rp2.get("error", "خطای ناشناخته") if isinstance(res_rp2, dict) else str(res_rp2)
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                f"⚠️ <b>خطا در ایجاد فاکتور ریال‌پی</b>\n\n<code>{esc(err_msg_rp2[:400])}</code>",
+                back_button(f"renew:{purchase_id}")); return
+        pay_url_rp2 = res_rp2.get("payment_url", "")
+        tok_rp2     = res_rp2.get("token", "")
+        with get_conn() as conn:
+            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (tok_rp2, payment_id))
+        expiry_line_rp2 = format_payment_expire_text(get_payment(payment_id))
+        expiry_line_rp2 = f"\n\n{expiry_line_rp2}" if expiry_line_rp2 else ""
+        fee_line_rp2 = ""
+        if final_rprice_rp != price:
+            fee_line_rp2 = f"\n💸 کارمزد: {fmt_price(final_rprice_rp - price)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_rprice_rp)}</b> تومان"
+        text_rp2 = (
+            "💳 <b>پرداخت با ریال‌پی — تمدید</b>\n\n"
+            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_rp2}\n\n"
+            "برای پرداخت روی دکمه زیر بزنید. پس از اتمام پرداخت به ربات برگردید."
+            f"{expiry_line_rp2}"
+        )
+        kb_rp2 = types.InlineKeyboardMarkup()
+        kb_rp2.add(types.InlineKeyboardButton("💳 پرداخت با ریال‌پی", url=pay_url_rp2))
+        kb_rp2.add(types.InlineKeyboardButton("🔍 بررسی پرداخت", callback_data=f"rpay:rialpay:verify:{payment_id}"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, text_rp2, kb_rp2)
+        return
+
     # ── Plisio: renewal ───────────────────────────────────────────────────────
     if data.startswith("rpay:plisio:verify:"):
         payment_id = int(data.split(":")[3])
@@ -7462,6 +7552,76 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, text, kb)
         return
 
+    # ── RialPay: config purchase ───────────────────────────────────────────────
+    if data.startswith("pay:rialpay:verify:"):
+        payment_id = int(data.split(":")[3])
+        payment = get_payment(payment_id)
+        if not payment or payment["user_id"] != uid:
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+        status_v = payment["status"]
+        if status_v == "completed":
+            bot.answer_callback_query(call.id, "✅ این پرداخت قبلاً تأیید و پردازش شده است.", show_alert=True); return
+        if status_v == "rejected":
+            bot.answer_callback_query(call.id, "❌ این پرداخت رد شده است.", show_alert=True); return
+        if status_v != "pending":
+            bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True); return
+        bot.answer_callback_query(call.id, "⏳ در حال بررسی وضعیت پرداخت…", show_alert=False)
+        bot.send_message(uid, "⏳ پرداخت شما هنوز از طریق وب‌هوک تأیید نشده است.\n\nپس از پرداخت تأیید به صورت خودکار انجام می‌شود. چند دقیقه صبر کنید و دوباره بررسی کنید.", parse_mode="HTML")
+        return
+
+    if data.startswith("pay:rialpay:") and not data.startswith("pay:rialpay:verify:"):
+        if not _check_invoice_valid(uid):
+            _show_invoice_expired(call); return
+        package_id  = int(data.split(":")[2])
+        package_row = get_package(package_id)
+        if not package_row or not _pkg_has_stock(package_row, setting_get("preorder_mode", "0") == "1"):
+            bot.answer_callback_query(call.id, "موجودی این پکیج تمام شده است.", show_alert=True); return
+        price       = _get_state_price(uid, package_row, "buy_select_method")
+        _qty_rp_buy = int(state_data(uid).get("quantity", 1) or 1)
+        if not is_gateway_in_range("rialpay", price):
+            _rng = get_gateway_range_text("rialpay")
+            bot.answer_callback_query(call.id,
+                f"⛔️ مبلغ {fmt_price(price)} تومان برای درگاه ریال‌پی مجاز نیست.\n"
+                f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
+                show_alert=True); return
+        final_rp_price = apply_gateway_fee("rialpay", price)
+        payment_id = create_payment("config_purchase", uid, package_id, final_rp_price, "rialpay",
+                                    status="pending", quantity=_qty_rp_buy)
+        _snames_rp = state_data(uid).get("service_names")
+        if _snames_rp:
+            set_payment_service_names(payment_id, _snames_rp)
+        _bot_uname_rp = bot.get_me().username or ""
+        _base_url_rp  = (setting_get("rialpay_callback_base_url", "") or "").rstrip("/")
+        _cb_url_rp    = f"{_base_url_rp}/rialpay/{_bot_uname_rp}/{payment_id}/webhook"
+        ok_rp, res_rp = create_rialpay_invoice(final_rp_price, uid, payment_id, _cb_url_rp)
+        if not ok_rp:
+            err_msg_rp = res_rp.get("error", "خطای ناشناخته") if isinstance(res_rp, dict) else str(res_rp)
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                f"⚠️ <b>خطا در ایجاد فاکتور ریال‌پی</b>\n\n<code>{esc(err_msg_rp[:400])}</code>",
+                back_button(f"buy:p:{package_id}")); return
+        pay_url_rp = res_rp.get("payment_url", "")
+        tok_rp     = res_rp.get("token", "")
+        with get_conn() as conn:
+            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (tok_rp, payment_id))
+        expiry_line_rp = format_payment_expire_text(get_payment(payment_id))
+        expiry_line_rp = f"\n\n{expiry_line_rp}" if expiry_line_rp else ""
+        fee_line_rp = ""
+        if final_rp_price != price:
+            fee_line_rp = f"\n💸 کارمزد: {fmt_price(final_rp_price - price)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_rp_price)}</b> تومان"
+        text_rp = (
+            "💳 <b>پرداخت با ریال‌پی</b>\n\n"
+            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_rp}\n\n"
+            "برای پرداخت روی دکمه زیر بزنید. پس از اتمام پرداخت به ربات برگردید."
+            f"{expiry_line_rp}"
+        )
+        kb_rp = types.InlineKeyboardMarkup()
+        kb_rp.add(types.InlineKeyboardButton("💳 پرداخت با ریال‌پی", url=pay_url_rp))
+        kb_rp.add(types.InlineKeyboardButton("🔍 بررسی پرداخت", callback_data=f"pay:rialpay:verify:{payment_id}"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, text_rp, kb_rp)
+        return
+
     # ── Plisio: purchase ──────────────────────────────────────────────────────
     if data.startswith("pay:plisio:verify:"):
         payment_id = int(data.split(":")[3])
@@ -8418,6 +8578,70 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("🔍 بررسی پرداخت", callback_data=f"wallet:charge:centralpay:verify:{payment_id}"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
+        return
+
+    # ── RialPay: wallet charge ────────────────────────────────────────────────
+    if data.startswith("wallet:charge:rialpay:verify:"):
+        payment_id = int(data.split(":")[-1])
+        payment = get_payment(payment_id)
+        if not payment or payment["user_id"] != uid:
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+        status_v = payment["status"]
+        if status_v == "completed":
+            bot.answer_callback_query(call.id, "✅ پرداخت شما قبلاً تأیید و کیف پول شارژ شده است.", show_alert=True); return
+        if status_v == "rejected":
+            bot.answer_callback_query(call.id, "❌ این پرداخت رد شده است.", show_alert=True); return
+        if status_v != "pending":
+            bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True); return
+        bot.answer_callback_query(call.id, "⏳ در حال بررسی وضعیت پرداخت…", show_alert=False)
+        bot.send_message(uid, "⏳ پرداخت شما هنوز از طریق وب‌هوک تأیید نشده است.\n\nپس از پرداخت تأیید به صورت خودکار انجام می‌شود. چند دقیقه صبر کنید.", parse_mode="HTML")
+        return
+
+    if data == "wallet:charge:rialpay":
+        if not _check_invoice_valid(uid):
+            _show_invoice_expired(call); return
+        sd     = state_data(uid)
+        amount = sd.get("amount")
+        if not amount:
+            bot.answer_callback_query(call.id, "ابتدا مبلغ را وارد کنید.", show_alert=True); return
+        if not is_gateway_in_range("rialpay", amount):
+            _rng = get_gateway_range_text("rialpay")
+            bot.answer_callback_query(call.id,
+                f"⛔️ مبلغ {fmt_price(amount)} تومان برای درگاه ریال‌پی مجاز نیست.\n"
+                f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
+                show_alert=True); return
+        final_amount_rp3 = apply_gateway_fee("rialpay", amount)
+        payment_id = create_payment("wallet_charge", uid, None, final_amount_rp3, "rialpay", status="pending")
+        _bot_uname_rp3 = bot.get_me().username or ""
+        _base_url_rp3  = (setting_get("rialpay_callback_base_url", "") or "").rstrip("/")
+        _cb_url_rp3    = f"{_base_url_rp3}/rialpay/{_bot_uname_rp3}/{payment_id}/webhook"
+        ok_rp3, res_rp3 = create_rialpay_invoice(final_amount_rp3, uid, payment_id, _cb_url_rp3)
+        if not ok_rp3:
+            err_rp3 = res_rp3.get("error", "خطای ناشناخته") if isinstance(res_rp3, dict) else str(res_rp3)
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                f"⚠️ <b>خطا در ایجاد فاکتور ریال‌پی</b>\n\n<code>{esc(err_rp3[:400])}</code>",
+                back_button("wallet:charge")); return
+        pay_url_rp3 = res_rp3.get("payment_url", "")
+        tok_rp3     = res_rp3.get("token", "")
+        with get_conn() as conn:
+            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (tok_rp3, payment_id))
+        expiry_line_rp3 = format_payment_expire_text(get_payment(payment_id))
+        expiry_line_rp3 = f"\n\n{expiry_line_rp3}" if expiry_line_rp3 else ""
+        fee_line_rp3 = ""
+        if final_amount_rp3 != amount:
+            fee_line_rp3 = f"\n💸 کارمزد: {fmt_price(final_amount_rp3 - amount)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_amount_rp3)}</b> تومان"
+        text_rp3 = (
+            "💳 <b>پرداخت با ریال‌پی — شارژ کیف پول</b>\n\n"
+            f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان{fee_line_rp3}\n\n"
+            "روی دکمه زیر بزنید و پرداخت را انجام دهید. پس از اتمام، تأیید به صورت خودکار انجام می‌شود."
+            f"{expiry_line_rp3}"
+        )
+        kb_rp3 = types.InlineKeyboardMarkup()
+        kb_rp3.add(types.InlineKeyboardButton("💳 پرداخت با ریال‌پی", url=pay_url_rp3))
+        kb_rp3.add(types.InlineKeyboardButton("🔍 بررسی پرداخت", callback_data=f"wallet:charge:rialpay:verify:{payment_id}"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, text_rp3, kb_rp3)
         return
 
         payment_id = int(data.split(":")[3])
@@ -10817,6 +11041,82 @@ def _dispatch_callback(call, uid, data):
                     parse_mode="HTML")
             return
 
+        # mypnlcfgrpay:rialpay:{config_id}:{package_id}
+        if data.startswith("mypnlcfgrpay:rialpay:") and not data.startswith("mypnlcfgrpay:rialpay:verify:"):
+            if not _check_invoice_valid(uid):
+                _show_invoice_expired(call); return
+            parts = data.split(":")
+            config_id  = int(parts[2])
+            package_id = int(parts[3])
+            cfg = get_panel_config(config_id)
+            if not cfg or cfg["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            package_row = get_package(package_id)
+            if not package_row:
+                bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True); return
+            sd = state_data(uid)
+            price = sd.get("amount") or get_effective_price(uid, package_row)
+            if not is_gateway_in_range("rialpay", price):
+                _rng = get_gateway_range_text("rialpay")
+                bot.answer_callback_query(call.id,
+                    f"⛔️ مبلغ {fmt_price(price)} تومان برای درگاه ریال‌پی مجاز نیست.\n"
+                    f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
+                    show_alert=True); return
+            final_rp_pnl = apply_gateway_fee("rialpay", price)
+            payment_id = create_payment("pnlcfg_renewal", uid, package_id, final_rp_pnl, "rialpay",
+                                        status="pending", config_id=config_id)
+            _bot_uname_rpnl = bot.get_me().username or ""
+            _base_url_rpnl  = (setting_get("rialpay_callback_base_url", "") or "").rstrip("/")
+            _cb_url_rpnl    = f"{_base_url_rpnl}/rialpay/{_bot_uname_rpnl}/{payment_id}/webhook"
+            ok_rp_pnl, res_rp_pnl = create_rialpay_invoice(final_rp_pnl, uid, payment_id, _cb_url_rpnl)
+            if not ok_rp_pnl:
+                err_rp_pnl = res_rp_pnl.get("error", "خطای ناشناخته") if isinstance(res_rp_pnl, dict) else str(res_rp_pnl)
+                bot.answer_callback_query(call.id)
+                send_or_edit(call,
+                    f"⚠️ <b>خطا در ایجاد فاکتور ریال‌پی</b>\n\n<code>{esc(err_rp_pnl[:400])}</code>",
+                    back_button(f"mypnlcfg:renewconfirm:{config_id}")); return
+            pay_url_rpnl = res_rp_pnl.get("payment_url", "")
+            tok_rpnl     = res_rp_pnl.get("token", "")
+            with get_conn() as conn:
+                conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (tok_rpnl, payment_id))
+            expiry_line_rpnl = format_payment_expire_text(get_payment(payment_id))
+            expiry_line_rpnl = f"\n\n{expiry_line_rpnl}" if expiry_line_rpnl else ""
+            fee_line_rpnl = ""
+            if final_rp_pnl != price:
+                fee_line_rpnl = f"\n💸 کارمزد: {fmt_price(final_rp_pnl - price)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_rp_pnl)}</b> تومان"
+            kb_rpnl = types.InlineKeyboardMarkup()
+            kb_rpnl.add(types.InlineKeyboardButton("💳 پرداخت با ریال‌پی", url=pay_url_rpnl))
+            kb_rpnl.add(types.InlineKeyboardButton("🔍 بررسی پرداخت",
+                        callback_data=f"mypnlcfgrpay:rialpay:verify:{payment_id}"))
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                "💳 <b>پرداخت با ریال‌پی (تمدید)</b>\n\n"
+                f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_rpnl}\n\n"
+                "برای پرداخت روی دکمه زیر بزنید."
+                f"{expiry_line_rpnl}",
+                kb_rpnl)
+            return
+
+        # mypnlcfgrpay:rialpay:verify:{payment_id}
+        if data.startswith("mypnlcfgrpay:rialpay:verify:"):
+            payment_id = int(data.split(":")[-1])
+            payment = get_payment(payment_id)
+            if not payment or payment["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            status_v = payment["status"]
+            if status_v == "completed":
+                bot.answer_callback_query(call.id, "✅ این پرداخت قبلاً تأیید شده است.", show_alert=True); return
+            if status_v == "rejected":
+                bot.answer_callback_query(call.id, "❌ این پرداخت رد شده است.", show_alert=True); return
+            if status_v not in ("pending",):
+                bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True); return
+            bot.answer_callback_query(call.id, "⏳ در حال بررسی وضعیت پرداخت…", show_alert=False)
+            bot.send_message(uid,
+                "⏳ پرداخت شما هنوز از طریق وب‌هوک تأیید نشده است.\n\n"
+                "پس از پرداخت تأیید به صورت خودکار انجام می‌شود. چند دقیقه صبر کنید.",
+                parse_mode="HTML")
+            return
+
         # mypnlcfgrpay:plisio:{config_id}:{package_id}
         if data.startswith("mypnlcfgrpay:plisio:") and not data.startswith("mypnlcfgrpay:plisio:verify:"):
             if not _check_invoice_valid(uid):
@@ -11278,6 +11578,81 @@ def _dispatch_callback(call, uid, data):
                     "⏳ پرداخت هنوز تأیید نشده است.\n"
                     "لطفاً چند دقیقه صبر کنید و دوباره وضعیت را بررسی کنید.",
                     parse_mode="HTML")
+            return
+
+        # mypnlcfgrpay:rialpay:{config_id}:{package_id} (duplicate section for this handler scope)
+        if data.startswith("mypnlcfgrpay:rialpay:") and not data.startswith("mypnlcfgrpay:rialpay:verify:"):
+            if not _check_invoice_valid(uid):
+                _show_invoice_expired(call); return
+            parts = data.split(":")
+            config_id  = int(parts[2])
+            package_id = int(parts[3])
+            cfg = get_panel_config(config_id)
+            if not cfg or cfg["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            package_row = get_package(package_id)
+            if not package_row:
+                bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True); return
+            sd = state_data(uid)
+            price = sd.get("amount") or get_effective_price(uid, package_row)
+            if not is_gateway_in_range("rialpay", price):
+                _rng = get_gateway_range_text("rialpay")
+                bot.answer_callback_query(call.id,
+                    f"⛔️ مبلغ {fmt_price(price)} تومان برای درگاه ریال‌پی مجاز نیست.\n"
+                    f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
+                    show_alert=True); return
+            final_rp_pnl2 = apply_gateway_fee("rialpay", price)
+            payment_id = create_payment("pnlcfg_renewal", uid, package_id, final_rp_pnl2, "rialpay",
+                                        status="pending", config_id=config_id)
+            _bot_uname_rpnl2 = bot.get_me().username or ""
+            _base_url_rpnl2  = (setting_get("rialpay_callback_base_url", "") or "").rstrip("/")
+            _cb_url_rpnl2    = f"{_base_url_rpnl2}/rialpay/{_bot_uname_rpnl2}/{payment_id}/webhook"
+            ok_rp_pnl2, res_rp_pnl2 = create_rialpay_invoice(final_rp_pnl2, uid, payment_id, _cb_url_rpnl2)
+            if not ok_rp_pnl2:
+                err_rp_pnl2 = res_rp_pnl2.get("error", "خطای ناشناخته") if isinstance(res_rp_pnl2, dict) else str(res_rp_pnl2)
+                bot.answer_callback_query(call.id)
+                send_or_edit(call,
+                    f"⚠️ <b>خطا در ایجاد فاکتور ریال‌پی</b>\n\n<code>{esc(err_rp_pnl2[:400])}</code>",
+                    back_button(f"mypnlcfg:renewconfirm:{config_id}")); return
+            pay_url_rpnl2 = res_rp_pnl2.get("payment_url", "")
+            tok_rpnl2     = res_rp_pnl2.get("token", "")
+            with get_conn() as conn:
+                conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (tok_rpnl2, payment_id))
+            expiry_line_rpnl2 = format_payment_expire_text(get_payment(payment_id))
+            expiry_line_rpnl2 = f"\n\n{expiry_line_rpnl2}" if expiry_line_rpnl2 else ""
+            fee_line_rpnl2 = ""
+            if final_rp_pnl2 != price:
+                fee_line_rpnl2 = f"\n💸 کارمزد: {fmt_price(final_rp_pnl2 - price)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_rp_pnl2)}</b> تومان"
+            kb_rpnl2 = types.InlineKeyboardMarkup()
+            kb_rpnl2.add(types.InlineKeyboardButton("💳 پرداخت با ریال‌پی", url=pay_url_rpnl2))
+            kb_rpnl2.add(types.InlineKeyboardButton("🔍 بررسی پرداخت",
+                        callback_data=f"mypnlcfgrpay:rialpay:verify:{payment_id}"))
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                "💳 <b>پرداخت با ریال‌پی (تمدید)</b>\n\n"
+                f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_rpnl2}\n\n"
+                "برای پرداخت روی دکمه زیر بزنید."
+                f"{expiry_line_rpnl2}",
+                kb_rpnl2)
+            return
+
+        if data.startswith("mypnlcfgrpay:rialpay:verify:") and not data.startswith("mypnlcfgrpay:rialpay:"):
+            payment_id = int(data.split(":")[-1])
+            payment = get_payment(payment_id)
+            if not payment or payment["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            status_v = payment["status"]
+            if status_v == "completed":
+                bot.answer_callback_query(call.id, "✅ این پرداخت قبلاً تأیید شده است.", show_alert=True); return
+            if status_v == "rejected":
+                bot.answer_callback_query(call.id, "❌ این پرداخت رد شده است.", show_alert=True); return
+            if status_v not in ("pending",):
+                bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True); return
+            bot.answer_callback_query(call.id, "⏳ در حال بررسی وضعیت پرداخت…", show_alert=False)
+            bot.send_message(uid,
+                "⏳ پرداخت شما هنوز از طریق وب‌هوک تأیید نشده است.\n\n"
+                "پس از پرداخت تأیید به صورت خودکار انجام می‌شود. چند دقیقه صبر کنید.",
+                parse_mode="HTML")
             return
 
         # mypnlcfg:autorenew:{config_id}
@@ -16469,6 +16844,7 @@ def _dispatch_callback(call, uid, data):
             ("nowpayments",      "💎 پرداخت کریپتو (NowPayments)"),
             ("tronado",          "درگاه کارت به کارت (Tronado)"),
             ("centralpay",       "درگاه کارت به کارت (CentralPay)"),
+            ("rialpay",          "💳 درگاه ریال‌پی"),
         ]:
             enabled = setting_get(f"gw_{gw_key}_enabled", "0")
             status_icon = "🟢" if enabled == "1" else "🔴"
@@ -17306,7 +17682,151 @@ def _dispatch_callback(call, uid, data):
             back_button("adm:set:gw:tronpays_rial"))
         return
 
-    _GW_RANGE_LABELS = {"card": "💳 کارت به کارت", "crypto": "💎 ارز دیجیتال", "tetrapay": "🏦 TetraPay", "swapwallet": "💎 SwapWallet", "swapwallet_crypto": "💎 SwapWallet کریپتو", "tronpays_rial": "💳 TronPays", "pazzlenet": "💳 PazzleNet", "plisio": "💎 Plisio", "nowpayments": "💎 NowPayments", "tronado": "💎 ترونادو", "centralpay": "💳 CentralPay"}
+    # ── RialPay admin settings ────────────────────────────────────────────────
+    if data == "adm:set:gw:rialpay":
+        enabled  = setting_get("gw_rialpay_enabled", "0")
+        vis      = setting_get("gw_rialpay_visibility", "public")
+        api_key  = (setting_get("rialpay_api_key", "") or "").strip()
+        range_en = setting_get("gw_rialpay_range_enabled", "0")
+        enabled_label = "🟢 فعال" if enabled == "1" else "🔴 غیرفعال"
+        vis_label     = "👥 عمومی" if vis == "public" else "🔒 کاربران امن"
+        range_label   = "🟢 فعال" if range_en == "1" else "🔴 غیرفعال"
+        fee_on   = setting_get("gw_rialpay_fee_enabled", "0") == "1"
+        bonus_on = setting_get("gw_rialpay_bonus_enabled", "0") == "1"
+        cb_base  = (setting_get("rialpay_callback_base_url", "") or "").strip()
+        kb = types.InlineKeyboardMarkup()
+        kb.row(
+            types.InlineKeyboardButton(f"وضعیت: {enabled_label}", callback_data="adm:gw:rialpay:toggle"),
+            types.InlineKeyboardButton(f"نمایش: {vis_label}",     callback_data="adm:gw:rialpay:vis"),
+        )
+        kb.add(types.InlineKeyboardButton(f"📊 بازه پرداختی: {range_label}", callback_data="adm:gw:rialpay:range"))
+        kb.add(types.InlineKeyboardButton("🔑 تنظیم کلید API", callback_data="adm:set:rialpay_key"))
+        kb.add(types.InlineKeyboardButton("🔐 تنظیم Webhook Secret", callback_data="adm:set:rialpay_webhook_secret"))
+        kb.add(types.InlineKeyboardButton("🔗 تنظیم Callback Base URL", callback_data="adm:set:rialpay_cb_url"))
+        kb.add(types.InlineKeyboardButton("🏷 نام نمایشی درگاه", callback_data="adm:gw:rialpay:set_name"))
+        fee_bonus_lbl = ("🟢 کارمزد" if fee_on else "🔴 کارمزد") + " | " + ("🟢 بونس" if bonus_on else "🔴 بونس")
+        kb.add(types.InlineKeyboardButton(f"🎁 بونس و کارمزد — {fee_bonus_lbl}", callback_data="adm:gw:rialpay:feebonus"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gateways", icon_custom_emoji_id="5253997076169115797"))
+        key_display = (f"<code>{esc(api_key[:8])}...{esc(api_key[-4:])}</code>"
+                       if api_key else "❌ <b>ثبت نشده</b>")
+        display_name_rp = setting_get("gw_rialpay_display_name", "")
+        name_display_rp = display_name_rp or "<i>پیش‌فرض: درگاه ریال‌پی</i>"
+        cb_url_display  = cb_base or "❌ تنظیم نشده"
+        text = (
+            "💳 <b>درگاه ریال‌پی</b>\n\n"
+            f"وضعیت: {enabled_label}\n"
+            f"نمایش: {vis_label}\n"
+            f"نام نمایشی: {name_display_rp}\n\n"
+            f"🔑 کلید API: {key_display}\n"
+            f"🔗 Callback Base URL: <code>{esc(cb_url_display)}</code>\n\n"
+            "📋 <b>راهنمای راه‌اندازی:</b>\n"
+            "۱. از ریال‌پی API Key دریافت کنید\n"
+            "۲. Callback Base URL را روی آدرس عمومی سرور خود تنظیم کنید\n"
+            "   (مثال: https://yourdomain.com)\n"
+            "۳. Webhook Secret را برای امنیت تنظیم کنید"
+        )
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, text, kb)
+        return
+
+    if data == "adm:gw:rialpay:set_name":
+        state_set(uid, "admin_set_gw_display_name", gw="rialpay")
+        bot.answer_callback_query(call.id)
+        current = setting_get("gw_rialpay_display_name", "")
+        send_or_edit(call,
+            f"🏷 <b>نام نمایشی درگاه ریال‌پی</b>\n\n"
+            f"مقدار فعلی: <code>{esc(current or 'پیش‌فرض')}</code>\n\n"
+            "نام دلخواه را ارسال کنید.\n"
+            "برای بازگشت به پیش‌فرض، <code>-</code> ارسال کنید.",
+            back_button("adm:set:gw:rialpay"))
+        return
+
+    if data == "adm:gw:rialpay:toggle":
+        enabled = setting_get("gw_rialpay_enabled", "0")
+        setting_set("gw_rialpay_enabled", "0" if enabled == "1" else "1")
+        log_admin_action(uid, f"درگاه ریال‌پی {'غیرفعال' if enabled == '1' else 'فعال'} شد")
+        bot.answer_callback_query(call.id, "تغییر یافت.")
+        _fake_call(call, "adm:set:gw:rialpay")
+        return
+
+    if data == "adm:gw:rialpay:vis":
+        vis = setting_get("gw_rialpay_visibility", "public")
+        setting_set("gw_rialpay_visibility", "secure" if vis == "public" else "public")
+        log_admin_action(uid, f"نمایش درگاه ریال‌پی به {'secure' if vis == 'public' else 'public'} تغییر کرد")
+        bot.answer_callback_query(call.id, "تغییر یافت.")
+        _fake_call(call, "adm:set:gw:rialpay")
+        return
+
+    if data == "adm:set:rialpay_key":
+        state_set(uid, "admin_set_rialpay_key")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "🔑 کلید API ریال‌پی را ارسال کنید:", back_button("adm:set:gw:rialpay"))
+        return
+
+    if data == "adm:set:rialpay_webhook_secret":
+        state_set(uid, "admin_set_rialpay_webhook_secret")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "🔐 Webhook Secret ریال‌پی را ارسال کنید:", back_button("adm:set:gw:rialpay"))
+        return
+
+    if data == "adm:set:rialpay_cb_url":
+        state_set(uid, "admin_set_rialpay_cb_url")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "🔗 <b>Callback Base URL ریال‌پی</b>\n\n"
+            "آدرس عمومی سرور خود را وارد کنید (بدون / انتهایی).\n"
+            "مثال: <code>https://yourdomain.com</code>",
+            back_button("adm:set:gw:rialpay"))
+        return
+
+    if data == "adm:gw:rialpay:feebonus":
+        fee_on   = setting_get("gw_rialpay_fee_enabled", "0") == "1"
+        bonus_on = setting_get("gw_rialpay_bonus_enabled", "0") == "1"
+        fee_val  = setting_get("gw_rialpay_fee_value", "0")
+        bon_val  = setting_get("gw_rialpay_bonus_value", "0")
+        fee_type = setting_get("gw_rialpay_fee_type", "fixed")
+        bon_type = setting_get("gw_rialpay_bonus_type", "fixed")
+        fee_unit = "تومان" if fee_type == "fixed" else "%"
+        bon_unit = "تومان" if bon_type == "fixed" else "%"
+        kb = types.InlineKeyboardMarkup()
+        kb.row(
+            types.InlineKeyboardButton(f"کارمزد: {'🟢' if fee_on else '🔴'}", callback_data="adm:gw:rialpay:fee_toggle"),
+            types.InlineKeyboardButton(f"بونس: {'🟢' if bonus_on else '🔴'}",  callback_data="adm:gw:rialpay:bonus_toggle"),
+        )
+        kb.add(types.InlineKeyboardButton(f"💸 کارمزد: {fee_val} {fee_unit}", callback_data="adm:gw:rialpay:fee_set"))
+        kb.add(types.InlineKeyboardButton(f"🎁 بونس: {bon_val} {bon_unit}",   callback_data="adm:gw:rialpay:bonus_set"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gw:rialpay", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "🎁 <b>بونس و کارمزد ریال‌پی</b>", kb)
+        return
+
+    if data == "adm:gw:rialpay:fee_toggle":
+        cur = setting_get("gw_rialpay_fee_enabled", "0")
+        setting_set("gw_rialpay_fee_enabled", "0" if cur == "1" else "1")
+        bot.answer_callback_query(call.id, "تغییر یافت.")
+        _fake_call(call, "adm:gw:rialpay:feebonus")
+        return
+
+    if data == "adm:gw:rialpay:bonus_toggle":
+        cur = setting_get("gw_rialpay_bonus_enabled", "0")
+        setting_set("gw_rialpay_bonus_enabled", "0" if cur == "1" else "1")
+        bot.answer_callback_query(call.id, "تغییر یافت.")
+        _fake_call(call, "adm:gw:rialpay:feebonus")
+        return
+
+    if data == "adm:gw:rialpay:fee_set":
+        state_set(uid, "admin_set_gw_fee_percent", gw="rialpay")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "💸 کارمزد ریال‌پی را وارد کنید (مثال: 2.5):", back_button("adm:gw:rialpay:feebonus"))
+        return
+
+    if data == "adm:gw:rialpay:bonus_set":
+        state_set(uid, "admin_set_gw_bonus_percent", gw="rialpay")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "🎁 بونس ریال‌پی را وارد کنید (مثال: 5):", back_button("adm:gw:rialpay:feebonus"))
+        return
+
+    # ── PazzleNet admin settings ────────────────────────────────────────────── = {"card": "💳 کارت به کارت", "crypto": "💎 ارز دیجیتال", "tetrapay": "🏦 TetraPay", "swapwallet": "💎 SwapWallet", "swapwallet_crypto": "💎 SwapWallet کریپتو", "tronpays_rial": "💳 TronPays", "pazzlenet": "💳 PazzleNet", "plisio": "💎 Plisio", "nowpayments": "💎 NowPayments", "tronado": "💎 ترونادو", "centralpay": "💳 CentralPay", "rialpay": "💳 ریال‌پی"}
 
     # ── PazzleNet admin settings ──────────────────────────────────────────────
     if data == "adm:set:gw:pazzlenet":
@@ -18008,6 +18528,7 @@ def _dispatch_callback(call, uid, data):
 
     if data.startswith("adm:gw:") and data.endswith(":range"):
         gw_name = data.split(":")[2]
+        _GW_RANGE_LABELS = {"card": "💳 کارت به کارت", "crypto": "💎 ارز دیجیتال", "tetrapay": "🏦 TetraPay", "swapwallet": "💎 SwapWallet", "swapwallet_crypto": "💎 SwapWallet کریپتو", "tronpays_rial": "💳 TronPays", "pazzlenet": "💳 PazzleNet", "plisio": "💎 Plisio", "nowpayments": "💎 NowPayments", "tronado": "💎 ترونادو", "centralpay": "💳 CentralPay", "rialpay": "💳 ریال‌پی"}
         gw_label = _GW_RANGE_LABELS.get(gw_name, gw_name)
         range_enabled = setting_get(f"gw_{gw_name}_range_enabled", "0")
         range_min = setting_get(f"gw_{gw_name}_range_min", "")

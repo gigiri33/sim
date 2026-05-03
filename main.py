@@ -444,6 +444,81 @@ def _plisio_webhook_server():
             print("CENTRALPAY_CALLBACK_ERROR:", exc)
             return "خطایی رخ داد. لطفاً به ربات برگردید و روی بررسی پرداخت بزنید.", 200
 
+    # ── RialPay routes ────────────────────────────────────────────────────────
+    @_app.route("/rialpay/<bot_username>/<int:payment_id>/webhook", methods=["POST", "GET"])
+    def _rialpay_webhook(bot_username, payment_id):
+        print(f"[RialPay Webhook HIT] payment_id={payment_id} bot={bot_username} "
+              f"method={request.method} args={dict(request.args)} "
+              f"json={request.get_json(silent=True)} form={dict(request.form)}")
+        try:
+            from bot.gateways.rialpay import verify_rialpay_webhook_signature, normalize_rialpay_status, process_rialpay_verified_payment
+            from bot.db import get_payment, is_payment_expired
+
+            raw_body = request.get_data()
+
+            # ── Parse JSON ────────────────────────────────────────────────────
+            data = request.get_json(silent=True, force=True) or {}
+
+            # ── Signature verification ────────────────────────────────────────
+            sig = request.headers.get("X-Signature", "")
+            if not verify_rialpay_webhook_signature(raw_body, sig):
+                print(f"[RialPay] Webhook signature INVALID for payment_id={payment_id}  sig={sig!r}")
+                return jsonify({"ok": False, "error": "invalid signature"}), 200
+
+            # ── Match order_id ────────────────────────────────────────────────
+            order_id_from_payload = data.get("order_id")
+            if str(order_id_from_payload) != str(payment_id):
+                print(f"[RialPay] order_id mismatch: payload={order_id_from_payload} url={payment_id}")
+                return jsonify({"ok": False, "error": "order_id mismatch"}), 200
+
+            # ── Load payment ──────────────────────────────────────────────────
+            payment = get_payment(payment_id)
+            if not payment:
+                print(f"[RialPay] payment_id={payment_id} not found")
+                return jsonify({"ok": True}), 200
+
+            if payment["payment_method"] != "rialpay":
+                print(f"[RialPay] payment_id={payment_id} wrong method {payment['payment_method']}")
+                return jsonify({"ok": True, "already_processed": True}), 200
+
+            if payment["status"] == "completed":
+                print(f"[RialPay] payment_id={payment_id} already completed")
+                return jsonify({"ok": True, "already_processed": True}), 200
+
+            norm_status = normalize_rialpay_status(str(data.get("status", "")))
+            print(f"[RialPay] payment_id={payment_id} norm_status={norm_status}")
+
+            if norm_status == "paid":
+                result = process_rialpay_verified_payment(payment_id, source="webhook", raw_payload=data)
+                print(f"[RialPay] webhook result payment_id={payment_id}: {result}")
+                status = result.get("status", "")
+                if status in ("ok", "already_processed"):
+                    return jsonify({"ok": True}), 200
+                if status == "amount_mismatch":
+                    return jsonify({"ok": True, "error_logged": True, "amount_mismatch": True}), 200
+                return jsonify({"ok": True, "error_logged": True, "error": str(result.get("msg", status))[:300]}), 200
+
+            elif norm_status == "rejected":
+                from bot.db import get_conn as _gc2
+                try:
+                    with _gc2() as _conn2:
+                        _conn2.execute(
+                            "UPDATE payments SET status='rejected' WHERE id=? AND status='pending'",
+                            (payment_id,),
+                        )
+                except Exception as _re:
+                    print(f"[RialPay] reject update failed: {_re}")
+                return jsonify({"ok": True}), 200
+
+            # pending / unknown: nothing to do yet
+            return jsonify({"ok": True}), 200
+
+        except Exception as exc:
+            import traceback as _tb3
+            _tb3.print_exc()
+            print("RIALPAY_WEBHOOK_ERROR:", exc)
+            return jsonify({"ok": True}), 200
+
     import time as _time
     import socket as _socket
     import os as _os

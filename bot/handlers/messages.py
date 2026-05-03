@@ -3767,6 +3767,39 @@ def universal_handler(message):
             bot.send_message(uid, f"✅ Callback URL ذخیره شد:\n<code>{val or 'https://example.com/'}</code>", reply_markup=back_button("adm:set:gw:tronpays_rial"))
             return
 
+        if sn == "admin_set_rialpay_key" and is_admin(uid):
+            val = (message.text or "").strip()
+            if not val:
+                bot.send_message(uid, "⚠️ کلید API نمی‌تواند خالی باشد. لطفاً دوباره ارسال کنید:", reply_markup=back_button("adm:set:gw:rialpay"))
+                return
+            setting_set("rialpay_api_key", val)
+            log_admin_action(uid, "کلید API ریال‌پی تغییر کرد")
+            state_clear(uid)
+            bot.send_message(uid, "✅ کلید API ریال‌پی ذخیره شد.", reply_markup=back_button("adm:set:gw:rialpay"))
+            return
+
+        if sn == "admin_set_rialpay_webhook_secret" and is_admin(uid):
+            val = (message.text or "").strip()
+            if not val:
+                bot.send_message(uid, "⚠️ Webhook Secret نمی‌تواند خالی باشد. لطفاً دوباره ارسال کنید:", reply_markup=back_button("adm:set:gw:rialpay"))
+                return
+            setting_set("rialpay_webhook_secret", val)
+            log_admin_action(uid, "Webhook Secret ریال‌پی تغییر کرد")
+            state_clear(uid)
+            bot.send_message(uid, "✅ Webhook Secret ریال‌پی ذخیره شد.", reply_markup=back_button("adm:set:gw:rialpay"))
+            return
+
+        if sn == "admin_set_rialpay_cb_url" and is_admin(uid):
+            val = (message.text or "").strip().rstrip("/")
+            if val and not (val.startswith("http://") or val.startswith("https://")):
+                bot.send_message(uid, "⚠️ URL باید با <code>https://</code> یا <code>http://</code> شروع شود:", reply_markup=back_button("adm:set:gw:rialpay"))
+                return
+            setting_set("rialpay_callback_base_url", val)
+            log_admin_action(uid, "Callback Base URL ریال‌پی تغییر کرد")
+            state_clear(uid)
+            bot.send_message(uid, f"✅ Callback Base URL ریال‌پی ذخیره شد:\n<code>{esc(val or '(خالی)')}</code>", reply_markup=back_button("adm:set:gw:rialpay"))
+            return
+
         if sn == "admin_set_plisio_key" and is_admin(uid):
             val = (message.text or "").strip()
             if not val:
