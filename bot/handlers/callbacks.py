@@ -939,7 +939,7 @@ def _show_purchase_gateways(target, uid, package_id, price, package_row):
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:nowpayments:{package_id}"))
         _gw_labels.append(("nowpayments", _lbl))
     if is_gateway_available("tronado", uid):
-        _lbl = setting_get("gw_tronado_display_name", "").strip() or "💎 درگاه ترونادو"
+        _lbl = setting_get("gw_tronado_display_name", "").strip() or "درگاه کارت به کارت (Tronado)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:tronado:{package_id}"))
         _gw_labels.append(("tronado", _lbl))
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"buy:t:{package_row['type_id']}", icon_custom_emoji_id="5253997076169115797"))
@@ -1025,7 +1025,7 @@ def _show_renewal_gateways(target, uid, purchase_id, package_id, price, package_
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:nowpayments:{purchase_id}:{package_id}"))
         _gw_labels.append(("nowpayments", _lbl))
     if is_gateway_available("tronado", uid):
-        _lbl = setting_get("gw_tronado_display_name", "").strip() or "💎 درگاه ترونادو"
+        _lbl = setting_get("gw_tronado_display_name", "").strip() or "درگاه کارت به کارت (Tronado)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:tronado:{purchase_id}:{package_id}"))
         _gw_labels.append(("tronado", _lbl))
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"renew:{purchase_id}", icon_custom_emoji_id="5253997076169115797"))
@@ -1487,7 +1487,7 @@ def _show_pnlcfg_renewal_gateways(target, uid, config_id, package_id, price, pac
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"mypnlcfgrpay:nowpayments:{config_id}:{package_id}"))
         _gw_labels.append(("nowpayments", _lbl))
     if is_gateway_available("tronado", uid):
-        _lbl = setting_get("gw_tronado_display_name", "").strip() or "💎 درگاه ترونادو"
+        _lbl = setting_get("gw_tronado_display_name", "").strip() or "درگاه کارت به کارت (Tronado)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"mypnlcfgrpay:tronado:{config_id}:{package_id}"))
         _gw_labels.append(("tronado", _lbl))
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"mypnlcfg:renewconfirm:{config_id}",
@@ -1558,7 +1558,7 @@ def _show_wallet_gateways(target, uid, amount):
         kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:nowpayments"))
         _gw_labels.append(("nowpayments", _lbl))
     if is_gateway_available("tronado", uid):
-        _lbl = setting_get("gw_tronado_display_name", "").strip() or "💎 درگاه ترونادو"
+        _lbl = setting_get("gw_tronado_display_name", "").strip() or "درگاه کارت به کارت (Tronado)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:tronado"))
         _gw_labels.append(("tronado", _lbl))
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
@@ -15991,7 +15991,7 @@ def _dispatch_callback(call, uid, data):
             ("pazzlenet",        "💳 درگاه کارت به کارت (PazzleNet)"),
             ("plisio",           "💎 پرداخت کریپتو (Plisio)"),
             ("nowpayments",      "💎 پرداخت کریپتو (NowPayments)"),
-            ("tronado",          "💎 درگاه ترونادو"),
+            ("tronado",          "درگاه کارت به کارت (Tronado)"),
         ]:
             enabled = setting_get(f"gw_{gw_key}_enabled", "0")
             status_icon = "🟢" if enabled == "1" else "🔴"
