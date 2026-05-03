@@ -340,37 +340,47 @@ def _tronado_status_not_found(resp: dict) -> bool:
     return "no order found" in txt or "order not found" in txt or "not found with this txid" in txt
 
 
-def _post_tronado_status_payload(payload: dict, label: str) -> dict:
+def _post_tronado_status_payload(payload: dict, label: str, transport: str = "json") -> dict:
     api_key = (setting_get("tronado_api_key", "") or "").strip()
     if not api_key or not payload:
         return {}
     url = _tronado_order_status_url()
-    payload_data = json.dumps(payload).encode("utf-8")
+    headers = {
+        "Accept":       "application/json",
+        "x-api-key":    api_key,
+        "User-Agent":   "ConfigFlow/1.0",
+    }
+    method = "POST"
+    payload_data = None
+    if transport == "form":
+        payload_data = urllib.parse.urlencode(payload).encode("utf-8")
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+    elif transport == "get":
+        url = f"{url}?{urllib.parse.urlencode(payload)}"
+        method = "GET"
+    else:
+        payload_data = json.dumps(payload).encode("utf-8")
+        headers["Content-Type"] = "application/json"
     req = urllib.request.Request(
         url,
         data=payload_data,
-        headers={
-            "Content-Type": "application/json",
-            "Accept":       "application/json",
-            "x-api-key":    api_key,
-            "User-Agent":   "ConfigFlow/1.0",
-        },
-        method="POST",
+        headers=headers,
+        method=method,
     )
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             raw, parsed = _decode_response_body(resp)
-        print(f"[Tronado] GetStatus {label} payload={payload} HTTP200 raw={raw[:400]}")
+        print(f"[Tronado] GetStatus {label}/{transport} payload={payload} HTTP200 raw={raw[:400]}")
         return parsed if isinstance(parsed, dict) else {}
     except urllib.error.HTTPError as e:
         try:
             raw_body = e.read().decode("utf-8", errors="replace").strip()
         except Exception:
             raw_body = ""
-        print(f"[Tronado] GetStatus {label} payload={payload} HTTP {e.code}: {raw_body[:300]}")
+        print(f"[Tronado] GetStatus {label}/{transport} payload={payload} HTTP {e.code}: {raw_body[:300]}")
         return {"__http_error": e.code, "__body": raw_body}
     except Exception as exc:
-        print(f"[Tronado] GetStatus {label} payload={payload} network error: {exc}")
+        print(f"[Tronado] GetStatus {label}/{transport} payload={payload} network error: {exc}")
         return {}
 
 
@@ -385,16 +395,26 @@ def get_tronado_payment_status(order_id_or_token: str) -> dict:
     ident = str(order_id_or_token).strip()
     candidates = []
 
-    def _add(label, payload):
-        item = (label, payload)
+    def _add(label, payload, transport="json"):
+        item = (label, payload, transport)
         if item not in candidates:
             candidates.append(item)
 
     # The Tronado endpoint has behaved inconsistently between accounts/docs.
-    # Try all known key names and both raw token and s_<token> MiniApp value.
+    # Try all known key names and transports. `Id` is the documented key, so it
+    # gets JSON, x-www-form-urlencoded and GET probes; other keys are low-cost
+    # JSON fallbacks for API deployments that use different model binding.
     _add("Id", {"Id": ident})
     if ident and not ident.startswith("s_"):
         _add("Id:s_token", {"Id": f"s_{ident}"})
+    _add("Id", {"Id": ident}, "form")
+    _add("Id", {"Id": ident}, "get")
+    if ident and not ident.startswith("s_"):
+        _add("Id:s_token", {"Id": f"s_{ident}"}, "form")
+        _add("Id:s_token", {"Id": f"s_{ident}"}, "get")
+        full_url = build_tronado_payment_url(ident)
+        _add("Id:full_url", {"Id": full_url})
+        _add("Id:full_url", {"Id": full_url}, "form")
     _add("Token", {"Token": ident})
     _add("OrderToken", {"OrderToken": ident})
     _add("PaymentID", {"PaymentID": ident})
@@ -403,8 +423,8 @@ def get_tronado_payment_status(order_id_or_token: str) -> dict:
     _add("id", {"id": ident})
 
     first_resp = {}
-    for label, payload in candidates:
-        resp = _post_tronado_status_payload(payload, label)
+    for label, payload, transport in candidates:
+        resp = _post_tronado_status_payload(payload, label, transport)
         if not first_resp:
             first_resp = resp
         # Stop as soon as the API returns a meaningful non-not-found response.
