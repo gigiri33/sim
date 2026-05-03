@@ -3706,6 +3706,30 @@ def universal_handler(message):
             bot.send_message(uid, f"✅ Callback URL ذخیره شد:\n<code>{esc(val) if val else 'حذف شد'}</code>", reply_markup=back_button("adm:set:gw:tronado"))
             return
 
+        if sn == "admin_set_centralpay_key" and is_admin(uid):
+            val = (message.text or "").strip()
+            if not val:
+                bot.send_message(uid, "⚠️ کلید API نمی‌تواند خالی باشد.", reply_markup=back_button("adm:set:gw:centralpay"))
+                return
+            setting_set("centralpay_api_key", val)
+            log_admin_action(uid, "کلید API سنترال‌پی تغییر کرد")
+            state_clear(uid)
+            bot.send_message(uid, "✅ کلید API سنترال‌پی ذخیره شد.", reply_markup=back_button("adm:set:gw:centralpay"))
+            return
+
+        if sn == "admin_set_centralpay_cb_url" and is_admin(uid):
+            val = (message.text or "").strip()
+            if val == "-":
+                val = ""
+            if val and not (val.startswith("https://") or val.startswith("http://")):
+                bot.send_message(uid, "⚠️ URL باید با <code>https://</code> شروع شود.", reply_markup=back_button("adm:set:gw:centralpay"))
+                return
+            setting_set("centralpay_callback_base_url", val)
+            log_admin_action(uid, f"Callback Base URL سنترال‌پی تغییر کرد: {val or '(حذف شد)'}")
+            state_clear(uid)
+            bot.send_message(uid, f"✅ Callback Base URL ذخیره شد:\n<code>{esc(val) if val else 'حذف شد'}</code>", reply_markup=back_button("adm:set:gw:centralpay"))
+            return
+
         if sn == "admin_set_tronpays_rial_cb_url" and is_admin(uid):
             val = (message.text or "").strip()
             if val and not (val.startswith("http://") or val.startswith("https://")):

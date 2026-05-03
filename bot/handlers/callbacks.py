@@ -98,6 +98,9 @@ from ..gateways.tronado import (
     get_tronado_payment_status, get_tronado_status_by_payment_id, is_tronado_response_paid,
     normalize_tronado_status,
 )
+from ..gateways.centralpay import (
+    create_centralpay_link, build_centralpay_return_url,
+)
 from ..gateways.plisio import (
     create_plisio_invoice, check_plisio_invoice,
     is_plisio_paid, is_plisio_pending, is_plisio_failed,
@@ -193,6 +196,29 @@ def _verify_tronado_payment(payment_id: int) -> dict:
     norm = normalize_tronado_status(td_resp)
     return {"verify": norm if norm in ("pending", "rejected") else "unknown",
             "process_result": {}, "raw_resp": td_resp}
+
+
+def _verify_centralpay_payment(payment_id: int) -> dict:
+    """
+    Shared CentralPay payment verification used by all :verify: handlers.
+    Calls process_centralpay_verified_payment which atomically locks and verifies.
+
+    Returns dict with:
+      "verify": "ok" | "already_processed" | "not_paid" | "process_error" | "amount_mismatch"
+      "process_result": dict from process_centralpay_verified_payment (or {})
+    """
+    from ..crypto_fulfillment import process_centralpay_verified_payment
+    proc = process_centralpay_verified_payment(payment_id, source="manual_verify", raw_payload=None)
+    status = proc.get("status", "")
+    if status == "ok":
+        return {"verify": "ok", "process_result": proc}
+    if status == "already_processed":
+        return {"verify": "already_processed", "process_result": proc}
+    if status == "amount_mismatch":
+        return {"verify": "amount_mismatch", "process_result": proc}
+    if status == "not_paid":
+        return {"verify": "not_paid", "process_result": proc}
+    return {"verify": "process_error", "process_result": proc}
 
 
 def _fmt_users_label(max_users):
@@ -942,6 +968,10 @@ def _show_purchase_gateways(target, uid, package_id, price, package_row):
         _lbl = setting_get("gw_tronado_display_name", "").strip() or "درگاه کارت به کارت (Tronado)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:tronado:{package_id}"))
         _gw_labels.append(("tronado", _lbl))
+    if is_gateway_available("centralpay", uid):
+        _lbl = setting_get("gw_centralpay_display_name", "").strip() or "درگاه کارت به کارت (CentralPay)"
+        kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:centralpay:{package_id}"))
+        _gw_labels.append(("centralpay", _lbl))
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"buy:t:{package_row['type_id']}", icon_custom_emoji_id="5253997076169115797"))
     _range_guide = build_gateway_range_guide(_gw_labels)
     _pkg_sn = package_row['show_name'] if 'show_name' in package_row.keys() else 1
@@ -1028,6 +1058,10 @@ def _show_renewal_gateways(target, uid, purchase_id, package_id, price, package_
         _lbl = setting_get("gw_tronado_display_name", "").strip() or "درگاه کارت به کارت (Tronado)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:tronado:{purchase_id}:{package_id}"))
         _gw_labels.append(("tronado", _lbl))
+    if is_gateway_available("centralpay", uid):
+        _lbl = setting_get("gw_centralpay_display_name", "").strip() or "درگاه کارت به کارت (CentralPay)"
+        kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:centralpay:{purchase_id}:{package_id}"))
+        _gw_labels.append(("centralpay", _lbl))
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"renew:{purchase_id}", icon_custom_emoji_id="5253997076169115797"))
     _range_guide = build_gateway_range_guide(_gw_labels)
     _pkg_sn_renew = package_row['show_name'] if 'show_name' in package_row.keys() else 1
@@ -1490,6 +1524,10 @@ def _show_pnlcfg_renewal_gateways(target, uid, config_id, package_id, price, pac
         _lbl = setting_get("gw_tronado_display_name", "").strip() or "درگاه کارت به کارت (Tronado)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"mypnlcfgrpay:tronado:{config_id}:{package_id}"))
         _gw_labels.append(("tronado", _lbl))
+    if is_gateway_available("centralpay", uid):
+        _lbl = setting_get("gw_centralpay_display_name", "").strip() or "درگاه کارت به کارت (CentralPay)"
+        kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"mypnlcfgrpay:centralpay:{config_id}:{package_id}"))
+        _gw_labels.append(("centralpay", _lbl))
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"mypnlcfg:renewconfirm:{config_id}",
            icon_custom_emoji_id="5253997076169115797"))
     _range_guide = build_gateway_range_guide(_gw_labels)
@@ -1561,6 +1599,10 @@ def _show_wallet_gateways(target, uid, amount):
         _lbl = setting_get("gw_tronado_display_name", "").strip() or "درگاه کارت به کارت (Tronado)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:tronado"))
         _gw_labels.append(("tronado", _lbl))
+    if is_gateway_available("centralpay", uid):
+        _lbl = setting_get("gw_centralpay_display_name", "").strip() or "درگاه کارت به کارت (CentralPay)"
+        kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:centralpay"))
+        _gw_labels.append(("centralpay", _lbl))
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
     _range_guide = build_gateway_range_guide(_gw_labels)
     sd = state_data(uid)
@@ -5945,6 +5987,92 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, text, kb)
         return
 
+    # ── CentralPay: renewal ───────────────────────────────────────────────────
+    if data.startswith("rpay:centralpay:verify:"):
+        payment_id = int(data.split(":")[3])
+        payment = get_payment(payment_id)
+        if not payment or payment["user_id"] != uid:
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        if payment["status"] != "pending":
+            if payment["status"] == "completed":
+                bot.answer_callback_query(call.id, "✅ این پرداخت قبلاً تأیید و پردازش شده است.", show_alert=True)
+            else:
+                bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id, "⏳ در حال بررسی وضعیت پرداخت…", show_alert=False)
+        _vrcp = _verify_centralpay_payment(payment_id)
+        if _vrcp["verify"] == "ok":
+            bot.send_message(uid, "✅ پرداخت سنترال‌پی تأیید شد! تمدید سرویس شما در حال انجام است…", parse_mode="HTML")
+        elif _vrcp["verify"] == "already_processed":
+            bot.send_message(uid, "✅ پرداخت شما قبلاً تأیید و تحویل داده شده است.", parse_mode="HTML")
+        elif _vrcp["verify"] == "amount_mismatch":
+            bot.send_message(uid, "⚠️ مبلغ پرداختی با سفارش مطابقت ندارد. لطفاً با پشتیبانی تماس بگیرید.", parse_mode="HTML")
+        elif _vrcp["verify"] == "process_error":
+            bot.send_message(uid, "⚠️ خطا در پردازش پرداخت. لطفاً با پشتیبانی تماس بگیرید.", parse_mode="HTML")
+        else:
+            bot.send_message(uid,
+                "⏳ پرداخت هنوز تأیید نشده است.\n"
+                "لطفاً چند دقیقه صبر کنید و دوباره وضعیت را بررسی کنید.",
+                parse_mode="HTML")
+        return
+
+    if data.startswith("rpay:centralpay:") and not data.startswith("rpay:centralpay:verify:"):
+        if not _check_invoice_valid(uid):
+            _show_invoice_expired(call)
+            return
+        parts       = data.split(":")
+        purchase_id = int(parts[2])
+        package_id  = int(parts[3])
+        item        = get_purchase(purchase_id)
+        package_row = get_package(package_id)
+        if not item or item["user_id"] != uid:
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        if not package_row:
+            bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
+            return
+        price = _get_state_price(uid, package_row, "renew_select_method")
+        if not is_gateway_in_range("centralpay", price):
+            _rng = get_gateway_range_text("centralpay")
+            bot.answer_callback_query(call.id,
+                f"⛔️ مبلغ {fmt_price(price)} تومان برای درگاه سنترال‌پی مجاز نیست.\n"
+                f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
+                show_alert=True)
+            return
+        final_rprice_cp = apply_gateway_fee("centralpay", price)
+        payment_id = create_payment("renewal", uid, package_id, final_rprice_cp, "centralpay",
+                                    status="pending", config_id=item["config_id"])
+        _bot_uname_rcp = bot.get_me().username or ""
+        ret_url_rcp = build_centralpay_return_url(payment_id, _bot_uname_rcp)
+        ok_cp, res_cp = create_centralpay_link(final_rprice_cp, uid, payment_id, ret_url_rcp)
+        if not ok_cp:
+            err_msg = res_cp.get("error", "خطای ناشناخته") if isinstance(res_cp, dict) else str(res_cp)
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                f"⚠️ <b>خطا در ایجاد درگاه سنترال‌پی</b>\n\n"
+                f"<code>{esc(err_msg[:400])}</code>\n\n"
+                "💡 مطمئن شوید کلید API سنترال‌پی صحیح وارد شده باشد.",
+                back_button(f"renew:{purchase_id}"))
+            return
+        pay_url_rcp = res_cp.get("redirect_url", "")
+        with get_conn() as conn:
+            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (pay_url_rcp, payment_id))
+        fee_line_rcp = ""
+        if final_rprice_cp != price:
+            fee_line_rcp = f"\n💸 کارمزد: {fmt_price(final_rprice_cp - price)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_rprice_cp)}</b> تومان"
+        text = (
+            "💳 <b>پرداخت با سنترال‌پی — تمدید</b>\n\n"
+            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_rcp}\n\n"
+            "برای پرداخت روی دکمه زیر بزنید. پس از اتمام پرداخت به ربات برگردید و روی «🔍 بررسی پرداخت» بزنید."
+        )
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("💳 پرداخت با سنترال‌پی", url=pay_url_rcp))
+        kb.add(types.InlineKeyboardButton("🔍 بررسی پرداخت", callback_data=f"rpay:centralpay:verify:{payment_id}"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, text, kb)
+        return
+
     # ── Plisio: renewal ───────────────────────────────────────────────────────
     if data.startswith("rpay:plisio:verify:"):
         payment_id = int(data.split(":")[3])
@@ -7246,6 +7374,89 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, text, kb)
         return
 
+    # ── CentralPay: config purchase ───────────────────────────────────────────
+    if data.startswith("pay:centralpay:verify:"):
+        payment_id = int(data.split(":")[3])
+        payment = get_payment(payment_id)
+        if not payment or payment["user_id"] != uid:
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        if payment["status"] != "pending":
+            if payment["status"] == "completed":
+                bot.answer_callback_query(call.id, "✅ این پرداخت قبلاً تأیید و پردازش شده است.", show_alert=True)
+            else:
+                bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id, "⏳ در حال بررسی وضعیت پرداخت…", show_alert=False)
+        _vpc = _verify_centralpay_payment(payment_id)
+        if _vpc["verify"] == "ok":
+            bot.send_message(uid, "✅ پرداخت سنترال‌پی تأیید شد! کانفیگ شما در حال آماده‌سازی است…", parse_mode="HTML")
+        elif _vpc["verify"] == "already_processed":
+            bot.send_message(uid, "✅ پرداخت شما قبلاً تأیید و تحویل داده شده است.", parse_mode="HTML")
+        elif _vpc["verify"] == "amount_mismatch":
+            bot.send_message(uid, "⚠️ مبلغ پرداختی با سفارش مطابقت ندارد. لطفاً با پشتیبانی تماس بگیرید.", parse_mode="HTML")
+        elif _vpc["verify"] == "process_error":
+            bot.send_message(uid, "⚠️ خطا در پردازش پرداخت. لطفاً با پشتیبانی تماس بگیرید.", parse_mode="HTML")
+        else:
+            bot.send_message(uid,
+                "⏳ پرداخت شما هنوز تأیید نشده است. چند دقیقه دیگر دوباره بررسی کنید.",
+                parse_mode="HTML")
+        return
+
+    if data.startswith("pay:centralpay:"):
+        if not _check_invoice_valid(uid):
+            _show_invoice_expired(call)
+            return
+        package_id  = int(data.split(":")[2])
+        package_row = get_package(package_id)
+        if not package_row or not _pkg_has_stock(package_row, setting_get("preorder_mode", "0") == "1"):
+            bot.answer_callback_query(call.id, "موجودی این پکیج تمام شده است.", show_alert=True)
+            return
+        price          = _get_state_price(uid, package_row, "buy_select_method")
+        _qty_cp_buy    = int(state_data(uid).get("quantity", 1) or 1)
+        if not is_gateway_in_range("centralpay", price):
+            _rng = get_gateway_range_text("centralpay")
+            bot.answer_callback_query(call.id,
+                f"⛔️ مبلغ {fmt_price(price)} تومان برای درگاه سنترال‌پی مجاز نیست.\n"
+                f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
+                show_alert=True)
+            return
+        final_cp_price = apply_gateway_fee("centralpay", price)
+        payment_id = create_payment("config_purchase", uid, package_id, final_cp_price, "centralpay",
+                                    status="pending", quantity=_qty_cp_buy)
+        _snames_cp = state_data(uid).get("service_names")
+        if _snames_cp:
+            set_payment_service_names(payment_id, _snames_cp)
+        _bot_uname_cp = bot.get_me().username or ""
+        ret_url_cp = build_centralpay_return_url(payment_id, _bot_uname_cp)
+        ok_cp, res_cp = create_centralpay_link(final_cp_price, uid, payment_id, ret_url_cp)
+        if not ok_cp:
+            err_msg = res_cp.get("error", "خطای ناشناخته") if isinstance(res_cp, dict) else str(res_cp)
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                f"⚠️ <b>خطا در ایجاد درگاه سنترال‌پی</b>\n\n"
+                f"<code>{esc(err_msg[:400])}</code>\n\n"
+                "💡 مطمئن شوید کلید API سنترال‌پی صحیح وارد شده باشد.",
+                back_button(f"buy:p:{package_id}"))
+            return
+        pay_url_cp = res_cp.get("redirect_url", "")
+        with get_conn() as conn:
+            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (pay_url_cp, payment_id))
+        fee_line_cp = ""
+        if final_cp_price != price:
+            fee_line_cp = f"\n💸 کارمزد: {fmt_price(final_cp_price - price)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_cp_price)}</b> تومان"
+        text = (
+            "💳 <b>پرداخت با سنترال‌پی</b>\n\n"
+            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_cp}\n\n"
+            "برای پرداخت روی دکمه زیر بزنید. پس از اتمام پرداخت به ربات برگردید و روی «🔍 بررسی پرداخت» بزنید."
+        )
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("💳 پرداخت با سنترال‌پی", url=pay_url_cp))
+        kb.add(types.InlineKeyboardButton("🔍 بررسی پرداخت", callback_data=f"pay:centralpay:verify:{payment_id}"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, text, kb)
+        return
+
     # ── Plisio: purchase ──────────────────────────────────────────────────────
     if data.startswith("pay:plisio:verify:"):
         payment_id = int(data.split(":")[3])
@@ -8124,6 +8335,86 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
         return
+
+    # ── CentralPay: wallet charge ─────────────────────────────────────────────
+    if data.startswith("wallet:charge:centralpay:verify:"):
+        payment_id = int(data.split(":")[-1])
+        payment = get_payment(payment_id)
+        if not payment or payment["user_id"] != uid:
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        if payment["status"] != "pending":
+            if payment["status"] == "completed":
+                bot.answer_callback_query(call.id, "✅ پرداخت شما قبلاً تأیید و کیف پول شارژ شده است.", show_alert=True)
+            else:
+                bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id, "⏳ در حال بررسی وضعیت پرداخت…", show_alert=False)
+        _vwc_cp = _verify_centralpay_payment(payment_id)
+        if _vwc_cp["verify"] == "ok":
+            bot.send_message(uid,
+                f"✅ پرداخت سنترال‌پی تأیید شد و کیف پول شارژ شد.\n\n"
+                f"💰 مبلغ: {fmt_price(payment['amount'])} تومان",
+                parse_mode="HTML")
+        elif _vwc_cp["verify"] == "already_processed":
+            bot.send_message(uid, "✅ پرداخت شما قبلاً تأیید و کیف پول شارژ شده است.", parse_mode="HTML")
+        elif _vwc_cp["verify"] == "amount_mismatch":
+            bot.send_message(uid, "⚠️ مبلغ پرداختی با سفارش مطابقت ندارد. لطفاً با پشتیبانی تماس بگیرید.", parse_mode="HTML")
+        elif _vwc_cp["verify"] == "process_error":
+            bot.send_message(uid, "⚠️ خطا در پردازش پرداخت. لطفاً با پشتیبانی تماس بگیرید.", parse_mode="HTML")
+        else:
+            bot.send_message(uid, "⏳ پرداخت هنوز تأیید نشده است. چند دقیقه بعد دوباره بررسی کنید.", parse_mode="HTML")
+        return
+
+    if data == "wallet:charge:centralpay":
+        if not _check_invoice_valid(uid):
+            _show_invoice_expired(call)
+            return
+        sd     = state_data(uid)
+        amount = sd.get("amount")
+        if not amount:
+            bot.answer_callback_query(call.id, "ابتدا مبلغ را وارد کنید.", show_alert=True)
+            return
+        if not is_gateway_in_range("centralpay", amount):
+            _rng = get_gateway_range_text("centralpay")
+            bot.answer_callback_query(call.id,
+                f"⛔️ مبلغ {fmt_price(amount)} تومان برای درگاه سنترال‌پی مجاز نیست.\n"
+                f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
+                show_alert=True)
+            return
+        final_amount_cp = apply_gateway_fee("centralpay", amount)
+        payment_id = create_payment("wallet_charge", uid, None, final_amount_cp, "centralpay", status="pending")
+        _bot_uname_cpwc = bot.get_me().username or ""
+        ret_url_cpwc = build_centralpay_return_url(payment_id, _bot_uname_cpwc)
+        ok_cp, res_cp = create_centralpay_link(final_amount_cp, uid, payment_id, ret_url_cpwc)
+        if not ok_cp:
+            err_msg = res_cp.get("error", "خطای ناشناخته") if isinstance(res_cp, dict) else str(res_cp)
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                f"⚠️ <b>خطا در ایجاد درگاه سنترال‌پی</b>\n\n"
+                f"<code>{esc(err_msg[:400])}</code>\n\n"
+                "💡 مطمئن شوید کلید API سنترال‌پی صحیح وارد شده باشد.",
+                back_button("wallet:charge"))
+            return
+        pay_url_cpwc = res_cp.get("redirect_url", "")
+        with get_conn() as conn:
+            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (pay_url_cpwc, payment_id))
+        fee_line_cpwc = ""
+        if final_amount_cp != amount:
+            fee_line_cpwc = f"\n💸 کارمزد: {fmt_price(final_amount_cp - amount)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_amount_cp)}</b> تومان"
+        text = (
+            "💳 <b>پرداخت با سنترال‌پی — شارژ کیف پول</b>\n\n"
+            f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان{fee_line_cpwc}\n\n"
+            "روی دکمه زیر بزنید و پرداخت را انجام دهید. پس از اتمام، روی «🔍 بررسی پرداخت» بزنید.\n\n"
+            "اگر پرداخت تأیید شده باشد، کیف پول به‌صورت خودکار شارژ می‌شود."
+        )
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("💳 پرداخت با سنترال‌پی", url=pay_url_cpwc))
+        kb.add(types.InlineKeyboardButton("🔍 بررسی پرداخت", callback_data=f"wallet:charge:centralpay:verify:{payment_id}"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, text, kb)
+        return
+
         payment_id = int(data.split(":")[3])
         payment = get_payment(payment_id)
         if not payment or payment["user_id"] != uid:
@@ -10432,6 +10723,91 @@ def _dispatch_callback(call, uid, data):
                     parse_mode="HTML")
             return
 
+        # mypnlcfgrpay:centralpay:{config_id}:{package_id}
+        if data.startswith("mypnlcfgrpay:centralpay:") and not data.startswith("mypnlcfgrpay:centralpay:verify:"):
+            if not _check_invoice_valid(uid):
+                _show_invoice_expired(call); return
+            parts = data.split(":")
+            config_id  = int(parts[2])
+            package_id = int(parts[3])
+            cfg = get_panel_config(config_id)
+            if not cfg or cfg["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            package_row = get_package(package_id)
+            if not package_row:
+                bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True); return
+            sd = state_data(uid)
+            price = sd.get("amount") or get_effective_price(uid, package_row)
+            if not is_gateway_in_range("centralpay", price):
+                _rng = get_gateway_range_text("centralpay")
+                bot.answer_callback_query(call.id,
+                    f"⛔️ مبلغ {fmt_price(price)} تومان برای درگاه سنترال‌پی مجاز نیست.\n"
+                    f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
+                    show_alert=True); return
+            final_cp_pnl = apply_gateway_fee("centralpay", price)
+            payment_id = create_payment("pnlcfg_renewal", uid, package_id, final_cp_pnl, "centralpay",
+                                        status="pending", config_id=config_id)
+            _bot_uname_cpnl = bot.get_me().username or ""
+            ret_url_cpnl = build_centralpay_return_url(payment_id, _bot_uname_cpnl)
+            ok_cp_pnl, res_cp_pnl = create_centralpay_link(final_cp_pnl, uid, payment_id, ret_url_cpnl)
+            if not ok_cp_pnl:
+                err_cp_pnl = res_cp_pnl.get("error", "خطای ناشناخته") if isinstance(res_cp_pnl, dict) else str(res_cp_pnl)
+                bot.answer_callback_query(call.id)
+                send_or_edit(call,
+                    f"⚠️ <b>خطا در ایجاد درگاه سنترال‌پی</b>\n\n<code>{esc(err_cp_pnl[:400])}</code>",
+                    back_button(f"mypnlcfg:renewconfirm:{config_id}")); return
+            pay_url_cpnl = res_cp_pnl.get("redirect_url", "")
+            with get_conn() as conn:
+                conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (pay_url_cpnl, payment_id))
+            fee_line_cpnl = ""
+            if final_cp_pnl != price:
+                fee_line_cpnl = f"\n💸 کارمزد: {fmt_price(final_cp_pnl - price)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_cp_pnl)}</b> تومان"
+            kb_cpnl = types.InlineKeyboardMarkup()
+            kb_cpnl.add(types.InlineKeyboardButton("💳 پرداخت با سنترال‌پی", url=pay_url_cpnl))
+            kb_cpnl.add(types.InlineKeyboardButton("🔍 بررسی پرداخت",
+                        callback_data=f"mypnlcfgrpay:centralpay:verify:{payment_id}"))
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                "💳 <b>پرداخت با سنترال‌پی (تمدید)</b>\n\n"
+                f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_cpnl}\n\n"
+                "برای پرداخت روی دکمه زیر بزنید. پس از اتمام پرداخت روی «🔍 بررسی پرداخت» بزنید.",
+                kb_cpnl)
+            return
+
+        # mypnlcfgrpay:centralpay:verify:{payment_id}
+        if data.startswith("mypnlcfgrpay:centralpay:verify:"):
+            payment_id = int(data.split(":")[-1])
+            payment = get_payment(payment_id)
+            if not payment or payment["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            if payment["status"] != "pending":
+                if payment["status"] == "completed":
+                    bot.answer_callback_query(call.id, "✅ این پرداخت قبلاً تأیید شده است.", show_alert=True)
+                else:
+                    bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+                return
+            bot.answer_callback_query(call.id, "⏳ در حال بررسی وضعیت پرداخت…", show_alert=False)
+            _vcpnl = _verify_centralpay_payment(payment_id)
+            state_clear(uid)
+            if _vcpnl["verify"] == "ok":
+                config_id_cpnl = payment["config_id"]
+                bot.send_message(uid, "✅ پرداخت سنترال‌پی تأیید شد! سرویس تمدید شد.", parse_mode="HTML")
+                _show_panel_config_detail(call, config_id_cpnl, back_data="my_configs", is_user_view=True)
+            elif _vcpnl["verify"] == "already_processed":
+                bot.send_message(uid, "✅ پرداخت شما قبلاً تأیید و تحویل داده شده است.", parse_mode="HTML")
+            elif _vcpnl["verify"] == "amount_mismatch":
+                send_or_edit(call, "⚠️ مبلغ پرداختی با سفارش مطابقت ندارد. لطفاً با پشتیبانی تماس بگیرید.",
+                             back_button("my_configs"))
+            elif _vcpnl["verify"] == "process_error":
+                send_or_edit(call, "❌ پرداخت انجام شد اما پردازش با خطا مواجه شد.\nلطفاً با پشتیبانی ارتباط بگیرید.",
+                             back_button("my_configs"))
+            else:
+                bot.send_message(uid,
+                    "⏳ پرداخت هنوز تأیید نشده است.\n"
+                    "لطفاً چند دقیقه صبر کنید و دوباره وضعیت را بررسی کنید.",
+                    parse_mode="HTML")
+            return
+
         # mypnlcfgrpay:plisio:{config_id}:{package_id}
         if data.startswith("mypnlcfgrpay:plisio:") and not data.startswith("mypnlcfgrpay:plisio:verify:"):
             if not _check_invoice_valid(uid):
@@ -10797,6 +11173,91 @@ def _dispatch_callback(call, uid, data):
             elif _vpnl2["verify"] == "already_processed":
                 bot.send_message(uid, "✅ پرداخت شما قبلاً تأیید و تحویل داده شده است.", parse_mode="HTML")
             elif _vpnl2["verify"] == "process_error":
+                send_or_edit(call, "❌ پرداخت انجام شد اما پردازش با خطا مواجه شد.\nلطفاً با پشتیبانی ارتباط بگیرید.",
+                             back_button("my_configs"))
+            else:
+                bot.send_message(uid,
+                    "⏳ پرداخت هنوز تأیید نشده است.\n"
+                    "لطفاً چند دقیقه صبر کنید و دوباره وضعیت را بررسی کنید.",
+                    parse_mode="HTML")
+            return
+
+        # mypnlcfgrpay:centralpay:{config_id}:{package_id}
+        if data.startswith("mypnlcfgrpay:centralpay:") and not data.startswith("mypnlcfgrpay:centralpay:verify:"):
+            if not _check_invoice_valid(uid):
+                _show_invoice_expired(call); return
+            parts = data.split(":")
+            config_id  = int(parts[2])
+            package_id = int(parts[3])
+            cfg = get_panel_config(config_id)
+            if not cfg or cfg["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            package_row = get_package(package_id)
+            if not package_row:
+                bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True); return
+            sd = state_data(uid)
+            price = sd.get("amount") or get_effective_price(uid, package_row)
+            if not is_gateway_in_range("centralpay", price):
+                _rng = get_gateway_range_text("centralpay")
+                bot.answer_callback_query(call.id,
+                    f"⛔️ مبلغ {fmt_price(price)} تومان برای درگاه سنترال‌پی مجاز نیست.\n"
+                    f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
+                    show_alert=True); return
+            final_cp_pnl2 = apply_gateway_fee("centralpay", price)
+            payment_id = create_payment("pnlcfg_renewal", uid, package_id, final_cp_pnl2, "centralpay",
+                                        status="pending", config_id=config_id)
+            _bot_uname_cp_pnl = bot.get_me().username or ""
+            ret_url_cp_pnl = build_centralpay_return_url(payment_id, _bot_uname_cp_pnl)
+            ok_cp2, res_cp2 = create_centralpay_link(final_cp_pnl2, uid, payment_id, ret_url_cp_pnl)
+            if not ok_cp2:
+                err_cp2 = res_cp2.get("error", "خطای ناشناخته") if isinstance(res_cp2, dict) else str(res_cp2)
+                bot.answer_callback_query(call.id)
+                send_or_edit(call,
+                    f"⚠️ <b>خطا در ایجاد درگاه سنترال‌پی</b>\n\n<code>{esc(err_cp2[:400])}</code>",
+                    back_button(f"mypnlcfg:renewconfirm:{config_id}")); return
+            pay_url_cp2 = res_cp2.get("redirect_url", "")
+            with get_conn() as conn:
+                conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (pay_url_cp2, payment_id))
+            fee_line_cp2 = ""
+            if final_cp_pnl2 != price:
+                fee_line_cp2 = f"\n💸 کارمزد: {fmt_price(final_cp_pnl2 - price)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_cp_pnl2)}</b> تومان"
+            kb_cp2 = types.InlineKeyboardMarkup()
+            kb_cp2.add(types.InlineKeyboardButton("💳 پرداخت با سنترال‌پی", url=pay_url_cp2))
+            kb_cp2.add(types.InlineKeyboardButton("🔍 بررسی پرداخت",
+                        callback_data=f"mypnlcfgrpay:centralpay:verify:{payment_id}"))
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                "💳 <b>پرداخت با سنترال‌پی (تمدید)</b>\n\n"
+                f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_cp2}\n\n"
+                "برای پرداخت روی دکمه زیر بزنید. پس از اتمام پرداخت روی «🔍 بررسی پرداخت» بزنید.",
+                kb_cp2)
+            return
+
+        # mypnlcfgrpay:centralpay:verify:{payment_id}
+        if data.startswith("mypnlcfgrpay:centralpay:verify:"):
+            payment_id = int(data.split(":")[-1])
+            payment = get_payment(payment_id)
+            if not payment or payment["user_id"] != uid:
+                bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
+            if payment["status"] != "pending":
+                if payment["status"] == "completed":
+                    bot.answer_callback_query(call.id, "✅ این پرداخت قبلاً تأیید شده است.", show_alert=True)
+                else:
+                    bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
+                return
+            bot.answer_callback_query(call.id, "⏳ در حال بررسی وضعیت پرداخت…", show_alert=False)
+            _vcpnl2 = _verify_centralpay_payment(payment_id)
+            state_clear(uid)
+            if _vcpnl2["verify"] == "ok":
+                config_id_cpnl2 = payment["config_id"]
+                bot.send_message(uid, "✅ پرداخت سنترال‌پی تأیید شد! سرویس تمدید شد.", parse_mode="HTML")
+                _show_panel_config_detail(call, config_id_cpnl2, back_data="my_configs", is_user_view=True)
+            elif _vcpnl2["verify"] == "already_processed":
+                bot.send_message(uid, "✅ پرداخت شما قبلاً تأیید و تحویل داده شده است.", parse_mode="HTML")
+            elif _vcpnl2["verify"] == "amount_mismatch":
+                send_or_edit(call, "⚠️ مبلغ پرداختی با سفارش مطابقت ندارد. لطفاً با پشتیبانی تماس بگیرید.",
+                             back_button("my_configs"))
+            elif _vcpnl2["verify"] == "process_error":
                 send_or_edit(call, "❌ پرداخت انجام شد اما پردازش با خطا مواجه شد.\nلطفاً با پشتیبانی ارتباط بگیرید.",
                              back_button("my_configs"))
             else:
@@ -15992,6 +16453,7 @@ def _dispatch_callback(call, uid, data):
             ("plisio",           "💎 پرداخت کریپتو (Plisio)"),
             ("nowpayments",      "💎 پرداخت کریپتو (NowPayments)"),
             ("tronado",          "درگاه کارت به کارت (Tronado)"),
+            ("centralpay",       "درگاه کارت به کارت (CentralPay)"),
         ]:
             enabled = setting_get(f"gw_{gw_key}_enabled", "0")
             status_icon = "🟢" if enabled == "1" else "🔴"
@@ -17072,6 +17534,111 @@ def _dispatch_callback(call, uid, data):
             "آدرس کامل با https:// را وارد کنید:\n"
             "<i>مثال: https://example.com</i>",
             back_button("adm:set:gw:tronado"))
+        return
+
+    # ── CentralPay admin settings ─────────────────────────────────────────────
+    if data == "adm:set:gw:centralpay":
+        enabled  = setting_get("gw_centralpay_enabled", "0")
+        vis      = setting_get("gw_centralpay_visibility", "public")
+        api_key  = setting_get("centralpay_api_key", "")
+        range_en = setting_get("gw_centralpay_range_enabled", "0")
+        enabled_label = "🟢 فعال" if enabled == "1" else "🔴 غیرفعال"
+        vis_label     = "👥 عمومی" if vis == "public" else "🔒 کاربران امن"
+        range_label   = "🟢 فعال" if range_en == "1" else "🔴 غیرفعال"
+        fee_on   = setting_get("gw_centralpay_fee_enabled", "0") == "1"
+        bonus_on = setting_get("gw_centralpay_bonus_enabled", "0") == "1"
+        cb_url_saved = (setting_get("centralpay_callback_base_url", "") or "").strip()
+        cb_url_display = (f"<code>{esc(cb_url_saved[:60])}</code>" if cb_url_saved else "— <i>از server_public_url استفاده می‌شود</i>")
+        display_name_cp = setting_get("gw_centralpay_display_name", "")
+        name_display_cp = display_name_cp or "<i>پیش‌فرض: درگاه کارت به کارت (CentralPay)</i>"
+        key_display = (f"<code>{esc(api_key[:8])}...{esc(api_key[-4:])}</code>" if api_key else "❌ <b>ثبت نشده</b>")
+        kb = types.InlineKeyboardMarkup()
+        kb.row(
+            types.InlineKeyboardButton(f"وضعیت: {enabled_label}", callback_data="adm:gw:centralpay:toggle"),
+            types.InlineKeyboardButton(f"نمایش: {vis_label}",     callback_data="adm:gw:centralpay:vis"),
+        )
+        kb.add(types.InlineKeyboardButton(f"📊 بازه پرداختی: {range_label}", callback_data="adm:gw:centralpay:range"))
+        kb.add(types.InlineKeyboardButton("🔑 تنظیم کلید API", callback_data="adm:set:centralpay_key"))
+        kb.add(types.InlineKeyboardButton("🔗 آدرس Callback Base URL", callback_data="adm:set:centralpay_cb_url"))
+        kb.add(types.InlineKeyboardButton("🏷 نام نمایشی درگاه", callback_data="adm:gw:centralpay:set_name"))
+        fee_bonus_lbl = ("🟢 کارمزد" if fee_on else "🔴 کارمزد") + " | " + ("🟢 بونس" if bonus_on else "🔴 بونس")
+        kb.add(types.InlineKeyboardButton(f"🎁 بونس و کارمزد — {fee_bonus_lbl}", callback_data="adm:gw:centralpay:feebonus"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gateways", icon_custom_emoji_id="5253997076169115797"))
+        text = (
+            "💳 <b>درگاه سنترال‌پی (CentralPay)</b>\n\n"
+            f"وضعیت: {enabled_label}\n"
+            f"نمایش: {vis_label}\n"
+            f"نام نمایشی: {name_display_cp}\n\n"
+            f"🔑 کلید API: {key_display}\n"
+            f"🔗 Callback Base URL: {cb_url_display}\n\n"
+            "📋 <b>راهنمای فعال‌سازی درگاه سنترال‌پی:</b>\n"
+            "۱. از پنل سنترال‌پی کلید API دریافت کنید\n"
+            "۲. Callback Base URL اختیاری است — اگر وارد نشود از server_public_url استفاده می‌شود\n"
+            "۳. درگاه را فعال کنید\n\n"
+            "📞 پشتیبانی: @Central_Pay"
+        )
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, text, kb)
+        return
+
+    if data == "adm:gw:centralpay:set_name":
+        state_set(uid, "admin_set_gw_display_name", gw="centralpay")
+        bot.answer_callback_query(call.id)
+        current = setting_get("gw_centralpay_display_name", "")
+        send_or_edit(call,
+            f"🏷 <b>نام نمایشی درگاه سنترال‌پی</b>\n\n"
+            f"مقدار فعلی: <code>{esc(current or 'پیش‌فرض')}</code>\n\n"
+            "نام دلخواه را ارسال کنید.\n"
+            "برای بازگشت به پیش‌فرض، <code>-</code> ارسال کنید.",
+            back_button("adm:set:gw:centralpay"))
+        return
+
+    if data == "adm:gw:centralpay:toggle":
+        enabled = setting_get("gw_centralpay_enabled", "0")
+        setting_set("gw_centralpay_enabled", "0" if enabled == "1" else "1")
+        log_admin_action(uid, f"درگاه سنترال‌پی {'غیرفعال' if enabled == '1' else 'فعال'} شد")
+        bot.answer_callback_query(call.id, "تغییر یافت.")
+        _fake_call(call, "adm:set:gw:centralpay")
+        return
+
+    if data == "adm:gw:centralpay:vis":
+        vis = setting_get("gw_centralpay_visibility", "public")
+        setting_set("gw_centralpay_visibility", "secure" if vis == "public" else "public")
+        log_admin_action(uid, f"نمایش درگاه سنترال‌پی به {'secure' if vis == 'public' else 'public'} تغییر کرد")
+        bot.answer_callback_query(call.id, "تغییر یافت.")
+        _fake_call(call, "adm:set:gw:centralpay")
+        return
+
+    if data == "adm:set:centralpay_key":
+        state_set(uid, "admin_set_centralpay_key")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "🔑 کلید API سنترال‌پی را ارسال کنید:", back_button("adm:set:gw:centralpay"))
+        return
+
+    if data == "adm:set:centralpay_cb_url":
+        state_set(uid, "admin_set_centralpay_cb_url")
+        bot.answer_callback_query(call.id)
+        current_cb = (setting_get("centralpay_callback_base_url", "") or "").strip()
+        send_or_edit(call,
+            f"🔗 <b>Callback Base URL سنترال‌پی</b>\n\n"
+            f"مقدار فعلی: <code>{esc(current_cb) or 'ثبت نشده'}</code>\n\n"
+            "آدرس عمومی سرور را وارد کنید (اختیاری):\n"
+            "<i>مثال: https://example.com</i>\n\n"
+            "اگر خالی باشد از setting_server_public_url استفاده می‌شود.\n"
+            "برای حذف، <code>-</code> ارسال کنید.",
+            back_button("adm:set:gw:centralpay"))
+        return
+
+    if data == "adm:gw:centralpay:range":
+        from ..payments import show_gateway_range_settings
+        bot.answer_callback_query(call.id)
+        show_gateway_range_settings(call, "centralpay")
+        return
+
+    if data == "adm:gw:centralpay:feebonus":
+        from ..payments import show_gateway_feebonus_settings
+        bot.answer_callback_query(call.id)
+        show_gateway_feebonus_settings(call, "centralpay")
         return
 
     # ── Plisio admin settings ─────────────────────────────────────────────────

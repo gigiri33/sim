@@ -484,6 +484,23 @@ def _run_init_db_migrations():
             "tronado_api_base_url":      "https://bot.tronado.cloud/api/v3",
             "tronado_wallet_address":    "",
             "tronado_callback_url":      "",
+            # ── CentralPay gateway ─────────────────────────────────────────────
+            "gw_centralpay_enabled":        "0",
+            "gw_centralpay_visibility":     "public",
+            "gw_centralpay_display_name":   "",
+            "gw_centralpay_range_enabled":  "0",
+            "gw_centralpay_range_min":      "",
+            "gw_centralpay_range_max":      "",
+            "gw_centralpay_fee_enabled":    "0",
+            "gw_centralpay_fee_type":       "fixed",
+            "gw_centralpay_fee_value":      "0",
+            "gw_centralpay_bonus_enabled":  "0",
+            "gw_centralpay_bonus_type":     "fixed",
+            "gw_centralpay_bonus_value":    "0",
+            "centralpay_api_key":                 "",
+            "centralpay_getlink_url":             "https://centralapi.org/webservice/basic/getLink.php",
+            "centralpay_verify_url":              "https://centralapi.org/webservice/basic/verify.php",
+            "centralpay_callback_base_url":       "",
         }
         for coin, _ in CRYPTO_COINS:
             defaults[f"crypto_{coin}"] = ""
@@ -2038,6 +2055,22 @@ def save_tronado_callback_data(payment_id: int, raw_payload: str,
              payment_id)
         )
 
+
+def lock_centralpay_payment(payment_id: int) -> bool:
+    """
+    Atomically move a pending centralpay payment to 'processing'.
+    Returns True if this call won the race (was pending before this call).
+    Returns False if already processing, completed, or any other non-pending status.
+    """
+    with get_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            "UPDATE payments SET status='processing' WHERE id=? AND payment_method='centralpay' AND status='pending'",
+            (payment_id,)
+        )
+        changed = conn.execute("SELECT changes() AS c").fetchone()["c"]
+        conn.execute("COMMIT")
+        return changed > 0
 
 
 # ── Admin Users ────────────────────────────────────────────────────────────────

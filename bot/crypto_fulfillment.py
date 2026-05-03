@@ -219,6 +219,245 @@ def start_tronado_poll_loop():
     print("✅ Tronado auto-poll loop started (interval: 2 min, max age: 1h)")
 
 
+# ── CentralPay verified-payment processor ────────────────────────────────────
+
+def process_centralpay_verified_payment(payment_id: int,
+                                         source: str = "manual_verify",
+                                         raw_payload: dict = None) -> dict:
+    """
+    Central, concurrency-safe handler for a confirmed CentralPay payment.
+
+    CentralPay's verify endpoint returns success=true on EVERY call for paid orders,
+    so an atomic lock (pending → processing) is mandatory before fulfillment.
+
+    Returns:
+        {"status": "already_processed"}                           — not pending
+        {"status": "ok"}                                          — fulfilled
+        {"status": "error", "msg": ...}                           — fulfillment error
+        {"status": "amount_mismatch", "expected": ..., "got": ...}
+    """
+    import json as _json
+    import traceback as _tb
+
+    from .db import (
+        get_payment, get_conn, update_balance,
+        get_payment_service_names,
+        get_package, get_purchase,
+        lock_centralpay_payment,
+    )
+    from .helpers import fmt_price, now_str
+    from .payments import apply_gateway_bonus_if_needed
+    from .bot_instance import bot
+    from .gateways.centralpay import verify_centralpay_order
+
+    payment = get_payment(payment_id)
+    if not payment:
+        print(f"[CentralPay] process_verified: payment {payment_id} not found")
+        return {"status": "already_processed"}
+
+    if payment["payment_method"] != "centralpay":
+        print(f"[CentralPay] process_verified: payment {payment_id} is not centralpay ({payment['payment_method']})")
+        return {"status": "already_processed"}
+
+    if payment["status"] not in ("pending",):
+        print(f"[CentralPay] process_verified: payment {payment_id} already {payment['status']} (source={source})")
+        return {"status": "already_processed"}
+
+    # ── Atomic lock ───────────────────────────────────────────────────────────
+    try:
+        locked = lock_centralpay_payment(payment_id)
+    except Exception as _le:
+        print(f"[CentralPay] process_verified: lock error payment {payment_id}: {_le}")
+        return {"status": "already_processed"}
+
+    if not locked:
+        print(f"[CentralPay] process_verified: payment {payment_id} lock lost (already processing/completed)")
+        return {"status": "already_processed"}
+
+    # ── Call verify API ───────────────────────────────────────────────────────
+    try:
+        ok_v, verify_result = verify_centralpay_order(payment_id)
+    except Exception as _ve:
+        _tb.print_exc()
+        # Reset to pending so it can be retried
+        try:
+            with get_conn() as _c:
+                _c.execute("UPDATE payments SET status='pending' WHERE id=? AND status='processing'", (payment_id,))
+        except Exception:
+            pass
+        return {"status": "error", "msg": str(_ve)}
+
+    if not ok_v:
+        # Not paid — reset to pending and return
+        try:
+            with get_conn() as _c:
+                _c.execute("UPDATE payments SET status='pending' WHERE id=? AND status='processing'", (payment_id,))
+        except Exception:
+            pass
+        err = verify_result.get("error", "") if isinstance(verify_result, dict) else str(verify_result)
+        print(f"[CentralPay] process_verified: payment {payment_id} not paid: {err}")
+        return {"status": "not_paid", "msg": err}
+
+    # ── Amount validation ─────────────────────────────────────────────────────
+    returned_amount = verify_result.get("amount", 0) if isinstance(verify_result, dict) else 0
+    if returned_amount:
+        expected = payment["amount"]
+        if abs(int(returned_amount) - expected) > expected * 0.05 + 100:
+            print(f"[CentralPay] process_verified: amount mismatch payment {payment_id}"
+                  f" expected={expected} got={returned_amount}")
+            try:
+                with get_conn() as _c:
+                    _c.execute("UPDATE payments SET status='pending' WHERE id=? AND status='processing'", (payment_id,))
+            except Exception:
+                pass
+            return {"status": "amount_mismatch", "expected": expected, "got": returned_amount}
+
+    # ── Persist audit data ────────────────────────────────────────────────────
+    reference_id = verify_result.get("reference_id", "") if isinstance(verify_result, dict) else ""
+    raw_str = _json.dumps(verify_result.get("raw", {}), ensure_ascii=False)[:4000] if isinstance(verify_result, dict) else ""
+    try:
+        with get_conn() as _c:
+            _c.execute(
+                "UPDATE payments SET raw_callback=?, callback_received_at=?,"
+                " gateway_ref=COALESCE(NULLIF(?, ''), gateway_ref),"
+                " external_txid=COALESCE(NULLIF(?, ''), external_txid)"
+                " WHERE id=?",
+                (raw_str, now_str(), str(payment_id), reference_id or "", payment_id)
+            )
+    except Exception:
+        pass
+
+    print(f"[CentralPay] process_verified: LOCKED & VERIFIED payment {payment_id} source={source}"
+          f" kind={payment['kind']} uid={payment['user_id']} amount={payment['amount']}")
+
+    kind   = payment["kind"]
+    uid    = payment["user_id"]
+    amount = payment["amount"]
+
+    try:
+        if kind == "wallet_charge":
+            with get_conn() as conn:
+                conn.execute(
+                    "UPDATE payments SET status='completed', approved_at=?, fulfilled_at=?"
+                    " WHERE id=? AND status='processing'",
+                    (now_str(), now_str(), payment_id)
+                )
+            update_balance(uid, amount)
+            try:
+                apply_gateway_bonus_if_needed(uid, "centralpay", amount)
+            except Exception:
+                pass
+            try:
+                bot.send_message(
+                    uid,
+                    f"✅ پرداخت سنترال‌پی تأیید شد و کیف پول شارژ شد.\n\n💰 مبلغ: {fmt_price(amount)} تومان",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+
+        elif kind == "config_purchase":
+            from .handlers.callbacks import _deliver_bulk_configs, _send_bulk_delivery_result
+            pkg_row = get_package(payment["package_id"])
+            qty = int(payment["quantity"]) if "quantity" in payment.keys() else 1
+            with get_conn() as conn:
+                conn.execute(
+                    "UPDATE payments SET status='completed', approved_at=?, fulfilled_at=?"
+                    " WHERE id=? AND status='processing'",
+                    (now_str(), now_str(), payment_id)
+                )
+            try:
+                bot.send_message(uid, "✅ پرداخت سنترال‌پی تأیید شد. کانفیگ‌های شما در حال آماده‌سازی هستند...", parse_mode="HTML")
+            except Exception:
+                pass
+            snames = get_payment_service_names(payment_id)
+            purchase_ids, pending_ids = _deliver_bulk_configs(
+                uid, uid, payment["package_id"], amount, "centralpay", qty, payment_id,
+                service_names=snames,
+            )
+            try:
+                apply_gateway_bonus_if_needed(uid, "centralpay", amount)
+            except Exception:
+                pass
+            _send_bulk_delivery_result(uid, uid, pkg_row, purchase_ids, pending_ids, "سنترال‌پی")
+
+        elif kind == "renewal":
+            from .ui.notifications import admin_renewal_notify
+            pkg_row = get_package(payment["package_id"])
+            cfg_id  = payment["config_id"]
+            with get_conn() as conn:
+                conn.execute(
+                    "UPDATE payments SET status='completed', approved_at=?, fulfilled_at=?"
+                    " WHERE id=? AND status='processing'",
+                    (now_str(), now_str(), payment_id)
+                )
+                row = conn.execute("SELECT purchase_id FROM configs WHERE id=?", (cfg_id,)).fetchone()
+            pid  = row["purchase_id"] if row else 0
+            item = get_purchase(pid) if pid else None
+            try:
+                bot.send_message(uid,
+                    "✅ <b>درخواست تمدید ارسال شد</b>\n\n"
+                    "🔄 پرداخت سنترال‌پی تأیید و درخواست تمدید ثبت شد.\n"
+                    "⏳ پس از انجام تمدید به شما اطلاع داده خواهد شد.",
+                    parse_mode="HTML")
+            except Exception:
+                pass
+            if item:
+                admin_renewal_notify(uid, item, pkg_row, amount, "سنترال‌پی")
+            try:
+                apply_gateway_bonus_if_needed(uid, "centralpay", amount)
+            except Exception:
+                pass
+
+        elif kind == "pnlcfg_renewal":
+            from .handlers.callbacks import _execute_pnlcfg_renewal
+            cfg_id = payment["config_id"]
+            pkg_id = payment["package_id"]
+            with get_conn() as conn:
+                conn.execute(
+                    "UPDATE payments SET status='completed', approved_at=?, fulfilled_at=?"
+                    " WHERE id=? AND status='processing'",
+                    (now_str(), now_str(), payment_id)
+                )
+            ok_r, _ = _execute_pnlcfg_renewal(cfg_id, pkg_id, chat_id=uid, uid=uid)
+            try:
+                if ok_r:
+                    bot.send_message(uid, "✅ پرداخت سنترال‌پی تأیید و سرویس تمدید شد.", parse_mode="HTML")
+                else:
+                    bot.send_message(uid,
+                        "✅ پرداخت سنترال‌پی تأیید شد اما تمدید سرویس با خطا مواجه شد.\n"
+                        "لطفاً با پشتیبانی ارتباط بگیرید.", parse_mode="HTML")
+            except Exception:
+                pass
+            try:
+                apply_gateway_bonus_if_needed(uid, "centralpay", amount)
+            except Exception:
+                pass
+
+        else:
+            with get_conn() as conn:
+                conn.execute(
+                    "UPDATE payments SET status='completed', approved_at=?, fulfilled_at=?"
+                    " WHERE id=? AND status='processing'",
+                    (now_str(), now_str(), payment_id)
+                )
+
+        return {"status": "ok"}
+
+    except Exception as exc:
+        _tb.print_exc()
+        print(f"[CentralPay] process_verified: fulfillment error payment {payment_id}: {exc}")
+        try:
+            with get_conn() as conn:
+                conn.execute(
+                    "UPDATE payments SET status='pending' WHERE id=? AND status='processing'",
+                    (payment_id,)
+                )
+        except Exception:
+            pass
+        return {"status": "error", "msg": str(exc)}
+
+
 # ── Shared Tronado verified-payment processor ─────────────────────────────────
 
 def process_tronado_verified_payment(payment_id: int,

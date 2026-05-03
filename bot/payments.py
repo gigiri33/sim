@@ -47,6 +47,7 @@ _GW_DISPLAY_NAMES = {
     "swapwallet_crypto": "SwapWallet",
     "tronpays_rial":     "TronPays",
     "tronado":           "ترونادو",
+    "centralpay":        "درگاه کارت به کارت (CentralPay)",
 }
 
 

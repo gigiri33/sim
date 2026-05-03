@@ -379,6 +379,46 @@ def _plisio_webhook_server():
             # Always 200 to stop Tronado from infinite retry
             return jsonify({"ok": True}), 200
 
+    # ── CentralPay routes ─────────────────────────────────────────────────────
+    @_app.route("/centralpay/<bot_username>/<int:payment_id>/callback", methods=["GET", "POST"])
+    def _centralpay_callback(bot_username, payment_id):
+        """
+        CentralPay returnUrl handler.
+        CentralPay redirects the user back here after payment (GET request).
+        We verify the order and fulfill, then show a simple HTML response.
+        """
+        import traceback as _tb2
+        try:
+            from bot.crypto_fulfillment import process_centralpay_verified_payment
+
+            payment = get_payment(payment_id)
+            if not payment:
+                return "پرداختی با این شناسه یافت نشد. لطفاً به ربات برگردید.", 200
+
+            if payment["payment_method"] != "centralpay":
+                return "پرداخت شما قبلاً تأیید شده است. لطفاً به ربات برگردید.", 200
+
+            if payment["status"] not in ("pending",):
+                return "پرداخت شما قبلاً تأیید شده است. لطفاً به ربات برگردید.", 200
+
+            result = process_centralpay_verified_payment(payment_id, source="return_url", raw_payload=None)
+            status = result.get("status", "")
+
+            if status == "ok":
+                return "پرداخت شما با موفقیت تأیید شد. لطفاً به ربات برگردید.", 200
+            elif status == "already_processed":
+                return "پرداخت شما قبلاً تأیید شده است. لطفاً به ربات برگردید.", 200
+            elif status == "amount_mismatch":
+                print(f"[CentralPay] returnUrl: amount mismatch payment={payment_id}")
+                return "مبلغ پرداختی با مبلغ سفارش مطابقت ندارد. لطفاً با پشتیبانی تماس بگیرید.", 200
+            else:
+                return "پرداخت شما هنوز تأیید نشده یا ناموفق است. لطفاً به ربات برگردید و روی بررسی پرداخت بزنید.", 200
+
+        except Exception as exc:
+            _tb2.print_exc()
+            print("CENTRALPAY_CALLBACK_ERROR:", exc)
+            return "خطایی رخ داد. لطفاً به ربات برگردید و روی بررسی پرداخت بزنید.", 200
+
     import time as _time
     import socket as _socket
     import os as _os
