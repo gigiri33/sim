@@ -39,6 +39,18 @@ def _get_verify_url() -> str:
     return url or CENTRALPAY_DEFAULT_VERIFY_URL
 
 
+def _get_link_type() -> str:
+    """
+    CentralPay getLink `type`.
+
+    Default is `deposit` per CentralPay's basic API docs. Some merchant panels
+    may not have deposit methods active; in that case support/admin can change
+    this setting to the type provided by CentralPay support without code changes.
+    """
+    val = (setting_get("centralpay_link_type", "deposit") or "deposit").strip()
+    return val or "deposit"
+
+
 def get_centralpay_callback_base_url() -> str:
     """Return the base URL for CentralPay callback (returnUrl)."""
     dedicated = (setting_get("centralpay_callback_base_url", "") or "").strip().rstrip("/")
@@ -99,14 +111,16 @@ def create_centralpay_link(amount_toman: int, user_id: int, order_id, return_url
     if not return_url:
         return False, {"error": _ERR_MESSAGES["callback_not_set"], "raw": {}}
 
-    payload = json.dumps({
+    link_type = _get_link_type()
+    payload_dict = {
         "api_key":   api_key,
-        "type":      "deposit",
+        "type":      link_type,
         "amount":    int(amount_toman),
         "userId":    user_id,
         "orderId":   str(order_id),
         "returnUrl": return_url,
-    }).encode("utf-8")
+    }
+    payload = json.dumps(payload_dict).encode("utf-8")
 
     url = _get_getlink_url()
     req = urllib.request.Request(
@@ -120,6 +134,7 @@ def create_centralpay_link(amount_toman: int, user_id: int, order_id, return_url
         method="POST",
     )
     try:
+        print(f"[CentralPay] getLink request: type={link_type} amount={int(amount_toman)} userId={user_id} orderId={order_id} returnUrl={return_url}")
         with urllib.request.urlopen(req, timeout=15) as resp:
             raw, parsed = _decode_response(resp)
         print(f"[CentralPay] getLink response: {raw[:500]}")
@@ -169,7 +184,7 @@ def create_centralpay_link(amount_toman: int, user_id: int, order_id, return_url
     if not redirect_url:
         return False, {"error": f"سنترال‌پی لینک پرداخت برنگرداند: {raw[:300]}", "raw": parsed}
 
-    return True, {"redirect_url": redirect_url, "raw": parsed}
+    return True, {"redirect_url": redirect_url, "type": link_type, "raw": parsed}
 
 
 def verify_centralpay_order(order_id):

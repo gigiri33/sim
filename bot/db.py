@@ -501,6 +501,7 @@ def _run_init_db_migrations():
             "centralpay_getlink_url":             "https://centralapi.org/webservice/basic/getLink.php",
             "centralpay_verify_url":              "https://centralapi.org/webservice/basic/verify.php",
             "centralpay_callback_base_url":       "",
+            "centralpay_link_type":               "deposit",
         }
         for coin, _ in CRYPTO_COINS:
             defaults[f"crypto_{coin}"] = ""

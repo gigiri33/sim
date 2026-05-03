@@ -17517,6 +17517,7 @@ def _dispatch_callback(call, uid, data):
         range_label   = "🟢 فعال" if range_en == "1" else "🔴 غیرفعال"
         fee_on   = setting_get("gw_centralpay_fee_enabled", "0") == "1"
         bonus_on = setting_get("gw_centralpay_bonus_enabled", "0") == "1"
+        link_type_cp = (setting_get("centralpay_link_type", "deposit") or "deposit").strip()
         cb_url_saved = (setting_get("centralpay_callback_base_url", "") or "").strip()
         cb_url_display = (f"<code>{esc(cb_url_saved[:60])}</code>" if cb_url_saved else "— <i>از server_public_url استفاده می‌شود</i>")
         display_name_cp = setting_get("gw_centralpay_display_name", "")
@@ -17529,6 +17530,7 @@ def _dispatch_callback(call, uid, data):
         )
         kb.add(types.InlineKeyboardButton(f"📊 بازه پرداختی: {range_label}", callback_data="adm:gw:centralpay:range"))
         kb.add(types.InlineKeyboardButton("🔑 تنظیم کلید API", callback_data="adm:set:centralpay_key"))
+        kb.add(types.InlineKeyboardButton(f"⚙️ نوع لینک: {link_type_cp}", callback_data="adm:set:centralpay_link_type"))
         kb.add(types.InlineKeyboardButton("🔗 آدرس Callback Base URL", callback_data="adm:set:centralpay_cb_url"))
         kb.add(types.InlineKeyboardButton("🏷 نام نمایشی درگاه", callback_data="adm:gw:centralpay:set_name"))
         fee_bonus_lbl = ("🟢 کارمزد" if fee_on else "🔴 کارمزد") + " | " + ("🟢 بونس" if bonus_on else "🔴 بونس")
@@ -17540,11 +17542,13 @@ def _dispatch_callback(call, uid, data):
             f"نمایش: {vis_label}\n"
             f"نام نمایشی: {name_display_cp}\n\n"
             f"🔑 کلید API: {key_display}\n"
+            f"⚙️ نوع لینک getLink: <code>{esc(link_type_cp)}</code>\n"
             f"🔗 Callback Base URL: {cb_url_display}\n\n"
             "📋 <b>راهنمای فعال‌سازی درگاه سنترال‌پی:</b>\n"
             "۱. از پنل سنترال‌پی کلید API دریافت کنید\n"
             "۲. Callback Base URL اختیاری است — اگر وارد نشود از server_public_url استفاده می‌شود\n"
-            "۳. درگاه را فعال کنید\n\n"
+            "۳. اگر صفحه پرداخت پیام «هیچ روش فعالی جهت واریز وجود ندارد» نشان داد، یا روش‌های واریز در پنل سنترال‌پی فعال نیست یا باید نوع لینک را طبق راهنمای پشتیبانی سنترال‌پی تغییر دهید\n"
+            "۴. درگاه را فعال کنید\n\n"
             "📞 پشتیبانی: @Central_Pay"
         )
         bot.answer_callback_query(call.id)
@@ -17583,6 +17587,19 @@ def _dispatch_callback(call, uid, data):
         state_set(uid, "admin_set_centralpay_key")
         bot.answer_callback_query(call.id)
         send_or_edit(call, "🔑 کلید API سنترال‌پی را ارسال کنید:", back_button("adm:set:gw:centralpay"))
+        return
+
+    if data == "adm:set:centralpay_link_type":
+        state_set(uid, "admin_set_centralpay_link_type")
+        bot.answer_callback_query(call.id)
+        current_type = (setting_get("centralpay_link_type", "deposit") or "deposit").strip()
+        send_or_edit(call,
+            f"⚙️ <b>نوع لینک getLink سنترال‌پی</b>\n\n"
+            f"مقدار فعلی: <code>{esc(current_type)}</code>\n\n"
+            "مقدار پیش‌فرض طبق مستندات: <code>deposit</code>\n"
+            "اگر صفحه پرداخت پیام «هیچ روش فعالی جهت واریز وجود ندارد» نشان می‌دهد، از پشتیبانی سنترال‌پی نوع صحیح را بگیرید و اینجا وارد کنید.\n\n"
+            "برای بازگشت به پیش‌فرض، <code>-</code> ارسال کنید.",
+            back_button("adm:set:gw:centralpay"))
         return
 
     if data == "adm:set:centralpay_cb_url":

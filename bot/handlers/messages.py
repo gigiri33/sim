@@ -3717,6 +3717,22 @@ def universal_handler(message):
             bot.send_message(uid, "✅ کلید API سنترال‌پی ذخیره شد.", reply_markup=back_button("adm:set:gw:centralpay"))
             return
 
+        if sn == "admin_set_centralpay_link_type" and is_admin(uid):
+            val = (message.text or "").strip()
+            if val == "-":
+                val = "deposit"
+            if not val:
+                bot.send_message(uid, "⚠️ نوع لینک نمی‌تواند خالی باشد.", reply_markup=back_button("adm:set:gw:centralpay"))
+                return
+            if len(val) > 50 or any(ch.isspace() for ch in val):
+                bot.send_message(uid, "⚠️ نوع لینک باید یک مقدار کوتاه بدون فاصله باشد. مثال: <code>deposit</code>", reply_markup=back_button("adm:set:gw:centralpay"))
+                return
+            setting_set("centralpay_link_type", val)
+            log_admin_action(uid, f"نوع لینک getLink سنترال‌پی تغییر کرد: {val}")
+            state_clear(uid)
+            bot.send_message(uid, f"✅ نوع لینک سنترال‌پی ذخیره شد:\n<code>{esc(val)}</code>", reply_markup=back_button("adm:set:gw:centralpay"))
+            return
+
         if sn == "admin_set_centralpay_cb_url" and is_admin(uid):
             val = (message.text or "").strip()
             if val == "-":
