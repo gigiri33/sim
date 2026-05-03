@@ -669,7 +669,7 @@ def _finish_card_payment_approval_core(payment_id, admin_note, approved):
     if approved:
         approve_payment(payment_id, admin_note)
         if payment["kind"] == "wallet_charge":
-            if not complete_payment(payment_id):
+            if not complete_payment(payment_id, force=True):
                 return False, True  # already processed
             update_balance(user_id, payment["amount"])
             notified = _safe_send(user_id, f"{ce('✅', '5900157489759916320')} واریزی شما تأیید شد." + (f"\n\n{esc(admin_note)}" if admin_note else ""))
@@ -700,7 +700,7 @@ def _finish_card_payment_approval_core(payment_id, admin_note, approved):
             package_row = get_package(package_id)
             from .handlers.callbacks import _deliver_bulk_configs, _send_bulk_delivery_result
             _qty_card = int(payment["quantity"]) if "quantity" in payment.keys() else 1
-            if not complete_payment(payment_id):
+            if not complete_payment(payment_id, force=True):
                 return False, True  # already processed
             notified = _safe_send(user_id,
                 f"{ce('✅', '5900157489759916320')} واریزی شما تأیید شد."
@@ -734,7 +734,7 @@ def _finish_card_payment_approval_core(payment_id, admin_note, approved):
             package_id  = payment["package_id"]
             package_row = get_package(package_id)
             config_id   = payment["config_id"]
-            if not complete_payment(payment_id):
+            if not complete_payment(payment_id, force=True):
                 return True, True  # already processed by another path
             notified = _safe_send(
                 user_id,
@@ -759,7 +759,7 @@ def _finish_card_payment_approval_core(payment_id, admin_note, approved):
             from .handlers.callbacks import _execute_pnlcfg_renewal as _exec_pnlr
             panel_config_id = payment["config_id"]
             package_id      = payment["package_id"]
-            if not complete_payment(payment_id):
+            if not complete_payment(payment_id, force=True):
                 return True, True  # already processed
             ok_r, err_r = _exec_pnlr(panel_config_id, package_id, uid=user_id)
             if ok_r:

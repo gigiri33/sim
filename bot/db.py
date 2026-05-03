@@ -2110,11 +2110,12 @@ def reject_payment(payment_id, admin_note):
         )
 
 
-def complete_payment(payment_id):
-    """Mark payment completed. Returns True if this call won the race, False if already processed."""
+def complete_payment(payment_id, force=False):
+    """Mark payment completed. Returns True if this call won the race, False if already processed.
+    force=True skips the expiry check (used for admin manual approval)."""
     with get_conn() as conn:
         payment = conn.execute("SELECT * FROM payments WHERE id=?", (payment_id,)).fetchone()
-        if is_payment_expired(payment):
+        if not force and is_payment_expired(payment):
             print(f"[EXPIRED PAYMENT IGNORED] payment_id={payment_id}")
             return False
         conn.execute(
