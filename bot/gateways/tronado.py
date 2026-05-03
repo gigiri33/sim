@@ -326,18 +326,26 @@ def _tronado_order_status_url() -> str:
     return f"{root}/Order/GetStatus"
 
 
-def get_tronado_payment_status(order_id_or_token: str) -> dict:
-    """
-    Call POST /Order/GetStatus with the order token (or Tronado order ID).
-    Per docs: Id can be the Tronado order token, or trndorderid_{our_payment_id}, or TXID.
-    Returns parsed response dict, or {} on failure.
-    """
+def _tronado_status_not_found(resp: dict) -> bool:
+    if not isinstance(resp, dict):
+        return False
+    data = resp.get("Data") or resp.get("data") or {}
+    if not isinstance(data, dict):
+        data = {}
+    txt = str(
+        resp.get("Error") or resp.get("Message") or resp.get("message") or
+        data.get("Error") or data.get("Message") or data.get("message") or
+        resp.get("__body") or ""
+    ).lower()
+    return "no order found" in txt or "order not found" in txt or "not found with this txid" in txt
+
+
+def _post_tronado_status_payload(payload: dict, label: str) -> dict:
     api_key = (setting_get("tronado_api_key", "") or "").strip()
-    if not api_key or not order_id_or_token:
+    if not api_key or not payload:
         return {}
     url = _tronado_order_status_url()
-    # Per API docs: Content-Type: application/json for all endpoints
-    payload_data = json.dumps({"Id": order_id_or_token}).encode("utf-8")
+    payload_data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url,
         data=payload_data,
@@ -352,19 +360,57 @@ def get_tronado_payment_status(order_id_or_token: str) -> dict:
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             raw, parsed = _decode_response_body(resp)
-        print(f"[Tronado] GetStatus({order_id_or_token[:40]}) HTTP200 raw={raw[:400]}")
+        print(f"[Tronado] GetStatus {label} payload={payload} HTTP200 raw={raw[:400]}")
         return parsed if isinstance(parsed, dict) else {}
     except urllib.error.HTTPError as e:
         try:
             raw_body = e.read().decode("utf-8", errors="replace").strip()
         except Exception:
             raw_body = ""
-        print(f"[Tronado] GetStatus HTTP {e.code} for {order_id_or_token[:40]}: {raw_body[:300]}")
-        # On HTTP error, return a dict with the error text so callers can inspect
+        print(f"[Tronado] GetStatus {label} payload={payload} HTTP {e.code}: {raw_body[:300]}")
         return {"__http_error": e.code, "__body": raw_body}
     except Exception as exc:
-        print(f"[Tronado] GetStatus network error for {order_id_or_token[:40]}: {exc}")
+        print(f"[Tronado] GetStatus {label} payload={payload} network error: {exc}")
         return {}
+
+
+def get_tronado_payment_status(order_id_or_token: str) -> dict:
+    """
+    Call POST /Order/GetStatus with the order token (or Tronado order ID).
+    Per docs: Id can be the Tronado order token, or trndorderid_{our_payment_id}, or TXID.
+    Returns parsed response dict, or {} on failure.
+    """
+    if not order_id_or_token:
+        return {}
+    ident = str(order_id_or_token).strip()
+    candidates = []
+
+    def _add(label, payload):
+        item = (label, payload)
+        if item not in candidates:
+            candidates.append(item)
+
+    # The Tronado endpoint has behaved inconsistently between accounts/docs.
+    # Try all known key names and both raw token and s_<token> MiniApp value.
+    _add("Id", {"Id": ident})
+    if ident and not ident.startswith("s_"):
+        _add("Id:s_token", {"Id": f"s_{ident}"})
+    _add("Token", {"Token": ident})
+    _add("OrderToken", {"OrderToken": ident})
+    _add("PaymentID", {"PaymentID": ident})
+    _add("PaymentId", {"PaymentId": ident})
+    _add("paymentId", {"paymentId": ident})
+    _add("id", {"id": ident})
+
+    first_resp = {}
+    for label, payload in candidates:
+        resp = _post_tronado_status_payload(payload, label)
+        if not first_resp:
+            first_resp = resp
+        # Stop as soon as the API returns a meaningful non-not-found response.
+        if resp and not resp.get("__http_error") and not _tronado_status_not_found(resp):
+            return resp
+    return first_resp
 
 
 def get_tronado_status_by_payment_id(payment_id_str: str) -> dict:
