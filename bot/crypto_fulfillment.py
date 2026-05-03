@@ -485,6 +485,7 @@ def process_tronado_verified_payment(payment_id: int,
         get_tronado_token_from_payment,
         get_tronado_payment_status,
         get_tronado_status_by_payment_id,
+        get_tronado_status_by_prefixed_payment_id,
         normalize_tronado_status,
     )
     import json as _json
@@ -499,7 +500,7 @@ def process_tronado_verified_payment(payment_id: int,
         print(f"[Tronado] process_verified: payment {payment_id} is not tronado ({payment['payment_method']})")
         return {"status": "already_processed"}
 
-    if payment["status"] not in ("pending",):
+    if payment["status"] not in ("pending", "rejected", "failed"):
         print(f"[Tronado] process_verified: payment {payment_id} already {payment['status']} (source={source})")
         return {"status": "already_processed"}
 
@@ -532,14 +533,25 @@ def process_tronado_verified_payment(payment_id: int,
             print(f"[Tronado] process_verified: GetStatus by token payment={payment_id} norm={norm}")
 
         if norm != "paid":
-            # Fallback only for legacy rows / API edge cases.
-            verify_key = f"trndorderid_{payment_id}"
+            # Primary fallback: exact PaymentID used when creating GetOrderToken.
+            verify_key = str(payment_id)
             fallback_resp = get_tronado_status_by_payment_id(str(payment_id))
             fallback_norm = normalize_tronado_status(fallback_resp)
-            print(f"[Tronado] process_verified: GetStatus fallback payment={payment_id} norm={fallback_norm}")
+            print(f"[Tronado] process_verified: GetStatus by PaymentID payment={payment_id} norm={fallback_norm}")
             if fallback_norm == "paid" or norm in ("unknown", "error"):
                 verify_resp = fallback_resp
                 norm = fallback_norm
+
+        if norm != "paid":
+            # Legacy fallback only. This endpoint often returns HTTP 500, so it
+            # must never be the first or only lookup path.
+            verify_key = f"trndorderid_{payment_id}"
+            pref_resp = get_tronado_status_by_prefixed_payment_id(str(payment_id))
+            pref_norm = normalize_tronado_status(pref_resp)
+            print(f"[Tronado] process_verified: GetStatus prefixed fallback payment={payment_id} norm={pref_norm}")
+            if pref_norm == "paid" or norm in ("unknown", "error"):
+                verify_resp = pref_resp
+                norm = pref_norm
 
     except Exception as _ve:
         _tb.print_exc()

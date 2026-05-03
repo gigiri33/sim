@@ -5861,7 +5861,7 @@ def _dispatch_callback(call, uid, data):
         if not payment or payment["user_id"] != uid:
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
             return
-        if payment["status"] != "pending":
+        if payment["status"] not in ("pending", "rejected", "failed"):
             if payment["status"] == "completed":
                 bot.answer_callback_query(call.id, "✅ این پرداخت قبلاً تأیید و پردازش شده است.", show_alert=True)
             else:
@@ -5973,7 +5973,7 @@ def _dispatch_callback(call, uid, data):
         if not payment or payment["user_id"] != uid:
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
             return
-        if payment["status"] != "pending":
+        if payment["status"] not in ("pending", "rejected", "failed"):
             if payment["status"] == "completed":
                 bot.answer_callback_query(call.id, "✅ این پرداخت قبلاً تأیید و پردازش شده است.", show_alert=True)
             else:
@@ -8227,7 +8227,7 @@ def _dispatch_callback(call, uid, data):
         if not payment or payment["user_id"] != uid:
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
             return
-        if payment["status"] != "pending":
+        if payment["status"] not in ("pending", "rejected", "failed"):
             if payment["status"] == "completed":
                 bot.answer_callback_query(call.id, "✅ پرداخت شما قبلاً تأیید و کیف پول شارژ شده است.", show_alert=True)
             else:
@@ -10666,7 +10666,7 @@ def _dispatch_callback(call, uid, data):
             payment = get_payment(payment_id)
             if not payment or payment["user_id"] != uid:
                 bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
-            if payment["status"] != "pending":
+            if payment["status"] not in ("pending", "rejected", "failed"):
                 if payment["status"] == "completed":
                     bot.answer_callback_query(call.id, "✅ این پرداخت قبلاً تأیید شده است.", show_alert=True)
                 else:
@@ -10749,7 +10749,7 @@ def _dispatch_callback(call, uid, data):
             payment = get_payment(payment_id)
             if not payment or payment["user_id"] != uid:
                 bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True); return
-            if payment["status"] != "pending":
+            if payment["status"] not in ("pending", "rejected", "failed"):
                 if payment["status"] == "completed":
                     bot.answer_callback_query(call.id, "✅ این پرداخت قبلاً تأیید شده است.", show_alert=True)
                 else:

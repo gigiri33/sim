@@ -2032,7 +2032,7 @@ def lock_tronado_payment(payment_id: int) -> bool:
     with get_conn() as conn:
         conn.execute("BEGIN IMMEDIATE")
         conn.execute(
-            "UPDATE payments SET status='processing' WHERE id=? AND payment_method='tronado' AND status='pending'",
+            "UPDATE payments SET status='processing' WHERE id=? AND payment_method='tronado' AND status IN ('pending','rejected','failed')",
             (payment_id,)
         )
         changed = conn.execute("SELECT changes() AS c").fetchone()["c"]

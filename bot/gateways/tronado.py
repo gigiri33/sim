@@ -369,9 +369,20 @@ def get_tronado_payment_status(order_id_or_token: str) -> dict:
 
 def get_tronado_status_by_payment_id(payment_id_str: str) -> dict:
     """
-    Call POST /Order/GetStatus using the trndorderid_ prefix with our original PaymentID.
-    Per docs: Id can be 'trndorderid_{our_order_id}'.
+    Call POST /Order/GetStatus using our exact PaymentID.
+
+    Tronado orders are created with payload PaymentID=str(payment_id). Some
+    deployments used trndorderid_{payment_id}, but Tronado commonly returns
+    HTTP 500 for that value. Keep the prefixed variant only as a fallback in
+    higher-level verification code.
     """
+    if not payment_id_str:
+        return {}
+    return get_tronado_payment_status(str(payment_id_str))
+
+
+def get_tronado_status_by_prefixed_payment_id(payment_id_str: str) -> dict:
+    """Legacy fallback: POST /Order/GetStatus with trndorderid_{payment_id}."""
     if not payment_id_str:
         return {}
     return get_tronado_payment_status(f"trndorderid_{payment_id_str}")
@@ -451,13 +462,16 @@ def normalize_tronado_status(resp: dict) -> str:
             return "pending"
         if val in _REJECTED_STATUSES:
             return "rejected"
-    # Check error text for "no order found" = expired/rejected
+    # "No order found with this txid" is returned when the wrong lookup key is
+    # used (e.g. token/trndorderid before Tronado has indexed it). Treat it as
+    # unknown/pending, not as a final rejection, otherwise paid orders can be
+    # falsely rejected and never fulfilled.
     err_txt = str(
         resp.get("Error") or resp.get("Message") or resp.get("message") or
         data.get("Error") or data.get("Message") or ""
     ).lower()
     if "no order found" in err_txt or "order not found" in err_txt:
-        return "rejected"
+        return "unknown"
     if err_txt:
         return "unknown"
     return "unknown"
