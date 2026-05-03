@@ -26,6 +26,7 @@ def run_crypto_fulfillment(gateway: str, payment_id: int):
             get_payment, complete_payment, update_balance,
             get_package, get_purchase, get_conn,
             get_payment_service_names,
+            is_payment_expired,
         )
         from .helpers import fmt_price
         from .payments import apply_gateway_bonus_if_needed
@@ -33,6 +34,9 @@ def run_crypto_fulfillment(gateway: str, payment_id: int):
 
         payment = get_payment(payment_id)
         if not payment or payment["status"] != "pending":
+            return
+        if is_payment_expired(payment):
+            print(f"[EXPIRED PAYMENT IGNORED] payment_id={payment_id}")
             return
         if not complete_payment(payment_id):
             return  # already handled by another path
@@ -234,6 +238,7 @@ def process_centralpay_verified_payment(payment_id: int,
         get_payment_service_names,
         get_package, get_purchase,
         lock_centralpay_payment,
+        is_payment_expired,
     )
     from .helpers import fmt_price, now_str
     from .payments import apply_gateway_bonus_if_needed
@@ -252,6 +257,10 @@ def process_centralpay_verified_payment(payment_id: int,
     if payment["status"] not in ("pending",):
         print(f"[CentralPay] process_verified: payment {payment_id} already {payment['status']} (source={source})")
         return {"status": "already_processed"}
+
+    if is_payment_expired(payment):
+        print(f"[EXPIRED PAYMENT IGNORED] payment_id={payment_id}")
+        return {"status": "expired"}
 
     # ── Atomic lock ───────────────────────────────────────────────────────────
     try:
@@ -289,18 +298,9 @@ def process_centralpay_verified_payment(payment_id: int,
         return {"status": "not_paid", "msg": err}
 
     # ── Amount validation ─────────────────────────────────────────────────────
-    def _payment_payable_amount(row) -> int:
-        try:
-            final_amount = row["final_amount"] if "final_amount" in row.keys() else None
-            if final_amount:
-                return int(final_amount)
-        except Exception:
-            pass
-        return int(row["amount"])
-
     returned_amount = verify_result.get("amount", 0) if isinstance(verify_result, dict) else 0
     if returned_amount:
-        expected = _payment_payable_amount(payment)
+        expected = payment["amount"]
         if abs(int(returned_amount) - expected) > expected * 0.05 + 100:
             print(f"[CentralPay] process_verified: amount mismatch payment {payment_id}"
                   f" expected={expected} got={returned_amount}")
@@ -326,9 +326,8 @@ def process_centralpay_verified_payment(payment_id: int,
     except Exception:
         pass
 
-        payable_amount = _payment_payable_amount(payment)
-        print(f"[CentralPay] process_verified: LOCKED & VERIFIED payment {payment_id} source={source}"
-            f" kind={payment['kind']} uid={payment['user_id']} amount={payment['amount']} payable={payable_amount}")
+    print(f"[CentralPay] process_verified: LOCKED & VERIFIED payment {payment_id} source={source}"
+          f" kind={payment['kind']} uid={payment['user_id']} amount={payment['amount']}")
 
     kind   = payment["kind"]
     uid    = payment["user_id"]
@@ -487,6 +486,7 @@ def process_tronado_verified_payment(payment_id: int,
         get_payment, get_conn, update_balance,
         get_payment_service_names, save_tronado_callback_data,
         get_package, get_purchase,
+        is_payment_expired,
     )
     from .helpers import fmt_price, now_str
     from .payments import apply_gateway_bonus_if_needed
@@ -515,6 +515,10 @@ def process_tronado_verified_payment(payment_id: int,
     if payment["status"] not in ("pending", "rejected", "failed"):
         print(f"[Tronado] process_verified: payment {payment_id} already {payment['status']} (source={source})")
         return {"status": "already_processed"}
+
+    if is_payment_expired(payment):
+        print(f"[EXPIRED PAYMENT IGNORED] payment_id={payment_id}")
+        return {"status": "expired"}
 
     # ── Atomically lock the payment (BEGIN IMMEDIATE) ─────────────────────────
     try:

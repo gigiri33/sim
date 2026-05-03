@@ -3548,34 +3548,38 @@ def universal_handler(message):
 
         if sn == "admin_gw_set_fee_val" and is_admin(uid):
             gw = sd.get("gw", "")
-            val = parse_int(normalize_text_number(message.text or ""))
             fee_type = setting_get(f"gw_{gw}_fee_type", "fixed")
+            raw_val = normalize_text_number(message.text or "").strip().replace(",", ".")
+            try:
+                val = float(raw_val) if fee_type == "pct" else parse_int(raw_val)
+            except Exception:
+                val = 0
             if not val or val <= 0 or (fee_type == "pct" and val > 100):
                 bot.send_message(uid, "⚠️ مقدار نامعتبر است.", reply_markup=back_button(f"adm:gw:{gw}:fee"))
                 return
-<<<<<<< HEAD
             val_text = str(int(val)) if isinstance(val, float) and val.is_integer() else str(val)
             setting_set(f"gw_{gw}_fee_value", val_text)
-            setting_set(f"gw_{gw}_fee_enabled", "1")
-=======
-            setting_set(f"gw_{gw}_fee_value", str(val))
->>>>>>> parent of 7ae2303 (درگاه سنترا پی)
             log_admin_action(uid, f"کارمزد درگاه {gw}: {val}")
             state_clear(uid)
-            bot.send_message(uid, f"✅ مقدار کارمزد تنظیم شد: {val}", reply_markup=back_button(f"adm:gw:{gw}:fee"))
+            bot.send_message(uid, f"✅ مقدار کارمزد تنظیم شد: {val_text}", reply_markup=back_button(f"adm:gw:{gw}:fee"))
             return
 
         if sn == "admin_gw_set_bonus_val" and is_admin(uid):
             gw = sd.get("gw", "")
-            val = parse_int(normalize_text_number(message.text or ""))
             bonus_type = setting_get(f"gw_{gw}_bonus_type", "fixed")
+            raw_val = normalize_text_number(message.text or "").strip().replace(",", ".")
+            try:
+                val = float(raw_val) if bonus_type == "pct" else parse_int(raw_val)
+            except Exception:
+                val = 0
             if not val or val <= 0 or (bonus_type == "pct" and val > 100):
                 bot.send_message(uid, "⚠️ مقدار نامعتبر است.", reply_markup=back_button(f"adm:gw:{gw}:bonus"))
                 return
-            setting_set(f"gw_{gw}_bonus_value", str(val))
+            val_text = str(int(val)) if isinstance(val, float) and val.is_integer() else str(val)
+            setting_set(f"gw_{gw}_bonus_value", val_text)
             log_admin_action(uid, f"بونس درگاه {gw}: {val}")
             state_clear(uid)
-            bot.send_message(uid, f"✅ مقدار بونس تنظیم شد: {val}", reply_markup=back_button(f"adm:gw:{gw}:bonus"))
+            bot.send_message(uid, f"✅ مقدار بونس تنظیم شد: {val_text}", reply_markup=back_button(f"adm:gw:{gw}:bonus"))
             return
 
         if sn == "admin_set_gw_fee_percent" and is_admin(uid):

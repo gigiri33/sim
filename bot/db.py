@@ -6,8 +6,10 @@ import time
 import uuid
 from datetime import datetime, timedelta
 
+import jdatetime
+
 from .config import DB_NAME, CRYPTO_COINS
-from .helpers import now_str
+from .helpers import now_str, _TZ_TEHRAN
 
 
 # ── Per-thread persistent connection ──────────────────────────────────────────
@@ -502,6 +504,9 @@ def _run_init_db_migrations():
             "centralpay_verify_url":              "https://centralapi.org/webservice/basic/verify.php",
             "centralpay_callback_base_url":       "",
             "centralpay_link_type":               "deposit",
+            # ── Invoice expiration ───────────────────────────────────────────
+            "invoice_expiry_enabled":             "1",
+            "invoice_expiry_minutes":             "30",
         }
         for coin, _ in CRYPTO_COINS:
             defaults[f"crypto_{coin}"] = ""
@@ -772,6 +777,7 @@ def _run_init_db_migrations():
             "ALTER TABLE payments ADD COLUMN raw_callback TEXT",
             "ALTER TABLE payments ADD COLUMN callback_received_at TEXT",
             "ALTER TABLE payments ADD COLUMN fulfilled_at TEXT",
+            "ALTER TABLE payments ADD COLUMN expires_at TEXT",
         ]
         for sql in migrations:
             try:
@@ -1864,7 +1870,6 @@ def get_agencies():
 
 
 # ── Payments ───────────────────────────────────────────────────────────────────
-<<<<<<< HEAD
 def get_invoice_expire_minutes() -> int:
     """Configured invoice lifetime in minutes."""
     try:
@@ -1949,22 +1954,19 @@ def format_payment_expire_text(payment) -> str:
     if not expires_at:
         return ""
     if is_payment_expired(payment):
-        return "⏰ زمان پرداخت شما با این فاکتور به پایان رسیده است.\nلطفا دوباره اقدام کنید."
-    expires_dt = _parse_payment_datetime(expires_at)
-    expires_label = expires_dt.strftime("%H:%M") if expires_dt else str(expires_at)[11:16]
-    return f"⏰ مهلت پرداخت تا: {expires_label}"
+        return "⏳ زمان پرداخت شما به پایان رسید\nلطفاً مجدداً خرید خود را انجام دهید"
+    return f"⏰ مهلت پرداخت تا: {expires_at}"
 
 
-=======
->>>>>>> parent of 7ae2303 (درگاه سنترا پی)
 def create_payment(kind, user_id, package_id, amount, payment_method,
                    status="pending", config_id=None, crypto_coin=None, final_amount=None, quantity=1):
+    expires_at = _calculate_invoice_expires_at()
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO payments(kind,user_id,package_id,amount,payment_method,"
-            "status,created_at,config_id,crypto_coin,final_amount,quantity) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            "status,created_at,expires_at,config_id,crypto_coin,final_amount,quantity) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
             (kind, user_id, package_id, amount, payment_method,
-             status, now_str(), config_id, crypto_coin, final_amount, max(1, int(quantity or 1)))
+             status, now_str(), expires_at, config_id, crypto_coin, final_amount, max(1, int(quantity or 1)))
         )
         return conn.execute("SELECT last_insert_rowid() AS x").fetchone()["x"]
 
@@ -2090,6 +2092,10 @@ def update_payment_receipt(payment_id, file_id, text_value):
 
 def approve_payment(payment_id, admin_note):
     with get_conn() as conn:
+        payment = conn.execute("SELECT * FROM payments WHERE id=?", (payment_id,)).fetchone()
+        if is_payment_expired(payment):
+            print(f"[EXPIRED PAYMENT IGNORED] payment_id={payment_id}")
+            return
         conn.execute(
             "UPDATE payments SET status='approved', admin_note=?, approved_at=? WHERE id=? AND status='pending'",
             (admin_note, now_str(), payment_id)
@@ -2107,6 +2113,10 @@ def reject_payment(payment_id, admin_note):
 def complete_payment(payment_id):
     """Mark payment completed. Returns True if this call won the race, False if already processed."""
     with get_conn() as conn:
+        payment = conn.execute("SELECT * FROM payments WHERE id=?", (payment_id,)).fetchone()
+        if is_payment_expired(payment):
+            print(f"[EXPIRED PAYMENT IGNORED] payment_id={payment_id}")
+            return False
         conn.execute(
             "UPDATE payments SET status='completed', approved_at=?, fulfilled_at=? WHERE id=? AND status IN ('pending', 'approved', 'processing')",
             (now_str(), now_str(), payment_id)
@@ -3851,39 +3861,30 @@ def get_gateway_fee_amount(gw_name: str, base_amount: int) -> int:
     """Return the fee to add on top of base_amount for this gateway (0 if disabled)."""
     if setting_get(f"gw_{gw_name}_fee_enabled", "0") != "1":
         return 0
-    try:
-        base_amount = int(base_amount or 0)
-    except (TypeError, ValueError):
-        return 0
     fee_type = setting_get(f"gw_{gw_name}_fee_type", "fixed")
     try:
-        fee_value = int(setting_get(f"gw_{gw_name}_fee_value", "0") or "0")
+        fee_value = float(setting_get(f"gw_{gw_name}_fee_value", "0") or "0")
     except ValueError:
         return 0
     if fee_type == "pct":
         return round(base_amount * fee_value / 100)
-    return fee_value
+    return round(fee_value)
 
 
 def get_gateway_bonus_amount(gw_name: str, base_amount: int) -> int:
     """Return wallet bonus to credit after successful payment through this gateway (0 if disabled)."""
     if setting_get(f"gw_{gw_name}_bonus_enabled", "0") != "1":
         return 0
-    try:
-        base_amount = int(base_amount or 0)
-    except (TypeError, ValueError):
-        return 0
     bonus_type = setting_get(f"gw_{gw_name}_bonus_type", "fixed")
     try:
-        bonus_value = int(setting_get(f"gw_{gw_name}_bonus_value", "0") or "0")
+        bonus_value = float(setting_get(f"gw_{gw_name}_bonus_value", "0") or "0")
     except ValueError:
         return 0
     if bonus_type == "pct":
         return round(base_amount * bonus_value / 100)
-    return bonus_value
+    return round(bonus_value)
 
 
 def apply_gateway_fee(gw_name: str, base_amount: int) -> int:
     """Return base_amount + fee for this gateway (fee-adjusted payable amount)."""
-    base_amount = int(base_amount or 0)
     return base_amount + get_gateway_fee_amount(gw_name, base_amount)
