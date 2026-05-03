@@ -314,6 +314,46 @@ def is_tronado_callback_valid(payload: dict) -> bool:
     return has_id
 
 
+def extract_tronado_callback_payload(payload: dict) -> dict:
+    """Flatten Flask wrapper payloads ({json, form, args, method}) into callback fields."""
+    if not isinstance(payload, dict):
+        return {}
+    merged = {}
+    for key in ("args", "form", "json"):
+        part = payload.get(key)
+        if isinstance(part, dict):
+            merged.update(part)
+    # If this is already a flat Tronado payload, keep it too.
+    for k, v in payload.items():
+        if k not in ("args", "form", "json", "method"):
+            merged.setdefault(k, v)
+    return merged
+
+
+def is_tronado_success_callback_payload(payload: dict) -> bool:
+    """
+    Strictly validate a successful Tronado IPN payload.
+
+    Do NOT treat PaymentID-only test curls as paid. Per Tronado docs, a real
+    successful callback contains either UniqueCode+Hash or PaymentID plus
+    UserTelegramId/Wallet/TronAmount fields.
+    """
+    data = extract_tronado_callback_payload(payload)
+    if not data:
+        return False
+    if data.get("UniqueCode") and data.get("Hash"):
+        return True
+    payment_id = data.get("PaymentID") or data.get("paymentId") or data.get("payment_id")
+    user_id = data.get("UserTelegramId") or data.get("userTelegramId") or data.get("user_id")
+    wallet = data.get("Wallet") or data.get("wallet") or data.get("WalletAddress")
+    tron_amount = (
+        data.get("TronAmount") or data.get("tronAmount") or
+        data.get("ActualTronAmount") or data.get("actualTronAmount") or
+        data.get("ََActualTronAmount")
+    )
+    return bool(payment_id and user_id and wallet and tron_amount)
+
+
 TRONADO_STATUS_BASE_URL = "https://bot.tronado.cloud"
 
 

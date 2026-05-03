@@ -487,6 +487,8 @@ def process_tronado_verified_payment(payment_id: int,
         get_tronado_status_by_payment_id,
         get_tronado_status_by_prefixed_payment_id,
         normalize_tronado_status,
+        extract_tronado_callback_payload,
+        is_tronado_success_callback_payload,
     )
     import json as _json
     import traceback as _tb
@@ -526,7 +528,21 @@ def process_tronado_verified_payment(payment_id: int,
     verify_key = ""
     norm = "unknown"
     try:
-        if token:
+        flat_ipn = extract_tronado_callback_payload(raw_payload or {})
+        if source == "ipn" and is_tronado_success_callback_payload(raw_payload or {}):
+            cb_pid = str(flat_ipn.get("PaymentID") or flat_ipn.get("paymentId") or flat_ipn.get("payment_id") or "")
+            cb_uid = str(flat_ipn.get("UserTelegramId") or flat_ipn.get("userTelegramId") or "")
+            if cb_pid and cb_pid not in (str(payment_id), f"tronado-wc-{payment_id}"):
+                print(f"[Tronado] process_verified: IPN payment id mismatch url={payment_id} payload={cb_pid}")
+            elif cb_uid and cb_uid != str(payment["user_id"]):
+                print(f"[Tronado] process_verified: IPN user mismatch payment={payment_id} db_uid={payment['user_id']} payload_uid={cb_uid}")
+            else:
+                verify_key = "trusted_ipn"
+                verify_resp = flat_ipn
+                norm = "paid"
+                print(f"[Tronado] process_verified: trusted successful IPN payment={payment_id}")
+
+        if norm != "paid" and token:
             verify_key = token
             verify_resp = get_tronado_payment_status(token)
             norm = normalize_tronado_status(verify_resp)
