@@ -10,6 +10,7 @@ import json
 import urllib.request
 import urllib.error
 import urllib.parse
+import re
 
 from ..db import setting_get
 from .crypto import fetch_crypto_prices
@@ -45,6 +46,67 @@ def get_tronado_base_url() -> str:
 def build_tronado_payment_url(token: str) -> str:
     """Build the Tronado Mini App payment URL from a token."""
     return TRONADO_PAYMENT_URL_TEMPLATE.format(token=token)
+
+
+def get_tronado_token_from_payment(payment) -> str:
+    """
+    Extract the Tronado order token for the exact payment row.
+
+    Supported storage locations:
+      - payments.gateway_ref
+      - payments.receipt_text as TRONADO_TOKEN=<token>
+      - payments.receipt_text as a raw token
+      - JSON-ish receipt/raw_callback containing Token/OrderToken
+    """
+    if not payment:
+        return ""
+
+    def _get(row, key, default=""):
+        try:
+            if hasattr(row, "keys") and key in row.keys():
+                return row[key] or default
+            if isinstance(row, dict):
+                return row.get(key) or default
+        except Exception:
+            pass
+        return default
+
+    for col in ("gateway_ref", "receipt_text", "raw_callback"):
+        value = str(_get(payment, col, "") or "").strip()
+        if not value:
+            continue
+
+        # Explicit marker written by new code.
+        m = re.search(r"TRONADO_TOKEN\s*=\s*([^\s;|,]+)", value, flags=re.I)
+        if m:
+            return m.group(1).strip()
+
+        # JSON response or callback data.
+        try:
+            parsed = json.loads(value)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, dict):
+            stack = [parsed]
+            while stack:
+                obj = stack.pop()
+                if not isinstance(obj, dict):
+                    continue
+                token = (
+                    obj.get("Token") or obj.get("token") or
+                    obj.get("OrderToken") or obj.get("orderToken")
+                )
+                if token:
+                    return str(token).strip()
+                for child in obj.values():
+                    if isinstance(child, dict):
+                        stack.append(child)
+
+        # Legacy rows stored only the token in receipt_text/gateway_ref.
+        if col in ("gateway_ref", "receipt_text") and len(value) <= 300 and "{" not in value and "\n" not in value:
+            return value
+
+    return ""
 
 
 def fetch_tronado_tron_amount(amount_toman: int, wallet_address: str) -> tuple:
@@ -226,6 +288,7 @@ def get_tronado_order_token(amount_toman: int, order_id: str, user_id: int,
         "payment_url": payment_url,
         "tron_amount": tron_amount,
         "trx_rate":    trx_irt,
+        "raw":         parsed,
     }
 
 

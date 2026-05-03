@@ -162,40 +162,25 @@ from ..db import (
 
 def _verify_tronado_payment(payment_id: int) -> dict:
     """
-    Shared Tronado payment verification logic used by all :verify: handlers.
-
-    Strategy (per spec):
-      1. Try get_tronado_status_by_payment_id(payment_id) first.
-      2. If not paid and a token is stored in receipt_text, try get_tronado_payment_status(token).
-      3. If paid → call process_tronado_verified_payment and return its result.
-
-    Returns a dict with:
-      "verify": "ok" | "already_processed" | "process_error" | "pending" | "rejected" | "unknown"
-      "process_result": dict from process_tronado_verified_payment (or {} if not reached)
-      "raw_resp": the tronado API response dict
+    Shared Tronado verification used by all :verify: handlers.
+    The central processor reads the exact payment row, extracts its own token,
+    verifies Tronado, locks atomically, and fulfills at most once.
     """
-    payment = get_payment(payment_id)
-    token = (payment["receipt_text"] if payment else None) or ""
-
-    # 1. Try by payment ID first
-    td_resp = get_tronado_status_by_payment_id(str(payment_id))
-    # 2. Fallback to token-based lookup
-    if not is_tronado_response_paid(td_resp) and token:
-        td_resp_tok = get_tronado_payment_status(token)
-        if is_tronado_response_paid(td_resp_tok):
-            td_resp = td_resp_tok
-
-    if is_tronado_response_paid(td_resp):
-        proc = process_tronado_verified_payment(payment_id, source="manual_verify", raw_payload=td_resp)
-        verify_status = proc.get("status", "process_error")
-        # normalise to our keys
-        if verify_status not in ("ok", "already_processed"):
-            verify_status = "process_error"
-        return {"verify": verify_status, "process_result": proc, "raw_resp": td_resp}
-
-    norm = normalize_tronado_status(td_resp)
-    return {"verify": norm if norm in ("pending", "rejected") else "unknown",
-            "process_result": {}, "raw_resp": td_resp}
+    proc = process_tronado_verified_payment(
+        payment_id,
+        source="manual_verify",
+        raw_payload={"manual_verify": True, "payment_id": payment_id},
+    )
+    status = proc.get("status", "process_error")
+    if status == "ok":
+        return {"verify": "ok", "process_result": proc, "raw_resp": proc.get("raw_resp", {})}
+    if status == "already_processed":
+        return {"verify": "already_processed", "process_result": proc, "raw_resp": proc.get("raw_resp", {})}
+    if status == "pending":
+        return {"verify": "pending", "process_result": proc, "raw_resp": proc.get("raw_resp", {})}
+    if status == "rejected":
+        return {"verify": "rejected", "process_result": proc, "raw_resp": proc.get("raw_resp", {})}
+    return {"verify": "process_error", "process_result": proc, "raw_resp": proc.get("raw_resp", {})}
 
 
 def _verify_centralpay_payment(payment_id: int) -> dict:
@@ -5885,22 +5870,16 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id, "⏳ در حال بررسی وضعیت پرداخت…", show_alert=False)
         _vr = _verify_tronado_payment(payment_id)
         if _vr["verify"] == "ok":
-            bot.send_message(uid, "✅ پرداخت تأیید شد! تمدید سرویس شما در حال انجام است…", parse_mode="HTML")
+            bot.send_message(uid, "✅ پرداخت شما تأیید شد و سرویس تحویل داده شد.", parse_mode="HTML")
         elif _vr["verify"] == "already_processed":
             bot.send_message(uid, "✅ پرداخت شما قبلاً تأیید و تحویل داده شده است.", parse_mode="HTML")
         elif _vr["verify"] == "process_error":
-            bot.send_message(uid, "⚠️ خطا در پردازش پرداخت. لطفاً با پشتیبانی تماس بگیرید.", parse_mode="HTML")
+            bot.send_message(uid, "⚠️ خطا در بررسی پرداخت. لطفاً بعداً دوباره تلاش کنید.", parse_mode="HTML")
         elif _vr["verify"] == "rejected":
-            _kb_rexp = types.InlineKeyboardMarkup()
-            _kb_rexp.add(types.InlineKeyboardButton("🔄 ساخت سفارش جدید", callback_data=f"rpay:tronado:cancel_retry:{payment_id}"))
-            bot.send_message(uid,
-                "⚠️ <b>سفارش ترونادو منقضی یا یافت نشد</b>\n\n"
-                "این لینک پرداخت منقضی شده است. روی دکمه زیر بزنید تا سفارش جدید ایجاد شود:",
-                parse_mode="HTML", reply_markup=_kb_rexp)
+            bot.send_message(uid, "❌ پرداخت شما رد شده یا ناموفق بوده است.", parse_mode="HTML")
         else:
             bot.send_message(uid,
-                "⏳ پرداخت هنوز تأیید نشده است.\n"
-                "لطفاً چند دقیقه صبر کنید و دوباره وضعیت را بررسی کنید.",
+                "⏳ پرداخت شما هنوز توسط ترونادو تأیید نشده است. چند دقیقه دیگر دوباره بررسی کنید.",
                 parse_mode="HTML")
         return
 
@@ -5968,7 +5947,7 @@ def _dispatch_callback(call, uid, data):
         tron_amt_rtd = result.get("tron_amount", 0)
         trx_rate_rtd = result.get("trx_rate", 0)
         with get_conn() as conn:
-            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (token_rtd, payment_id))
+            conn.execute("UPDATE payments SET receipt_text=?, gateway_ref=? WHERE id=?", (f"TRONADO_TOKEN={token_rtd}", token_rtd, payment_id))
         state_set(uid, "await_tronado_renewal_verify", payment_id=payment_id, token=token_rtd,
                   purchase_id=purchase_id)
         fee_line_rtd = ""
@@ -7269,24 +7248,16 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id, "⏳ در حال بررسی وضعیت پرداخت…", show_alert=False)
         _vp = _verify_tronado_payment(payment_id)
         if _vp["verify"] == "ok":
-            bot.send_message(uid, "✅ پرداخت تأیید شد! کانفیگ شما در حال آماده‌سازی است…", parse_mode="HTML")
+            bot.send_message(uid, "✅ پرداخت شما تأیید شد و سرویس تحویل داده شد.", parse_mode="HTML")
         elif _vp["verify"] == "already_processed":
             bot.send_message(uid, "✅ پرداخت شما قبلاً تأیید و تحویل داده شده است.", parse_mode="HTML")
         elif _vp["verify"] == "process_error":
-            bot.send_message(uid, "⚠️ خطا در پردازش پرداخت. لطفاً با پشتیبانی تماس بگیرید.", parse_mode="HTML")
+            bot.send_message(uid, "⚠️ خطا در بررسی پرداخت. لطفاً بعداً دوباره تلاش کنید.", parse_mode="HTML")
         elif _vp["verify"] == "rejected":
-            pkg_id_td_v = payment["package_id"] or 0
-            _kb_exp = types.InlineKeyboardMarkup()
-            if pkg_id_td_v:
-                _kb_exp.add(types.InlineKeyboardButton("🔄 ساخت سفارش جدید", callback_data=f"pay:tronado:cancel_retry:{payment_id}"))
-            bot.send_message(uid,
-                "⚠️ <b>سفارش ترونادو منقضی یا یافت نشد</b>\n\n"
-                "این لینک پرداخت منقضی شده است. برای پرداخت باید سفارش جدیدی ایجاد کنید.\n\n"
-                "روی دکمه زیر بزنید تا سفارش قبلی لغو شود و یک لینک پرداخت جدید دریافت کنید:",
-                parse_mode="HTML", reply_markup=_kb_exp)
+            bot.send_message(uid, "❌ پرداخت شما رد شده یا ناموفق بوده است.", parse_mode="HTML")
         else:
             bot.send_message(uid,
-                "⏳ پرداخت شما هنوز تأیید نشده است. چند دقیقه دیگر دوباره بررسی کنید.",
+                "⏳ پرداخت شما هنوز توسط ترونادو تأیید نشده است. چند دقیقه دیگر دوباره بررسی کنید.",
                 parse_mode="HTML")
         return
 
@@ -7352,7 +7323,7 @@ def _dispatch_callback(call, uid, data):
         tron_amt_td2  = result.get("tron_amount", 0)
         trx_rate_td2  = result.get("trx_rate", 0)
         with get_conn() as conn:
-            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (token_td2, payment_id))
+            conn.execute("UPDATE payments SET receipt_text=?, gateway_ref=? WHERE id=?", (f"TRONADO_TOKEN={token_td2}", token_td2, payment_id))
         state_set(uid, "await_tronado_verify", payment_id=payment_id, token=token_td2)
         fee_line_td = ""
         if final_td_price != price:
@@ -8265,18 +8236,15 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id, "⏳ در حال بررسی وضعیت پرداخت…", show_alert=False)
         _vwc = _verify_tronado_payment(payment_id)
         if _vwc["verify"] == "ok":
-            bot.send_message(uid,
-                f"✅ پرداخت ترونادو تأیید شد و کیف پول شارژ شد.\n\n"
-                f"💰 مبلغ: {fmt_price(payment['amount'])} تومان",
-                parse_mode="HTML")
+            bot.send_message(uid, "✅ پرداخت شما تأیید شد و سرویس تحویل داده شد.", parse_mode="HTML")
         elif _vwc["verify"] == "already_processed":
-            bot.send_message(uid, "✅ پرداخت شما قبلاً تأیید و کیف پول شارژ شده است.", parse_mode="HTML")
+            bot.send_message(uid, "✅ پرداخت شما قبلاً تأیید و تحویل داده شده است.", parse_mode="HTML")
         elif _vwc["verify"] == "process_error":
-            bot.send_message(uid, "⚠️ خطا در پردازش پرداخت. لطفاً با پشتیبانی تماس بگیرید.", parse_mode="HTML")
+            bot.send_message(uid, "⚠️ خطا در بررسی پرداخت. لطفاً بعداً دوباره تلاش کنید.", parse_mode="HTML")
         elif _vwc["verify"] == "rejected":
-            bot.send_message(uid, "❌ پرداخت شما تایید نشد یا رد شده است.", parse_mode="HTML")
+            bot.send_message(uid, "❌ پرداخت شما رد شده یا ناموفق بوده است.", parse_mode="HTML")
         else:
-            bot.send_message(uid, "⏳ پرداخت شما هنوز تأیید نشده است. چند دقیقه دیگر دوباره بررسی کنید.", parse_mode="HTML")
+            bot.send_message(uid, "⏳ پرداخت شما هنوز توسط ترونادو تأیید نشده است. چند دقیقه دیگر دوباره بررسی کنید.", parse_mode="HTML")
         return
 
     if data == "wallet:charge:tronado":
@@ -8315,7 +8283,7 @@ def _dispatch_callback(call, uid, data):
         tron_amt_td = result.get("tron_amount", 0)
         trx_rate_td = result.get("trx_rate", 0)
         with get_conn() as conn:
-            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (token_td, payment_id))
+            conn.execute("UPDATE payments SET receipt_text=?, gateway_ref=? WHERE id=?", (f"TRONADO_TOKEN={token_td}", token_td, payment_id))
         state_set(uid, "await_tronado_verify", payment_id=payment_id, token=token_td)
         fee_line = ""
         if final_amount != amount:
@@ -10673,7 +10641,7 @@ def _dispatch_callback(call, uid, data):
             tron_amt_tpnl = result_td_pnl.get("tron_amount", 0)
             trx_rate_tpnl = result_td_pnl.get("trx_rate", 0)
             with get_conn() as conn:
-                conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (token_tpnl, payment_id))
+                conn.execute("UPDATE payments SET receipt_text=?, gateway_ref=? WHERE id=?", (f"TRONADO_TOKEN={token_tpnl}", token_tpnl, payment_id))
             state_set(uid, "await_pnlcfg_renewal_tronado_verify",
                       payment_id=payment_id, token=token_tpnl, config_id=config_id)
             fee_line_tpnl = ""
@@ -10709,17 +10677,18 @@ def _dispatch_callback(call, uid, data):
             state_clear(uid)
             if _vpnl["verify"] == "ok":
                 config_id_pnltd = payment["config_id"]
-                bot.send_message(uid, "✅ پرداخت تأیید شد! سرویس تمدید شد.", parse_mode="HTML")
+                bot.send_message(uid, "✅ پرداخت شما تأیید شد و سرویس تحویل داده شد.", parse_mode="HTML")
                 _show_panel_config_detail(call, config_id_pnltd, back_data="my_configs", is_user_view=True)
             elif _vpnl["verify"] == "already_processed":
                 bot.send_message(uid, "✅ پرداخت شما قبلاً تأیید و تحویل داده شده است.", parse_mode="HTML")
             elif _vpnl["verify"] == "process_error":
-                send_or_edit(call, "❌ پرداخت انجام شد اما پردازش با خطا مواجه شد.\nلطفاً با پشتیبانی ارتباط بگیرید.",
+                send_or_edit(call, "⚠️ خطا در بررسی پرداخت. لطفاً بعداً دوباره تلاش کنید.",
                              back_button("my_configs"))
+            elif _vpnl["verify"] == "rejected":
+                bot.send_message(uid, "❌ پرداخت شما رد شده یا ناموفق بوده است.", parse_mode="HTML")
             else:
                 bot.send_message(uid,
-                    "⏳ پرداخت هنوز تأیید نشده است.\n"
-                    "لطفاً چند دقیقه صبر کنید و دوباره وضعیت را بررسی کنید.",
+                    "⏳ پرداخت شما هنوز توسط ترونادو تأیید نشده است. چند دقیقه دیگر دوباره بررسی کنید.",
                     parse_mode="HTML")
             return
 
@@ -11136,7 +11105,7 @@ def _dispatch_callback(call, uid, data):
             token_td_pnl   = result_td.get("token", "")
             pay_url_td_pnl = result_td.get("payment_url", "")
             with get_conn() as conn:
-                conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (token_td_pnl, payment_id))
+                conn.execute("UPDATE payments SET receipt_text=?, gateway_ref=? WHERE id=?", (f"TRONADO_TOKEN={token_td_pnl}", token_td_pnl, payment_id))
             state_set(uid, "await_pnlcfg_renewal_tronado_verify",
                       payment_id=payment_id, token=token_td_pnl, config_id=config_id)
             kb_td = types.InlineKeyboardMarkup()
@@ -11168,17 +11137,18 @@ def _dispatch_callback(call, uid, data):
             state_clear(uid)
             if _vpnl2["verify"] == "ok":
                 config_id_pnltd2 = payment["config_id"]
-                bot.send_message(uid, "✅ پرداخت تأیید شد! سرویس تمدید شد.", parse_mode="HTML")
+                bot.send_message(uid, "✅ پرداخت شما تأیید شد و سرویس تحویل داده شد.", parse_mode="HTML")
                 _show_panel_config_detail(call, config_id_pnltd2, back_data="my_configs", is_user_view=True)
             elif _vpnl2["verify"] == "already_processed":
                 bot.send_message(uid, "✅ پرداخت شما قبلاً تأیید و تحویل داده شده است.", parse_mode="HTML")
             elif _vpnl2["verify"] == "process_error":
-                send_or_edit(call, "❌ پرداخت انجام شد اما پردازش با خطا مواجه شد.\nلطفاً با پشتیبانی ارتباط بگیرید.",
+                send_or_edit(call, "⚠️ خطا در بررسی پرداخت. لطفاً بعداً دوباره تلاش کنید.",
                              back_button("my_configs"))
+            elif _vpnl2["verify"] == "rejected":
+                bot.send_message(uid, "❌ پرداخت شما رد شده یا ناموفق بوده است.", parse_mode="HTML")
             else:
                 bot.send_message(uid,
-                    "⏳ پرداخت هنوز تأیید نشده است.\n"
-                    "لطفاً چند دقیقه صبر کنید و دوباره وضعیت را بررسی کنید.",
+                    "⏳ پرداخت شما هنوز توسط ترونادو تأیید نشده است. چند دقیقه دیگر دوباره بررسی کنید.",
                     parse_mode="HTML")
             return
 

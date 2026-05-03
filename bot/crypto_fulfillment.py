@@ -168,9 +168,7 @@ def _tronado_poll_loop():
     import time as _time
     from .db import get_conn
     from .gateways.tronado import (
-        get_tronado_payment_status,
-        get_tronado_status_by_payment_id,
-        is_tronado_response_paid,
+        get_tronado_token_from_payment,
     )
 
     _time.sleep(30)  # initial delay — let bot fully start first
@@ -180,7 +178,7 @@ def _tronado_poll_loop():
             _cutoff = (_dt.datetime.utcnow() - _dt.timedelta(hours=_TRONADO_MAX_AGE_HOURS)).strftime("%Y-%m-%d %H:%M:%S")
             with get_conn() as _conn:
                 rows = _conn.execute(
-                    "SELECT id, receipt_text FROM payments"
+                    "SELECT * FROM payments"
                     " WHERE status='pending' AND payment_method='tronado'"
                     " AND (created_at IS NULL OR created_at = '' OR created_at >= ?)",
                     (_cutoff,)
@@ -188,22 +186,14 @@ def _tronado_poll_loop():
 
             for row in rows:
                 pay_id    = row["id"]
-                token     = row["receipt_text"] or ""
                 try:
-                    resp = {}
-                    # Try by token first (most specific)
-                    if token:
-                        resp = get_tronado_payment_status(token)
-                    # Always also try by our payment_id prefix (more reliable after confirmation)
-                    if not is_tronado_response_paid(resp):
-                        resp2 = get_tronado_status_by_payment_id(str(pay_id))
-                        if resp2 and not resp2.get("__http_error"):
-                            resp = resp2
-                    if is_tronado_response_paid(resp):
-                        print(f"[Tronado] Auto-poll: payment {pay_id} PAID — fulfilling")
-                        process_tronado_verified_payment(pay_id, source="auto_poll", raw_payload=resp)
+                    token = get_tronado_token_from_payment(row)
+                    print(f"[Tronado] Auto-poll: checking payment {pay_id} token={'yes' if token else 'no'}")
+                    proc = process_tronado_verified_payment(pay_id, source="auto_poll", raw_payload={"auto_poll": True})
+                    if proc.get("status") == "ok":
+                        print(f"[Tronado] Auto-poll: payment {pay_id} PAID — fulfilled")
                     else:
-                        print(f"[Tronado] Auto-poll: payment {pay_id} not paid yet resp={str(resp)[:120]}")
+                        print(f"[Tronado] Auto-poll: payment {pay_id} result={proc}")
                 except Exception as _pe:
                     print(f"[Tronado] Auto-poll error for payment {pay_id}: {_pe}")
 
@@ -491,6 +481,12 @@ def process_tronado_verified_payment(payment_id: int,
     from .helpers import fmt_price, now_str
     from .payments import apply_gateway_bonus_if_needed
     from .bot_instance import bot
+    from .gateways.tronado import (
+        get_tronado_token_from_payment,
+        get_tronado_payment_status,
+        get_tronado_status_by_payment_id,
+        normalize_tronado_status,
+    )
     import json as _json
     import traceback as _tb
 
@@ -507,38 +503,6 @@ def process_tronado_verified_payment(payment_id: int,
         print(f"[Tronado] process_verified: payment {payment_id} already {payment['status']} (source={source})")
         return {"status": "already_processed"}
 
-    # ── Amount validation ──────────────────────────────────────────────────────
-    if raw_payload and isinstance(raw_payload, dict):
-        for amt_key in ("Amount", "amount", "TomanAmount", "tomanAmount"):
-            ext_amount = raw_payload.get(amt_key)
-            if ext_amount is not None:
-                try:
-                    ext_amount_int = int(float(ext_amount))
-                    expected = payment["amount"]
-                    # Allow ±5% tolerance (Tronado may include slight rounding)
-                    if abs(ext_amount_int - expected) > expected * 0.05 + 100:
-                        print(f"[Tronado] process_verified: amount mismatch payment {payment_id}"
-                              f" expected={expected} got={ext_amount_int}")
-                        return {"status": "amount_mismatch", "expected": expected, "got": ext_amount_int}
-                except Exception:
-                    pass
-                break
-
-    # ── Extract audit IDs from payload ────────────────────────────────────────
-    gateway_ref = ""
-    external_txid = ""
-    if raw_payload and isinstance(raw_payload, dict):
-        gateway_ref = str(
-            raw_payload.get("UniqueCode") or raw_payload.get("uniqueCode") or
-            raw_payload.get("OrderId")    or raw_payload.get("orderId") or ""
-        )[:255]
-        external_txid = str(
-            raw_payload.get("Hash")          or raw_payload.get("hash") or
-            raw_payload.get("TransactionId") or raw_payload.get("transactionId") or
-            raw_payload.get("TxHash")        or ""
-        )[:255]
-    raw_payload_str = _json.dumps(raw_payload, ensure_ascii=False)[:4000] if raw_payload else ""
-
     # ── Atomically lock the payment (BEGIN IMMEDIATE) ─────────────────────────
     try:
         from .db import lock_tronado_payment
@@ -553,13 +517,120 @@ def process_tronado_verified_payment(payment_id: int,
         print(f"[Tronado] process_verified: payment {payment_id} lock lost (already processing/completed)")
         return {"status": "already_processed"}
 
+    # ── Verify exact Tronado order for this payment ───────────────────────────
+    # IMPORTANT: token is read only from this payment row. Never scan/choose an
+    # older pending payment or a latest payment.
+    token = get_tronado_token_from_payment(payment)
+    verify_resp = {}
+    verify_key = ""
+    norm = "unknown"
+    try:
+        if token:
+            verify_key = token
+            verify_resp = get_tronado_payment_status(token)
+            norm = normalize_tronado_status(verify_resp)
+            print(f"[Tronado] process_verified: GetStatus by token payment={payment_id} norm={norm}")
+
+        if norm != "paid":
+            # Fallback only for legacy rows / API edge cases.
+            verify_key = f"trndorderid_{payment_id}"
+            fallback_resp = get_tronado_status_by_payment_id(str(payment_id))
+            fallback_norm = normalize_tronado_status(fallback_resp)
+            print(f"[Tronado] process_verified: GetStatus fallback payment={payment_id} norm={fallback_norm}")
+            if fallback_norm == "paid" or norm in ("unknown", "error"):
+                verify_resp = fallback_resp
+                norm = fallback_norm
+
+    except Exception as _ve:
+        _tb.print_exc()
+        try:
+            with get_conn() as conn:
+                conn.execute("UPDATE payments SET status='pending' WHERE id=? AND status='processing'", (payment_id,))
+        except Exception:
+            pass
+        print(f"[Tronado] process_verified: verify error payment {payment_id}: {_ve}")
+        return {"status": "error", "msg": str(_ve)}
+
+    audit_payload = {
+        "source": source,
+        "incoming": raw_payload or {},
+        "verify_key": verify_key,
+        "verify_response": verify_resp,
+        "normalized_status": norm,
+    }
+
+    # ── Extract audit IDs from verified response/payload ──────────────────────
+    def _deep_get(dct, *keys):
+        if not isinstance(dct, dict):
+            return ""
+        candidates = [dct]
+        data = dct.get("Data") or dct.get("data")
+        if isinstance(data, dict):
+            candidates.insert(0, data)
+        for obj in candidates:
+            for key in keys:
+                val = obj.get(key)
+                if val:
+                    return val
+        return ""
+
+    gateway_ref = str(_deep_get(verify_resp, "UniqueCode", "uniqueCode", "OrderId", "orderId") or token or "")[:255]
+    external_txid = str(_deep_get(verify_resp, "Hash", "hash", "TransactionId", "transactionId", "TxHash") or "")[:255]
+    raw_payload_str = _json.dumps(audit_payload, ensure_ascii=False)[:4000]
+
     # ── Persist audit data ────────────────────────────────────────────────────
     try:
         save_tronado_callback_data(payment_id, raw_payload_str, gateway_ref, external_txid)
     except Exception:
         pass
 
-    print(f"[Tronado] process_verified: LOCKED payment {payment_id} source={source}"
+    if norm == "pending" or norm == "unknown" or norm == "error":
+        try:
+            with get_conn() as conn:
+                conn.execute("UPDATE payments SET status='pending' WHERE id=? AND status='processing'", (payment_id,))
+        except Exception:
+            pass
+        print(f"[Tronado] process_verified: payment {payment_id} not paid yet norm={norm} resp={str(verify_resp)[:300]}")
+        return {"status": "pending", "verify_status": norm, "raw_resp": verify_resp}
+
+    if norm == "rejected":
+        try:
+            with get_conn() as conn:
+                conn.execute(
+                    "UPDATE payments SET status='rejected', rejected_at=?, reject_reason=? WHERE id=? AND status='processing'",
+                    (now_str(), "Tronado rejected/failed", payment_id)
+                )
+        except Exception:
+            try:
+                with get_conn() as conn:
+                    conn.execute("UPDATE payments SET status='rejected' WHERE id=? AND status='processing'", (payment_id,))
+            except Exception:
+                pass
+        print(f"[Tronado] process_verified: payment {payment_id} rejected resp={str(verify_resp)[:300]}")
+        return {"status": "rejected", "raw_resp": verify_resp}
+
+    # ── Amount validation ──────────────────────────────────────────────────────
+    for amt_key in ("Amount", "amount", "TomanAmount", "tomanAmount", "Toman", "Price"):
+        ext_amount = _deep_get(verify_resp, amt_key)
+        if ext_amount is not None and ext_amount != "":
+            try:
+                ext_amount_int = int(float(ext_amount))
+                expected = payment["amount"]
+                # Allow ±5% tolerance (Tronado may include slight rounding/fees)
+                if abs(ext_amount_int - expected) > expected * 0.05 + 100:
+                    print(f"[Tronado] process_verified: amount mismatch payment {payment_id}"
+                          f" expected={expected} got={ext_amount_int}")
+                    try:
+                        with get_conn() as conn:
+                            conn.execute("UPDATE payments SET status='pending' WHERE id=? AND status='processing'", (payment_id,))
+                    except Exception:
+                        pass
+                    return {"status": "amount_mismatch", "expected": expected, "got": ext_amount_int}
+            except Exception:
+                pass
+            break
+
+    print(f"[Tronado] process_verified: LOCKED & PAID payment {payment_id} source={source}"
           f" kind={payment['kind']} uid={payment['user_id']} amount={payment['amount']}")
 
     kind   = payment["kind"]

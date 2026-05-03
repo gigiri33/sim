@@ -293,84 +293,72 @@ def _plisio_webhook_server():
         return jsonify({"status": "ok"}), 200
 
     # ── Tronado routes ────────────────────────────────────────────────────────
-    @_app.route("/tronado/<bot_username>/<int:payment_id>/callback", methods=["POST", "GET"])
+    @_app.route("/tronado/<bot_username>/<int:payment_id>/callback", methods=["GET", "POST"])
     def _tronado_callback(bot_username, payment_id):
-        import json as _json
+        print(f"[Tronado Callback HIT] payment_id={payment_id} method={request.method} args={dict(request.args)} json={request.get_json(silent=True)} form={dict(request.form)}")
         try:
-            # Read payload: JSON → form-data → query params → urlencoded body
-            payload = request.get_json(force=True, silent=True)
-            if not payload:
-                payload = request.form.to_dict() or {}
-            if not payload:
-                try:
-                    import urllib.parse as _up
-                    raw_body = request.get_data(as_text=True)
-                    payload = dict(_up.parse_qsl(raw_body)) if raw_body else {}
-                except Exception:
-                    payload = {}
-            if not payload:
-                payload = request.args.to_dict() or {}
-
-            print(f"[Tronado] IPN HIT payment_id={payment_id} method={request.method}"
-                  f" content_type={request.content_type} keys={list(payload.keys())}"
-                  f" data={str(payload)[:300]}")
-
-            # Validate basic structure — accept any payload with a recognisable field
-            from bot.gateways.tronado import (
-                is_tronado_callback_valid as _td_valid,
-                get_tronado_payment_status,
-                get_tronado_status_by_payment_id,
-                normalize_tronado_status,
-            )
-            if not _td_valid(payload) and not payload:
-                print(f"[Tronado] IPN REJECTED invalid payload for payment_id={payment_id}")
-                return jsonify({"ok": False, "error": "invalid payment"}), 200
+            json_payload = request.get_json(silent=True)
+            payload = {
+                "args": dict(request.args),
+                "form": dict(request.form),
+                "json": json_payload,
+                "method": request.method,
+            }
+            print(f"[Tronado] IPN payload payment_id={payment_id}: {str(payload)[:1000]}")
 
             payment = get_payment(payment_id)
             if not payment:
                 print(f"[Tronado] IPN: payment_id={payment_id} not found in DB")
-                return jsonify({"ok": True}), 200
+                return jsonify({"ok": True, "payment_not_found": True}), 200
+
             if payment["payment_method"] != "tronado":
                 print(f"[Tronado] IPN: payment_id={payment_id} wrong method {payment['payment_method']}")
-                return jsonify({"ok": True}), 200
-            if payment["status"] not in ("pending",):
+                return jsonify({"ok": True, "gateway_mismatch": True}), 200
+
+            try:
+                import json as _json
+                from bot.db import save_tronado_callback_data
+                save_tronado_callback_data(payment_id, _json.dumps(payload, ensure_ascii=False))
+            except Exception as _audit_exc:
+                print(f"[Tronado] IPN: failed to save raw callback for payment_id={payment_id}: {_audit_exc}")
+
+            if payment["status"] in ("completed", "fulfilled", "approved", "paid"):
                 print(f"[Tronado] IPN: payment_id={payment_id} already {payment['status']}")
                 return jsonify({"ok": True, "already_processed": True}), 200
 
+            if payment["status"] != "pending":
+                print(f"[Tronado] IPN: payment_id={payment_id} non-pending status={payment['status']}")
+                return jsonify({"ok": True, "status": payment["status"]}), 200
+
             # PaymentID mismatch check — if IPN body has a PaymentID, it must match
-            ipn_pid = (payload.get("PaymentID") or payload.get("paymentId") or
-                       payload.get("payment_id") or "")
+            body = json_payload if isinstance(json_payload, dict) else {}
+            form = dict(request.form)
+            args = dict(request.args)
+            ipn_pid = (body.get("PaymentID") or body.get("paymentId") or body.get("payment_id") or
+                       form.get("PaymentID") or form.get("paymentId") or form.get("payment_id") or
+                       args.get("PaymentID") or args.get("paymentId") or args.get("payment_id") or "")
             if ipn_pid and str(ipn_pid) not in (str(payment_id),
                                                  f"tronado-wc-{payment_id}",
                                                  str(payment_id)):
                 print(f"[Tronado] IPN: PaymentID mismatch url={payment_id} body={ipn_pid}")
                 return jsonify({"ok": False, "error": "payment id mismatch"}), 200
 
-            # Always double-check with GetStatus before fulfilling
-            token = payment["receipt_text"] or ""
-            td_status_resp = {}
-            if token:
-                td_status_resp = get_tronado_payment_status(token)
-            norm = normalize_tronado_status(td_status_resp)
-            if norm != "paid":
-                td_status_resp2 = get_tronado_status_by_payment_id(str(payment_id))
-                norm = normalize_tronado_status(td_status_resp2)
-                if norm == "paid":
-                    td_status_resp = td_status_resp2
+            from bot.crypto_fulfillment import process_tronado_verified_payment
+            result = process_tronado_verified_payment(payment_id, source="ipn", raw_payload=payload)
+            status = result.get("status", "error")
+            print(f"[Tronado] IPN result payment_id={payment_id}: {result}")
 
-            if norm == "paid":
-                from bot.crypto_fulfillment import process_tronado_verified_payment
-                result = process_tronado_verified_payment(payment_id, source="ipn",
-                                                           raw_payload=payload or td_status_resp)
-                if result.get("status") == "already_processed":
-                    return jsonify({"ok": True, "already_processed": True}), 200
-                return jsonify({"ok": True}), 200
-            else:
-                # IPN arrived but GetStatus doesn't confirm paid yet — log and return OK
-                # (Tronado might send early IPN for pending states)
-                print(f"[Tronado] IPN: GetStatus for {payment_id} returned norm={norm}"
-                      f" resp={str(td_status_resp)[:200]} — not fulfilling yet")
-                return jsonify({"ok": True}), 200
+            if status == "already_processed":
+                return jsonify({"ok": True, "already_processed": True}), 200
+            if status == "ok":
+                return jsonify({"ok": True, "fulfilled": True}), 200
+            if status == "pending":
+                return jsonify({"ok": True, "pending": True}), 200
+            if status == "rejected":
+                return jsonify({"ok": True, "rejected": True}), 200
+            if status == "amount_mismatch":
+                return jsonify({"ok": True, "error_logged": True, "amount_mismatch": True}), 200
+            return jsonify({"ok": True, "error_logged": True, "error": str(result.get("msg", status))[:300]}), 200
 
         except Exception as exc:
             import traceback as _tb
