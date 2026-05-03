@@ -187,7 +187,7 @@ update_payment_proxy_routes() {
     cat >> "$PAYMENT_NGINX_SNIPPET" <<EOF
 
 # seamless-${num} @${username}
-location ~* ^/(tronado|centralpay|plisio|nowpayments|pazzlenet)/${slug}(/|$) {
+location ~* ^/(tronado|centralpay|plisio|nowpayments|pazzlenet|rialpay)/${slug}(/|$) {
     proxy_pass http://127.0.0.1:${port};
     proxy_set_header Host \$host;
     proxy_set_header X-Real-IP \$remote_addr;

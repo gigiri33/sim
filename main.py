@@ -445,8 +445,16 @@ def _plisio_webhook_server():
             return "خطایی رخ داد. لطفاً به ربات برگردید و روی بررسی پرداخت بزنید.", 200
 
     # ── RialPay routes ────────────────────────────────────────────────────────
-    @_app.route("/rialpay/<bot_username>/<int:payment_id>/webhook", methods=["POST", "GET"])
+    @_app.route("/rialpay/<bot_username>/<int:payment_id>/webhook", methods=["POST", "GET", "OPTIONS"])
     def _rialpay_webhook(bot_username, payment_id):
+        # CORS preflight (for browser-based webhook testers)
+        if request.method == "OPTIONS":
+            resp = jsonify({"ok": True})
+            resp.headers["Access-Control-Allow-Origin"] = "*"
+            resp.headers["Access-Control-Allow-Methods"] = "POST, GET, OPTIONS"
+            resp.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Signature, Authorization"
+            return resp, 200
+
         print(f"[RialPay Webhook HIT] payment_id={payment_id} bot={bot_username} "
               f"method={request.method} args={dict(request.args)} "
               f"json={request.get_json(silent=True)} form={dict(request.form)}")
@@ -525,6 +533,14 @@ def _plisio_webhook_server():
             _tb3.print_exc()
             print("RIALPAY_WEBHOOK_ERROR:", exc)
             return jsonify({"ok": True}), 200
+
+    @_app.after_request
+    def _add_cors_headers(response):
+        """Add CORS headers to all responses (needed for browser-based webhook testers)."""
+        response.headers.setdefault("Access-Control-Allow-Origin", "*")
+        response.headers.setdefault("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+        response.headers.setdefault("Access-Control-Allow-Headers", "Content-Type, X-Signature, Authorization")
+        return response
 
     import time as _time
     import socket as _socket
