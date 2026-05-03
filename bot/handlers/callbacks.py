@@ -211,6 +211,16 @@ def _verify_centralpay_payment(payment_id: int) -> dict:
     return {"verify": "process_error", "process_result": proc}
 
 
+_EXPIRED_PAYMENT_TEXT = "⏰ زمان پرداخت شما با این فاکتور به پایان رسیده است.\nلطفا دوباره اقدام کنید."
+_CENTRALPAY_VPN_NOTE = "\n\n⚠️ این درگاه فقط با فیلترشکن روشن باز می‌شود."
+
+
+def _expired_payment_kb():
+    kb = types.InlineKeyboardMarkup()
+    kb.add(types.InlineKeyboardButton("🔄 شروع مجدد", callback_data="nav:main"))
+    return kb
+
+
 def _fmt_users_label(max_users):
     if not max_users or max_users == 0:
         return "نامحدود"
@@ -3688,6 +3698,36 @@ def on_callback(call):
         except Exception:
             pass
 
+        # ── CentralPay payment open button; unlike URL buttons this can expire cleanly.
+        try:
+            if data.startswith("centralpay:open:"):
+                _pid = int(data.rsplit(":", 1)[-1])
+                _payment = get_payment(_pid)
+                if not _payment or _payment["user_id"] != uid:
+                    bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+                    return
+                if is_payment_expired(_payment):
+                    print(f"[EXPIRED PAYMENT IGNORED] payment_id={_pid}")
+                    bot.answer_callback_query(call.id, _EXPIRED_PAYMENT_TEXT, show_alert=True)
+                    try:
+                        bot.edit_message_text(
+                            _EXPIRED_PAYMENT_TEXT,
+                            call.message.chat.id,
+                            call.message.message_id,
+                            reply_markup=_expired_payment_kb(),
+                        )
+                    except Exception:
+                        pass
+                    return
+                pay_url = (_payment["receipt_text"] if "receipt_text" in _payment.keys() else "") or ""
+                if pay_url:
+                    bot.answer_callback_query(call.id, "در حال باز کردن صفحه پرداخت...", url=pay_url)
+                else:
+                    bot.answer_callback_query(call.id, "لینک پرداخت یافت نشد. دوباره اقدام کنید.", show_alert=True)
+                return
+        except Exception:
+            pass
+
         # ── Invoice expiration guard for every gateway verify button ─────────
         try:
             if ":verify:" in data and data.startswith(("pay:", "rpay:", "wallet:charge:", "mypnlcfgrpay:")):
@@ -3697,14 +3737,15 @@ def on_callback(call):
                     print(f"[EXPIRED PAYMENT IGNORED] payment_id={_pid}")
                     bot.answer_callback_query(
                         call.id,
-                        "⏳ زمان این فاکتور به پایان رسیده است. لطفاً مجدداً خرید خود را انجام دهید.",
+                        _EXPIRED_PAYMENT_TEXT,
                         show_alert=True,
                     )
                     try:
                         bot.edit_message_text(
-                            "⏳ زمان پرداخت شما به پایان رسید\nلطفاً مجدداً خرید خود را انجام دهید",
+                            _EXPIRED_PAYMENT_TEXT,
                             call.message.chat.id,
                             call.message.message_id,
+                            reply_markup=_expired_payment_kb(),
                         )
                     except Exception:
                         pass
@@ -6074,10 +6115,11 @@ def _dispatch_callback(call, uid, data):
             "💳 <b>پرداخت با سنترال‌پی — تمدید</b>\n\n"
             f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_rcp}\n\n"
             "برای پرداخت روی دکمه زیر بزنید. پس از اتمام پرداخت به ربات برگردید و روی «🔍 بررسی پرداخت» بزنید."
+            f"{_CENTRALPAY_VPN_NOTE}"
             f"{expiry_line_rcp}"
         )
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("💳 پرداخت با سنترال‌پی", url=pay_url_rcp))
+        kb.add(types.InlineKeyboardButton("💳 پرداخت با سنترال‌پی", callback_data=f"centralpay:open:{payment_id}"))
         kb.add(types.InlineKeyboardButton("🔍 بررسی پرداخت", callback_data=f"rpay:centralpay:verify:{payment_id}"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
@@ -7453,10 +7495,11 @@ def _dispatch_callback(call, uid, data):
             "💳 <b>پرداخت با سنترال‌پی</b>\n\n"
             f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_cp}\n\n"
             "برای پرداخت روی دکمه زیر بزنید. پس از اتمام پرداخت به ربات برگردید و روی «🔍 بررسی پرداخت» بزنید."
+            f"{_CENTRALPAY_VPN_NOTE}"
             f"{expiry_line_cp}"
         )
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("💳 پرداخت با سنترال‌پی", url=pay_url_cp))
+        kb.add(types.InlineKeyboardButton("💳 پرداخت با سنترال‌پی", callback_data=f"centralpay:open:{payment_id}"))
         kb.add(types.InlineKeyboardButton("🔍 بررسی پرداخت", callback_data=f"pay:centralpay:verify:{payment_id}"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
@@ -8384,8 +8427,9 @@ def _dispatch_callback(call, uid, data):
                 f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
                 show_alert=True)
             return
+        amount = int(amount)
         final_amount_cp = apply_gateway_fee("centralpay", amount)
-        payment_id = create_payment("wallet_charge", uid, None, final_amount_cp, "centralpay", status="pending")
+        payment_id = create_payment("wallet_charge", uid, None, amount, "centralpay", status="pending", final_amount=final_amount_cp)
         _bot_uname_cpwc = bot.get_me().username or ""
         ret_url_cpwc = build_centralpay_return_url(payment_id, _bot_uname_cpwc)
         ok_cp, res_cp = create_centralpay_link(final_amount_cp, uid, payment_id, ret_url_cpwc)
@@ -8408,13 +8452,14 @@ def _dispatch_callback(call, uid, data):
             fee_line_cpwc = f"\n💸 کارمزد: {fmt_price(final_amount_cp - amount)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_amount_cp)}</b> تومان"
         text = (
             "💳 <b>پرداخت با سنترال‌پی — شارژ کیف پول</b>\n\n"
-            f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان{fee_line_cpwc}\n\n"
+            f"💰 مبلغ قابل پرداخت: <b>{fmt_price(final_amount_cp)}</b> تومان{fee_line_cpwc}\n\n"
             "روی دکمه زیر بزنید و پرداخت را انجام دهید. پس از اتمام، روی «🔍 بررسی پرداخت» بزنید.\n\n"
             "اگر پرداخت تأیید شده باشد، کیف پول به‌صورت خودکار شارژ می‌شود."
+            f"{_CENTRALPAY_VPN_NOTE}"
             f"{expiry_line_cpwc}"
         )
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("💳 پرداخت با سنترال‌پی", url=pay_url_cpwc))
+        kb.add(types.InlineKeyboardButton("💳 پرداخت با سنترال‌پی", callback_data=f"centralpay:open:{payment_id}"))
         kb.add(types.InlineKeyboardButton("🔍 بررسی پرداخت", callback_data=f"wallet:charge:centralpay:verify:{payment_id}"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
@@ -10771,7 +10816,7 @@ def _dispatch_callback(call, uid, data):
             if final_cp_pnl != price:
                 fee_line_cpnl = f"\n💸 کارمزد: {fmt_price(final_cp_pnl - price)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_cp_pnl)}</b> تومان"
             kb_cpnl = types.InlineKeyboardMarkup()
-            kb_cpnl.add(types.InlineKeyboardButton("💳 پرداخت با سنترال‌پی", url=pay_url_cpnl))
+            kb_cpnl.add(types.InlineKeyboardButton("💳 پرداخت با سنترال‌پی", callback_data=f"centralpay:open:{payment_id}"))
             kb_cpnl.add(types.InlineKeyboardButton("🔍 بررسی پرداخت",
                         callback_data=f"mypnlcfgrpay:centralpay:verify:{payment_id}"))
             bot.answer_callback_query(call.id)
@@ -10779,6 +10824,7 @@ def _dispatch_callback(call, uid, data):
                 "💳 <b>پرداخت با سنترال‌پی (تمدید)</b>\n\n"
                 f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_cpnl}\n\n"
                 "برای پرداخت روی دکمه زیر بزنید. پس از اتمام پرداخت روی «🔍 بررسی پرداخت» بزنید."
+                f"{_CENTRALPAY_VPN_NOTE}"
                 f"{expiry_line_cpnl}",
                 kb_cpnl)
             return
@@ -11234,7 +11280,7 @@ def _dispatch_callback(call, uid, data):
             if final_cp_pnl2 != price:
                 fee_line_cp2 = f"\n💸 کارمزد: {fmt_price(final_cp_pnl2 - price)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_cp_pnl2)}</b> تومان"
             kb_cp2 = types.InlineKeyboardMarkup()
-            kb_cp2.add(types.InlineKeyboardButton("💳 پرداخت با سنترال‌پی", url=pay_url_cp2))
+            kb_cp2.add(types.InlineKeyboardButton("💳 پرداخت با سنترال‌پی", callback_data=f"centralpay:open:{payment_id}"))
             kb_cp2.add(types.InlineKeyboardButton("🔍 بررسی پرداخت",
                         callback_data=f"mypnlcfgrpay:centralpay:verify:{payment_id}"))
             bot.answer_callback_query(call.id)
@@ -11242,6 +11288,7 @@ def _dispatch_callback(call, uid, data):
                 "💳 <b>پرداخت با سنترال‌پی (تمدید)</b>\n\n"
                 f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_cp2}\n\n"
                 "برای پرداخت روی دکمه زیر بزنید. پس از اتمام پرداخت روی «🔍 بررسی پرداخت» بزنید."
+                f"{_CENTRALPAY_VPN_NOTE}"
                 f"{expiry_line_cp2}",
                 kb_cp2)
             return

@@ -1954,8 +1954,10 @@ def format_payment_expire_text(payment) -> str:
     if not expires_at:
         return ""
     if is_payment_expired(payment):
-        return "⏳ زمان پرداخت شما به پایان رسید\nلطفاً مجدداً خرید خود را انجام دهید"
-    return f"⏰ مهلت پرداخت تا: {expires_at}"
+        return "⏰ زمان پرداخت شما با این فاکتور به پایان رسیده است.\nلطفا دوباره اقدام کنید."
+    expires_dt = _parse_payment_datetime(expires_at)
+    expires_label = expires_dt.strftime("%H:%M") if expires_dt else str(expires_at)[11:16]
+    return f"⏰ مهلت پرداخت تا: {expires_label}"
 
 
 def create_payment(kind, user_id, package_id, amount, payment_method,
@@ -3861,6 +3863,10 @@ def get_gateway_fee_amount(gw_name: str, base_amount: int) -> int:
     """Return the fee to add on top of base_amount for this gateway (0 if disabled)."""
     if setting_get(f"gw_{gw_name}_fee_enabled", "0") != "1":
         return 0
+    try:
+        base_amount = int(base_amount or 0)
+    except (TypeError, ValueError):
+        return 0
     fee_type = setting_get(f"gw_{gw_name}_fee_type", "fixed")
     try:
         fee_value = float(setting_get(f"gw_{gw_name}_fee_value", "0") or "0")
@@ -3875,6 +3881,10 @@ def get_gateway_bonus_amount(gw_name: str, base_amount: int) -> int:
     """Return wallet bonus to credit after successful payment through this gateway (0 if disabled)."""
     if setting_get(f"gw_{gw_name}_bonus_enabled", "0") != "1":
         return 0
+    try:
+        base_amount = int(base_amount or 0)
+    except (TypeError, ValueError):
+        return 0
     bonus_type = setting_get(f"gw_{gw_name}_bonus_type", "fixed")
     try:
         bonus_value = float(setting_get(f"gw_{gw_name}_bonus_value", "0") or "0")
@@ -3887,4 +3897,5 @@ def get_gateway_bonus_amount(gw_name: str, base_amount: int) -> int:
 
 def apply_gateway_fee(gw_name: str, base_amount: int) -> int:
     """Return base_amount + fee for this gateway (fee-adjusted payable amount)."""
+    base_amount = int(base_amount or 0)
     return base_amount + get_gateway_fee_amount(gw_name, base_amount)

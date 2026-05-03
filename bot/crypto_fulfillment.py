@@ -298,9 +298,18 @@ def process_centralpay_verified_payment(payment_id: int,
         return {"status": "not_paid", "msg": err}
 
     # ── Amount validation ─────────────────────────────────────────────────────
+    def _payment_payable_amount(row) -> int:
+        try:
+            final_amount = row["final_amount"] if "final_amount" in row.keys() else None
+            if final_amount:
+                return int(final_amount)
+        except Exception:
+            pass
+        return int(row["amount"])
+
     returned_amount = verify_result.get("amount", 0) if isinstance(verify_result, dict) else 0
     if returned_amount:
-        expected = payment["amount"]
+        expected = _payment_payable_amount(payment)
         if abs(int(returned_amount) - expected) > expected * 0.05 + 100:
             print(f"[CentralPay] process_verified: amount mismatch payment {payment_id}"
                   f" expected={expected} got={returned_amount}")
@@ -326,8 +335,9 @@ def process_centralpay_verified_payment(payment_id: int,
     except Exception:
         pass
 
-    print(f"[CentralPay] process_verified: LOCKED & VERIFIED payment {payment_id} source={source}"
-          f" kind={payment['kind']} uid={payment['user_id']} amount={payment['amount']}")
+        payable_amount = _payment_payable_amount(payment)
+        print(f"[CentralPay] process_verified: LOCKED & VERIFIED payment {payment_id} source={source}"
+            f" kind={payment['kind']} uid={payment['user_id']} amount={payment['amount']} payable={payable_amount}")
 
     kind   = payment["kind"]
     uid    = payment["user_id"]
