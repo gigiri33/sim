@@ -460,6 +460,7 @@ StartLimitIntervalSec=0
 Type=simple
 WorkingDirectory=${DIR}
 EnvironmentFile=${DIR}/.env
+Environment=PYTHONUNBUFFERED=1
 ExecStart=${DIR}/venv/bin/python ${DIR}/main.py
 Restart=always
 RestartSec=5

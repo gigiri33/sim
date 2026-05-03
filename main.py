@@ -6,6 +6,13 @@ Run with:  python main.py
 """
 import threading
 import json
+import sys
+
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
+except Exception:
+    pass
 
 from bot.db import init_db
 from bot.db import cleanup_stale_reservations
