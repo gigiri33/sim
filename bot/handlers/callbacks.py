@@ -6153,8 +6153,10 @@ def _dispatch_callback(call, uid, data):
                 back_button(f"renew:{purchase_id}")); return
         pay_url_rp2 = res_rp2.get("payment_url", "")
         tok_rp2     = res_rp2.get("token", "")
+        _rp2_real_amount = res_rp2.get("amount", final_rprice_rp)
         with get_conn() as conn:
-            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (tok_rp2, payment_id))
+            conn.execute("UPDATE payments SET receipt_text=?, gateway_ref=? WHERE id=?",
+                         (tok_rp2, str(_rp2_real_amount), payment_id))
         expiry_line_rp2 = format_payment_expire_text(get_payment(payment_id))
         expiry_line_rp2 = f"\n\n{expiry_line_rp2}" if expiry_line_rp2 else ""
         fee_line_rp2 = ""
@@ -7601,8 +7603,10 @@ def _dispatch_callback(call, uid, data):
                 back_button(f"buy:p:{package_id}")); return
         pay_url_rp = res_rp.get("payment_url", "")
         tok_rp     = res_rp.get("token", "")
+        _rp_real_amount = res_rp.get("amount", final_rp_price)
         with get_conn() as conn:
-            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (tok_rp, payment_id))
+            conn.execute("UPDATE payments SET receipt_text=?, gateway_ref=? WHERE id=?",
+                         (tok_rp, str(_rp_real_amount), payment_id))
         expiry_line_rp = format_payment_expire_text(get_payment(payment_id))
         expiry_line_rp = f"\n\n{expiry_line_rp}" if expiry_line_rp else ""
         fee_line_rp = ""
@@ -8622,8 +8626,10 @@ def _dispatch_callback(call, uid, data):
                 back_button("wallet:charge")); return
         pay_url_rp3 = res_rp3.get("payment_url", "")
         tok_rp3     = res_rp3.get("token", "")
+        _rp3_real_amount = res_rp3.get("amount", final_amount_rp3)
         with get_conn() as conn:
-            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (tok_rp3, payment_id))
+            conn.execute("UPDATE payments SET receipt_text=?, gateway_ref=? WHERE id=?",
+                         (tok_rp3, str(_rp3_real_amount), payment_id))
         expiry_line_rp3 = format_payment_expire_text(get_payment(payment_id))
         expiry_line_rp3 = f"\n\n{expiry_line_rp3}" if expiry_line_rp3 else ""
         fee_line_rp3 = ""
@@ -11074,8 +11080,10 @@ def _dispatch_callback(call, uid, data):
                     back_button(f"mypnlcfg:renewconfirm:{config_id}")); return
             pay_url_rpnl = res_rp_pnl.get("payment_url", "")
             tok_rpnl     = res_rp_pnl.get("token", "")
+            _rpnl_real_amount = res_rp_pnl.get("amount", final_rp_pnl)
             with get_conn() as conn:
-                conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (tok_rpnl, payment_id))
+                conn.execute("UPDATE payments SET receipt_text=?, gateway_ref=? WHERE id=?",
+                             (tok_rpnl, str(_rpnl_real_amount), payment_id))
             expiry_line_rpnl = format_payment_expire_text(get_payment(payment_id))
             expiry_line_rpnl = f"\n\n{expiry_line_rpnl}" if expiry_line_rpnl else ""
             fee_line_rpnl = ""
@@ -11612,8 +11620,10 @@ def _dispatch_callback(call, uid, data):
                     back_button(f"mypnlcfg:renewconfirm:{config_id}")); return
             pay_url_rpnl2 = res_rp_pnl2.get("payment_url", "")
             tok_rpnl2     = res_rp_pnl2.get("token", "")
+            _rpnl2_real_amount = res_rp_pnl2.get("amount", final_rp_pnl2)
             with get_conn() as conn:
-                conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (tok_rpnl2, payment_id))
+                conn.execute("UPDATE payments SET receipt_text=?, gateway_ref=? WHERE id=?",
+                             (tok_rpnl2, str(_rpnl2_real_amount), payment_id))
             expiry_line_rpnl2 = format_payment_expire_text(get_payment(payment_id))
             expiry_line_rpnl2 = f"\n\n{expiry_line_rpnl2}" if expiry_line_rpnl2 else ""
             fee_line_rpnl2 = ""

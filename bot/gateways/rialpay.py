@@ -204,8 +204,18 @@ def process_rialpay_verified_payment(payment_id: int,
         if ext_amount is not None:
             try:
                 ext_amount_int = int(float(ext_amount))
-                expected = payment["amount"]
-                if abs(ext_amount_int - expected) > expected * 0.05 + 100:
+                # Use gateway_ref (RialPay's actual invoice amount) if available,
+                # otherwise fall back to DB amount with generous tolerance (20%)
+                expected_str = (payment["gateway_ref"] or "").strip() if payment["gateway_ref"] else ""
+                if expected_str:
+                    try:
+                        expected = int(float(expected_str))
+                    except Exception:
+                        expected = payment["amount"]
+                else:
+                    expected = payment["amount"]
+                tolerance = max(int(expected * 0.20), 500)
+                if abs(ext_amount_int - expected) > tolerance:
                     print(f"[RialPay] process_verified: amount mismatch payment={payment_id}"
                           f" expected={expected} got={ext_amount_int}")
                     return {"status": "amount_mismatch", "expected": expected, "got": ext_amount_int}
