@@ -3559,6 +3559,7 @@ def universal_handler(message):
                 return
             val_text = str(int(val)) if isinstance(val, float) and val.is_integer() else str(val)
             setting_set(f"gw_{gw}_fee_value", val_text)
+            setting_set(f"gw_{gw}_fee_enabled", "1")
             log_admin_action(uid, f"کارمزد درگاه {gw}: {val}")
             state_clear(uid)
             bot.send_message(uid, f"✅ مقدار کارمزد تنظیم شد: {val_text}", reply_markup=back_button(f"adm:gw:{gw}:fee"))

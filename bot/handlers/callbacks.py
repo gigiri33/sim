@@ -3721,7 +3721,24 @@ def on_callback(call):
                     return
                 pay_url = (_payment["receipt_text"] if "receipt_text" in _payment.keys() else "") or ""
                 if pay_url:
-                    bot.answer_callback_query(call.id, "در حال باز کردن صفحه پرداخت...", url=pay_url)
+                    bot.answer_callback_query(call.id)
+                    # Build verify callback based on payment kind
+                    _kind = _payment["kind"]
+                    if _kind == "wallet_charge":
+                        _verify_cb = f"wallet:charge:centralpay:verify:{_pid}"
+                    elif _kind == "renewal":
+                        _verify_cb = f"rpay:centralpay:verify:{_pid}"
+                    elif _kind == "pnlcfg_renewal":
+                        _verify_cb = f"mypnlcfgrpay:centralpay:verify:{_pid}"
+                    else:
+                        _verify_cb = f"pay:centralpay:verify:{_pid}"
+                    _open_kb = types.InlineKeyboardMarkup()
+                    _open_kb.add(types.InlineKeyboardButton("🌐 رفتن به صفحه پرداخت", url=pay_url))
+                    _open_kb.add(types.InlineKeyboardButton("🔍 بررسی پرداخت", callback_data=_verify_cb))
+                    try:
+                        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=_open_kb)
+                    except Exception:
+                        pass
                 else:
                     bot.answer_callback_query(call.id, "لینک پرداخت یافت نشد. دوباره اقدام کنید.", show_alert=True)
                 return
