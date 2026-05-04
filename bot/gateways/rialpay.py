@@ -36,6 +36,8 @@
 import json
 import hmac
 import hashlib
+import re
+import urllib.parse
 import urllib.request
 import urllib.error
 
@@ -43,6 +45,36 @@ from ..db import setting_get
 
 
 RIALPAY_DEFAULT_CREATE_URL = "https://rialbotapi.shop/api/create_invoice.php"
+RIALPAY_DEFAULT_CHECK_URL = "https://rialbotapi.shop/api/invoicetest.php"
+
+
+def _extract_token_from_link(link: str) -> str:
+    """Extract RialPay invoice token from links like t.me/Rialpaybot?start=inv_<token>."""
+    link = str(link or "").strip()
+    if not link:
+        return ""
+    try:
+        parsed = urllib.parse.urlparse(link)
+        qs = urllib.parse.parse_qs(parsed.query or "")
+        start = (qs.get("start") or [""])[0]
+        if start:
+            return start[4:] if start.startswith("inv_") else start
+    except Exception:
+        pass
+    m = re.search(r"(?:start=|/)inv_([A-Za-z0-9_-]+)", link)
+    if m:
+        return m.group(1)
+    m = re.search(r"inv_([A-Za-z0-9_-]+)", link)
+    return m.group(1) if m else ""
+
+
+def _pick_first(data: dict, keys: tuple) -> str:
+    """Return the first non-empty value from a dict as string."""
+    for key in keys:
+        val = data.get(key)
+        if val not in (None, ""):
+            return str(val).strip()
+    return ""
 
 
 def get_rialpay_callback_base_url() -> str:
@@ -136,8 +168,14 @@ def create_rialpay_invoice(amount_toman: int, user_id, order_id, callback_url: s
     api_status = data.get("status")
 
     if api_status is True or str(api_status).lower() in ("true", "1", "ok", "success"):
-        token = str(data.get("token") or "").strip()
-        link  = str(data.get("link")  or data.get("payment_url") or "").strip()
+        link = _pick_first(data, (
+            "link", "payment_url", "pay_url", "url", "invoice_url", "payment_link",
+        ))
+        token = _pick_first(data, (
+            "token", "invoice_token", "invoiceToken", "transaction_token", "hash",
+        ))
+        if not token:
+            token = _extract_token_from_link(link)
         if token and link:
             return True, {
                 "status":      "created",
@@ -148,16 +186,13 @@ def create_rialpay_invoice(amount_toman: int, user_id, order_id, callback_url: s
             }
         return False, {
             "status": "error",
-            "error":  f"ریال‌پی پاسخ ناقص برگرداند (token یا link خالی است): {raw[:300]}",
+            "error":  f"ریال‌پی پاسخ ناقص برگرداند (توکن یا لینک پرداخت خالی است): {raw[:300]}",
             "raw":    data,
         }
 
     err_msg = _extract_error(data) or raw[:300]
     print(f"[RialPay] create_invoice FAILED order_id={order_id}: status={api_status!r} raw={raw[:400]}")
     return False, {"status": "error", "error": f"ساخت فاکتور ریال‌پی ناموفق بود: {err_msg}\n\nپاسخ سرور: {raw[:200]}", "raw": data}
-
-
-RIALPAY_CHECK_URL = "https://rialbotapi.shop/api/invoicetest.php"
 
 
 def check_rialpay_invoice_status(token: str) -> dict:
@@ -176,9 +211,10 @@ def check_rialpay_invoice_status(token: str) -> dict:
     if not token:
         return {"status": "error", "error": "توکن فاکتور خالی است."}
 
+    check_url = (setting_get("rialpay_check_invoice_url", "") or RIALPAY_DEFAULT_CHECK_URL).strip()
     form = _up.urlencode({"token": token}).encode("utf-8")
     req  = urllib.request.Request(
-        RIALPAY_CHECK_URL,
+        check_url,
         data=form,
         headers={
             "Content-Type": "application/x-www-form-urlencoded",
@@ -205,16 +241,17 @@ def check_rialpay_invoice_status(token: str) -> dict:
 
     invoice_status = str(parsed.get("invoice_status") or "").strip().lower()
     raw_status     = parsed.get("raw_status")
+    raw_status_s   = str(raw_status).strip().lower()
 
     # raw_status: 0=pending, 1=paid (confirmed by support)
-    if raw_status == 1 or invoice_status in ("paid", "success", "completed", "successful"):
+    if raw_status_s in ("1", "paid", "success", "completed", "successful") or invoice_status in ("paid", "success", "completed", "successful"):
         return {
             "status":         "paid",
             "seller_receive": parsed.get("seller_receive"),
             "invoice_id":     parsed.get("invoice_id"),
             "raw":            parsed,
         }
-    if invoice_status in ("rejected", "failed", "cancelled", "canceled", "cancel"):
+    if raw_status_s in ("-1", "2", "rejected", "failed", "cancelled", "canceled", "cancel") or invoice_status in ("rejected", "failed", "cancelled", "canceled", "cancel"):
         return {"status": "rejected", "raw": parsed}
 
     # default: pending

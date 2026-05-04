@@ -520,6 +520,7 @@ def _run_init_db_migrations():
             "rialpay_api_key":                    "",
             "rialpay_webhook_secret":             "",
             "rialpay_create_invoice_url":         "https://rialbotapi.shop/api/create_invoice.php",
+            "rialpay_check_invoice_url":          "https://rialbotapi.shop/api/invoicetest.php",
             "rialpay_callback_base_url":          "",
             # ── Invoice expiration ───────────────────────────────────────────
             "invoice_expiry_enabled":             "1",
