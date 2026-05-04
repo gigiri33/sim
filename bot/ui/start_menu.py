@@ -14,7 +14,10 @@ DEFAULT_LAYOUT = [
     ["buy_service", "my_services"],
     ["free_test"],
     ["wallet", "account"],
+    ["voucher", "referral"],
+    ["tariff", "apps"],
     ["support"],
+    ["agency"],
     ["admin_panel"],
 ]
 
@@ -47,14 +50,17 @@ def _free_test_visible(user_id: int) -> bool:
 
 
 BUTTONS: dict[str, StartMenuButton] = {
-    "support": StartMenuButton("support", "پشتیبانی", "support", "5467539229468793355"),
     "buy_service": StartMenuButton("buy_service", "خرید سرویس جدید", "buy:start", "5312361253610475399"),
     "my_services": StartMenuButton("my_services", "سرویس‌های من", "my_configs", "5361741454685256344"),
+    "free_test": StartMenuButton("free_test", "تست رایگان", "test:start", "6283073379184415506", "free_test_enabled", condition=_free_test_visible),
     "wallet": StartMenuButton("wallet", '<tg-emoji emoji-id="5256186332669035163">💰</tg-emoji> کیف پول', "wallet:menu", "5256186332669035163", condition=wallet_pay_enabled_for),
     "account": StartMenuButton("account", "حساب کاربری", "profile", "5373012449597335010", "show_account_button"),
     "voucher": StartMenuButton("voucher", "ثبت کارت هدیه", "voucher:redeem", "5418010521309815154", "vouchers_enabled"),
+    "referral": StartMenuButton("referral", "زیرمجموعه‌گیری", "referral:menu", "5453957997418004470", "referral_enabled"),
+    "tariff": StartMenuButton("tariff", '<tg-emoji emoji-id="5431722320366429593">🔢</tg-emoji> تعرفه', "tariff:show", "5431722320366429593", "tariff_enabled"),
+    "apps": StartMenuButton("apps", '<tg-emoji emoji-id="5244612521087749872">📥</tg-emoji> دریافت اپلیکیشن‌ها', "apps:menu", "5244612521087749872", "apps_enabled"),
+    "support": StartMenuButton("support", "پشتیبانی", "support", "5467539229468793355"),
     "agency": StartMenuButton("agency", "درخواست نمایندگی", "agency:request", "5372957680174384345", "agency_request_enabled"),
-    "free_test": StartMenuButton("free_test", "تست رایگان", "test:start", "6283073379184415506", "free_test_enabled", condition=_free_test_visible),
     "admin_panel": StartMenuButton("admin_panel", "ورود به پنل مدیریت", "admin:panel", "5370935802844946281", admin_only=True),
 }
 
