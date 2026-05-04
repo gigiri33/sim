@@ -11,7 +11,7 @@ from ..helpers import is_admin, admin_has_perm
 from .start_menu import build_main_menu_rows
 
 
-def _btn(text, callback_data=None, url=None, emoji_id=None, copy_text=None):
+def _btn(text, callback_data=None, url=None, emoji_id=None, copy_text=None, style=None):
     """Build an InlineKeyboardButton dict with optional icon_custom_emoji_id."""
     d = {"text": text}
     if callback_data is not None:
@@ -22,6 +22,8 @@ def _btn(text, callback_data=None, url=None, emoji_id=None, copy_text=None):
         d["icon_custom_emoji_id"] = str(emoji_id)
     if copy_text is not None:
         d["copy_text"] = {"text": str(copy_text)}
+    if style is not None:
+        d["style"] = style
     return d
 
 
@@ -47,6 +49,7 @@ def kb_main(user_id):
                 item["text"],
                 callback_data=item["callback_data"],
                 emoji_id=item.get("emoji_id"),
+                style=item.get("style"),
             )
             for item in row
         ])

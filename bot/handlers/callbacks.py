@@ -15502,6 +15502,7 @@ def _dispatch_callback(call, uid, data):
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("✅ وضعیت دکمه‌ها", callback_data="admin:startmenu:status"))
         kb.add(types.InlineKeyboardButton("✏️ ویرایش متن دکمه‌ها", callback_data="admin:startmenu:texts"))
+        kb.add(types.InlineKeyboardButton("🎨 رنگ دکمه‌های منو استارت", callback_data="admin:startmenu:colors"))
         kb.add(types.InlineKeyboardButton("🧩 تغییر ترتیب و ردیف‌ها", callback_data="admin:startmenu:layout"))
         kb.add(types.InlineKeyboardButton("🔄 بازنشانی چیدمان پیش‌فرض", callback_data="admin:startmenu:reset_layout"))
         kb.add(types.InlineKeyboardButton("🧹 بازنشانی متن دکمه‌ها", callback_data="admin:startmenu:reset_texts"))
@@ -15567,6 +15568,28 @@ def _dispatch_callback(call, uid, data):
         if not admin_has_perm(uid, "settings"):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
             return
+        from ..ui.start_menu import BUTTONS, get_button_raw_text, get_button_emoji_id
+        key = data.split(":")[-1]
+        if key not in BUTTONS:
+            bot.answer_callback_query(call.id, "کلید نامعتبر است.", show_alert=True)
+            return
+        emoji_cur = get_button_emoji_id(key)
+        kb2 = types.InlineKeyboardMarkup()
+        kb2.add(types.InlineKeyboardButton("✏️ ویرایش متن دکمه", callback_data=f"admin:startmenu:edittext:{key}"))
+        kb2.add(types.InlineKeyboardButton("✨ ویرایش ایموجی دکمه", callback_data=f"admin:startmenu:editemoji:{key}"))
+        kb2.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:startmenu:texts", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"✏️ <b>ویرایش دکمه:</b> <code>{key}</code>\n\n"
+            f"متن فعلی:\n<blockquote>{esc(get_button_raw_text(key))}</blockquote>\n"
+            f"ایموجی فعلی: <code>{emoji_cur or '—'}</code>\n\n"
+            "یک گزینه را انتخاب کنید:", kb2)
+        return
+
+    if data.startswith("admin:startmenu:edittext:"):
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
         from ..ui.start_menu import BUTTONS, get_button_raw_text
         key = data.split(":")[-1]
         if key not in BUTTONS:
@@ -15579,8 +15602,96 @@ def _dispatch_callback(call, uid, data):
             f"کلید: <code>{key}</code>\n"
             f"متن فعلی:\n<blockquote>{esc(get_button_raw_text(key))}</blockquote>\n\n"
             "متن جدید را ارسال کنید. برای برگشت به پیش‌فرض، <code>-</code> بفرستید.",
-            back_button("admin:startmenu:texts"))
+            back_button(f"admin:startmenu:text:{key}"))
         return
+
+    if data.startswith("admin:startmenu:editemoji:"):
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        from ..ui.start_menu import BUTTONS, get_button_emoji_id
+        key = data.split(":")[-1]
+        if key not in BUTTONS:
+            bot.answer_callback_query(call.id, "کلید نامعتبر است.", show_alert=True)
+            return
+        state_set(uid, "admin_startmenu_edit_emoji", button_key=key)
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"✨ <b>ویرایش ایموجی دکمه</b>\n\n"
+            f"کلید: <code>{key}</code>\n"
+            f"ایموجی فعلی: <code>{get_button_emoji_id(key) or '—'}</code>\n\n"
+            "یک پیام حاوی ایموجی پرمیوم بفرستید، یا آیدی عددی آن را بنویسید.\n"
+            "برای برگشت به پیش‌فرض، <code>-</code> بفرستید.",
+            back_button(f"admin:startmenu:text:{key}"))
+        return
+
+    if data == "admin:startmenu:colors":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        from ..ui.start_menu import BUTTONS, get_button_raw_text, get_button_style, button_text_for_telegram
+        _style_labels = {"primary": "🔵 آبی", "success": "🟢 سبز", "danger": "🔴 قرمز", "": "⬜ پیش‌فرض"}
+        kb2 = types.InlineKeyboardMarkup()
+        for key in BUTTONS:
+            label = button_text_for_telegram(get_button_raw_text(key))
+            sty = get_button_style(key)
+            sty_label = _style_labels.get(sty, "⬜ پیش‌فرض")
+            kb2.add(types.InlineKeyboardButton(f"{label} — {sty_label}", callback_data=f"admin:startmenu:color:{key}"))
+        kb2.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:startmenu", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "🎨 <b>رنگ دکمه‌های منو استارت</b>\n\nیک دکمه را برای تغییر رنگ انتخاب کنید:", kb2)
+        return
+
+    if data.startswith("admin:startmenu:color:") and not data.startswith("admin:startmenu:setcolor:"):
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        from ..ui.start_menu import BUTTONS, get_button_raw_text, get_button_style, button_text_for_telegram
+        key = data[len("admin:startmenu:color:"):]
+        if key not in BUTTONS:
+            bot.answer_callback_query(call.id, "کلید نامعتبر است.", show_alert=True)
+            return
+        label = button_text_for_telegram(get_button_raw_text(key))
+        cur_style = get_button_style(key)
+        # Build color picker using raw markup so button styles are applied
+        from ..ui.keyboards import _raw_markup
+        rows = [
+            [{"text": "⬜ پیش‌فرض (شیشه‌ای)", "callback_data": f"admin:startmenu:setcolor:{key}:default"}],
+            [{"text": "🔵 آبی", "callback_data": f"admin:startmenu:setcolor:{key}:primary", "style": "primary"}],
+            [{"text": "🟢 سبز", "callback_data": f"admin:startmenu:setcolor:{key}:success", "style": "success"}],
+            [{"text": "🔴 قرمز", "callback_data": f"admin:startmenu:setcolor:{key}:danger", "style": "danger"}],
+            [{"text": "بازگشت", "callback_data": "admin:startmenu:colors", "icon_custom_emoji_id": "5253997076169115797"}],
+        ]
+        _style_labels = {"primary": "🔵 آبی", "success": "🟢 سبز", "danger": "🔴 قرمز", "": "⬜ پیش‌فرض"}
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"🎨 <b>رنگ دکمه:</b> {esc(label)}\n\n"
+            f"رنگ فعلی: {_style_labels.get(cur_style, '⬜ پیش‌فرض')}\n\n"
+            "رنگ جدید را انتخاب کنید:",
+            _raw_markup(rows))
+        return
+
+    if data.startswith("admin:startmenu:setcolor:"):
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        from ..ui.start_menu import BUTTONS
+        # format: admin:startmenu:setcolor:{key}:{style}
+        # key may not contain ':', style is last segment
+        rest = data[len("admin:startmenu:setcolor:"):]
+        last_colon = rest.rfind(":")
+        key = rest[:last_colon]
+        style_val = rest[last_colon + 1:]
+        if key not in BUTTONS:
+            bot.answer_callback_query(call.id, "کلید نامعتبر است.", show_alert=True)
+            return
+        save_val = "" if style_val == "default" else style_val
+        setting_set(f"start_menu_style:{key}", save_val)
+        _style_labels = {"primary": "🔵 آبی", "success": "🟢 سبز", "danger": "🔴 قرمز", "default": "⬜ پیش‌فرض"}
+        bot.answer_callback_query(call.id, f"رنگ دکمه {key} تغییر کرد به {_style_labels.get(style_val, style_val)}")
+        _fake_call(call, "admin:startmenu:colors")
+        return
+
 
     if data == "admin:startmenu:layout":
         if not admin_has_perm(uid, "settings"):

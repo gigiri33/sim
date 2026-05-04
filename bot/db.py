@@ -533,10 +533,12 @@ def _run_init_db_migrations():
             # ── Start menu layout / button texts ──────────────────────────────
             "show_account_button":                "1",
             "start_menu_layout":                  "[[\"buy_service\",\"my_services\"],[\"free_test\"],[\"wallet\",\"account\"],[\"voucher\",\"referral\"],[\"tariff\",\"apps\"],[\"support\"],[\"agency\"],[\"admin_panel\"]]",
-            "start_menu_text:wallet":             "<tg-emoji emoji-id=\"5256186332669035163\">💰</tg-emoji> کیف پول",
-            "start_menu_text:apps":               "<tg-emoji emoji-id=\"5244612521087749872\">📥</tg-emoji> دریافت اپلیکیشن ها",
-            "start_menu_text:tariff":             "<tg-emoji emoji-id=\"5431722320366429593\">🔢</tg-emoji> تعرفه",
+            "start_menu_text:wallet":             "کیف پول",
+            "start_menu_text:apps":               "دریافت اپلیکیشن‌ها",
+            "start_menu_text:tariff":             "تعرفه",
             "start_menu_enabled:wallet":          "1",
+            "start_menu_style:buy_service":       "primary",
+            "start_menu_style:my_services":       "success",
         }
         for coin, _ in CRYPTO_COINS:
             defaults[f"crypto_{coin}"] = ""

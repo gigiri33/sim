@@ -53,12 +53,12 @@ BUTTONS: dict[str, StartMenuButton] = {
     "buy_service": StartMenuButton("buy_service", "خرید سرویس جدید", "buy:start", "5312361253610475399"),
     "my_services": StartMenuButton("my_services", "سرویس‌های من", "my_configs", "5361741454685256344"),
     "free_test": StartMenuButton("free_test", "تست رایگان", "test:start", "6283073379184415506", "free_test_enabled", condition=_free_test_visible),
-    "wallet": StartMenuButton("wallet", '<tg-emoji emoji-id="5256186332669035163">💰</tg-emoji> کیف پول', "wallet:menu", "5256186332669035163", condition=wallet_pay_enabled_for),
+    "wallet": StartMenuButton("wallet", "کیف پول", "wallet:menu", "5256186332669035163", condition=wallet_pay_enabled_for),
     "account": StartMenuButton("account", "حساب کاربری", "profile", "5373012449597335010", "show_account_button"),
     "voucher": StartMenuButton("voucher", "ثبت کارت هدیه", "voucher:redeem", "5418010521309815154", "vouchers_enabled"),
     "referral": StartMenuButton("referral", "زیرمجموعه‌گیری", "referral:menu", "5453957997418004470", "referral_enabled"),
-    "tariff": StartMenuButton("tariff", '<tg-emoji emoji-id="5431722320366429593">🔢</tg-emoji> تعرفه', "tariff:show", "5431722320366429593", "tariff_enabled"),
-    "apps": StartMenuButton("apps", '<tg-emoji emoji-id="5244612521087749872">📥</tg-emoji> دریافت اپلیکیشن‌ها', "apps:menu", "5244612521087749872", "apps_enabled"),
+    "tariff": StartMenuButton("tariff", "تعرفه", "tariff:show", "5431722320366429593", "tariff_enabled"),
+    "apps": StartMenuButton("apps", "دریافت اپلیکیشن‌ها", "apps:menu", "5244612521087749872", "apps_enabled"),
     "support": StartMenuButton("support", "پشتیبانی", "support", "5467539229468793355"),
     "agency": StartMenuButton("agency", "درخواست نمایندگی", "agency:request", "5372957680174384345", "agency_request_enabled"),
     "admin_panel": StartMenuButton("admin_panel", "ورود به پنل مدیریت", "admin:panel", "5370935802844946281", admin_only=True),
@@ -98,9 +98,18 @@ def button_admin_enabled(key: str) -> bool:
 def get_button_raw_text(key: str) -> str:
     button = BUTTONS[key]
     custom = setting_get(f"start_menu_text:{key}", "")
-    if custom:
-        return custom
-    return button.default_text
+    return custom if custom else button.default_text
+
+
+def get_button_emoji_id(key: str) -> str:
+    """Return per-button emoji_id override from settings, falling back to default."""
+    button = BUTTONS[key]
+    return setting_get(f"start_menu_emoji:{key}", "") or button.emoji_id
+
+
+def get_button_style(key: str) -> str:
+    """Return button style (primary/success/danger) for Telegram API or empty string."""
+    return setting_get(f"start_menu_style:{key}", "")
 
 
 _TG_EMOJI_RE = re.compile(r'<tg-emoji\s+emoji-id=["\'][^"\']+["\']\s*>(.*?)</tg-emoji>', re.I | re.S)
@@ -115,11 +124,12 @@ def button_text_for_telegram(raw_text: str) -> str:
 
 
 def get_button_payload(key: str) -> dict:
-    button = BUTTONS[key]
+    sty = get_button_style(key)
     return {
         "text": button_text_for_telegram(get_button_raw_text(key)),
-        "callback_data": button.callback_data,
-        "emoji_id": button.emoji_id or None,
+        "callback_data": BUTTONS[key].callback_data,
+        "emoji_id": get_button_emoji_id(key) or None,
+        "style": sty or None,
     }
 
 

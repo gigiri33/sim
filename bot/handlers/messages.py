@@ -3975,6 +3975,48 @@ def universal_handler(message):
                 bot.send_message(uid, preview, parse_mode="HTML", reply_markup=back_button("admin:startmenu:texts"))
             return
 
+        if sn == "admin_startmenu_edit_emoji" and is_admin(uid):
+            from ..ui.start_menu import BUTTONS, get_button_emoji_id
+            from ..ui.premium_emoji import tg_emoji as _tge
+            key = state_data(uid).get("button_key")
+            if key not in BUTTONS:
+                state_clear(uid)
+                bot.send_message(uid, "⚠️ کلید دکمه نامعتبر است.", reply_markup=back_button("admin:startmenu:texts"))
+                return
+            raw_text = (message.text or "").strip()
+            if raw_text == "-":
+                setting_set(f"start_menu_emoji:{key}", "")
+                log_admin_action(uid, f"ایموجی دکمه {key} به پیش‌فرض برگشت")
+                state_clear(uid)
+                bot.send_message(uid, "✅ ایموجی دکمه به پیش‌فرض برگشت.", reply_markup=back_button(f"admin:startmenu:text:{key}"))
+                return
+            # Try to extract custom_emoji_id from message entities
+            entities = message.entities or []
+            custom_emoji_id = None
+            for e in entities:
+                if e.type == "custom_emoji":
+                    custom_emoji_id = e.custom_emoji_id
+                    break
+            # Fall back to plain numeric ID if admin typed it directly
+            if not custom_emoji_id and raw_text.isdigit() and len(raw_text) >= 10:
+                custom_emoji_id = raw_text
+            if not custom_emoji_id:
+                bot.send_message(uid,
+                    "⚠️ ایموجی پرمیوم پیدا نشد.\n\n"
+                    "یک پیام حاوی ایموجی پرمیوم بفرستید، یا آیدی عددی آن را بنویسید.\n"
+                    "برای لغو: <code>-</code>",
+                    parse_mode="HTML")
+                return
+            setting_set(f"start_menu_emoji:{key}", custom_emoji_id)
+            log_admin_action(uid, f"ایموجی دکمه {key} تغییر کرد به {custom_emoji_id}")
+            state_clear(uid)
+            preview_emoji = _tge(custom_emoji_id, "✨")
+            bot.send_message(uid,
+                f"✅ ایموجی دکمه ذخیره شد.\n\nآیدی: <code>{custom_emoji_id}</code>\nپیش‌نمایش: {preview_emoji}",
+                parse_mode="HTML",
+                reply_markup=back_button(f"admin:startmenu:text:{key}"))
+            return
+
         if sn == "admin_startmenu_edit_layout" and is_admin(uid):
             import json as _json
             from ..ui.start_menu import parse_layout_text, BUTTONS, button_admin_enabled
