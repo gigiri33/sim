@@ -70,7 +70,7 @@ def create_rialpay_invoice(amount_toman: int, user_id, order_id, callback_url: s
         "order_id": str(order_id),
     }).encode("utf-8")
 
-    print(f"[RialPay] create_invoice → POST {create_url} | order_id={order_id} amount={amount_toman}")
+    print(f"[RialPay] create_invoice → POST {create_url} | order_id={order_id} amount={amount_toman} callback={callback_url!r}")
 
     req = urllib.request.Request(
         create_url,
