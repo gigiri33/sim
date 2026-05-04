@@ -15464,8 +15464,6 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("📢 کانال قفل",           callback_data="adm:locked_channels"))
         kb.add(types.InlineKeyboardButton("🎁 تست رایگان",      callback_data="adm:set:freetest"))
         kb.add(types.InlineKeyboardButton("� متن‌های ربات",    callback_data="adm:bot_texts"))
-        _account_icon = "✅" if setting_get("show_account_button", "1") == "1" else "❌"
-        kb.add(types.InlineKeyboardButton(f"{_account_icon} نمایش حساب کاربری", callback_data="adm:set:show_account"))
         kb.add(types.InlineKeyboardButton("🧩 چیدمان و متن های منو استارت", callback_data="admin:startmenu"))
         kb.add(types.InlineKeyboardButton("🏪 مدیریت فروش",    callback_data="adm:set:shop"))
         kb.add(types.InlineKeyboardButton("📱 جمع‌آوری شماره تلفن", callback_data="adm:set:phone"))
@@ -15478,19 +15476,6 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "⚙️ <b>تنظیمات</b>", kb)
-        return
-
-    if data == "adm:set:show_account":
-        if not admin_has_perm(uid, "settings"):
-            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
-            return
-        cur = setting_get("show_account_button", "1")
-        new_val = "0" if cur == "1" else "1"
-        setting_set("show_account_button", new_val)
-        setting_set("start_menu_enabled:account", new_val)
-        log_admin_action(uid, f"نمایش حساب کاربری {'فعال' if new_val == '1' else 'غیرفعال'} شد")
-        bot.answer_callback_query(call.id, "تغییر یافت.")
-        _fake_call(call, "admin:settings")
         return
 
     # ── Admin: Start menu layout/texts ───────────────────────────────────────

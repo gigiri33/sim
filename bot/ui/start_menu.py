@@ -54,7 +54,7 @@ BUTTONS: dict[str, StartMenuButton] = {
     "my_services": StartMenuButton("my_services", "سرویس‌های من", "my_configs", "5361741454685256344"),
     "free_test": StartMenuButton("free_test", "تست رایگان", "test:start", "6283073379184415506", "free_test_enabled", condition=_free_test_visible),
     "wallet": StartMenuButton("wallet", "کیف پول", "wallet:menu", "5256186332669035163", condition=wallet_pay_enabled_for),
-    "account": StartMenuButton("account", "حساب کاربری", "profile", "5373012449597335010", "show_account_button"),
+    "account": StartMenuButton("account", "حساب کاربری", "profile", "5373012449597335010"),
     "voucher": StartMenuButton("voucher", "ثبت کارت هدیه", "voucher:redeem", "5418010521309815154", "vouchers_enabled"),
     "referral": StartMenuButton("referral", "زیرمجموعه‌گیری", "referral:menu", "5453957997418004470", "referral_enabled"),
     "tariff": StartMenuButton("tariff", "تعرفه", "tariff:show", "5431722320366429593", "tariff_enabled"),
