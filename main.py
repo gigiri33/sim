@@ -470,6 +470,14 @@ def _plisio_webhook_server():
         try:
             from bot.gateways.rialpay import verify_rialpay_sign, normalize_rialpay_status, process_rialpay_verified_payment
             from bot.db import get_payment
+            from bot.bot_instance import bot as _bot
+
+            # ── Bot username guard (multi-bot server safety) ──────────────────
+            _my_username = (_bot.get_me().username or "").lower().lstrip("@")
+            _req_username = (bot_username or "").lower().lstrip("@")
+            if _my_username and _req_username and _my_username != _req_username:
+                print(f"[RialPay] bot_username mismatch: url={_req_username} mine={_my_username} — ignoring")
+                return jsonify({"ok": True}), 200
 
             # ── Signature verification ────────────────────────────────────────
             if not verify_rialpay_sign(invoice_id=invoice_id, sign=sign):

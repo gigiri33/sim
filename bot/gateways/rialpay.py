@@ -1,7 +1,36 @@
 # -*- coding: utf-8 -*-
 """
-RialPay payment gateway — create invoices and handle webhook callbacks.
-Webhook authentication via HMAC-SHA256 (X-Signature header).
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  درگاه پرداخت RialPay — ساخت فاکتور + وبهوک
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+اطلاعات تماس:
+  💎 کانال اطلاع‌رسانی : @Rialpays
+  💎 پشتیبانی مجموعه  : @RialSupport
+  🤖 ربات               : @RialPayBot
+
+──────────────────────────────────────────────
+  تنظیمات پنل ادمین
+──────────────────────────────────────────────
+• rialpay_api_key          → کلید API که از پنل ریال‌پی دریافت می‌کنید
+• rialpay_webhook_secret   → کلید مخفی برای اعتبارسنجی امضای وبهوک (اختیاری)
+• rialpay_create_invoice_url → آدرس API ساخت فاکتور (پیش‌فرض: https://rialbotapi.shop/api/create_invoice.php)
+• rialpay_callback_base_url → آدرس پایه وبهوک؛ اگر خالی باشد از server_public_url استفاده می‌شود
+
+──────────────────────────────────────────────
+  فرمت Callback URL (در پنل ریال‌پی وارد کنید)
+──────────────────────────────────────────────
+  https://<دامین‌شما>/rialpay/<یوزرنیم‌ربات>/{payment_id}/webhook
+
+  مثال:
+    https://bot.example.com/rialpay/MyShopBot/{payment_id}/webhook
+
+  نکات:
+  ─ به جای {payment_id} عدد واقعی سفارش قرار می‌گیرد (به‌صورت خودکار)
+  ─ <یوزرنیم‌ربات> را بدون @ وارد کنید (مثلاً: MyShopBot)
+  ─ در سرورهای چندربات، یوزرنیم باید دقیقاً با یوزرنیم ربات مربوطه یکسان باشد
+    تا وبهوک به ربات اشتباه نرسد
+──────────────────────────────────────────────
 """
 
 import json
