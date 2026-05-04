@@ -3968,7 +3968,11 @@ def universal_handler(message):
                 setting_set(f"start_menu_text:{key}", html_text)
                 log_admin_action(uid, f"متن دکمه منوی استارت {key} تغییر کرد")
                 state_clear(uid)
-                bot.send_message(uid, "✅ متن دکمه ذخیره شد.", reply_markup=back_button("admin:startmenu:texts"))
+                preview = (
+                    f"✅ متن دکمه ذخیره شد.\n\n"
+                    f"پیش‌نمایش:\n{html_text}"
+                )
+                bot.send_message(uid, preview, parse_mode="HTML", reply_markup=back_button("admin:startmenu:texts"))
             return
 
         if sn == "admin_startmenu_edit_layout" and is_admin(uid):

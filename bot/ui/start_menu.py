@@ -14,7 +14,6 @@ DEFAULT_LAYOUT = [
     ["buy_service", "my_services"],
     ["free_test"],
     ["wallet", "account"],
-    ["tariff", "apps"],
     ["support"],
     ["admin_panel"],
 ]
@@ -47,19 +46,12 @@ def _free_test_visible(user_id: int) -> bool:
     return mode == "everyone" or (mode == "agents_only" and _user_is_agent(user_id))
 
 
-def _referral_text() -> str:
-    return setting_get("referral_button_title", "").strip() or "💼 زیرمجموعه‌گیری 🎉"
-
-
 BUTTONS: dict[str, StartMenuButton] = {
     "support": StartMenuButton("support", "پشتیبانی", "support", "5467539229468793355"),
-    "tariff": StartMenuButton("tariff", '<tg-emoji emoji-id="5431722320366429593">🔢</tg-emoji> تعرفه', "tariff:show", "5431722320366429593", "tariff_enabled"),
-    "apps": StartMenuButton("apps", '<tg-emoji emoji-id="5244612521087749872">📥</tg-emoji> دریافت اپلیکیشن ها', "apps:menu", "5244612521087749872", "apps_enabled"),
     "buy_service": StartMenuButton("buy_service", "خرید سرویس جدید", "buy:start", "5312361253610475399"),
     "my_services": StartMenuButton("my_services", "سرویس‌های من", "my_configs", "5361741454685256344"),
     "wallet": StartMenuButton("wallet", '<tg-emoji emoji-id="5256186332669035163">💰</tg-emoji> کیف پول', "wallet:menu", "5256186332669035163", condition=wallet_pay_enabled_for),
     "account": StartMenuButton("account", "حساب کاربری", "profile", "5373012449597335010", "show_account_button"),
-    "referral": StartMenuButton("referral", _referral_text(), "referral:menu", "5453957997418004470", "referral_enabled"),
     "voucher": StartMenuButton("voucher", "ثبت کارت هدیه", "voucher:redeem", "5418010521309815154", "vouchers_enabled"),
     "agency": StartMenuButton("agency", "درخواست نمایندگی", "agency:request", "5372957680174384345", "agency_request_enabled"),
     "free_test": StartMenuButton("free_test", "تست رایگان", "test:start", "6283073379184415506", "free_test_enabled", condition=_free_test_visible),
@@ -69,8 +61,7 @@ BUTTONS: dict[str, StartMenuButton] = {
 
 def _specific_enabled(button: StartMenuButton) -> bool:
     if button.enabled_setting:
-        default = "1" if button.enabled_setting not in ("tariff_enabled", "apps_enabled") else "0"
-        return setting_get(button.enabled_setting, default) == "1"
+        return setting_get(button.enabled_setting, "1") == "1"
     return True
 
 
@@ -103,8 +94,6 @@ def get_button_raw_text(key: str) -> str:
     custom = setting_get(f"start_menu_text:{key}", "")
     if custom:
         return custom
-    if key == "referral":
-        return _referral_text()
     return button.default_text
 
 
