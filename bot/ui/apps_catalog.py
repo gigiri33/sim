@@ -84,11 +84,11 @@ def os_button_label(os_key: str) -> str:
     return f"{ce(item['emoji'], item['emoji_id'])} {item['label']}"
 
 def os_button_text(os_key: str) -> str:
-    """Return fallback text for inline keyboard buttons."""
+    """Return fallback text for inline keyboard buttons (no plain emoji, use icon_custom_emoji_id instead)."""
     item = OS_BY_KEY.get(normalize_os_key(os_key))
     if not item:
         return str(os_key)
-    return f"{item['emoji']} {item['label']}"
+    return item["label"]
 
 def get_os_emoji_id(os_key: str) -> str:
     item = OS_BY_KEY.get(normalize_os_key(os_key))

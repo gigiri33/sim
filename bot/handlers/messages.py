@@ -106,6 +106,31 @@ bot.answer_callback_query = _popup_patched_acq
 
 # ── Broadcast helpers ──────────────────────────────────────────────────────────
 
+
+def _parse_type_emoji(text_in, entities):
+    """Parse admin-entered emoji input for config type buttons.
+
+    Returns the emoji value to store:
+      - "" if text is 'ندارد' or empty
+      - <tg-emoji> HTML tag if a custom_emoji entity is present or text is numeric ID
+      - plain text (emoji char) otherwise
+    """
+    import re as _re2
+    from ..ui.premium_emoji import serialize_premium_text as _spte
+    if not text_in or text_in in ("ندارد", "none", "بدون"):
+        return ""
+    # Numeric ID → wrap as tg-emoji tag
+    if text_in.isdigit():
+        return f'<tg-emoji emoji-id="{text_in}">🔹</tg-emoji>'
+    # Already a tg-emoji HTML tag
+    if text_in.startswith("<tg-emoji"):
+        return text_in
+    # Has custom_emoji entity → serialize with entity info
+    if any(getattr(e, "type", None) == "custom_emoji" for e in (entities or [])):
+        return _spte(text_in, entities)
+    # Plain text / plain emoji
+    return text_in
+
 def _bc_progress_text(title: str, total: int, done: int, ok: int, fail: int) -> str:
     bar_fill = 10
     filled = int(done / total * bar_fill) if total > 0 else 0
@@ -1851,30 +1876,50 @@ def universal_handler(message):
             if not name:
                 bot.send_message(uid, "⚠️ نام نوع نمی‌تواند خالی باشد.", reply_markup=back_button("admin:types"))
                 return
-            state_set(uid, "admin_add_type_desc", type_name=name)
-            kb = types.InlineKeyboardMarkup()
-            kb.add(types.InlineKeyboardButton("⏭ توضیحاتی نمی‌خواهم وارد کنم", callback_data="admin:type:skipdesc"))
-            kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:types", icon_custom_emoji_id="5253997076169115797"))
+            state_set(uid, "admin_add_type_emoji", type_name=name)
+            import json as _json_ate
+            _emoji_kb = _json_ate.dumps({"inline_keyboard": [
+                [{"text": "بدون ایموجی", "callback_data": "admin:type:pickemoji:none"}],
+                [{"text": "بازگشت", "callback_data": "admin:types", "icon_custom_emoji_id": "5253997076169115797"}],
+            ]})
             bot.send_message(uid,
-                f"📝 توضیحات نوع <b>{esc(name)}</b> را وارد کنید:\n\n"
-                "این توضیحات پس از ارسال کانفیگ به کاربر نمایش داده می‌شود.\n"
-                "اگر نمی‌خواهید توضیحاتی وارد کنید، دکمه زیر را بزنید:", reply_markup=kb)
+                f"🎨 ایموجی نوع <b>{esc(name)}</b> را ارسال کنید.\n\n"
+                "می‌توانید ایموجی ساده یا ایموجی پرمیوم بفرستید.\n"
+                "اگر ایموجی نمی‌خواهید، دکمه زیر را بزنید.",
+                reply_markup=_emoji_kb)
             return
 
-        if sn == "admin_add_type_desc" and is_admin(uid):
-            from ..ui.premium_emoji import serialize_premium_text as _spt
-            desc = (message.text or message.caption or "").strip()
-            entities = message.entities or message.caption_entities or []
-            name = sd["type_name"]
-            try:
-                add_type(name, _spt(desc, entities))
-                log_admin_action(uid, f"نوع جدید '{name}' ثبت شد")
-                state_clear(uid)
-                bot.send_message(uid, "✅ نوع جدید ثبت شد.")
-                _show_admin_types(message)
-            except sqlite3.IntegrityError:
-                state_clear(uid)
-                bot.send_message(uid, "⚠️ این نوع قبلاً ثبت شده است.", reply_markup=back_button("admin:types"))
+        if sn == "admin_add_type_emoji" and is_admin(uid):
+            text_in = (message.text or "").strip()
+            entities = message.entities or []
+            emoji_val = _parse_type_emoji(text_in, entities)
+            state_set(uid, "admin_add_type_color", type_name=sd["type_name"], type_emoji=emoji_val)
+            import json as _json_atc
+            _color_kb = _json_atc.dumps({"inline_keyboard": [
+                [
+                    {"text": "🟢 سبز", "callback_data": "admin:type:pickcolor:green", "style": "success"},
+                    {"text": "🔵 آبی", "callback_data": "admin:type:pickcolor:blue", "style": "primary"},
+                ],
+                [
+                    {"text": "🔴 قرمز", "callback_data": "admin:type:pickcolor:red", "style": "danger"},
+                    {"text": "⬜ شیشه‌ای", "callback_data": "admin:type:pickcolor:glass"},
+                ],
+                [{"text": "بازگشت", "callback_data": "admin:types", "icon_custom_emoji_id": "5253997076169115797"}],
+            ]})
+            bot.send_message(uid, "🎨 رنگ دکمه دسته‌بندی را انتخاب کنید:", reply_markup=_color_kb)
+            return
+
+        if sn == "admin_edit_type_emoji" and is_admin(uid):
+            from ..db import update_type_emoji as _ute
+            text_in = (message.text or "").strip()
+            entities = message.entities or []
+            emoji_val = _parse_type_emoji(text_in, entities)
+            type_id = sd["type_id"]
+            _ute(type_id, emoji_val)
+            log_admin_action(uid, f"ایموجی نوع #{type_id} ویرایش شد")
+            state_clear(uid)
+            bot.send_message(uid, "✅ ایموجی نوع سرویس ذخیره شد.")
+            _show_admin_types(message)
             return
 
         if sn == "admin_edit_type" and is_admin(uid):

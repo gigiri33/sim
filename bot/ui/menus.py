@@ -193,7 +193,16 @@ def show_my_configs(target, user_id, page=0, search=None):
     total = items_total + panel_total
 
     if total == 0 and not active_search:
-        send_or_edit(target, f"{ce('📭', '5258134813302332906')} هنوز کانفیگی برای حساب شما ثبت نشده است.", back_button("main"))
+        import json as _json
+        _kb_empty = _json.dumps({"inline_keyboard": [
+            [{"text": "خرید سرویس", "callback_data": "buy:start", "style": "success"}],
+            [{"text": "بازگشت", "callback_data": "nav:main", "icon_custom_emoji_id": "5253997076169115797"}],
+        ]})
+        send_or_edit(
+            target,
+            f"{ce('😔', '5370781385885751708')} لیست سرویس‌های شما خالی است.\n\n» برای خرید سرویس از دکمه زیر اقدام نمایید.",
+            _kb_empty,
+        )
         return
 
     total_pages = max(1, (total + PER_PAGE - 1) // PER_PAGE)

@@ -60,7 +60,7 @@ BUTTONS: dict[str, StartMenuButton] = {
     "tariff": StartMenuButton("tariff", "تعرفه", "tariff:show", "5431722320366429593", "tariff_enabled"),
     "apps": StartMenuButton("apps", "دریافت اپلیکیشن‌ها", "apps:menu", "5244612521087749872", "apps_enabled"),
     "support": StartMenuButton("support", "پشتیبانی", "support", "5467539229468793355"),
-    "agency": StartMenuButton("agency", "درخواست نمایندگی", "agency:request", "5372957680174384345", "agency_request_enabled"),
+    "agency": StartMenuButton("agency", "درخواست نمایندگی", "agency:request", "5372957680174384345", "agency_request_enabled", condition=lambda uid: not _user_is_agent(uid)),
     "admin_panel": StartMenuButton("admin_panel", "ورود به پنل مدیریت", "admin:panel", "5370935802844946281", admin_only=True),
 }
 

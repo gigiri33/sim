@@ -6726,23 +6726,56 @@ def _dispatch_callback(call, uid, data):
             return
         stock_only = setting_get("preorder_mode", "0") == "1"
         items = get_active_types()
-        kb = types.InlineKeyboardMarkup()
+        import json as _json_bsr
+        import re as _re_bsr
+        _tgemoji_re = _re_bsr.compile(r'<tg-emoji[^>]+emoji-id="(\d+)"[^>]*>(.*?)</tg-emoji>', _re_bsr.I | _re_bsr.S)
+        _tag_re     = _re_bsr.compile(r'<[^>]+>')
+        _color_map  = {"green": "success", "red": "danger", "blue": "primary"}
+        _btn_rows = []
         has_any = False
         for item in items:
             packs = [p for p in get_packages(type_id=item['id']) if p['price'] > 0 and _pkg_has_stock(p, stock_only)]
             if packs:
-                kb.add(types.InlineKeyboardButton(f"🧩 {item['name']}", callback_data=f"buy:t:{item['id']}"))
+                _emoji_raw  = item["emoji"] if "emoji" in item.keys() else ""
+                _btn_color  = item["button_color"] if "button_color" in item.keys() else "glass"
+                _icon_id = None
+                _text_pfx = ""
+                if _emoji_raw:
+                    _m = _tgemoji_re.search(_emoji_raw)
+                    if _m:
+                        _icon_id = _m.group(1)
+                    elif _emoji_raw.strip().startswith("{"):
+                        try:
+                            import json as _jj
+                            _ej = _jj.loads(_emoji_raw)
+                            for _ent in _ej.get("entities", []):
+                                if _ent.get("type") == "custom_emoji":
+                                    _icon_id = _ent["custom_emoji_id"]
+                                    break
+                        except Exception:
+                            pass
+                    if not _icon_id:
+                        _plain = _tag_re.sub("", _emoji_raw).strip()
+                        if _plain:
+                            _text_pfx = _plain + " "
+                _btn = {"text": _text_pfx + item["name"], "callback_data": f"buy:t:{item['id']}"}
+                if _icon_id:
+                    _btn["icon_custom_emoji_id"] = _icon_id
+                if _btn_color in _color_map:
+                    _btn["style"] = _color_map[_btn_color]
+                _btn_rows.append([_btn])
                 has_any = True
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
+        _btn_rows.append([{"text": "بازگشت", "callback_data": "nav:main", "icon_custom_emoji_id": "5253997076169115797"}])
+        kb = _json_bsr.dumps({"inline_keyboard": _btn_rows})
         bot.answer_callback_query(call.id)
         if not has_any:
             send_or_edit(call, "📭 در حال حاضر بسته‌ای برای فروش موجود نیست.", kb)
         else:
-            send_or_edit(call, "🛒 <b>خرید کانفیگ جدید</b>\n\nنوع مورد نظر را انتخاب کنید:", kb)
+            from ..ui.premium_emoji import ce as _ce
+            send_or_edit(call, f"{_ce('🛒', '5431499171045581032')} برای خرید سرویس لطفا یکی از دسته‌بندی‌های زیر را انتخاب کنید.", kb)
         return
 
     if data.startswith("buy:t:"):
-        _shop_st2 = setting_get("shop_open", "1")
         if _shop_st2 not in ("1", "2"):
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
@@ -8214,13 +8247,15 @@ def _dispatch_callback(call, uid, data):
     if data == "wallet:menu":
         user = get_user(uid)
         balance = int(user["balance"] or 0) if user else 0
-        kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("افزایش موجودی", callback_data="wallet:charge", icon_custom_emoji_id="5256186332669035163"))
-        kb.add(types.InlineKeyboardButton("بازگشت به منوی اصلی", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
+        import json as _json_wm
+        kb = _json_wm.dumps({"inline_keyboard": [
+            [{"text": "افزایش موجودی", "callback_data": "wallet:charge", "style": "success", "icon_custom_emoji_id": "5256186332669035163"}],
+            [{"text": "بازگشت به منوی اصلی", "callback_data": "nav:main", "icon_custom_emoji_id": "5253997076169115797"}],
+        ]})
         bot.answer_callback_query(call.id)
         send_or_edit(
             call,
-            "💰 <b>موجودی کیف پول شما:</b>\n"
+            "💰 <b>موجودی کیف پول شما:</b>\n\n"
             f"<blockquote>{fmt_price(balance)} تومان</blockquote>\n\n"
             "برای افزایش موجودی از روی دکمه زیر بزنید.",
             kb,
@@ -9633,6 +9668,8 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton(status_label, callback_data=f"admin:type:toggleactive:{type_id}"))
         kb.add(types.InlineKeyboardButton("📦 ویرایش پکیج‌ها", callback_data=f"admin:type:pkgs:{type_id}"))
         kb.add(types.InlineKeyboardButton(f"🔢 جایگاه (فعلاً {_cur_pos} از {_total})", callback_data=f"admin:type:sortorder:{type_id}"))
+        kb.add(types.InlineKeyboardButton("🎨 ویرایش ایموجی", callback_data=f"admin:type:editemoji:{type_id}"))
+        kb.add(types.InlineKeyboardButton("🎨 ویرایش رنگ", callback_data=f"admin:type:editcolor:{type_id}"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:types", icon_custom_emoji_id="5253997076169115797"))
         desc_preview = f"\n📝 توضیحات: {esc(row['description'][:80])}..." if row["description"] and len(row["description"]) > 80 else (f"\n📝 توضیحات: {esc(row['description'])}" if row["description"] else "\n📝 توضیحات: ندارد")
         status_line  = "\n🔘 وضعیت: <b>فعال</b>" if is_active else "\n🔘 وضعیت: <b>غیرفعال</b>"
@@ -9726,6 +9763,124 @@ def _dispatch_callback(call, uid, data):
                 bot.answer_callback_query(call.id, "⚠️ این نوع قبلاً ثبت شده.", show_alert=True)
         else:
             bot.answer_callback_query(call.id)
+        return
+
+    # ── admin:type:pickemoji:none — skip emoji step in add flow ───────────────
+    if data == "admin:type:pickemoji:none":
+        sn2 = state_name(uid)
+        sd2 = state_data(uid)
+        if sn2 == "admin_add_type_emoji":
+            state_set(uid, "admin_add_type_color", type_name=sd2.get("type_name", ""), type_emoji="")
+            import json as _json_pne
+            _color_kb = _json_pne.dumps({"inline_keyboard": [
+                [
+                    {"text": "🟢 سبز", "callback_data": "admin:type:pickcolor:green", "style": "success"},
+                    {"text": "🔵 آبی", "callback_data": "admin:type:pickcolor:blue", "style": "primary"},
+                ],
+                [
+                    {"text": "🔴 قرمز", "callback_data": "admin:type:pickcolor:red", "style": "danger"},
+                    {"text": "⬜ شیشه‌ای", "callback_data": "admin:type:pickcolor:glass"},
+                ],
+                [{"text": "بازگشت", "callback_data": "admin:types", "icon_custom_emoji_id": "5253997076169115797"}],
+            ]})
+            bot.answer_callback_query(call.id)
+            send_or_edit(call, "🎨 رنگ دکمه دسته‌بندی را انتخاب کنید:", _color_kb)
+        else:
+            bot.answer_callback_query(call.id)
+        return
+
+    # ── admin:type:pickcolor:{color} — finalize add flow ──────────────────────
+    if data.startswith("admin:type:pickcolor:"):
+        color = data.split(":")[-1]
+        if color not in ("green", "blue", "red", "glass"):
+            bot.answer_callback_query(call.id)
+            return
+        sn2 = state_name(uid)
+        sd2 = state_data(uid)
+        if sn2 != "admin_add_type_color":
+            bot.answer_callback_query(call.id)
+            return
+        name  = sd2.get("type_name", "")
+        emoji = sd2.get("type_emoji", "")
+        try:
+            add_type(name, "", emoji, color)
+            log_admin_action(uid, f"نوع جدید '{name}' ثبت شد")
+            state_clear(uid)
+            bot.answer_callback_query(call.id, "✅ نوع جدید ثبت شد.")
+            _show_admin_types(call)
+        except sqlite3.IntegrityError:
+            state_clear(uid)
+            bot.answer_callback_query(call.id, "⚠️ این نوع قبلاً ثبت شده.", show_alert=True)
+        return
+
+    # ── admin:type:editemoji:{id} ─────────────────────────────────────────────
+    if data.startswith("admin:type:editemoji:"):
+        type_id = int(data.split(":")[-1])
+        row = get_type(type_id)
+        if not row:
+            bot.answer_callback_query(call.id, "نوع یافت نشد.", show_alert=True)
+            return
+        state_set(uid, "admin_edit_type_emoji", type_id=type_id)
+        bot.answer_callback_query(call.id)
+        import json as _json_ee
+        _ne_kb = _json_ee.dumps({"inline_keyboard": [
+            [{"text": "حذف ایموجی", "callback_data": f"admin:type:clearemoji:{type_id}"}],
+            [{"text": "بازگشت", "callback_data": f"admin:type:edit:{type_id}", "icon_custom_emoji_id": "5253997076169115797"}],
+        ]})
+        send_or_edit(call,
+            f"🎨 ایموجی جدید نوع <b>{esc(row['name'])}</b> را ارسال کنید.\n\n"
+            "می‌توانید ایموجی ساده یا ایموجی پرمیوم بفرستید.\n"
+            "برای حذف ایموجی، دکمه «حذف ایموجی» را بزنید.",
+            _ne_kb)
+        return
+
+    # ── admin:type:clearemoji:{id} ────────────────────────────────────────────
+    if data.startswith("admin:type:clearemoji:"):
+        type_id = int(data.split(":")[-1])
+        from ..db import update_type_emoji as _ute2
+        _ute2(type_id, "")
+        state_clear(uid)
+        bot.answer_callback_query(call.id, "✅ ایموجی حذف شد.")
+        log_admin_action(uid, f"ایموجی نوع #{type_id} حذف شد")
+        _fake_call(call, f"admin:type:edit:{type_id}")
+        return
+
+    # ── admin:type:editcolor:{id} ─────────────────────────────────────────────
+    if data.startswith("admin:type:editcolor:"):
+        type_id = int(data.split(":")[-1])
+        row = get_type(type_id)
+        if not row:
+            bot.answer_callback_query(call.id, "نوع یافت نشد.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        import json as _json_ec
+        _ec_kb = _json_ec.dumps({"inline_keyboard": [
+            [
+                {"text": "🟢 سبز", "callback_data": f"admin:type:setcolor:{type_id}:green", "style": "success"},
+                {"text": "🔵 آبی", "callback_data": f"admin:type:setcolor:{type_id}:blue", "style": "primary"},
+            ],
+            [
+                {"text": "🔴 قرمز", "callback_data": f"admin:type:setcolor:{type_id}:red", "style": "danger"},
+                {"text": "⬜ شیشه‌ای", "callback_data": f"admin:type:setcolor:{type_id}:glass"},
+            ],
+            [{"text": "بازگشت", "callback_data": f"admin:type:edit:{type_id}", "icon_custom_emoji_id": "5253997076169115797"}],
+        ]})
+        send_or_edit(call, f"🎨 رنگ دکمه نوع <b>{esc(row['name'])}</b> را انتخاب کنید:", _ec_kb)
+        return
+
+    # ── admin:type:setcolor:{id}:{color} ─────────────────────────────────────
+    if data.startswith("admin:type:setcolor:"):
+        parts = data.split(":")
+        type_id = int(parts[3])
+        color   = parts[4] if len(parts) > 4 else "glass"
+        if color not in ("green", "blue", "red", "glass"):
+            bot.answer_callback_query(call.id)
+            return
+        from ..db import update_type_button_color as _utbc
+        _utbc(type_id, color)
+        bot.answer_callback_query(call.id, "✅ رنگ دکمه نوع سرویس ذخیره شد.")
+        log_admin_action(uid, f"رنگ نوع #{type_id} به {color} تغییر یافت")
+        _fake_call(call, f"admin:type:edit:{type_id}")
         return
 
     if data.startswith("admin:type:deldesc:"):
@@ -19714,7 +19869,8 @@ def _dispatch_callback(call, uid, data):
             bot.send_message(uid, "📭 در حال حاضر بسته‌ای برای فروش موجود نیست.",
                              parse_mode="HTML", reply_markup=kb)
         else:
-            bot.send_message(uid, "🛒 <b>خرید کانفیگ جدید</b>\n\nنوع مورد نظر را انتخاب کنید:",
+            from ..ui.premium_emoji import ce as _ce
+            bot.send_message(uid, f"{_ce('🛒', '5431499171045581032')} برای خرید سرویس لطفا یکی از دسته‌بندی‌های زیر را انتخاب کنید.",
                              parse_mode="HTML", reply_markup=kb)
         return
 

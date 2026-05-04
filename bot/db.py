@@ -812,6 +812,9 @@ def _run_init_db_migrations():
             "ALTER TABLE payments ADD COLUMN expires_at TEXT",
             "ALTER TABLE payments ADD COLUMN notify_message_id INTEGER",
             "ALTER TABLE payments ADD COLUMN used_card_id INTEGER",
+            # ── Config types: emoji and button color ──────────────────────────
+            "ALTER TABLE config_types ADD COLUMN emoji TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE config_types ADD COLUMN button_color TEXT NOT NULL DEFAULT 'glass'",
         ]
         for sql in migrations:
             try:
@@ -1225,21 +1228,35 @@ def get_type(type_id):
         ).fetchone()
 
 
-def add_type(name, description=""):
+def add_type(name, description="", emoji="", button_color="glass"):
     with get_conn() as conn:
         try:
             max_order = conn.execute(
                 "SELECT COALESCE(MAX(sort_order), 0) FROM config_types"
             ).fetchone()[0]
             conn.execute(
-                "INSERT INTO config_types(name, description, sort_order) VALUES(?, ?, ?)",
-                (name.strip(), description.strip(), max_order + 1)
+                "INSERT INTO config_types(name, description, emoji, button_color, sort_order) VALUES(?, ?, ?, ?, ?)",
+                (name.strip(), description.strip(), (emoji or "").strip(), button_color or "glass", max_order + 1)
             )
         except Exception:
             conn.execute(
-                "INSERT INTO config_types(name, description) VALUES(?, ?)",
-                (name.strip(), description.strip())
+                "INSERT INTO config_types(name, description, emoji, button_color) VALUES(?, ?, ?, ?)",
+                (name.strip(), description.strip(), (emoji or "").strip(), button_color or "glass")
             )
+
+
+def update_type_emoji(type_id, emoji):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE config_types SET emoji=? WHERE id=?", ((emoji or "").strip(), type_id)
+        )
+
+
+def update_type_button_color(type_id, color):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE config_types SET button_color=? WHERE id=?", (color or "glass", type_id)
+        )
 
 
 def update_type(type_id, new_name):
