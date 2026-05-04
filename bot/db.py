@@ -526,13 +526,13 @@ def _run_init_db_migrations():
             "invoice_expiry_enabled":             "1",
             "invoice_expiry_minutes":             "30",
             # ── Tariff ────────────────────────────────────────────────────────
-            "tariff_enabled":                     "0",
+            "tariff_enabled":                     "1",
             "tariff_text":                        "",
             # ── Apps / Tutorial section ───────────────────────────────────────
-            "apps_enabled":                       "0",
+            "apps_enabled":                       "1",
             # ── Start menu layout / button texts ──────────────────────────────
             "show_account_button":                "1",
-            "start_menu_layout":                  "[[\"support\"],[\"tariff\",\"apps\"],[\"buy_service\"],[\"my_services\",\"wallet\"],[\"account\",\"referral\"],[\"agency\"],[\"free_test\"]]",
+            "start_menu_layout":                  "[[\"buy_service\",\"my_services\"],[\"free_test\"],[\"wallet\",\"account\"],[\"tariff\",\"apps\"],[\"support\"],[\"admin_panel\"]]",
             "start_menu_text:wallet":             "<tg-emoji emoji-id=\"5256186332669035163\">💰</tg-emoji> کیف پول",
             "start_menu_text:apps":               "<tg-emoji emoji-id=\"5244612521087749872\">📥</tg-emoji> دریافت اپلیکیشن ها",
             "start_menu_text:tariff":             "<tg-emoji emoji-id=\"5431722320366429593\">🔢</tg-emoji> تعرفه",

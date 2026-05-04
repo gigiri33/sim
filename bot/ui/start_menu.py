@@ -11,13 +11,12 @@ from ..helpers import is_admin
 
 
 DEFAULT_LAYOUT = [
-    ["support"],
-    ["tariff", "apps"],
-    ["buy_service"],
-    ["my_services", "wallet"],
-    ["account", "referral"],
-    ["agency"],
+    ["buy_service", "my_services"],
     ["free_test"],
+    ["wallet", "account"],
+    ["tariff", "apps"],
+    ["support"],
+    ["admin_panel"],
 ]
 
 DEFAULT_LAYOUT_JSON = json.dumps(DEFAULT_LAYOUT, ensure_ascii=False)
