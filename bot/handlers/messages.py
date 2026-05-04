@@ -86,6 +86,23 @@ from .callbacks import (
     _is_panel_package, _show_naming_prompt,
 )
 
+# ── Popup dispatch: suppress answer_callback_query for fake calls ─────────────
+# When a popup-mode menu button is pressed, the bot receives a text message and
+# routes it as a fake callback. Since there's no real callback query ID,
+# answer_callback_query would throw an ApiTelegramException and abort the handler
+# before any content is sent. We use a thread-local flag to suppress those calls.
+_popup_suppress_acq = threading.local()
+_popup_acq_orig = bot.answer_callback_query
+
+
+def _popup_patched_acq(cq_id, *a, **kw):
+    if getattr(_popup_suppress_acq, 'active', False):
+        return None
+    return _popup_acq_orig(cq_id, *a, **kw)
+
+
+bot.answer_callback_query = _popup_patched_acq
+
 
 # ── Broadcast helpers ──────────────────────────────────────────────────────────
 
@@ -457,19 +474,21 @@ def universal_handler(message):
         from ..ui.start_menu import find_button_callback_by_text
         _popup_cb = find_button_callback_by_text(message.text or "")
         if _popup_cb:
-            from .callbacks import handle_callback as _hcb
+            from .callbacks import _dispatch_callback as _dcb
+            _src_msg = message
+            _src_user = message.from_user
 
             class _FakeCQ:
                 id = "0"
-                from_user = message.from_user
+                from_user = _src_user
                 data = _popup_cb
-                json_string = ""
+                message = _src_msg
 
-                class _Msg:
-                    pass
-
-            _FakeCQ.message = message
-            _hcb(_FakeCQ())
+            _popup_suppress_acq.active = True
+            try:
+                _dcb(_FakeCQ(), uid, _popup_cb)
+            finally:
+                _popup_suppress_acq.active = False
             return
 
     try:

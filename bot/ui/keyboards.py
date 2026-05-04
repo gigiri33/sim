@@ -57,10 +57,17 @@ def kb_main(user_id):
 
 
 def kb_main_popup(user_id):
-    """Build a ReplyKeyboardMarkup for popup (bottom keyboard) mode."""
+    """Build a ReplyKeyboardMarkup for popup (bottom keyboard) mode, with emoji and colors."""
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
     for row in build_main_menu_rows(user_id):
-        buttons = [types.KeyboardButton(item["text"]) for item in row]
+        buttons = [
+            types.KeyboardButton(
+                item["text"],
+                icon_custom_emoji_id=item.get("emoji_id") or None,
+                style=item.get("style") or None,
+            )
+            for item in row
+        ]
         kb.row(*buttons)
     return kb
 
