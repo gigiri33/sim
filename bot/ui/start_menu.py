@@ -199,3 +199,17 @@ def layout_to_text(layout: list[list[str]] | None = None) -> str:
 
 def valid_keys_text() -> str:
     return "\n".join(f"<code>{key}</code> — {button_text_for_telegram(BUTTONS[key].default_text)}" for key in BUTTONS)
+
+
+def find_button_callback_by_text(text: str) -> str | None:
+    """In popup mode, map a displayed button text to its callback_data.
+    Returns callback_data string if matched, else None.
+    """
+    if not text:
+        return None
+    t = text.strip()
+    for key, button in BUTTONS.items():
+        btn_text = button_text_for_telegram(get_button_raw_text(key))
+        if t == btn_text:
+            return button.callback_data
+    return None

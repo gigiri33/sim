@@ -56,6 +56,15 @@ def kb_main(user_id):
     return _raw_markup(rows)
 
 
+def kb_main_popup(user_id):
+    """Build a ReplyKeyboardMarkup for popup (bottom keyboard) mode."""
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    for row in build_main_menu_rows(user_id):
+        buttons = [types.KeyboardButton(item["text"]) for item in row]
+        kb.row(*buttons)
+    return kb
+
+
 def kb_admin_panel(uid=None):
     rows = []
     is_owner = (uid in ADMIN_IDS) if uid else False

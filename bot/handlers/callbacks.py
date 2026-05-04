@@ -15525,7 +15525,14 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
             return
         from ..ui.start_menu import layout_to_text
+        cur_mode = setting_get("start_menu_mode", "inline")
+        glass_lbl = "✅ شیشه‌ای (فعال)" if cur_mode == "inline" else "شیشه‌ای"
+        popup_lbl = "✅ پاپ‌آپ (فعال)" if cur_mode == "popup" else "پاپ‌آپ"
         kb = types.InlineKeyboardMarkup()
+        kb.row(
+            types.InlineKeyboardButton(f"🪟 {glass_lbl}", callback_data="admin:startmenu:setmode:inline"),
+            types.InlineKeyboardButton(f"⬆️ {popup_lbl}", callback_data="admin:startmenu:setmode:popup"),
+        )
         kb.add(types.InlineKeyboardButton("✅ وضعیت دکمه‌ها", callback_data="admin:startmenu:status"))
         kb.add(types.InlineKeyboardButton("✏️ ویرایش متن دکمه‌ها", callback_data="admin:startmenu:texts"))
         kb.add(types.InlineKeyboardButton("🎨 رنگ دکمه‌های منو استارت", callback_data="admin:startmenu:colors"))
@@ -15536,8 +15543,20 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id)
         send_or_edit(call,
             "🧩 <b>چیدمان و متن های منو استارت</b>\n\n"
+            "📱 <b>مدل منو استارت:</b> " + ("شیشه‌ای (Inline)" if cur_mode == "inline" else "پاپ‌آپ (ReplyKeyboard)") + "\n\n"
             "چیدمان فعلی:\n"
             f"<pre>{esc(layout_to_text())}</pre>", kb)
+        return
+
+    if data.startswith("admin:startmenu:setmode:"):
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        mode = data.split(":")[-1]
+        if mode in ("inline", "popup"):
+            setting_set("start_menu_mode", mode)
+            bot.answer_callback_query(call.id, "✅ مدل منو تغییر یافت.")
+            _fake_call(call, "admin:startmenu")
         return
 
     if data == "admin:startmenu:status":

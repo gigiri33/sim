@@ -448,6 +448,30 @@ def universal_handler(message):
     sn = state_name(uid)
     sd = state_data(uid)
 
+    # ── Popup menu routing ────────────────────────────────────────────────────
+    # When start_menu_mode == "popup", the start menu is a ReplyKeyboardMarkup.
+    # Button presses arrive as text messages. Route them like callbacks if no
+    # active state is pending (so we don't hijack mid-flow inputs).
+    if (not sn and message.content_type == "text"
+            and setting_get("start_menu_mode", "inline") == "popup"):
+        from ..ui.start_menu import find_button_callback_by_text
+        _popup_cb = find_button_callback_by_text(message.text or "")
+        if _popup_cb:
+            from .callbacks import handle_callback as _hcb
+
+            class _FakeCQ:
+                id = "0"
+                from_user = message.from_user
+                data = _popup_cb
+                json_string = ""
+
+                class _Msg:
+                    pass
+
+            _FakeCQ.message = message
+            _hcb(_FakeCQ())
+            return
+
     try:
         # ── My Configs search ─────────────────────────────────────────────────
         if sn == "my_cfgs_search":

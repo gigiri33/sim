@@ -10,21 +10,53 @@ from ..db import setting_get, get_user, get_user_purchases, get_referral_stats, 
 from ..helpers import esc, fmt_price, display_username, back_button, move_leading_emoji
 from ..bot_instance import bot
 from .helpers import send_or_edit
-from .keyboards import kb_main
+from .keyboards import kb_main, kb_main_popup
 from .premium_emoji import render_premium_text_html, render_premium_text_entities, deserialize_premium_text, ce
+
+
+def _send_popup_main_menu(uid, chat_id, text, entities=None, thread_id=None):
+    """Send the main menu message with a ReplyKeyboardMarkup (popup mode)."""
+    kb = kb_main_popup(uid)
+    if entities:
+        try:
+            bot.send_message(chat_id, text, parse_mode="", entities=entities,
+                             reply_markup=kb, disable_web_page_preview=True,
+                             message_thread_id=thread_id)
+        except Exception:
+            bot.send_message(chat_id, text, reply_markup=kb,
+                             disable_web_page_preview=True, message_thread_id=thread_id)
+    else:
+        try:
+            bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb,
+                             disable_web_page_preview=True, message_thread_id=thread_id)
+        except Exception:
+            import re as _re
+            plain = _re.sub(r"<[^>]+>", "", text)
+            plain = plain.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+            bot.send_message(chat_id, plain, reply_markup=kb,
+                             disable_web_page_preview=True, message_thread_id=thread_id)
 
 
 def show_main_menu(target):
     uid         = target.from_user.id if hasattr(target, "from_user") else target.chat.id
+    popup_mode  = setting_get("start_menu_mode", "inline") == "popup"
     custom_raw  = setting_get("start_text", "")
+
+    if hasattr(target, "message"):
+        chat_id = target.message.chat.id
+        thread_id = getattr(target.message, "message_thread_id", None)
+    else:
+        chat_id = target.chat.id
+        thread_id = getattr(target, "message_thread_id", None)
+
     if custom_raw:
         parsed = deserialize_premium_text(custom_raw)
         if parsed.get("entities"):
             # Has premium/custom emoji → send via entities (no parse_mode, no HTML issues)
             text, entities = render_premium_text_entities(custom_raw)
-            chat_id = (
-                target.message.chat.id if hasattr(target, "message") else target.chat.id
-            )
+            if popup_mode:
+                _send_popup_main_menu(uid, chat_id, text, entities=entities, thread_id=thread_id)
+                return
             kb = kb_main(uid)
             try:
                 if hasattr(target, "message"):
@@ -69,7 +101,10 @@ def show_main_menu(target):
             f"{ce('📞', '5467539229468793355')} پشتیبانی حرفه‌ای ۲۴ ساعته\n\n"
             "از منوی زیر بخش مورد نظر خود را انتخاب کنید."
         )
-    send_or_edit(target, text, kb_main(uid))
+    if popup_mode:
+        _send_popup_main_menu(uid, chat_id, text, thread_id=thread_id)
+    else:
+        send_or_edit(target, text, kb_main(uid))
 
 
 def show_profile(target, user_id):
