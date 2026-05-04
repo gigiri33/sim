@@ -4946,11 +4946,12 @@ def _dispatch_callback(call, uid, data):
         if setting_get("tariff_enabled", "0") != "1":
             bot.answer_callback_query(call.id, "تعرفه فعال نیست.", show_alert=True)
             return
-        tariff_text = setting_get("tariff_text", "").strip()
-        if not tariff_text:
+        tariff_text = setting_get("tariff_text", "")
+        if not tariff_text or not tariff_text.strip():
             text = "📋 <b>تعرفه</b>\n\nتعرفه‌ای ثبت نشده است."
         else:
-            text = tariff_text
+            from ..ui.premium_emoji import render_premium_text_html
+            text = render_premium_text_html(tariff_text)
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("🛒 خرید سرویس", callback_data="buy:start"))
         kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
@@ -4963,13 +4964,18 @@ def _dispatch_callback(call, uid, data):
         if setting_get("apps_enabled", "0") != "1":
             bot.answer_callback_query(call.id, "این بخش فعال نیست.", show_alert=True)
             return
-        from ..ui.apps_catalog import OS_LIST
+        from ..ui.apps_catalog import OS_LIST, os_button_text
+        from ..ui.premium_emoji import ce
         kb = types.InlineKeyboardMarkup()
-        for os_key, os_label in OS_LIST:
-            kb.add(types.InlineKeyboardButton(os_label, callback_data=f"apps:os:{os_key}"))
+        for item in OS_LIST:
+            kb.add(types.InlineKeyboardButton(
+                os_button_text(item["key"]),
+                callback_data=f"apps:os:{item['key']}",
+                icon_custom_emoji_id=item["emoji_id"],
+            ))
         kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
         send_or_edit(call,
-            "📱 <b>آموزش و دریافت اپلیکیشن‌ها</b>\n\n"
+            f"{ce('📱', '6019392692499255094')} <b>آموزش و دریافت اپلیکیشن‌ها</b>\n\n"
             "سیستم‌عامل خود را انتخاب کنید:",
             kb)
         return
@@ -4979,22 +4985,20 @@ def _dispatch_callback(call, uid, data):
         if setting_get("apps_enabled", "0") != "1":
             bot.answer_callback_query(call.id, "این بخش فعال نیست.", show_alert=True)
             return
-        from ..ui.apps_catalog import APPS, get_os_label, get_active_apps
+        from ..ui.apps_catalog import get_active_apps, get_os_label, normalize_os_key, OS_BY_KEY
+        from ..ui.premium_emoji import ce
         os_key = data[len("apps:os:"):]
+        os_key = normalize_os_key(os_key)
+        os_meta = OS_BY_KEY.get(os_key, {})
         os_label = get_os_label(os_key)
         active = get_active_apps(os_key, setting_get)
+        os_icon = ce(os_meta.get("emoji", "📱"), os_meta.get("emoji_id", "6019392692499255094"))
+        text = f"{ce('📱', '6019392692499255094')} <b>اپلیکیشن‌های {os_icon} {esc(os_label)}</b>"
         if not active:
-            text = f"📱 <b>{os_label}</b>\n\nدر حال حاضر هیچ نرم‌افزاری برای این سیستم‌عامل موجود نیست."
-        else:
-            lines = [f"📱 <b>اپلیکیشن‌های {os_label}</b>\n"]
-            for i, app in enumerate(active, 1):
-                lines.append(
-                    f"{i}. <b>{esc(app['name'])}</b>\n"
-                    f"   {esc(app['desc'])}\n"
-                    f"   🔗 <a href=\"{app['url']}\">دانلود</a>\n"
-                )
-            text = "\n".join(lines)
+            text += "\n\nدر حال حاضر هیچ نرم‌افزاری برای این سیستم‌عامل موجود نیست."
         kb = types.InlineKeyboardMarkup()
+        for app in active:
+            kb.add(types.InlineKeyboardButton(f"📥 {app['name']}", url=app["url"]))
         kb.add(types.InlineKeyboardButton("🔙 بازگشت به لیست سیستم‌عامل‌ها", callback_data="apps:menu"))
         kb.add(types.InlineKeyboardButton("🏠 بازگشت به منوی اصلی", callback_data="nav:main"))
         send_or_edit(call, text, kb)
@@ -15465,13 +15469,13 @@ def _dispatch_callback(call, uid, data):
         toggle_lbl = "🔴 غیرفعال کردن" if apps_on else "🟢 فعال کردن"
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton(toggle_lbl, callback_data="admin:apps:toggle"))
-        kb.add(types.InlineKeyboardButton("📱 مدیریت دیوایس‌ها / سیستم‌عامل‌ها", callback_data="admin:apps:os_list"))
+        kb.add(types.InlineKeyboardButton("📱 مدیریت سیستم‌عامل‌ها", callback_data="admin:apps:os_list"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call,
             f"📲 <b>دریافت اپلیکیشن‌ها</b>\n\n"
             f"وضعیت: {'🟢 فعال' if apps_on else '🔴 غیرفعال'}\n\n"
-            "وقتی فعال باشد، دکمه «آموزش و دریافت اپلیکیشن‌ها» در منوی اصلی نمایش داده می‌شود.", kb)
+            "وقتی فعال باشد، دکمه «دریافت اپلیکیشن‌ها» در منوی اصلی نمایش داده می‌شود.", kb)
         return
 
     if data == "admin:apps:toggle":
@@ -15490,10 +15494,14 @@ def _dispatch_callback(call, uid, data):
         if not admin_has_perm(uid, "settings"):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
             return
-        from ..ui.apps_catalog import OS_LIST
+        from ..ui.apps_catalog import OS_LIST, os_button_text
         kb = types.InlineKeyboardMarkup()
-        for os_key, os_label in OS_LIST:
-            kb.add(types.InlineKeyboardButton(os_label, callback_data=f"admin:apps:os:{os_key}"))
+        for item in OS_LIST:
+            kb.add(types.InlineKeyboardButton(
+                os_button_text(item["key"]),
+                callback_data=f"admin:apps:os:{item['key']}",
+                icon_custom_emoji_id=item["emoji_id"],
+            ))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:apps", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "📱 <b>مدیریت سیستم‌عامل‌ها</b>\n\nیک سیستم‌عامل را انتخاب کنید:", kb)
@@ -15503,8 +15511,8 @@ def _dispatch_callback(call, uid, data):
         if not admin_has_perm(uid, "settings"):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
             return
-        from ..ui.apps_catalog import APPS, get_os_label
-        os_key = data[len("admin:apps:os:"):]
+        from ..ui.apps_catalog import APPS, get_os_label, normalize_os_key
+        os_key = normalize_os_key(data[len("admin:apps:os:"):])
         os_label = get_os_label(os_key)
         apps = APPS.get(os_key, [])
         kb = types.InlineKeyboardMarkup()
@@ -15529,10 +15537,10 @@ def _dispatch_callback(call, uid, data):
         if not admin_has_perm(uid, "settings"):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
             return
-        from ..ui.apps_catalog import APPS, get_os_label
+        from ..ui.apps_catalog import normalize_os_key
         parts = data.split(":")
         # admin:apps:item:{os_key}:{app_key}
-        os_key  = parts[3]
+        os_key  = normalize_os_key(parts[3])
         app_key = parts[4]
         setting_key = f"app_item_enabled:{os_key}:{app_key}"
         cur = setting_get(setting_key, "1")

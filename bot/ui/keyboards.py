@@ -63,11 +63,14 @@ def kb_main(user_id):
         rows.append([_btn(_ref_btn_title,    callback_data="referral:menu",  emoji_id="5453957997418004470")])
     elif voucher_on:
         rows.append([_btn("ثبت کارت هدیه", callback_data="voucher:redeem", emoji_id="5418010521309815154")])
-    rows.append([_btn("ارتباط با پشتیبانی", callback_data="support", emoji_id="5467539229468793355")])
+    rows.append([_btn("پشتیبانی", callback_data="support", emoji_id="5467539229468793355")])
+    row_info = []
     if setting_get("tariff_enabled", "0") == "1":
-        rows.append([_btn("تعرفه", callback_data="tariff:show", emoji_id="5368324170671202286")])
+        row_info.append(_btn("🔢 تعرفه", callback_data="tariff:show", emoji_id="5431722320366429593"))
     if setting_get("apps_enabled", "0") == "1":
-        rows.append([_btn("آموزش و دریافت اپلیکیشن ها", callback_data="apps:menu", emoji_id="5373230547154228224")])
+        row_info.append(_btn("📥 دریافت اپلیکیشن ها", callback_data="apps:menu", emoji_id="5244612521087749872"))
+    if row_info:
+        rows.append(row_info)
     if setting_get("agency_request_enabled", "1") == "1":
         rows.append([_btn("درخواست نمایندگی", callback_data="agency:request", emoji_id="5372957680174384345")])
     if is_admin(user_id):

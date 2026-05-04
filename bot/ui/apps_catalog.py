@@ -9,201 +9,100 @@ Each app entry:
   url  : official download/website URL
 """
 
-# OS definitions: (os_key, os_label)
+from .premium_emoji import ce
+
 OS_LIST = [
-    ("android", "🤖 اندروید"),
-    ("ios",     "🍎 iOS"),
-    ("windows", "🪟 ویندوز"),
-    ("mac",     "🍏 مک"),
-    ("linux",   "🐧 لینوکس"),
+    {"key": "and", "legacy_key": "android", "label": "اندروید", "emoji": "🤖", "emoji_id": "6008224489039466126"},
+    {"key": "ios", "legacy_key": "ios",     "label": "iOS",     "emoji": "🍎", "emoji_id": "5764747723651684781"},
+    {"key": "win", "legacy_key": "windows", "label": "ویندوز",  "emoji": "🪟", "emoji_id": "6005916300600152073"},
+    {"key": "mac", "legacy_key": "mac",     "label": "مک",      "emoji": "💻", "emoji_id": "6008199565344248075"},
+    {"key": "lin", "legacy_key": "linux",   "label": "لینوکس",  "emoji": "🐧", "emoji_id": "6008107257907122096"},
 ]
 
-# Map of os_key → list of app dicts
-APPS: dict = {
-    "android": [
-        {
-            "key":  "hiddify",
-            "name": "Hiddify",
-            "desc": "مناسب برای لینک‌های Hiddify / Sing-box / Xray و بسیاری از کانفیگ‌های رایج.",
-            "url":  "https://github.com/hiddify/hiddify-app/releases/latest",
-        },
-        {
-            "key":  "v2rayng",
-            "name": "v2rayNG",
-            "desc": "کلاینت اندروید برای V2Ray/Xray، VMess، VLESS، Trojan و Shadowsocks.",
-            "url":  "https://github.com/2dust/v2rayNG/releases/latest",
-        },
-        {
-            "key":  "nekobox",
-            "name": "NekoBox for Android",
-            "desc": "کلاینت اندروید برای کانفیگ‌های Xray/Sing-box و پروتکل‌های رایج.",
-            "url":  "https://github.com/MatsuriDayo/NekoBoxForAndroid/releases/latest",
-        },
-        {
-            "key":  "wireguard",
-            "name": "WireGuard",
-            "desc": "برای کانفیگ‌های WireGuard.",
-            "url":  "https://www.wireguard.com/install/",
-        },
-        {
-            "key":  "openvpn",
-            "name": "OpenVPN Connect",
-            "desc": "برای کانفیگ‌های OpenVPN.",
-            "url":  "https://openvpn.net/client/",
-        },
+OS_BY_KEY = {item["key"]: item for item in OS_LIST}
+LEGACY_TO_KEY = {item["legacy_key"]: item["key"] for item in OS_LIST}
+
+APPS: dict[str, list[dict]] = {
+    "and": [
+        {"key": "hiddify",     "name": "Hiddify",         "url": "https://github.com/hiddify/hiddify-app/releases/latest"},
+        {"key": "v2rayng",     "name": "v2RayNG",         "url": "https://github.com/2dust/v2rayNG/releases/latest"},
+        {"key": "nekobox",     "name": "NekoBox",         "url": "https://github.com/MatsuriDayo/NekoBoxForAndroid/releases/latest"},
+        {"key": "v2raytun",    "name": "v2RayTun",        "url": "https://play.google.com/store/apps/details?id=com.v2raytun.android"},
+        {"key": "v2box",       "name": "V2Box",           "url": "https://play.google.com/store/apps/details?id=dev.hexasoftware.v2box"},
+        {"key": "napsternetv", "name": "NapsternetV",     "url": "https://play.google.com/store/apps/details?id=com.napsternetlabs.napsternetv"},
+        {"key": "wireguard",   "name": "WireGuard",       "url": "https://www.wireguard.com/install/"},
+        {"key": "openvpn",     "name": "OpenVPN Connect", "url": "https://openvpn.net/client/"},
     ],
     "ios": [
-        {
-            "key":  "hiddify",
-            "name": "Hiddify",
-            "desc": "کلاینت چندپلتفرمی برای کانفیگ‌های رایج.",
-            "url":  "https://hiddify.com/",
-        },
-        {
-            "key":  "streisand",
-            "name": "Streisand",
-            "desc": "کلاینت iOS برای VLESS, VMess, Trojan, Shadowsocks, Hysteria, TUIC و WireGuard.",
-            "url":  "https://apps.apple.com/us/app/streisand/id6450534064",
-        },
-        {
-            "key":  "foxray",
-            "name": "FoXray",
-            "desc": "کلاینت iOS/iPadOS/macOS برای Xray، VLESS، VMess، Trojan و Shadowsocks.",
-            "url":  "https://apps.apple.com/nz/app/foxray/id6448898396",
-        },
-        {
-            "key":  "wireguard",
-            "name": "WireGuard",
-            "desc": "برای کانفیگ‌های WireGuard.",
-            "url":  "https://www.wireguard.com/install/",
-        },
-        {
-            "key":  "openvpn",
-            "name": "OpenVPN Connect",
-            "desc": "برای کانفیگ‌های OpenVPN.",
-            "url":  "https://openvpn.net/client/",
-        },
+        {"key": "hiddify",     "name": "Hiddify",         "url": "https://hiddify.com/"},
+        {"key": "streisand",   "name": "Streisand",       "url": "https://apps.apple.com/us/app/streisand/id6450534064"},
+        {"key": "foxray",      "name": "FoXray",          "url": "https://apps.apple.com/nz/app/foxray/id6448898396"},
+        {"key": "v2raytun",    "name": "v2RayTun",        "url": "https://apps.apple.com/us/app/v2raytun/id6476628951"},
+        {"key": "v2box",       "name": "V2Box",           "url": "https://apps.apple.com/us/app/v2box-v2ray-client/id6446814690"},
+        {"key": "wireguard",   "name": "WireGuard",       "url": "https://www.wireguard.com/install/"},
+        {"key": "openvpn",     "name": "OpenVPN Connect", "url": "https://openvpn.net/client/"},
     ],
-    "windows": [
-        {
-            "key":  "hiddify",
-            "name": "Hiddify",
-            "desc": "کلاینت ویندوز برای کانفیگ‌های Sing-box/Xray و پروتکل‌های رایج.",
-            "url":  "https://github.com/hiddify/hiddify-app/releases/latest",
-        },
-        {
-            "key":  "v2rayn",
-            "name": "v2rayN",
-            "desc": "کلاینت ویندوز برای VLESS, VMess, Trojan, Shadowsocks, Xray و Sing-box.",
-            "url":  "https://github.com/2dust/v2rayN/releases/latest",
-        },
-        {
-            "key":  "nekoray",
-            "name": "NekoRay",
-            "desc": "کلاینت دسکتاپ برای Xray/Sing-box و پروتکل‌های رایج.",
-            "url":  "https://github.com/MatsuriDayo/nekoray/releases/latest",
-        },
-        {
-            "key":  "wireguard",
-            "name": "WireGuard",
-            "desc": "برای کانفیگ‌های WireGuard.",
-            "url":  "https://www.wireguard.com/install/",
-        },
-        {
-            "key":  "openvpn",
-            "name": "OpenVPN Connect",
-            "desc": "برای کانفیگ‌های OpenVPN.",
-            "url":  "https://openvpn.net/client/",
-        },
+    "win": [
+        {"key": "hiddify",   "name": "Hiddify",         "url": "https://github.com/hiddify/hiddify-app/releases/latest"},
+        {"key": "v2rayn",    "name": "v2rayN",          "url": "https://github.com/2dust/v2rayN/releases/latest"},
+        {"key": "nekoray",   "name": "NekoRay",         "url": "https://github.com/MatsuriDayo/nekoray/releases/latest"},
+        {"key": "wireguard", "name": "WireGuard",       "url": "https://www.wireguard.com/install/"},
+        {"key": "openvpn",   "name": "OpenVPN Connect", "url": "https://openvpn.net/client/"},
     ],
     "mac": [
-        {
-            "key":  "hiddify",
-            "name": "Hiddify",
-            "desc": "کلاینت مک برای کانفیگ‌های Sing-box/Xray.",
-            "url":  "https://github.com/hiddify/hiddify-app/releases/latest",
-        },
-        {
-            "key":  "v2rayn",
-            "name": "v2rayN",
-            "desc": "نسخه دسکتاپ برای Windows / Linux / macOS با پشتیبانی از Xray و Sing-box.",
-            "url":  "https://github.com/2dust/v2rayN/releases/latest",
-        },
-        {
-            "key":  "nekoray",
-            "name": "NekoRay",
-            "desc": "کلاینت دسکتاپ برای کانفیگ‌های Xray/Sing-box.",
-            "url":  "https://github.com/MatsuriDayo/nekoray/releases/latest",
-        },
-        {
-            "key":  "foxray",
-            "name": "FoXray",
-            "desc": "کلاینت macOS/iOS برای Xray، VLESS، VMess، Trojan و Shadowsocks.",
-            "url":  "https://apps.apple.com/nz/app/foxray/id6448898396",
-        },
-        {
-            "key":  "wireguard",
-            "name": "WireGuard",
-            "desc": "برای کانفیگ‌های WireGuard.",
-            "url":  "https://www.wireguard.com/install/",
-        },
-        {
-            "key":  "openvpn",
-            "name": "OpenVPN Connect",
-            "desc": "برای کانفیگ‌های OpenVPN.",
-            "url":  "https://openvpn.net/client/",
-        },
+        {"key": "hiddify",   "name": "Hiddify",         "url": "https://github.com/hiddify/hiddify-app/releases/latest"},
+        {"key": "v2rayn",    "name": "v2rayN",          "url": "https://github.com/2dust/v2rayN/releases/latest"},
+        {"key": "nekoray",   "name": "NekoRay",         "url": "https://github.com/MatsuriDayo/nekoray/releases/latest"},
+        {"key": "foxray",    "name": "FoXray",          "url": "https://apps.apple.com/nz/app/foxray/id6448898396"},
+        {"key": "v2box",     "name": "V2Box",           "url": "https://apps.apple.com/us/app/v2box-v2ray-client/id6446814690"},
+        {"key": "wireguard", "name": "WireGuard",       "url": "https://www.wireguard.com/install/"},
+        {"key": "openvpn",   "name": "OpenVPN Connect", "url": "https://openvpn.net/client/"},
     ],
-    "linux": [
-        {
-            "key":  "hiddify",
-            "name": "Hiddify",
-            "desc": "کلاینت لینوکس برای کانفیگ‌های Sing-box/Xray.",
-            "url":  "https://github.com/hiddify/hiddify-app/releases/latest",
-        },
-        {
-            "key":  "v2rayn",
-            "name": "v2rayN",
-            "desc": "نسخه لینوکس با پشتیبانی از Xray و Sing-box.",
-            "url":  "https://github.com/2dust/v2rayN/releases/latest",
-        },
-        {
-            "key":  "nekoray",
-            "name": "NekoRay",
-            "desc": "کلاینت لینوکس برای Xray/Sing-box.",
-            "url":  "https://github.com/MatsuriDayo/nekoray/releases/latest",
-        },
-        {
-            "key":  "wireguard",
-            "name": "WireGuard",
-            "desc": "برای کانفیگ‌های WireGuard.",
-            "url":  "https://www.wireguard.com/install/",
-        },
-        {
-            "key":  "openvpn",
-            "name": "OpenVPN",
-            "desc": "برای کانفیگ‌های OpenVPN.",
-            "url":  "https://openvpn.net/client/",
-        },
+    "lin": [
+        {"key": "hiddify",   "name": "Hiddify",   "url": "https://github.com/hiddify/hiddify-app/releases/latest"},
+        {"key": "v2rayn",    "name": "v2rayN",    "url": "https://github.com/2dust/v2rayN/releases/latest"},
+        {"key": "nekoray",   "name": "NekoRay",   "url": "https://github.com/MatsuriDayo/nekoray/releases/latest"},
+        {"key": "wireguard", "name": "WireGuard", "url": "https://www.wireguard.com/install/"},
+        {"key": "openvpn",   "name": "OpenVPN",   "url": "https://openvpn.net/client/"},
     ],
 }
 
+def normalize_os_key(os_key: str) -> str:
+    """Accept old and new OS keys and return the short key."""
+    key = str(os_key or "").strip().lower()
+    return LEGACY_TO_KEY.get(key, key)
 
 def get_os_label(os_key: str) -> str:
-    """Return the display label for an OS key."""
-    for k, lbl in OS_LIST:
-        if k == os_key:
-            return lbl
-    return os_key
+    item = OS_BY_KEY.get(normalize_os_key(os_key))
+    return item["label"] if item else str(os_key)
 
+def os_button_label(os_key: str) -> str:
+    """Return HTML label with premium emoji for OS menu messages."""
+    item = OS_BY_KEY.get(normalize_os_key(os_key))
+    if not item:
+        return str(os_key)
+    return f"{ce(item['emoji'], item['emoji_id'])} {item['label']}"
 
-def get_active_apps(os_key: str, setting_get_fn) -> list:
-    """Return the enabled apps for a given OS, consulting the settings DB."""
-    apps = APPS.get(os_key, [])
+def os_button_text(os_key: str) -> str:
+    """Return fallback text for inline keyboard buttons."""
+    item = OS_BY_KEY.get(normalize_os_key(os_key))
+    if not item:
+        return str(os_key)
+    return f"{item['emoji']} {item['label']}"
+
+def get_os_emoji_id(os_key: str) -> str:
+    item = OS_BY_KEY.get(normalize_os_key(os_key))
+    return item["emoji_id"] if item else ""
+
+def get_active_apps(os_key: str, setting_get_fn) -> list[dict]:
+    """Return enabled apps; default is enabled. Also respects old long-key settings."""
+    key = normalize_os_key(os_key)
+    legacy = OS_BY_KEY.get(key, {}).get("legacy_key", key)
     result = []
-    for app in apps:
-        setting_key = f"app_item_enabled:{os_key}:{app['key']}"
-        enabled = setting_get_fn(setting_key, "1")
+    for app in APPS.get(key, []):
+        new_setting = f"app_item_enabled:{key}:{app['key']}"
+        old_setting = f"app_item_enabled:{legacy}:{app['key']}"
+        enabled = setting_get_fn(new_setting, setting_get_fn(old_setting, "1"))
         if enabled == "1":
             result.append(app)
     return result

@@ -3932,14 +3932,17 @@ def universal_handler(message):
             return
 
         if sn == "admin_edit_tariff_text" and is_admin(uid):
-            raw_text = (message.text or message.caption or "").strip()
-            if raw_text == "-":
+            from ..ui.premium_emoji import serialize_premium_text as _spt, render_premium_text_html as _rph
+            raw_text = message.text if message.text is not None else (message.caption or "")
+            entities = message.entities or message.caption_entities or []
+            if raw_text.strip() == "-":
                 setting_set("tariff_text", "")
                 log_admin_action(uid, "متن تعرفه پاک شد")
                 state_clear(uid)
                 bot.send_message(uid, "✅ متن تعرفه پاک شد.", reply_markup=back_button("adm:tariff:view"))
             else:
-                setting_set("tariff_text", raw_text)
+                tariff_html = _rph(_spt(raw_text, entities))
+                setting_set("tariff_text", tariff_html)
                 log_admin_action(uid, "متن تعرفه تغییر کرد")
                 state_clear(uid)
                 bot.send_message(uid, "✅ متن تعرفه ذخیره شد.", reply_markup=back_button("adm:tariff:view"))

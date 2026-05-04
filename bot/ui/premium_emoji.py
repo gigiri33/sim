@@ -85,6 +85,11 @@ def ce(emoji: str, eid: str | int) -> str:
     return f'<tg-emoji emoji-id="{eid_str}">{emoji}</tg-emoji>'
 
 
+def tg_emoji(emoji_id: str | int, fallback: str) -> str:
+    """Return Bot API compatible custom emoji HTML with the requested argument order."""
+    return ce(fallback, emoji_id)
+
+
 # ── Extraction ─────────────────────────────────────────────────────────────────
 
 def extract_custom_emojis(message) -> list[dict]:
