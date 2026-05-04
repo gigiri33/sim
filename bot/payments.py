@@ -48,7 +48,7 @@ _GW_DISPLAY_NAMES = {
     "tronpays_rial":     "TronPays",
     "tronado":           "ترونادو",
     "centralpay":        "درگاه کارت به کارت (CentralPay)",
-    "rialpay":           "درگاه ریال‌پی",
+    "rialpay":           "درگاه کارت به کارت (Rialpays)",
 }
 
 
@@ -197,7 +197,7 @@ def show_payment_method_selection(target, uid, context_data):
         "swapwallet_crypto": ("درگاه کارت به کارت و ارز دیجیتال (SwapWallet)", "5796315849241403403"),
         "tronpays_rial":     ("درگاه کارت به کارت (TronPay)",               "5796315849241403403"),
         "tronado":           ("درگاه ترونادو",                              "5796315849241403403"),
-        "rialpay":           ("درگاه ریال‌پی",                               "5796315849241403403"),
+        "rialpay":           ("درگاه کارت به کارت (Rialpays)",                               "5796315849241403403"),
     }
 
     def _add_gw(key, cb, extra_check=True):

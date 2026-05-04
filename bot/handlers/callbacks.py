@@ -966,7 +966,7 @@ def _show_purchase_gateways(target, uid, package_id, price, package_row):
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:centralpay:{package_id}"))
         _gw_labels.append(("centralpay", _lbl))
     if is_gateway_available("rialpay", uid):
-        _lbl = setting_get("gw_rialpay_display_name", "").strip() or "درگاه ریال‌پی"
+        _lbl = setting_get("gw_rialpay_display_name", "").strip() or "درگاه کارت به کارت (Rialpays)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:rialpay:{package_id}"))
         _gw_labels.append(("rialpay", _lbl))
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"buy:t:{package_row['type_id']}", icon_custom_emoji_id="5253997076169115797"))
@@ -1060,7 +1060,7 @@ def _show_renewal_gateways(target, uid, purchase_id, package_id, price, package_
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:centralpay:{purchase_id}:{package_id}"))
         _gw_labels.append(("centralpay", _lbl))
     if is_gateway_available("rialpay", uid):
-        _lbl = setting_get("gw_rialpay_display_name", "").strip() or "درگاه ریال‌پی"
+        _lbl = setting_get("gw_rialpay_display_name", "").strip() or "درگاه کارت به کارت (Rialpays)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:rialpay:{purchase_id}:{package_id}"))
         _gw_labels.append(("rialpay", _lbl))
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"renew:{purchase_id}", icon_custom_emoji_id="5253997076169115797"))
@@ -1530,7 +1530,7 @@ def _show_pnlcfg_renewal_gateways(target, uid, config_id, package_id, price, pac
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"mypnlcfgrpay:centralpay:{config_id}:{package_id}"))
         _gw_labels.append(("centralpay", _lbl))
     if is_gateway_available("rialpay", uid):
-        _lbl = setting_get("gw_rialpay_display_name", "").strip() or "درگاه ریال‌پی"
+        _lbl = setting_get("gw_rialpay_display_name", "").strip() or "درگاه کارت به کارت (Rialpays)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"mypnlcfgrpay:rialpay:{config_id}:{package_id}"))
         _gw_labels.append(("rialpay", _lbl))
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"mypnlcfg:renewconfirm:{config_id}",
@@ -1609,7 +1609,7 @@ def _show_wallet_gateways(target, uid, amount):
         kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:centralpay"))
         _gw_labels.append(("centralpay", _lbl))
     if is_gateway_available("rialpay", uid):
-        _lbl = setting_get("gw_rialpay_display_name", "").strip() or "درگاه ریال‌پی"
+        _lbl = setting_get("gw_rialpay_display_name", "").strip() or "درگاه کارت به کارت (Rialpays)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:rialpay"))
         _gw_labels.append(("rialpay", _lbl))
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
@@ -17716,10 +17716,10 @@ def _dispatch_callback(call, uid, data):
         key_display = (f"<code>{esc(api_key[:8])}...{esc(api_key[-4:])}</code>"
                        if api_key else "❌ <b>ثبت نشده</b>")
         display_name_rp = setting_get("gw_rialpay_display_name", "")
-        name_display_rp = display_name_rp or "<i>پیش‌فرض: درگاه ریال‌پی</i>"
+        name_display_rp = display_name_rp or "<i>پیش‌فرض: درگاه کارت به کارت (Rialpays)</i>"
         cb_url_display  = cb_base or "❌ تنظیم نشده"
         text = (
-            "💳 <b>درگاه ریال‌پی</b>\n\n"
+            "💳 <b>درگاه کارت به کارت (Rialpays)</b>\n\n"
             f"وضعیت: {enabled_label}\n"
             f"نمایش: {vis_label}\n"
             f"نام نمایشی: {name_display_rp}\n\n"

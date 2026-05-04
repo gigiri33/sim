@@ -455,35 +455,29 @@ def _plisio_webhook_server():
             resp.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Signature, Authorization"
             return resp, 200
 
+        # RialPay sends form POST fields: invoice_id, amount, status, order_id, sign
+        # sign = hmac_sha256(key=secret, msg=str(invoice_id))
+        invoice_id = request.form.get("invoice_id") or request.args.get("invoice_id")
+        amount_raw = request.form.get("amount") or request.args.get("amount")
+        status_raw = request.form.get("status") or request.args.get("status")
+        order_id_raw = request.form.get("order_id") or request.args.get("order_id")
+        sign = request.form.get("sign") or request.args.get("sign") or ""
+
         print(f"[RialPay Webhook HIT] payment_id={payment_id} bot={bot_username} "
-              f"method={request.method} args={dict(request.args)} "
-              f"json={request.get_json(silent=True)} form={dict(request.form)}")
+              f"method={request.method} invoice_id={invoice_id} status={status_raw!r} "
+              f"order_id={order_id_raw} amount={amount_raw} sign={sign[:16] if sign else '—'}...")
+
         try:
-            from bot.gateways.rialpay import verify_rialpay_webhook_signature, normalize_rialpay_status, process_rialpay_verified_payment
-            from bot.db import get_payment, is_payment_expired
-
-            raw_body = request.get_data()
-
-            # ── Parse JSON or form-encoded ─────────────────────────────────────
-            data = request.get_json(silent=True, force=True)
-            if not data:
-                # RialPay may send form-encoded or query-string data
-                data = dict(request.form) or dict(request.args) or {}
-                # Flatten single-value lists from MultiDict
-                data = {k: (v[0] if isinstance(v, list) and len(v) == 1 else v)
-                        for k, v in data.items()}
-            print(f"[RialPay] webhook parsed data: {str(data)[:400]}")
+            from bot.gateways.rialpay import verify_rialpay_sign, normalize_rialpay_status, process_rialpay_verified_payment
+            from bot.db import get_payment
 
             # ── Signature verification ────────────────────────────────────────
-            sig = request.headers.get("X-Signature", "")
-            if not verify_rialpay_webhook_signature(raw_body, sig):
-                print(f"[RialPay] Webhook signature INVALID for payment_id={payment_id}  sig={sig!r}")
-                return jsonify({"ok": False, "error": "invalid signature"}), 200
+            if not verify_rialpay_sign(invoice_id=invoice_id, sign=sign):
+                return jsonify({"ok": False, "error": "invalid sign"}), 200
 
             # ── Match order_id ────────────────────────────────────────────────
-            order_id_from_payload = data.get("order_id")
-            if order_id_from_payload is not None and str(order_id_from_payload) != str(payment_id):
-                print(f"[RialPay] order_id mismatch: payload={order_id_from_payload} url={payment_id}")
+            if order_id_raw is not None and str(order_id_raw) != str(payment_id):
+                print(f"[RialPay] order_id mismatch: payload={order_id_raw} url={payment_id}")
                 return jsonify({"ok": False, "error": "order_id mismatch"}), 200
 
             # ── Load payment ──────────────────────────────────────────────────
@@ -500,18 +494,26 @@ def _plisio_webhook_server():
                 print(f"[RialPay] payment_id={payment_id} already completed")
                 return jsonify({"ok": True, "already_processed": True}), 200
 
-            norm_status = normalize_rialpay_status(str(data.get("status", "")))
-            print(f"[RialPay] payment_id={payment_id} norm_status={norm_status}")
+            norm_status = normalize_rialpay_status(str(status_raw or ""))
+            print(f"[RialPay] payment_id={payment_id} norm_status={norm_status} raw={status_raw!r}")
+
+            data = {
+                "invoice_id": invoice_id,
+                "amount":     amount_raw,
+                "status":     status_raw,
+                "order_id":   order_id_raw,
+                "sign":       sign,
+            }
 
             if norm_status == "paid":
                 result = process_rialpay_verified_payment(payment_id, source="webhook", raw_payload=data)
                 print(f"[RialPay] webhook result payment_id={payment_id}: {result}")
                 status = result.get("status", "")
                 if status in ("ok", "already_processed"):
-                    return jsonify({"ok": True}), 200
+                    return "OK", 200
                 if status == "amount_mismatch":
-                    return jsonify({"ok": True, "error_logged": True, "amount_mismatch": True}), 200
-                return jsonify({"ok": True, "error_logged": True, "error": str(result.get("msg", status))[:300]}), 200
+                    return "OK", 200
+                return "OK", 200
 
             elif norm_status == "rejected":
                 from bot.db import get_conn as _gc2
@@ -523,16 +525,16 @@ def _plisio_webhook_server():
                         )
                 except Exception as _re:
                     print(f"[RialPay] reject update failed: {_re}")
-                return jsonify({"ok": True}), 200
+                return "FAILED", 200
 
-            # pending / unknown: nothing to do yet
-            return jsonify({"ok": True}), 200
+            # pending / unknown
+            return "OK", 200
 
         except Exception as exc:
             import traceback as _tb3
             _tb3.print_exc()
             print("RIALPAY_WEBHOOK_ERROR:", exc)
-            return jsonify({"ok": True}), 200
+            return "OK", 200
 
     @_app.after_request
     def _add_cors_headers(response):

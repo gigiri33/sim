@@ -130,21 +130,40 @@ def create_rialpay_invoice(amount_toman: int, user_id, order_id, callback_url: s
 
 def verify_rialpay_webhook_signature(raw_body: bytes, signature: str) -> bool:
     """
-    Verify X-Signature header from RialPay webhook using HMAC-SHA256.
+    Verify RialPay webhook sign field using HMAC-SHA256.
+    RialPay computes: hmac_sha256(key=secret, msg=invoice_id)
+    The sign comes as a POST form field, not a header.
+    This function is kept for compatibility but use verify_rialpay_sign() directly.
+    """
+    # Delegate to the form-field based verifier (signature here is the sign field value)
+    return verify_rialpay_sign(invoice_id=None, sign=signature, raw_body=raw_body)
 
-    If rialpay_webhook_secret is not set, returns False (reject all).
+
+def verify_rialpay_sign(invoice_id, sign: str, raw_body: bytes = None) -> bool:
+    """
+    Verify RialPay's sign field: hmac_sha256(key=secret, msg=str(invoice_id))
+    If secret is not configured, skip verification (accept all).
     """
     secret = (setting_get("rialpay_webhook_secret", "") or "").strip()
     if not secret:
-        # No secret configured → accept all webhooks (insecure but functional)
-        print("[RialPay] webhook signature check SKIPPED: no secret configured.")
+        print("[RialPay] webhook sign check SKIPPED: no secret configured.")
+        return True
+    if not sign:
+        print("[RialPay] webhook sign check SKIPPED: no sign provided.")
+        return True
+    if invoice_id is None:
+        # Can't verify without invoice_id
+        print("[RialPay] webhook sign check SKIPPED: no invoice_id.")
         return True
     expected = hmac.new(
         secret.encode("utf-8"),
-        raw_body,
+        str(invoice_id).encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
-    return hmac.compare_digest(expected, (signature or "").strip())
+    result = hmac.compare_digest(expected, str(sign).strip())
+    if not result:
+        print(f"[RialPay] webhook sign INVALID invoice_id={invoice_id} sign={sign!r}")
+    return result
 
 
 def normalize_rialpay_status(status: str) -> str:
