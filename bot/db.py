@@ -810,6 +810,8 @@ def _run_init_db_migrations():
             "ALTER TABLE payments ADD COLUMN callback_received_at TEXT",
             "ALTER TABLE payments ADD COLUMN fulfilled_at TEXT",
             "ALTER TABLE payments ADD COLUMN expires_at TEXT",
+            "ALTER TABLE payments ADD COLUMN notify_message_id INTEGER",
+            "ALTER TABLE payments ADD COLUMN used_card_id INTEGER",
         ]
         for sql in migrations:
             try:
@@ -2071,6 +2073,139 @@ def get_payment(payment_id):
         return conn.execute(
             "SELECT * FROM payments WHERE id=?", (payment_id,)
         ).fetchone()
+
+
+def get_gateway_stats(payment_method: str) -> dict:
+    """
+    Return completed payment stats for a given payment_method.
+
+    Returns:
+        {
+            "total_toman": <int>,        # sum of amount column (toman)
+            "count": <int>,              # number of completed payments
+            "by_coin": {                 # populated only when crypto_coin rows exist
+                "<coin>": {
+                    "toman": <int>,
+                    "crypto": <float or None>,  # sum of crypto_amount if available
+                }
+            }
+        }
+    """
+    with get_conn() as conn:
+        # Overall totals
+        row = conn.execute(
+            "SELECT COUNT(*) AS cnt, COALESCE(SUM(amount),0) AS total"
+            " FROM payments"
+            " WHERE payment_method=? AND status='completed'",
+            (payment_method,),
+        ).fetchone()
+        total_toman = int(row["total"]) if row else 0
+        count = int(row["cnt"]) if row else 0
+
+        # Per-coin breakdown
+        coin_rows = conn.execute(
+            "SELECT crypto_coin,"
+            " COUNT(*) AS cnt,"
+            " COALESCE(SUM(amount), 0) AS toman_sum,"
+            " COALESCE(SUM(CAST(REPLACE(crypto_amount,'',crypto_amount) AS REAL)), 0) AS crypto_sum"
+            " FROM payments"
+            " WHERE payment_method=? AND status='completed' AND crypto_coin IS NOT NULL AND crypto_coin != ''"
+            " GROUP BY crypto_coin",
+            (payment_method,),
+        ).fetchall()
+
+    by_coin = {}
+    for cr in coin_rows:
+        coin = cr["crypto_coin"]
+        crypto_val = None
+        try:
+            v = float(cr["crypto_sum"])
+            if v > 0:
+                crypto_val = v
+        except Exception:
+            pass
+        by_coin[coin] = {
+            "toman": int(cr["toman_sum"]),
+            "count": int(cr["cnt"]),
+            "crypto": crypto_val,
+        }
+
+    return {"total_toman": total_toman, "count": count, "by_coin": by_coin}
+
+
+def get_card_payment_stats() -> list:
+    """
+    Return per-card payment stats for completed card payments.
+
+    Each item:
+        {
+            "card_id": <int or None>,
+            "card_number": <str>,
+            "bank_name": <str>,
+            "holder_name": <str>,
+            "is_active": <int>,
+            "total_toman": <int>,
+            "count": <int>,
+        }
+    Cards with no payments are also included (total=0, count=0).
+    Plus an extra entry for payments with no card_id (legacy).
+    """
+    with get_conn() as conn:
+        # Per-card aggregates
+        rows = conn.execute(
+            "SELECT p.used_card_id,"
+            " COALESCE(SUM(p.amount), 0) AS total,"
+            " COUNT(*) AS cnt"
+            " FROM payments p"
+            " WHERE p.payment_method='card' AND p.status='completed'"
+            " GROUP BY p.used_card_id"
+        ).fetchall()
+
+        cards = conn.execute(
+            "SELECT id, card_number, bank_name, holder_name, is_active"
+            " FROM payment_cards ORDER BY id ASC"
+        ).fetchall()
+
+    stats_map = {}
+    for r in rows:
+        cid = r["used_card_id"]
+        stats_map[cid] = {"total_toman": int(r["total"]), "count": int(r["cnt"])}
+
+    result = []
+    known_ids = set()
+    for c in cards:
+        cid = c["id"]
+        known_ids.add(cid)
+        s = stats_map.get(cid, {"total_toman": 0, "count": 0})
+        result.append({
+            "card_id": cid,
+            "card_number": c["card_number"],
+            "bank_name": c["bank_name"] or "",
+            "holder_name": c["holder_name"] or "",
+            "is_active": c["is_active"],
+            "total_toman": s["total_toman"],
+            "count": s["count"],
+        })
+
+    # Legacy / unlinked payments (NULL card_id or id not in payment_cards)
+    unlinked_total = 0
+    unlinked_count = 0
+    for cid, s in stats_map.items():
+        if cid not in known_ids:
+            unlinked_total += s["total_toman"]
+            unlinked_count += s["count"]
+    if unlinked_count > 0:
+        result.append({
+            "card_id": None,
+            "card_number": "—",
+            "bank_name": "پرداخت‌های قدیمی",
+            "holder_name": "",
+            "is_active": 1,
+            "total_toman": unlinked_total,
+            "count": unlinked_count,
+        })
+
+    return result
 
 
 def get_pending_crypto_payments(limit=30):

@@ -420,6 +420,14 @@ def process_rialpay_verified_payment(payment_id: int,
     amount = payment["amount"]
 
     try:
+        # ── Edit old payment message to remove buttons ────────────────────────
+        notify_msg_id = payment.get("notify_message_id") or 0
+        if notify_msg_id:
+            try:
+                bot.edit_message_reply_markup(uid, int(notify_msg_id), reply_markup=None)
+            except Exception:
+                pass
+
         if kind == "wallet_charge":
             with get_conn() as conn:
                 conn.execute(

@@ -79,6 +79,9 @@ from ..db import (
     update_panel_config_field, delete_panel_config,
     # Service naming
     set_payment_service_names, get_payment_service_names,
+    # Gateway stats
+    get_gateway_stats,
+    get_card_payment_stats,
 )
 from ..gateways.base import is_gateway_available, is_card_info_complete, get_gateway_range_text, is_gateway_in_range, build_gateway_range_guide
 from ..gateways.crypto import fetch_crypto_prices
@@ -5585,6 +5588,10 @@ def _dispatch_callback(call, uid, data):
             return
         payment_id = create_payment("renewal", uid, package_id, price, "card", status="pending",
                                      config_id=item["config_id"])
+        if _ci.get("id"):
+            try:
+                with get_conn() as _c: _c.execute("UPDATE payments SET used_card_id=? WHERE id=?", (_ci["id"], payment_id))
+            except Exception: pass
         # Generate random amount if enabled
         final_amount = None
         if setting_get("gw_card_random_amount", "0") == "1":
@@ -6353,6 +6360,13 @@ def _dispatch_callback(call, uid, data):
         kb_rp2.add(types.InlineKeyboardButton("🔍 بررسی پرداخت", callback_data=f"rpay:rialpay:verify:{payment_id}"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, text_rp2, kb_rp2)
+        try:
+            _rp2_msg_id = call.message.message_id if hasattr(call, "message") else None
+            if _rp2_msg_id:
+                with get_conn() as conn:
+                    conn.execute("UPDATE payments SET notify_message_id=? WHERE id=?", (_rp2_msg_id, payment_id))
+        except Exception:
+            pass
         return
 
     # ── Plisio: renewal ───────────────────────────────────────────────────────
@@ -7032,6 +7046,10 @@ def _dispatch_callback(call, uid, data):
         _qty_card = int(state_data(uid).get("quantity", 1) or 1)
         payment_id = create_payment("config_purchase", uid, package_id, price, "card",
                                     status="pending", quantity=_qty_card)
+        if _ci.get("id"):
+            try:
+                with get_conn() as _c: _c.execute("UPDATE payments SET used_card_id=? WHERE id=?", (_ci["id"], payment_id))
+            except Exception: pass
         _snames_card = state_data(uid).get("service_names")
         if _snames_card:
             set_payment_service_names(payment_id, _snames_card)
@@ -7804,6 +7822,13 @@ def _dispatch_callback(call, uid, data):
         kb_rp.add(types.InlineKeyboardButton("🔍 بررسی پرداخت", callback_data=f"pay:rialpay:verify:{payment_id}"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, text_rp, kb_rp)
+        try:
+            _rp_msg_id = call.message.message_id if hasattr(call, "message") else None
+            if _rp_msg_id:
+                with get_conn() as conn:
+                    conn.execute("UPDATE payments SET notify_message_id=? WHERE id=?", (_rp_msg_id, payment_id))
+        except Exception:
+            pass
         return
 
     # ── Plisio: purchase ──────────────────────────────────────────────────────
@@ -8261,6 +8286,10 @@ def _dispatch_callback(call, uid, data):
         card, bank, owner = _ci["card_number"], _ci["bank_name"], _ci["holder_name"]
         amount = apply_gateway_fee("card", amount)
         payment_id = create_payment("wallet_charge", uid, None, amount, "card", status="pending")
+        if _ci.get("id"):
+            try:
+                with get_conn() as _c: _c.execute("UPDATE payments SET used_card_id=? WHERE id=?", (_ci["id"], payment_id))
+            except Exception: pass
         # Generate random amount if enabled
         final_amount = None
         if setting_get("gw_card_random_amount", "0") == "1":
@@ -8845,6 +8874,14 @@ def _dispatch_callback(call, uid, data):
         kb_rp3.add(types.InlineKeyboardButton("🔍 بررسی پرداخت", callback_data=f"wallet:charge:rialpay:verify:{payment_id}"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, text_rp3, kb_rp3)
+        # ذخیره message_id پیام پرداخت برای edit کردن بعد از تأیید اتوماتیک
+        try:
+            _rp3_msg_id = call.message.message_id if hasattr(call, "message") else None
+            if _rp3_msg_id:
+                with get_conn() as conn:
+                    conn.execute("UPDATE payments SET notify_message_id=? WHERE id=?", (_rp3_msg_id, payment_id))
+        except Exception:
+            pass
         return
 
         payment_id = int(data.split(":")[3])
@@ -10780,6 +10817,10 @@ def _dispatch_callback(call, uid, data):
                     show_alert=True); return
             payment_id = create_payment("pnlcfg_renewal", uid, package_id, price, "card",
                                         status="pending", config_id=config_id)
+            if _ci.get("id"):
+                try:
+                    with get_conn() as _c: _c.execute("UPDATE payments SET used_card_id=? WHERE id=?", (_ci["id"], payment_id))
+                except Exception: pass
             final_amount = None
             if setting_get("gw_card_random_amount", "0") == "1":
                 final_amount = _generate_card_final_amount(price, payment_id)
@@ -17406,6 +17447,27 @@ def _dispatch_callback(call, uid, data):
         return
 
     # ── Gateway settings ─────────────────────────────────────────────────────
+    def _gw_stats_line(gw_key: str, crypto: bool = False) -> str:
+        """Return a formatted stats line for a gateway settings page."""
+        try:
+            stats = get_gateway_stats(gw_key)
+            total = stats["total_toman"]
+            count = stats["count"]
+            if count == 0:
+                return "📊 پرداخت موفق: هنوز پرداختی ثبت نشده"
+            base = f"📊 پرداخت موفق: <b>{fmt_price(total)}</b> تومان ({count} تراکنش)"
+            if crypto and stats["by_coin"]:
+                lines = [base]
+                for coin, cd in sorted(stats["by_coin"].items()):
+                    coin_line = f"  • {coin.upper()}: {fmt_price(cd['toman'])} تومان"
+                    if cd["crypto"] and cd["crypto"] > 0:
+                        coin_line += f" ≈ {cd['crypto']:.4f} {coin.upper()}"
+                    lines.append(coin_line)
+                return "\n".join(lines)
+            return base
+        except Exception:
+            return ""
+
     if data == "adm:set:gateways":
         kb = types.InlineKeyboardMarkup()
         for gw_key, gw_default in [
@@ -17467,7 +17529,8 @@ def _dispatch_callback(call, uid, data):
             f"نام نمایشی: {name_display}\n"
             f"🎲 قیمت رندوم: {random_label}\n"
             f"🔄 چرخش کارت: {rotation_label}\n"
-            f"💳 کارت‌ها: {cards_status}"
+            f"💳 کارت‌ها: {cards_status}\n\n"
+            f"{_gw_stats_line('card')}"
         )
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
@@ -17528,6 +17591,11 @@ def _dispatch_callback(call, uid, data):
         cards = get_payment_cards()
         rotation_on = setting_get("gw_card_rotation_enabled", "0") == "1"
         rotation_lbl = "🟢 فعال" if rotation_on else "🔴 غیرفعال"
+        # Load per-card stats
+        try:
+            _cstats = {cs["card_id"]: cs for cs in get_card_payment_stats() if cs["card_id"] is not None}
+        except Exception:
+            _cstats = {}
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("➕ اضافه کردن کارت جدید", callback_data="adm:gw:card:cards:add"))
         kb.add(types.InlineKeyboardButton(f"🔀 رندم کارت‌ها: {rotation_lbl}", callback_data="adm:gw:card:cards:rotation"))
@@ -17540,6 +17608,26 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:set:gw:card", icon_custom_emoji_id="5253997076169115797"))
         cards_count = len(cards)
         active_count = sum(1 for c in cards if c["is_active"])
+        # Build per-card stats block
+        stats_lines = []
+        for c in cards:
+            cs = _cstats.get(c["id"])
+            status_icon = "✅" if c["is_active"] else "⛔"
+            card_label = c["card_number"]
+            if c["bank_name"]:
+                card_label += f" ({c['bank_name']})"
+            if cs and cs["count"] > 0:
+                stats_lines.append(f"{status_icon} <code>{card_label}</code>: <b>{fmt_price(cs['total_toman'])}</b> تومان ({cs['count']} تراکنش)")
+            else:
+                stats_lines.append(f"{status_icon} <code>{card_label}</code>: هنوز پرداختی ثبت نشده")
+        # Check for legacy unlinked
+        try:
+            _unl = next((cs for cs in get_card_payment_stats() if cs["card_id"] is None), None)
+            if _unl and _unl["count"] > 0:
+                stats_lines.append(f"📦 پرداخت‌های قدیمی (بدون کارت): <b>{fmt_price(_unl['total_toman'])}</b> تومان ({_unl['count']} تراکنش)")
+        except Exception:
+            pass
+        stats_block = "\n".join(stats_lines) if stats_lines else "هنوز هیچ پرداختی ثبت نشده"
         try:
             bot.answer_callback_query(call.id)
         except Exception:
@@ -17549,6 +17637,7 @@ def _dispatch_callback(call, uid, data):
             f"تعداد کارت‌ها: <b>{cards_count}</b>\n"
             f"کارت‌های فعال: <b>{active_count}</b>\n"
             f"🔀 رندم: {rotation_lbl}\n\n"
+            f"📊 <b>آمار پرداخت‌های موفق هر کارت:</b>\n{stats_block}\n\n"
             "برای مدیریت هر کارت روی آن بزنید:",
             kb)
         return
@@ -17592,6 +17681,15 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton(toggle_lbl, callback_data=f"adm:gw:card:cards:toggle:{card_id}"))
         kb.add(types.InlineKeyboardButton("🗑 حذف کارت", callback_data=f"adm:gw:card:cards:delask:{card_id}"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:gw:card:cards", icon_custom_emoji_id="5253997076169115797"))
+        # Per-card stats
+        try:
+            _cs = next((s for s in get_card_payment_stats() if s["card_id"] == card_id), None)
+            if _cs and _cs["count"] > 0:
+                _stats_txt = f"\n\n📊 <b>پرداخت‌های موفق این کارت:</b>\n{fmt_price(_cs['total_toman'])} تومان ({_cs['count']} تراکنش)"
+            else:
+                _stats_txt = "\n\n📊 هنوز پرداخت موفقی از این کارت ثبت نشده"
+        except Exception:
+            _stats_txt = ""
         try:
             bot.answer_callback_query(call.id)
         except Exception:
@@ -17601,7 +17699,8 @@ def _dispatch_callback(call, uid, data):
             f"شماره: <code>{esc(card['card_number'])}</code>\n"
             f"بانک: {esc(card['bank_name'] or '—')}\n"
             f"صاحب کارت: {esc(card['holder_name'] or '—')}\n"
-            f"وضعیت: {status_lbl}",
+            f"وضعیت: {status_lbl}"
+            f"{_stats_txt}",
             kb)
         return
 
@@ -17941,7 +18040,8 @@ def _dispatch_callback(call, uid, data):
             f"نام نمایشی: {name_display_crypto}\n\n"
             "ℹ️ <i>با فعال‌سازی <b>کامنت</b> یا <b>مبلغ رندم</b> برای هر ارز، "
             "هنگام نمایش صفحه پرداخت، کد کامنت تصادفی و/یا مبلغ ارزی با ارقام اعشاری رندم به کاربر نشان داده می‌شود.</i>\n\n"
-            "برای ویرایش آدرس ولت روی نام ارز بزنید:"
+            "برای ویرایش آدرس ولت روی نام ارز بزنید:\n\n"
+            f"{_gw_stats_line('crypto', crypto=True)}"
         )
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
@@ -18016,7 +18116,8 @@ def _dispatch_callback(call, uid, data):
             f"نام نمایشی: {name_display_tp}\n\n"
             f"💳 پرداخت از تلگرام: {bot_label}\n"
             f"🌐 پرداخت از مرورگر: {web_label}\n\n"
-            f"کلید API: {key_display}"
+            f"کلید API: {key_display}\n\n"
+            f"{_gw_stats_line('tetrapay')}"
         )
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
@@ -18115,7 +18216,8 @@ def _dispatch_callback(call, uid, data):
             "   👉 business.swapwallet.app\n"
             "3️⃣ یک فروشگاه جدید بسازید\n"
             "4️⃣ <b>نام فروشگاه</b> رو به عنوان نام کاربری اینجا وارد کنید\n"
-            "5️⃣ از تب <b>پروفایل ← کلید API</b> کلید بگیرید و وارد کنید"
+            "5️⃣ از تب <b>پروفایل ← کلید API</b> کلید بگیرید و وارد کنید\n\n"
+            f"{_gw_stats_line('swapwallet_crypto', crypto=True)}"
         )
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
@@ -18207,7 +18309,8 @@ def _dispatch_callback(call, uid, data):
             "📋 <b>راهنمای دریافت API Key:</b>\n"
             "۱. ربات @TronPaysBot را استارت کنید\n"
             "۲. ثبت‌نام و احراز هویت را تکمیل کنید\n"
-            "۳. کلید API را از پروفایل دریافت کنید"
+            "۳. کلید API را از پروفایل دریافت کنید\n\n"
+            f"{_gw_stats_line('tronpays_rial')}"
         )
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
@@ -18298,7 +18401,8 @@ def _dispatch_callback(call, uid, data):
             "۱. از ریال‌پی API Key دریافت کنید\n"
             "۲. Callback Base URL را روی آدرس عمومی سرور خود تنظیم کنید\n"
             "   (مثال: https://yourdomain.com)\n"
-            "۳. Webhook Secret را برای امنیت تنظیم کنید"
+            "۳. Webhook Secret را برای امنیت تنظیم کنید\n\n"
+            f"{_gw_stats_line('rialpay')}"
         )
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
@@ -18448,7 +18552,8 @@ def _dispatch_callback(call, uid, data):
             "۱. ربات @puzzlenetpay_bot را استارت کنید\n"
             "۲. فروشگاه را ثبت کنید\n"
             "۳. از قسمت مشخصات من، کلید API را بردارید\n"
-            "۴. Callback URL بالا را در تنظیمات فروشگاه وارد کنید"
+            "۴. Callback URL بالا را در تنظیمات فروشگاه وارد کنید\n\n"
+            f"{_gw_stats_line('pazzlenet')}"
         )
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
@@ -18583,7 +18688,8 @@ def _dispatch_callback(call, uid, data):
             "۲. آدرس کیف پول TRC20 خود را وارد کنید\n"
             "۳. آدرس Callback با <code>https://</code> وارد کنید (|ترونادو HTTP قبول نمی‌کند)\n"
             "۴. درگاه را فعال کنید\n\n"
-            "📢 کانال ترونادو: @TronadoCh — 📞 پشتیبانی: @TrndSupport"
+            "📢 کانال ترونادو: @TronadoCh — 📞 پشتیبانی: @TrndSupport\n\n"
+            f"{_gw_stats_line('tronado')}"
         )
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
@@ -18690,7 +18796,8 @@ def _dispatch_callback(call, uid, data):
             "۲. Callback Base URL اختیاری است — اگر وارد نشود از server_public_url استفاده می‌شود\n"
             "۳. اگر صفحه پرداخت پیام «هیچ روش فعالی جهت واریز وجود ندارد» نشان داد، یا روش‌های واریز در پنل سنترال‌پی فعال نیست یا باید نوع لینک را طبق راهنمای پشتیبانی سنترال‌پی تغییر دهید\n"
             "۴. درگاه را فعال کنید\n\n"
-            "📞 پشتیبانی: @Central_Pay"
+            "📞 پشتیبانی: @Central_Pay\n\n"
+            f"{_gw_stats_line('centralpay')}"
         )
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
@@ -18808,7 +18915,8 @@ def _dispatch_callback(call, uid, data):
             "📋 <b>راهنما:</b>\n"
             "۱. در <a href='https://plisio.net'>plisio.net</a> ثبت‌نام کنید\n"
             "۲. از پنل، کلید API را دریافت کنید\n"
-            "۳. آدرس عمومی به‌صورت خودکار از IP سرور تشخیص داده می‌شود — نیازی به تنظیم در سایت Plisio نیست؛ Webhook هر فاکتور به‌صورت خودکار ثبت می‌شود."
+            "۳. آدرس عمومی به‌صورت خودکار از IP سرور تشخیص داده می‌شود — نیازی به تنظیم در سایت Plisio نیست؛ Webhook هر فاکتور به‌صورت خودکار ثبت می‌شود.\n\n"
+            f"{_gw_stats_line('plisio', crypto=True)}"
         )
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
@@ -18939,7 +19047,8 @@ def _dispatch_callback(call, uid, data):
             "۳. از منوی <b>Settings → API Keys</b> روی <b>Add New Key</b> بزنید و کلید API را کپی کنید\n"
             "۴. از منوی <b>Settings → Payment Settings → IPN Settings</b> روی <b>Generate</b> کلیک کنید تا <b>IPN Secret Key</b> ساخته شود (⚠️ <u>فقط یک‌بار نمایش داده می‌شود — حتماً ذخیره کنید</u>)\n"
             "۵. هر دو مقدار را در همین صفحه با دکمه‌های بالا وارد کنید\n\n"
-            "💡 آدرس Webhook به‌صورت خودکار از IP عمومی سرور تشخیص داده می‌شود — نیازی به تنظیم دستی در سایت NowPayments نیست؛ هر فاکتور، IPN خودش را همراه دارد."
+            "💡 آدرس Webhook به‌صورت خودکار از IP عمومی سرور تشخیص داده می‌شود — نیازی به تنظیم دستی در سایت NowPayments نیست؛ هر فاکتور، IPN خودش را همراه دارد.\n\n"
+            f"{_gw_stats_line('nowpayments', crypto=True)}"
         )
         try:
             bot.answer_callback_query(call.id)
