@@ -3931,6 +3931,20 @@ def universal_handler(message):
                     reply_markup=back_button("adm:bot_texts"))
             return
 
+        if sn == "admin_edit_tariff_text" and is_admin(uid):
+            raw_text = (message.text or message.caption or "").strip()
+            if raw_text == "-":
+                setting_set("tariff_text", "")
+                log_admin_action(uid, "متن تعرفه پاک شد")
+                state_clear(uid)
+                bot.send_message(uid, "✅ متن تعرفه پاک شد.", reply_markup=back_button("adm:tariff:view"))
+            else:
+                setting_set("tariff_text", raw_text)
+                log_admin_action(uid, "متن تعرفه تغییر کرد")
+                state_clear(uid)
+                bot.send_message(uid, "✅ متن تعرفه ذخیره شد.", reply_markup=back_button("adm:tariff:view"))
+            return
+
         # ── Admin: Free Test settings ──────────────────────────────────────────
         if sn == "admin_set_agent_test_limit" and is_admin(uid):
             val = (message.text or "").strip()

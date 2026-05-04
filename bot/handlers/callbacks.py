@@ -4940,6 +4940,66 @@ def _dispatch_callback(call, uid, data):
         show_support(call)
         return
 
+    # ── Tariff ────────────────────────────────────────────────────────────────
+    if data == "tariff:show":
+        bot.answer_callback_query(call.id)
+        if setting_get("tariff_enabled", "0") != "1":
+            bot.answer_callback_query(call.id, "تعرفه فعال نیست.", show_alert=True)
+            return
+        tariff_text = setting_get("tariff_text", "").strip()
+        if not tariff_text:
+            text = "📋 <b>تعرفه</b>\n\nتعرفه‌ای ثبت نشده است."
+        else:
+            text = tariff_text
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("🛒 خرید سرویس", callback_data="buy:start"))
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+        send_or_edit(call, text, kb)
+        return
+
+    # ── Apps Menu ─────────────────────────────────────────────────────────────
+    if data == "apps:menu":
+        bot.answer_callback_query(call.id)
+        if setting_get("apps_enabled", "0") != "1":
+            bot.answer_callback_query(call.id, "این بخش فعال نیست.", show_alert=True)
+            return
+        from ..ui.apps_catalog import OS_LIST
+        kb = types.InlineKeyboardMarkup()
+        for os_key, os_label in OS_LIST:
+            kb.add(types.InlineKeyboardButton(os_label, callback_data=f"apps:os:{os_key}"))
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+        send_or_edit(call,
+            "📱 <b>آموزش و دریافت اپلیکیشن‌ها</b>\n\n"
+            "سیستم‌عامل خود را انتخاب کنید:",
+            kb)
+        return
+
+    if data.startswith("apps:os:"):
+        bot.answer_callback_query(call.id)
+        if setting_get("apps_enabled", "0") != "1":
+            bot.answer_callback_query(call.id, "این بخش فعال نیست.", show_alert=True)
+            return
+        from ..ui.apps_catalog import APPS, get_os_label, get_active_apps
+        os_key = data[len("apps:os:"):]
+        os_label = get_os_label(os_key)
+        active = get_active_apps(os_key, setting_get)
+        if not active:
+            text = f"📱 <b>{os_label}</b>\n\nدر حال حاضر هیچ نرم‌افزاری برای این سیستم‌عامل موجود نیست."
+        else:
+            lines = [f"📱 <b>اپلیکیشن‌های {os_label}</b>\n"]
+            for i, app in enumerate(active, 1):
+                lines.append(
+                    f"{i}. <b>{esc(app['name'])}</b>\n"
+                    f"   {esc(app['desc'])}\n"
+                    f"   🔗 <a href=\"{app['url']}\">دانلود</a>\n"
+                )
+            text = "\n".join(lines)
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت به لیست سیستم‌عامل‌ها", callback_data="apps:menu"))
+        kb.add(types.InlineKeyboardButton("🏠 بازگشت به منوی اصلی", callback_data="nav:main"))
+        send_or_edit(call, text, kb)
+        return
+
     if data == "referral:menu":
         bot.answer_callback_query(call.id)
         show_referral_menu(call, uid)
@@ -15383,6 +15443,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("🤖 مدیریت عملیات ربات", callback_data="adm:ops"))
         kb.add(types.InlineKeyboardButton("🏢 مدیریت گروه",    callback_data="admin:group"))
         kb.add(types.InlineKeyboardButton("⭐ آیدی ایموجی پرمیوم", callback_data="adm:emoji:menu"))
+        kb.add(types.InlineKeyboardButton("📲 دریافت اپلیکیشن‌ها", callback_data="admin:apps"))
         kb.add(types.InlineKeyboardButton("� مدیریت اعلان‌ها",  callback_data="adm:notif"))
         kb.add(types.InlineKeyboardButton("�💾 بکاپ",            callback_data="admin:backup"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
@@ -15390,7 +15451,94 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, "⚙️ <b>تنظیمات</b>", kb)
         return
 
-    # ── Admin: Premium Emoji Tools ────────────────────────────────────────────
+    # ── Admin: Apps Management ────────────────────────────────────────────────
+    if data == "admin:apps":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        apps_on = setting_get("apps_enabled", "0") == "1"
+        toggle_lbl = "🔴 غیرفعال کردن" if apps_on else "🟢 فعال کردن"
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton(toggle_lbl, callback_data="admin:apps:toggle"))
+        kb.add(types.InlineKeyboardButton("📱 مدیریت دیوایس‌ها / سیستم‌عامل‌ها", callback_data="admin:apps:os_list"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"📲 <b>دریافت اپلیکیشن‌ها</b>\n\n"
+            f"وضعیت: {'🟢 فعال' if apps_on else '🔴 غیرفعال'}\n\n"
+            "وقتی فعال باشد، دکمه «آموزش و دریافت اپلیکیشن‌ها» در منوی اصلی نمایش داده می‌شود.", kb)
+        return
+
+    if data == "admin:apps:toggle":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        cur = setting_get("apps_enabled", "0")
+        new_val = "0" if cur == "1" else "1"
+        setting_set("apps_enabled", new_val)
+        log_admin_action(uid, f"بخش اپلیکیشن‌ها {'فعال' if new_val == '1' else 'غیرفعال'} شد")
+        bot.answer_callback_query(call.id, "تغییر یافت.")
+        _fake_call(call, "admin:apps")
+        return
+
+    if data == "admin:apps:os_list":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        from ..ui.apps_catalog import OS_LIST
+        kb = types.InlineKeyboardMarkup()
+        for os_key, os_label in OS_LIST:
+            kb.add(types.InlineKeyboardButton(os_label, callback_data=f"admin:apps:os:{os_key}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:apps", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "📱 <b>مدیریت سیستم‌عامل‌ها</b>\n\nیک سیستم‌عامل را انتخاب کنید:", kb)
+        return
+
+    if data.startswith("admin:apps:os:") and not data.startswith("admin:apps:os_list"):
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        from ..ui.apps_catalog import APPS, get_os_label
+        os_key = data[len("admin:apps:os:"):]
+        os_label = get_os_label(os_key)
+        apps = APPS.get(os_key, [])
+        kb = types.InlineKeyboardMarkup()
+        for app in apps:
+            setting_key = f"app_item_enabled:{os_key}:{app['key']}"
+            is_on = setting_get(setting_key, "1") == "1"
+            icon = "✅" if is_on else "❌"
+            kb.add(types.InlineKeyboardButton(
+                f"{icon} {app['name']}",
+                callback_data=f"admin:apps:item:{os_key}:{app['key']}"
+            ))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:apps:os_list", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"📱 <b>نرم‌افزارهای {os_label}</b>\n\n"
+            "برای فعال/غیرفعال کردن هر نرم‌افزار روی آن کلیک کنید:\n"
+            "✅ = فعال (به کاربر نمایش داده می‌شود)\n"
+            "❌ = غیرفعال", kb)
+        return
+
+    if data.startswith("admin:apps:item:"):
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        from ..ui.apps_catalog import APPS, get_os_label
+        parts = data.split(":")
+        # admin:apps:item:{os_key}:{app_key}
+        os_key  = parts[3]
+        app_key = parts[4]
+        setting_key = f"app_item_enabled:{os_key}:{app_key}"
+        cur = setting_get(setting_key, "1")
+        new_val = "0" if cur == "1" else "1"
+        setting_set(setting_key, new_val)
+        label = "فعال" if new_val == "1" else "غیرفعال"
+        log_admin_action(uid, f"اپلیکیشن {app_key} ({os_key}) {label} شد")
+        bot.answer_callback_query(call.id, f"{label} شد.")
+        # Re-render the OS apps list
+        _fake_call(call, f"admin:apps:os:{os_key}")
+        return
     if data == "adm:emoji:menu":
         if not admin_has_perm(uid, "settings"):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
@@ -18796,9 +18944,57 @@ def _dispatch_callback(call, uid, data):
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("✏️ ویرایش متن استارت", callback_data="adm:set:start_text"))
         kb.add(types.InlineKeyboardButton("📜 قوانین خرید",        callback_data="adm:set:rules"))
+        kb.add(types.InlineKeyboardButton("📋 تعرفه",              callback_data="adm:tariff:view"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "📝 <b>متن‌های ربات</b>\n\nیکی از موارد زیر را انتخاب کنید:", kb)
+        return
+
+    # ── Admin: Tariff ─────────────────────────────────────────────────────────
+    if data == "adm:tariff:view":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        enabled = setting_get("tariff_enabled", "0")
+        toggle_label = "🔴 غیرفعال کردن" if enabled == "1" else "🟢 فعال کردن"
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton(toggle_label, callback_data="adm:tariff:toggle"))
+        kb.add(types.InlineKeyboardButton("✏️ ویرایش متن تعرفه", callback_data="adm:tariff:edit"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:bot_texts", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"📋 <b>تعرفه</b>\n\n"
+            f"وضعیت: {'🟢 فعال' if enabled == '1' else '🔴 غیرفعال'}\n\n"
+            "وقتی فعال باشد، دکمه «تعرفه» در منوی اصلی نمایش داده می‌شود.", kb)
+        return
+
+    if data == "adm:tariff:toggle":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        enabled = setting_get("tariff_enabled", "0")
+        new_val = "0" if enabled == "1" else "1"
+        setting_set("tariff_enabled", new_val)
+        log_admin_action(uid, f"تعرفه {'فعال' if new_val == '1' else 'غیرفعال'} شد")
+        bot.answer_callback_query(call.id, "تغییر یافت.")
+        _fake_call(call, "adm:tariff:view")
+        return
+
+    if data == "adm:tariff:edit":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        current = setting_get("tariff_text", "")
+        preview = (esc(current[:300]) + "...") if len(current) > 300 else (esc(current) if current else "<i>خالی</i>")
+        state_set(uid, "admin_edit_tariff_text")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"✏️ <b>ویرایش متن تعرفه</b>\n\n"
+            f"متن فعلی:\n{preview}\n\n"
+            "متن جدید تعرفه را ارسال کنید.\n"
+            "می‌توانید از تگ‌های HTML استفاده کنید.\n"
+            "برای پاک‌کردن متن، <code>-</code> بفرستید.",
+            back_button("adm:tariff:view"))
         return
 
     if data == "adm:set:start_text":

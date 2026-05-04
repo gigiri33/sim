@@ -524,6 +524,11 @@ def _run_init_db_migrations():
             # ── Invoice expiration ───────────────────────────────────────────
             "invoice_expiry_enabled":             "1",
             "invoice_expiry_minutes":             "30",
+            # ── Tariff ────────────────────────────────────────────────────────
+            "tariff_enabled":                     "0",
+            "tariff_text":                        "",
+            # ── Apps / Tutorial section ───────────────────────────────────────
+            "apps_enabled":                       "0",
         }
         for coin, _ in CRYPTO_COINS:
             defaults[f"crypto_{coin}"] = ""
