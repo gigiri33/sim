@@ -8185,6 +8185,23 @@ def _dispatch_callback(call, uid, data):
         deliver_purchase_message(call.message.chat.id, purchase_id)
         return
 
+    # ── Wallet menu ───────────────────────────────────────────────────────────
+    if data == "wallet:menu":
+        user = get_user(uid)
+        balance = int(user["balance"] or 0) if user else 0
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("افزایش موجودی", callback_data="wallet:charge", icon_custom_emoji_id="5256186332669035163"))
+        kb.add(types.InlineKeyboardButton("بازگشت به منوی اصلی", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(
+            call,
+            "💰 <b>موجودی کیف پول شما:</b>\n"
+            f"<blockquote>{fmt_price(balance)} تومان</blockquote>\n\n"
+            "برای افزایش موجودی از روی دکمه زیر بزنید.",
+            kb,
+        )
+        return
+
     # ── Wallet charge ─────────────────────────────────────────────────────────
     if data == "wallet:charge":
         if setting_get("shop_open", "1") not in ("1", "2"):
@@ -15447,6 +15464,9 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("📢 کانال قفل",           callback_data="adm:locked_channels"))
         kb.add(types.InlineKeyboardButton("🎁 تست رایگان",      callback_data="adm:set:freetest"))
         kb.add(types.InlineKeyboardButton("� متن‌های ربات",    callback_data="adm:bot_texts"))
+        _account_icon = "✅" if setting_get("show_account_button", "1") == "1" else "❌"
+        kb.add(types.InlineKeyboardButton(f"{_account_icon} نمایش حساب کاربری", callback_data="adm:set:show_account"))
+        kb.add(types.InlineKeyboardButton("🧩 چیدمان و متن های منو استارت", callback_data="admin:startmenu"))
         kb.add(types.InlineKeyboardButton("🏪 مدیریت فروش",    callback_data="adm:set:shop"))
         kb.add(types.InlineKeyboardButton("📱 جمع‌آوری شماره تلفن", callback_data="adm:set:phone"))
         kb.add(types.InlineKeyboardButton("🤖 مدیریت عملیات ربات", callback_data="adm:ops"))
@@ -15458,6 +15478,159 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "⚙️ <b>تنظیمات</b>", kb)
+        return
+
+    if data == "adm:set:show_account":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        cur = setting_get("show_account_button", "1")
+        new_val = "0" if cur == "1" else "1"
+        setting_set("show_account_button", new_val)
+        setting_set("start_menu_enabled:account", new_val)
+        log_admin_action(uid, f"نمایش حساب کاربری {'فعال' if new_val == '1' else 'غیرفعال'} شد")
+        bot.answer_callback_query(call.id, "تغییر یافت.")
+        _fake_call(call, "admin:settings")
+        return
+
+    # ── Admin: Start menu layout/texts ───────────────────────────────────────
+    if data == "admin:startmenu":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        from ..ui.start_menu import layout_to_text
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("✅ وضعیت دکمه‌ها", callback_data="admin:startmenu:status"))
+        kb.add(types.InlineKeyboardButton("✏️ ویرایش متن دکمه‌ها", callback_data="admin:startmenu:texts"))
+        kb.add(types.InlineKeyboardButton("🧩 تغییر ترتیب و ردیف‌ها", callback_data="admin:startmenu:layout"))
+        kb.add(types.InlineKeyboardButton("🔄 بازنشانی چیدمان پیش‌فرض", callback_data="admin:startmenu:reset_layout"))
+        kb.add(types.InlineKeyboardButton("🧹 بازنشانی متن دکمه‌ها", callback_data="admin:startmenu:reset_texts"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "🧩 <b>چیدمان و متن های منو استارت</b>\n\n"
+            "چیدمان فعلی:\n"
+            f"<pre>{esc(layout_to_text())}</pre>", kb)
+        return
+
+    if data == "admin:startmenu:status":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        from ..ui.start_menu import BUTTONS, button_admin_enabled, button_text_for_telegram, get_button_raw_text
+        kb = types.InlineKeyboardMarkup()
+        for key in BUTTONS:
+            icon = "✅" if button_admin_enabled(key) else "❌"
+            label = button_text_for_telegram(get_button_raw_text(key))
+            kb.add(types.InlineKeyboardButton(f"{icon} {label} ({key})", callback_data=f"admin:startmenu:toggle:{key}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:startmenu", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "✅ <b>وضعیت دکمه‌های منوی اصلی</b>\n\n"
+            "برای فعال/غیرفعال کردن هر دکمه روی آن بزنید.", kb)
+        return
+
+    if data.startswith("admin:startmenu:toggle:"):
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        from ..ui.start_menu import BUTTONS, button_admin_enabled
+        key = data.split(":")[-1]
+        if key not in BUTTONS:
+            bot.answer_callback_query(call.id, "کلید نامعتبر است.", show_alert=True)
+            return
+        new_val = "0" if button_admin_enabled(key) else "1"
+        setting_set(f"start_menu_enabled:{key}", new_val)
+        dedicated = BUTTONS[key].enabled_setting
+        if dedicated:
+            setting_set(dedicated, new_val)
+        log_admin_action(uid, f"دکمه منوی استارت {key} {'فعال' if new_val == '1' else 'غیرفعال'} شد")
+        bot.answer_callback_query(call.id, "تغییر یافت.")
+        _fake_call(call, "admin:startmenu:status")
+        return
+
+    if data == "admin:startmenu:texts":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        from ..ui.start_menu import BUTTONS, button_text_for_telegram, get_button_raw_text
+        kb = types.InlineKeyboardMarkup()
+        for key in BUTTONS:
+            label = button_text_for_telegram(get_button_raw_text(key))
+            kb.add(types.InlineKeyboardButton(f"✏️ {label} ({key})", callback_data=f"admin:startmenu:text:{key}"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:startmenu", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "✏️ <b>ویرایش متن دکمه‌های منوی اصلی</b>\n\nیک دکمه را انتخاب کنید:", kb)
+        return
+
+    if data.startswith("admin:startmenu:text:"):
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        from ..ui.start_menu import BUTTONS, get_button_raw_text
+        key = data.split(":")[-1]
+        if key not in BUTTONS:
+            bot.answer_callback_query(call.id, "کلید نامعتبر است.", show_alert=True)
+            return
+        state_set(uid, "admin_startmenu_edit_text", button_key=key)
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"✏️ <b>ویرایش متن دکمه</b>\n\n"
+            f"کلید: <code>{key}</code>\n"
+            f"متن فعلی:\n<blockquote>{esc(get_button_raw_text(key))}</blockquote>\n\n"
+            "متن جدید را ارسال کنید. برای برگشت به پیش‌فرض، <code>-</code> بفرستید.",
+            back_button("admin:startmenu:texts"))
+        return
+
+    if data == "admin:startmenu:layout":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        from ..ui.start_menu import layout_to_text, valid_keys_text
+        state_set(uid, "admin_startmenu_edit_layout")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "🧩 <b>تغییر چیدمان منوی استارت</b>\n\n"
+            "هر خط یعنی یک ردیف. کلید دکمه‌ها را با فاصله جدا کنید. هر ردیف حداکثر ۳ دکمه.\n\n"
+            "چیدمان فعلی:\n"
+            f"<pre>{esc(layout_to_text())}</pre>\n\n"
+            "کلیدهای مجاز:\n"
+            f"{valid_keys_text()}",
+            back_button("admin:startmenu"))
+        return
+
+    if data == "admin:startmenu:reset_layout":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        from ..ui.start_menu import DEFAULT_LAYOUT_JSON
+        setting_set("start_menu_layout", DEFAULT_LAYOUT_JSON)
+        log_admin_action(uid, "چیدمان منوی استارت به پیش‌فرض برگشت")
+        bot.answer_callback_query(call.id, "چیدمان پیش‌فرض شد.")
+        _fake_call(call, "admin:startmenu")
+        return
+
+    if data == "admin:startmenu:reset_texts":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("✅ تأیید بازنشانی متن‌ها", callback_data="admin:startmenu:reset_texts:yes"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:startmenu", icon_custom_emoji_id="5253997076169115797"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call, "🧹 متن همه دکمه‌ها به پیش‌فرض برگردد؟", kb)
+        return
+
+    if data == "admin:startmenu:reset_texts:yes":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        from ..ui.start_menu import BUTTONS
+        for key in BUTTONS:
+            setting_set(f"start_menu_text:{key}", "")
+        log_admin_action(uid, "متن دکمه‌های منوی استارت به پیش‌فرض برگشت")
+        bot.answer_callback_query(call.id, "متن‌ها پیش‌فرض شد.")
+        _fake_call(call, "admin:startmenu")
         return
 
     # ── Admin: Apps Management ────────────────────────────────────────────────
@@ -15485,6 +15658,7 @@ def _dispatch_callback(call, uid, data):
         cur = setting_get("apps_enabled", "0")
         new_val = "0" if cur == "1" else "1"
         setting_set("apps_enabled", new_val)
+        setting_set("start_menu_enabled:apps", new_val)
         log_admin_action(uid, f"بخش اپلیکیشن‌ها {'فعال' if new_val == '1' else 'غیرفعال'} شد")
         bot.answer_callback_query(call.id, "تغییر یافت.")
         _fake_call(call, "admin:apps")
@@ -18988,6 +19162,7 @@ def _dispatch_callback(call, uid, data):
         enabled = setting_get("tariff_enabled", "0")
         new_val = "0" if enabled == "1" else "1"
         setting_set("tariff_enabled", new_val)
+        setting_set("start_menu_enabled:tariff", new_val)
         log_admin_action(uid, f"تعرفه {'فعال' if new_val == '1' else 'غیرفعال'} شد")
         bot.answer_callback_query(call.id, "تغییر یافت.")
         _fake_call(call, "adm:tariff:view")

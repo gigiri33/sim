@@ -3948,6 +3948,47 @@ def universal_handler(message):
                 bot.send_message(uid, "✅ متن تعرفه ذخیره شد.", reply_markup=back_button("adm:tariff:view"))
             return
 
+        if sn == "admin_startmenu_edit_text" and is_admin(uid):
+            from ..ui.premium_emoji import serialize_premium_text as _spt, render_premium_text_html as _rph
+            from ..ui.start_menu import BUTTONS
+            key = state_data(uid).get("button_key")
+            if key not in BUTTONS:
+                state_clear(uid)
+                bot.send_message(uid, "⚠️ کلید دکمه نامعتبر است.", reply_markup=back_button("admin:startmenu:texts"))
+                return
+            raw_text = message.text if message.text is not None else (message.caption or "")
+            if raw_text.strip() == "-":
+                setting_set(f"start_menu_text:{key}", "")
+                log_admin_action(uid, f"متن دکمه {key} به پیش‌فرض برگشت")
+                state_clear(uid)
+                bot.send_message(uid, "✅ متن دکمه به پیش‌فرض برگشت.", reply_markup=back_button("admin:startmenu:texts"))
+            else:
+                entities = message.entities or message.caption_entities or []
+                html_text = _rph(_spt(raw_text, entities))
+                setting_set(f"start_menu_text:{key}", html_text)
+                log_admin_action(uid, f"متن دکمه منوی استارت {key} تغییر کرد")
+                state_clear(uid)
+                bot.send_message(uid, "✅ متن دکمه ذخیره شد.", reply_markup=back_button("admin:startmenu:texts"))
+            return
+
+        if sn == "admin_startmenu_edit_layout" and is_admin(uid):
+            import json as _json
+            from ..ui.start_menu import parse_layout_text, BUTTONS, button_admin_enabled
+            raw_text = message.text or ""
+            layout, err = parse_layout_text(raw_text)
+            if err:
+                bot.send_message(uid, f"⚠️ {err}\n\nلطفاً چیدمان را دوباره ارسال کنید.", reply_markup=back_button("admin:startmenu"))
+                return
+            setting_set("start_menu_layout", _json.dumps(layout, ensure_ascii=False))
+            missing = [k for k in BUTTONS if button_admin_enabled(k) and all(k not in row for row in layout)]
+            warn = ""
+            if missing:
+                warn = "\n\n⚠️ این دکمه‌های فعال در چیدمان نیامده‌اند و انتهای منو اضافه می‌شوند:\n" + ", ".join(missing)
+            log_admin_action(uid, "چیدمان منوی استارت تغییر کرد")
+            state_clear(uid)
+            bot.send_message(uid, f"✅ چیدمان منوی استارت ذخیره شد.{warn}", reply_markup=back_button("admin:startmenu"))
+            return
+
         # ── Admin: Free Test settings ──────────────────────────────────────────
         if sn == "admin_set_agent_test_limit" and is_admin(uid):
             val = (message.text or "").strip()

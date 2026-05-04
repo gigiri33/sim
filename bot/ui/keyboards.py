@@ -6,8 +6,9 @@ import json
 from telebot import types
 
 from ..config import ADMIN_IDS, PERM_USER_FULL
-from ..db import setting_get, wallet_pay_enabled_for
+from ..db import setting_get
 from ..helpers import is_admin, admin_has_perm
+from .start_menu import build_main_menu_rows
 
 
 def _btn(text, callback_data=None, url=None, emoji_id=None, copy_text=None):
@@ -40,41 +41,15 @@ def _user_is_agent(user_id) -> bool:
 
 def kb_main(user_id):
     rows = []
-    rows.append([
-        _btn("خرید سرویس جدید", callback_data="buy:start",      emoji_id="5312361253610475399"),
-        _btn("سرویس‌های من",     callback_data="my_configs",      emoji_id="5361741454685256344"),
-    ])
-    _ft_mode = setting_get("free_test_mode", "everyone")
-    if _ft_mode == "everyone" or (_ft_mode == "agents_only" and _user_is_agent(user_id)):
-        rows.append([_btn("تست رایگان", callback_data="test:start", emoji_id="6283073379184415506")])
-    rows.append([
-        _btn("حساب کاربری",  callback_data="profile",        emoji_id="5373012449597335010"),
-        *([_btn("شارژ کیف پول", callback_data="wallet:charge",  emoji_id="5931368295545443065")] if wallet_pay_enabled_for(user_id) else []),
-    ])
-    ref_on     = setting_get("referral_enabled", "1") == "1"
-    voucher_on = setting_get("vouchers_enabled", "1") == "1"
-    _ref_btn_title = setting_get("referral_button_title", "").strip() or "💼 زیرمجموعه‌گیری 🎉"
-    if ref_on and voucher_on:
+    for row in build_main_menu_rows(user_id):
         rows.append([
-            _btn(_ref_btn_title,    callback_data="referral:menu",   emoji_id="5453957997418004470"),
-            _btn("ثبت کارت هدیه", callback_data="voucher:redeem",  emoji_id="5418010521309815154"),
+            _btn(
+                item["text"],
+                callback_data=item["callback_data"],
+                emoji_id=item.get("emoji_id"),
+            )
+            for item in row
         ])
-    elif ref_on:
-        rows.append([_btn(_ref_btn_title,    callback_data="referral:menu",  emoji_id="5453957997418004470")])
-    elif voucher_on:
-        rows.append([_btn("ثبت کارت هدیه", callback_data="voucher:redeem", emoji_id="5418010521309815154")])
-    rows.append([_btn("پشتیبانی", callback_data="support", emoji_id="5467539229468793355")])
-    row_info = []
-    if setting_get("tariff_enabled", "0") == "1":
-        row_info.append(_btn("🔢 تعرفه", callback_data="tariff:show", emoji_id="5431722320366429593"))
-    if setting_get("apps_enabled", "0") == "1":
-        row_info.append(_btn("📥 دریافت اپلیکیشن ها", callback_data="apps:menu", emoji_id="5244612521087749872"))
-    if row_info:
-        rows.append(row_info)
-    if setting_get("agency_request_enabled", "1") == "1":
-        rows.append([_btn("درخواست نمایندگی", callback_data="agency:request", emoji_id="5372957680174384345")])
-    if is_admin(user_id):
-        rows.append([_btn("ورود به پنل مدیریت", callback_data="admin:panel", emoji_id="5370935802844946281")])
     return _raw_markup(rows)
 
 
