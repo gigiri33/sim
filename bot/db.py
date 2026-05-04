@@ -960,7 +960,8 @@ def notify_first_start_if_needed(tg_user):
 def get_users(has_purchase=None, limit=None, offset=0, status=None):
     q = (
         "SELECT u.*, "
-        "(SELECT COUNT(*) FROM purchases p WHERE p.user_id=u.user_id) AS purchase_count "
+        "(SELECT COUNT(*) FROM purchases p WHERE p.user_id=u.user_id)"
+        "+ (SELECT COUNT(*) FROM panel_configs pc WHERE pc.user_id=u.user_id) AS purchase_count "
         "FROM users u WHERE 1=1"
     )
     params = []
@@ -1018,7 +1019,11 @@ def count_users_stats():
     with get_conn() as conn:
         total = conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
         buyers = conn.execute(
-            "SELECT COUNT(DISTINCT user_id) AS n FROM purchases"
+            """SELECT COUNT(DISTINCT uid) AS n FROM (
+                SELECT user_id AS uid FROM purchases
+                UNION
+                SELECT user_id AS uid FROM panel_configs
+            )"""
         ).fetchone()["n"]
         new_today = conn.execute(
             "SELECT COUNT(*) AS n FROM users WHERE joined_at LIKE ?", (f"{today}%",)
@@ -1031,7 +1036,8 @@ def search_users(query):
     with get_conn() as conn:
         base = (
             "SELECT u.*, "
-            "(SELECT COUNT(*) FROM purchases p WHERE p.user_id=u.user_id) AS purchase_count "
+            "(SELECT COUNT(*) FROM purchases p WHERE p.user_id=u.user_id)"
+            "+ (SELECT COUNT(*) FROM panel_configs pc WHERE pc.user_id=u.user_id) AS purchase_count "
             "FROM users u WHERE "
         )
         if query.isdigit():
@@ -1391,11 +1397,18 @@ def count_available_manual_configs(package_id: int) -> int:
 
 
 def add_config(type_id, package_id, service_name, config_text, inquiry_link):
+    svc = service_name.strip()
     with get_conn() as conn:
+        existing = conn.execute(
+            "SELECT id FROM configs WHERE package_id=? AND service_name=? LIMIT 1",
+            (package_id, svc)
+        ).fetchone()
+        if existing:
+            raise ValueError(f"کانفیگ با نام '{svc}' قبلاً در این پکیج ثبت شده است (id={existing['id']})")
         conn.execute(
             "INSERT INTO configs(type_id,package_id,service_name,config_text,"
             "inquiry_link,created_at) VALUES(?,?,?,?,?,?)",
-            (type_id, package_id, service_name.strip(),
+            (type_id, package_id, svc,
              config_text.strip(), inquiry_link.strip(), now_str())
         )
     # Reset low-stock / empty-stock notification flags so they fire again
@@ -2108,11 +2121,8 @@ def update_payment_receipt(payment_id, file_id, text_value):
 
 
 def approve_payment(payment_id, admin_note):
+    """Mark payment approved by admin. No expiry check — admin decision is final."""
     with get_conn() as conn:
-        payment = conn.execute("SELECT * FROM payments WHERE id=?", (payment_id,)).fetchone()
-        if is_payment_expired(payment):
-            print(f"[EXPIRED PAYMENT IGNORED] payment_id={payment_id}")
-            return
         conn.execute(
             "UPDATE payments SET status='approved', admin_note=?, approved_at=? WHERE id=? AND status='pending'",
             (admin_note, now_str(), payment_id)

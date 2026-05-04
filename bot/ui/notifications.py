@@ -706,12 +706,26 @@ def _complete_pending_order(pending_id, cfg_name, cfg_text, inquiry_link):
     user_id    = p_row["user_id"]
     pkg        = get_package(package_id)
     with get_conn() as conn:
-        cur = conn.execute(
-            "INSERT INTO configs(service_name, config_text, inquiry_link, package_id, type_id, created_at) "
-            "VALUES (?, ?, ?, ?, ?, datetime('now'))",
-            (cfg_name, cfg_text, inquiry_link, package_id, pkg["type_id"] if pkg else None)
-        )
-        config_id = cur.lastrowid
+        # Guard against duplicate service names within the same package
+        existing = conn.execute(
+            "SELECT id, sold_to FROM configs WHERE package_id=? AND service_name=? LIMIT 1",
+            (package_id, cfg_name)
+        ).fetchone()
+        if existing:
+            if existing["sold_to"] is not None:
+                raise ValueError(
+                    f"کانفیگ '{cfg_name}' قبلاً در این پکیج به کاربر {existing['sold_to']} فروخته شده است. "
+                    f"(config id={existing['id']})"
+                )
+            # Re-use the existing available config instead of creating a duplicate
+            config_id = existing["id"]
+        else:
+            cur = conn.execute(
+                "INSERT INTO configs(service_name, config_text, inquiry_link, package_id, type_id, created_at) "
+                "VALUES (?, ?, ?, ?, ?, datetime('now'))",
+                (cfg_name, cfg_text, inquiry_link, package_id, pkg["type_id"] if pkg else None)
+            )
+            config_id = cur.lastrowid
     purchase_id = assign_config_to_user(
         config_id, user_id, package_id,
         p_row["amount"], p_row["payment_method"], is_test=0

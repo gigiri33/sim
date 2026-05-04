@@ -14461,7 +14461,30 @@ def _dispatch_callback(call, uid, data):
         if not cfg_row:
             bot.answer_callback_query(call.id, "کانفیگ یافت نشد.", show_alert=True)
             return
-        purchase_id = assign_config_to_user(config_id, target_id, cfg_row["package_id"], 0, "admin_gift", is_test=0)
+        # Guard: reject if config was sold or reserved since the list was shown
+        if cfg_row["sold_to"] is not None:
+            bot.answer_callback_query(
+                call.id,
+                "⛔ این کانفیگ قبلاً به کاربر دیگری فروخته شده است.\nلیست را دوباره بارگذاری کنید.",
+                show_alert=True,
+            )
+            return
+        if cfg_row["reserved_payment_id"] is not None:
+            bot.answer_callback_query(
+                call.id,
+                "⚠️ این کانفیگ در حال حاضر رزرو شده است. لحظاتی دیگر دوباره امتحان کنید.",
+                show_alert=True,
+            )
+            return
+        try:
+            purchase_id = assign_config_to_user(config_id, target_id, cfg_row["package_id"], 0, "admin_gift", is_test=0)
+        except RuntimeError:
+            bot.answer_callback_query(
+                call.id,
+                "⛔ خطا: این کانفیگ همزمان توسط سیستم دیگری اختصاص داده شد. لیست را دوباره بارگذاری کنید.",
+                show_alert=True,
+            )
+            return
         bot.answer_callback_query(call.id, "کانفیگ منتقل شد!")
         send_or_edit(call, "✅ کانفیگ با موفقیت به کاربر اختصاص یافت.", back_button("admin:users"))
         try:
