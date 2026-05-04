@@ -37,6 +37,8 @@ import json
 import hmac
 import hashlib
 import re
+import threading
+import time
 import urllib.parse
 import urllib.request
 import urllib.error
@@ -457,6 +459,90 @@ def process_rialpay_verified_payment(payment_id: int,
         except Exception:
             pass
         return {"status": "error", "msg": str(exc)}
+
+
+def _poll_pending_rialpay_once(limit: int = 100) -> None:
+    """Check pending RialPay invoices once and auto-complete paid payments."""
+    from datetime import datetime, timedelta
+    from ..db import get_conn, get_payment, is_payment_expired, _parse_payment_datetime
+    from ..helpers import _TZ_TEHRAN
+
+    try:
+        with get_conn() as conn:
+            rows = conn.execute(
+                "SELECT id, receipt_text FROM payments"
+                " WHERE payment_method='rialpay' AND status='pending'"
+                " AND COALESCE(receipt_text, '')<>''"
+                " ORDER BY id DESC LIMIT ?",
+                (int(limit),),
+            ).fetchall()
+    except Exception as exc:
+        print(f"[RialPay AutoCheck] DB query failed: {exc}")
+        return
+
+    for row in rows:
+        payment_id = int(row["id"])
+        token = (row["receipt_text"] or "").strip()
+        if not token:
+            continue
+
+        try:
+            payment = get_payment(payment_id)
+            if not payment or payment["status"] != "pending" or payment["payment_method"] != "rialpay":
+                continue
+            created_dt = _parse_payment_datetime(payment["created_at"] if "created_at" in payment.keys() else None)
+            if created_dt and datetime.now(_TZ_TEHRAN) - created_dt > timedelta(minutes=30):
+                continue
+            if is_payment_expired(payment):
+                continue
+
+            chk = check_rialpay_invoice_status(token)
+            status = chk.get("status", "error")
+            print(f"[RialPay AutoCheck] payment_id={payment_id} token={token[:12]}… status={status}")
+
+            if status == "paid":
+                raw_p = chk.get("raw", {}) if isinstance(chk, dict) else {}
+                result = process_rialpay_verified_payment(
+                    payment_id,
+                    source="auto_check",
+                    raw_payload={
+                        "token":      token,
+                        "invoice_id": str(raw_p.get("invoice_id") or ""),
+                        "amount":     str(raw_p.get("seller_receive") or raw_p.get("amount") or ""),
+                        "raw":        raw_p,
+                    },
+                )
+                print(f"[RialPay AutoCheck] process result payment_id={payment_id}: {result}")
+            elif status == "rejected":
+                try:
+                    with get_conn() as conn:
+                        conn.execute(
+                            "UPDATE payments SET status='rejected' WHERE id=? AND status='pending'",
+                            (payment_id,),
+                        )
+                    print(f"[RialPay AutoCheck] payment_id={payment_id} marked rejected")
+                except Exception as rej_exc:
+                    print(f"[RialPay AutoCheck] reject update failed payment_id={payment_id}: {rej_exc}")
+        except Exception as exc:
+            print(f"[RialPay AutoCheck] payment_id={payment_id} failed: {exc}")
+
+
+def start_rialpay_auto_check_loop(interval_seconds: int = 30) -> None:
+    """Start background RialPay token checker; each pending token is checked until invoice expiry."""
+    if getattr(start_rialpay_auto_check_loop, "_started", False):
+        return
+    start_rialpay_auto_check_loop._started = True
+
+    def _loop():
+        print(f"✅ RialPay auto-check loop started (interval: {interval_seconds}s)")
+        while True:
+            try:
+                _poll_pending_rialpay_once()
+            except Exception as exc:
+                print(f"[RialPay AutoCheck] loop error: {exc}")
+            time.sleep(max(10, int(interval_seconds or 30)))
+
+    threading.Thread(target=_loop, daemon=True).start()
 
 
 def _fulfill_rialpay_non_wallet(payment_id: int, kind: str, uid: int, amount: int, payment):

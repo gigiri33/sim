@@ -6340,6 +6340,7 @@ def _dispatch_callback(call, uid, data):
         text_rp2 = (
             "💳 <b>پرداخت با ریال‌پی — تمدید</b>\n\n"
             f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_rp2}\n\n"
+            f"🔖 توکن پرداخت:\n<code>{esc(tok_rp2)}</code>\n\n"
             "برای پرداخت روی دکمه زیر بزنید. پس از اتمام پرداخت به ربات برگردید."
             f"{expiry_line_rp2}"
         )
@@ -7790,6 +7791,7 @@ def _dispatch_callback(call, uid, data):
         text_rp = (
             "💳 <b>پرداخت با ریال‌پی</b>\n\n"
             f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_rp}\n\n"
+            f"🔖 توکن پرداخت:\n<code>{esc(tok_rp)}</code>\n\n"
             "برای پرداخت روی دکمه زیر بزنید. پس از اتمام پرداخت به ربات برگردید."
             f"{expiry_line_rp}"
         )
@@ -8813,6 +8815,7 @@ def _dispatch_callback(call, uid, data):
         text_rp3 = (
             "💳 <b>پرداخت با ریال‌پی — شارژ کیف پول</b>\n\n"
             f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان{fee_line_rp3}\n\n"
+            f"🔖 توکن پرداخت:\n<code>{esc(tok_rp3)}</code>\n\n"
             "روی دکمه زیر بزنید و پرداخت را انجام دهید. پس از اتمام، تأیید به صورت خودکار انجام می‌شود."
             f"{expiry_line_rp3}"
         )
@@ -11272,6 +11275,7 @@ def _dispatch_callback(call, uid, data):
             send_or_edit(call,
                 "💳 <b>پرداخت با ریال‌پی (تمدید)</b>\n\n"
                 f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_rpnl}\n\n"
+                f"🔖 توکن پرداخت:\n<code>{esc(tok_rpnl)}</code>\n\n"
                 "برای پرداخت روی دکمه زیر بزنید."
                 f"{expiry_line_rpnl}",
                 kb_rpnl)
@@ -11809,6 +11813,7 @@ def _dispatch_callback(call, uid, data):
             send_or_edit(call,
                 "💳 <b>پرداخت با ریال‌پی (تمدید)</b>\n\n"
                 f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_rpnl2}\n\n"
+                f"🔖 توکن پرداخت:\n<code>{esc(tok_rpnl2)}</code>\n\n"
                 "برای پرداخت روی دکمه زیر بزنید."
                 f"{expiry_line_rpnl2}",
                 kb_rpnl2)

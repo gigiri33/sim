@@ -690,6 +690,10 @@ def main():
     from bot.crypto_fulfillment import start_tronado_poll_loop
     start_tronado_poll_loop()
 
+    # Start RialPay auto-check loop (checks pending invoice tokens every 30s until expiry)
+    from bot.gateways.rialpay import start_rialpay_auto_check_loop
+    start_rialpay_auto_check_loop(interval_seconds=30)
+
     # Remove any active webhook before starting long-polling (prevents 409 conflict)
     try:
         bot.delete_webhook(drop_pending_updates=True)
