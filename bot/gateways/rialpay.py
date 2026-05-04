@@ -157,6 +157,70 @@ def create_rialpay_invoice(amount_toman: int, user_id, order_id, callback_url: s
     return False, {"status": "error", "error": f"ساخت فاکتور ریال‌پی ناموفق بود: {err_msg}\n\nپاسخ سرور: {raw[:200]}", "raw": data}
 
 
+RIALPAY_CHECK_URL = "https://rialbotapi.shop/api/invoicetest.php"
+
+
+def check_rialpay_invoice_status(token: str) -> dict:
+    """
+    Query RialPay invoice status via invoicetest.php.
+
+    POST token=<token>
+
+    Returns one of:
+      {"status": "paid",    "seller_receive": int, "invoice_id": ..., "raw": {...}}
+      {"status": "pending", "raw": {...}}
+      {"status": "rejected","raw": {...}}
+      {"status": "error",   "error": str}
+    """
+    import urllib.parse as _up
+    if not token:
+        return {"status": "error", "error": "توکن فاکتور خالی است."}
+
+    form = _up.urlencode({"token": token}).encode("utf-8")
+    req  = urllib.request.Request(
+        RIALPAY_CHECK_URL,
+        data=form,
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept":       "application/json, */*",
+            "User-Agent":   "ConfigFlow/1.0",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            raw_text, parsed = _decode_response_body(resp)
+    except Exception as e:
+        print(f"[RialPay] check_invoice_status error: {e}")
+        return {"status": "error", "error": f"خطا در اتصال به ریال‌پی: {e}"}
+
+    print(f"[RialPay] check_invoice_status token={token[:12]}… → {raw_text[:300]}")
+
+    if not isinstance(parsed, dict):
+        return {"status": "error", "error": f"پاسخ نامعتبر: {raw_text[:200]}"}
+
+    api_ok = str(parsed.get("status") or "").lower() in ("ok", "true", "1", "success")
+    if not api_ok:
+        return {"status": "error", "error": _extract_error(parsed) or raw_text[:200]}
+
+    invoice_status = str(parsed.get("invoice_status") or "").strip().lower()
+    raw_status     = parsed.get("raw_status")
+
+    # raw_status: 0=pending, 1=paid (confirmed by support)
+    if raw_status == 1 or invoice_status in ("paid", "success", "completed", "successful"):
+        return {
+            "status":         "paid",
+            "seller_receive": parsed.get("seller_receive"),
+            "invoice_id":     parsed.get("invoice_id"),
+            "raw":            parsed,
+        }
+    if invoice_status in ("rejected", "failed", "cancelled", "canceled", "cancel"):
+        return {"status": "rejected", "raw": parsed}
+
+    # default: pending
+    return {"status": "pending", "raw": parsed}
+
+
 def verify_rialpay_webhook_signature(raw_body: bytes, signature: str) -> bool:
     """
     Verify RialPay webhook sign field using HMAC-SHA256.

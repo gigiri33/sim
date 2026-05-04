@@ -257,10 +257,11 @@ def _show_admin_user_detail(call, user_id, back_cb="admin:users"):
         f"نمایندگی: {agent_label}"
     )
     uid_t = row["user_id"]
+    _src  = ":a" if back_cb == "admin:agents" else ""
     kb    = types.InlineKeyboardMarkup()
     kb.row(
-        types.InlineKeyboardButton(f"🔄 {status_label}", callback_data=f"adm:usr:sts:{uid_t}"),
-        types.InlineKeyboardButton(f"🤝 نمایندگی",       callback_data=f"adm:usr:ag:{uid_t}"),
+        types.InlineKeyboardButton(f"🔄 {status_label}", callback_data=f"adm:usr:sts:{uid_t}{_src}"),
+        types.InlineKeyboardButton(f"🤝 نمایندگی",       callback_data=f"adm:usr:ag:{uid_t}{_src}"),
     )
     kb.add(types.InlineKeyboardButton("💰 موجودی",           callback_data=f"adm:usr:bal:{uid_t}"))
     kb.add(types.InlineKeyboardButton("💳 اعتبار خرید",       callback_data=f"adm:credit:{uid_t}"))

@@ -4096,18 +4096,22 @@ def universal_handler(message):
             kb.add(types.InlineKeyboardButton("🔙 بازگشت به کاربر", callback_data=f"adm:usr:v:{target_user_id}"))
             target_info = get_user(target_user_id)
             try:
-                _tname    = target_info['first_name'] or ''
-                _tuname   = target_info['username'] or ''
-                _new_bal  = target_info['balance']
-                _uname_str = f" (@{_tuname})" if _tuname else ""
-                _name_display = f"<b>{esc(_tname)}</b>{_uname_str}" if _tname else f"@{_tuname}" if _tuname else f"<code>{target_user_id}</code>"
+                _tname   = (target_info['first_name'] or '').strip()
+                _tuname  = (target_info['username']   or '').strip()
+                _new_bal = target_info['balance']
+                if _tuname:
+                    _uname_line = f"👤 کاربر: @{esc(_tuname)}\n"
+                elif _tname:
+                    _uname_line = f"👤 کاربر: <b>{esc(_tname)}</b>\n"
+                else:
+                    _uname_line = ""
             except Exception:
-                _name_display = f"<code>{target_user_id}</code>"
-                _new_bal = 0
+                _uname_line = ""
+                _new_bal    = 0
             bot.send_message(
                 uid,
                 f"✅ موجودی {action_label} یافت.\n\n"
-                f"👤 کاربر: {_name_display}\n"
+                f"{_uname_line}"
                 f"🆔 آیدی: <code>{target_user_id}</code>\n"
                 f"💰 مبلغ: <b>{fmt_price(abs(amount))}</b> تومان\n"
                 f"💳 موجودی جدید: <b>{fmt_price(_new_bal)}</b> تومان",
@@ -4275,7 +4279,7 @@ def universal_handler(message):
             log_admin_action(uid, f"سقف اعتبار کاربر {target_user_id}: {fmt_price(val)} تومان")
             bot.send_message(uid,
                 f"✅ سقف اعتبار کاربر <code>{target_user_id}</code>: <b>{fmt_price(val)} تومان</b> تنظیم شد.",
-                reply_markup=kb_admin_panel())
+                reply_markup=back_button(f"adm:credit:{target_user_id}"))
             return
 
         # ── Admin: Addon unit price ────────────────────────────────────────────

@@ -104,7 +104,7 @@ from ..gateways.centralpay import (
 )
 from ..gateways.rialpay import (
     create_rialpay_invoice, normalize_rialpay_status, process_rialpay_verified_payment,
-    get_rialpay_callback_base_url,
+    get_rialpay_callback_base_url, check_rialpay_invoice_status,
 )
 from ..gateways.plisio import (
     create_plisio_invoice, check_plisio_invoice,
@@ -6103,6 +6103,121 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, text, kb)
         return
 
+    # ── RialPay helper (used by all 3 rialpay:verify handlers below) ──────────
+    def _do_rialpay_verify(payment_id, payment):
+        """
+        Check RialPay invoice status via API and process if paid.
+        Returns True if caller should `return` immediately.
+        """
+        token = (payment["receipt_text"] or "").strip() if payment else ""
+        if not token:
+            # No token saved — fall back to admin notify
+            _notify_rialpay_manual_confirm(payment_id, uid, payment)
+            bot.send_message(uid,
+                "⏳ <b>توکن فاکتور یافت نشد.</b>\n\n"
+                "درخواست بررسی دستی به ادمین ارسال شد.",
+                parse_mode="HTML")
+            return True
+
+        chk = check_rialpay_invoice_status(token)
+        chk_status = chk.get("status", "error")
+        print(f"[RialPay] user verify payment_id={payment_id} → {chk_status}")
+
+        if chk_status == "paid":
+            raw_p = chk.get("raw", {})
+            result = process_rialpay_verified_payment(
+                payment_id,
+                source="user_verify",
+                raw_payload={
+                    "token":      token,
+                    "invoice_id": str(raw_p.get("invoice_id") or ""),
+                    "amount":     str(raw_p.get("seller_receive") or ""),
+                },
+            )
+            r_status = result.get("status", "")
+            if r_status in ("ok",):
+                bot.send_message(uid,
+                    "✅ <b>پرداخت شما تأیید شد!</b>\n\nسرویس شما فعال شد.",
+                    parse_mode="HTML")
+            elif r_status == "already_processed":
+                bot.send_message(uid,
+                    "✅ این پرداخت قبلاً پردازش شده است.",
+                    parse_mode="HTML")
+            elif r_status == "amount_mismatch":
+                _notify_rialpay_manual_confirm(payment_id, uid, payment)
+                bot.send_message(uid,
+                    "⚠️ مبلغ پرداخت با فاکتور مطابقت ندارد. ادمین برای بررسی دستی مطلع شد.",
+                    parse_mode="HTML")
+            else:
+                bot.send_message(uid,
+                    f"❌ خطا در پردازش پرداخت: {result.get('msg', '')}",
+                    parse_mode="HTML")
+            return True
+
+        if chk_status == "rejected":
+            from ..db import get_conn as _gc_rp_v
+            with _gc_rp_v() as _c_rp_v:
+                _c_rp_v.execute(
+                    "UPDATE payments SET status='rejected' WHERE id=? AND status='pending'",
+                    (payment_id,)
+                )
+            bot.send_message(uid,
+                "❌ <b>پرداخت شما تأیید نشده است.</b>\n\nدر صورت کسر وجه با پشتیبانی تماس بگیرید.",
+                parse_mode="HTML")
+            return True
+
+        if chk_status == "error":
+            _notify_rialpay_manual_confirm(payment_id, uid, payment)
+            bot.send_message(uid,
+                "⚠️ <b>خطا در بررسی وضعیت پرداخت.</b>\n\n"
+                "درخواست بررسی دستی به ادمین ارسال شد.",
+                parse_mode="HTML")
+            return True
+
+        # pending
+        bot.send_message(uid,
+            "⏳ <b>پرداخت هنوز تأیید نشده است.</b>\n\n"
+            "لطفاً پس از اتمام پرداخت در RialPay دوباره بررسی کنید.",
+            parse_mode="HTML")
+        return True
+
+    def _notify_rialpay_manual_confirm(p_id, payer_uid, payment_row):
+        """Notify all admins about a pending RialPay payment needing manual confirmation."""
+        user = get_user(payer_uid)
+        uname = f"@{user['username']}" if user and user["username"] else f"کاربر <code>{payer_uid}</code>"
+        token = (payment_row["receipt_text"] or "—") if payment_row else "—"
+        text_r = (
+            f"🔔 <b>درخواست تأیید دستی ریال‌پی</b>\n\n"
+            f"👤 کاربر: {uname}\n"
+            f"🆔 آیدی: <code>{payer_uid}</code>\n"
+            f"💰 مبلغ: {fmt_price(payment_row['amount'] if payment_row else 0)} تومان\n"
+            f"🔖 payment_id: <code>{p_id}</code>\n"
+            f"📋 توکن: <code>{esc(str(token)[:60])}</code>\n\n"
+            "وضعیت پرداخت را در @RialPayBot بررسی کنید.\n"
+            "اگر پرداخت تأیید شده بود روی ✅ تأیید بزنید."
+        )
+        kb_r = types.InlineKeyboardMarkup()
+        kb_r.row(
+            types.InlineKeyboardButton("✅ تأیید دستی",  callback_data=f"adm:rp:force:{p_id}"),
+            types.InlineKeyboardButton("❌ رد",          callback_data=f"adm:rp:reject:{p_id}"),
+        )
+        for _adm in ADMIN_IDS:
+            try:
+                bot.send_message(_adm, text_r, parse_mode="HTML", reply_markup=kb_r)
+            except Exception:
+                pass
+        for _row2 in get_all_admin_users():
+            _sub = _row2["user_id"]
+            if _sub in ADMIN_IDS:
+                continue
+            _perms2 = json.loads(_row2["permissions"] or "{}")
+            if not (_perms2.get("full") or _perms2.get("approve_payments")):
+                continue
+            try:
+                bot.send_message(_sub, text_r, parse_mode="HTML", reply_markup=kb_r)
+            except Exception:
+                pass
+
     # ── RialPay: renewal ──────────────────────────────────────────────────────
     if data.startswith("rpay:rialpay:verify:"):
         payment_id = int(data.split(":")[3])
@@ -6116,8 +6231,8 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id, "❌ این پرداخت رد شده است.", show_alert=True); return
         if status_v != "pending":
             bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True); return
-        bot.answer_callback_query(call.id, "⏳ در حال بررسی وضعیت پرداخت…", show_alert=False)
-        bot.send_message(uid, "⏳ پرداخت شما هنوز از طریق وب‌هوک تأیید نشده است.\n\nپس از پرداخت تأیید به صورت خودکار انجام می‌شود. چند دقیقه صبر کنید.", parse_mode="HTML")
+        bot.answer_callback_query(call.id, "⏳ در حال بررسی…", show_alert=False)
+        _do_rialpay_verify(payment_id, payment)
         return
 
     if data.startswith("rpay:rialpay:") and not data.startswith("rpay:rialpay:verify:"):
@@ -7567,8 +7682,8 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id, "❌ این پرداخت رد شده است.", show_alert=True); return
         if status_v != "pending":
             bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True); return
-        bot.answer_callback_query(call.id, "⏳ در حال بررسی وضعیت پرداخت…", show_alert=False)
-        bot.send_message(uid, "⏳ پرداخت شما هنوز از طریق وب‌هوک تأیید نشده است.\n\nپس از پرداخت تأیید به صورت خودکار انجام می‌شود. چند دقیقه صبر کنید و دوباره بررسی کنید.", parse_mode="HTML")
+        bot.answer_callback_query(call.id, "⏳ در حال بررسی…", show_alert=False)
+        _do_rialpay_verify(payment_id, payment)
         return
 
     if data.startswith("pay:rialpay:") and not data.startswith("pay:rialpay:verify:"):
@@ -11115,11 +11230,8 @@ def _dispatch_callback(call, uid, data):
                 bot.answer_callback_query(call.id, "❌ این پرداخت رد شده است.", show_alert=True); return
             if status_v not in ("pending",):
                 bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True); return
-            bot.answer_callback_query(call.id, "⏳ در حال بررسی وضعیت پرداخت…", show_alert=False)
-            bot.send_message(uid,
-                "⏳ پرداخت شما هنوز از طریق وب‌هوک تأیید نشده است.\n\n"
-                "پس از پرداخت تأیید به صورت خودکار انجام می‌شود. چند دقیقه صبر کنید.",
-                parse_mode="HTML")
+            bot.answer_callback_query(call.id, "⏳ در حال بررسی…", show_alert=False)
+            _do_rialpay_verify(payment_id, payment)
             return
 
         # mypnlcfgrpay:plisio:{config_id}:{package_id}
@@ -11654,11 +11766,8 @@ def _dispatch_callback(call, uid, data):
                 bot.answer_callback_query(call.id, "❌ این پرداخت رد شده است.", show_alert=True); return
             if status_v not in ("pending",):
                 bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True); return
-            bot.answer_callback_query(call.id, "⏳ در حال بررسی وضعیت پرداخت…", show_alert=False)
-            bot.send_message(uid,
-                "⏳ پرداخت شما هنوز از طریق وب‌هوک تأیید نشده است.\n\n"
-                "پس از پرداخت تأیید به صورت خودکار انجام می‌شود. چند دقیقه صبر کنید.",
-                parse_mode="HTML")
+            bot.answer_callback_query(call.id, "⏳ در حال بررسی…", show_alert=False)
+            _do_rialpay_verify(payment_id, payment)
             return
 
         # mypnlcfg:autorenew:{config_id}
@@ -14178,11 +14287,15 @@ def _dispatch_callback(call, uid, data):
         target_id = int(parts[3]) if len(parts) > 3 else 0
 
         if sub == "v":   # view user
-            _show_admin_user_detail(call, target_id)
+            _usr_row = get_user(target_id)
+            _back = "admin:agents" if (_usr_row and _usr_row["is_agent"]) else "admin:users"
+            _show_admin_user_detail(call, target_id, back_cb=_back)
             bot.answer_callback_query(call.id)
             return
 
         if sub == "sts":  # cycle status: safe → unsafe → restricted → safe
+            src_code  = parts[4] if len(parts) > 4 else ""
+            back_cb_r = "admin:agents" if src_code == "a" else "admin:users"
             user = get_user(target_id)
             current = user["status"] if user else "safe"
             if current == "safe":
@@ -14197,17 +14310,19 @@ def _dispatch_callback(call, uid, data):
             set_user_status(target_id, new_status)
             bot.answer_callback_query(call.id, f"وضعیت کاربر به {label} تغییر کرد.")
             log_admin_action(uid, f"وضعیت کاربر <code>{target_id}</code> به {label} تغییر کرد")
-            _show_admin_user_detail(call, target_id)
+            _show_admin_user_detail(call, target_id, back_cb=back_cb_r)
             return
 
         if sub == "ag":  # toggle agent
+            src_code  = parts[4] if len(parts) > 4 else ""
+            back_cb_r = "admin:agents" if src_code == "a" else "admin:users"
             user     = get_user(target_id)
             new_flag = 0 if user["is_agent"] else 1
             set_user_agent(target_id, new_flag)
             label = "فعال" if new_flag else "غیرفعال"
             bot.answer_callback_query(call.id, f"نمایندگی {label} شد.")
             log_admin_action(uid, f"نمایندگی کاربر <code>{target_id}</code> {label} شد")
-            _show_admin_user_detail(call, target_id)
+            _show_admin_user_detail(call, target_id, back_cb=back_cb_r)
             return
 
         if sub == "bal":  # balance menu
@@ -21309,6 +21424,54 @@ def _dispatch_callback(call, uid, data):
                 "مثال:\n"
                 "<code>http://example.com:2096/sub/abc123xyz456</code>",
                 back_button(f"adm:pnl:cpkgs:{panel_id}"))
+        return
+
+    # ── Admin: RialPay manual confirm / reject ────────────────────────────────
+    if data.startswith("adm:rp:force:") or data.startswith("adm:rp:reject:"):
+        if not admin_has_perm(uid, "approve_payments") and not is_admin(uid):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        parts        = data.split(":")
+        action       = parts[2]          # force | reject
+        payment_id   = int(parts[3])
+        payment      = get_payment(payment_id)
+        if not payment:
+            bot.answer_callback_query(call.id, "تراکنش یافت نشد.", show_alert=True); return
+        if payment["status"] != "pending":
+            bot.answer_callback_query(call.id,
+                "✅ این تراکنش قبلاً تأیید شده است." if payment["status"] == "completed" else
+                "⛔ این تراکنش قبلاً بررسی شده است.", show_alert=True)
+            return
+        if action == "force":
+            bot.answer_callback_query(call.id, "⏳ در حال پردازش…")
+            result = process_rialpay_verified_payment(payment_id, source="admin_manual")
+            status_r = result.get("status", "")
+            if status_r in ("ok", "already_processed"):
+                send_or_edit(call, f"✅ تراکنش ریال‌پی #{payment_id} با موفقیت تأیید شد.", kb_admin_panel(uid))
+                try:
+                    bot.send_message(payment["user_id"],
+                        "✅ پرداخت شما توسط ادمین تأیید شد. سرویس شما به‌زودی ارسال می‌شود.",
+                        parse_mode="HTML")
+                except Exception:
+                    pass
+            else:
+                send_or_edit(call,
+                    f"⚠️ خطا در پردازش تراکنش #{payment_id}: {status_r}",
+                    kb_admin_panel(uid))
+        else:  # reject
+            with get_conn() as _c_rp:
+                _c_rp.execute(
+                    "UPDATE payments SET status='rejected' WHERE id=? AND status='pending'",
+                    (payment_id,))
+            bot.answer_callback_query(call.id, "✅ تراکنش رد شد.")
+            send_or_edit(call, f"❌ تراکنش ریال‌پی #{payment_id} رد شد.", kb_admin_panel(uid))
+            try:
+                bot.send_message(payment["user_id"],
+                    "❌ پرداخت ریال‌پی شما توسط ادمین رد شد.\nبرای پیگیری با پشتیبانی تماس بگیرید.",
+                    parse_mode="HTML")
+            except Exception:
+                pass
+        log_admin_action(uid, f"ریال‌پی #{payment_id} {'تأیید' if action == 'force' else 'رد'} دستی توسط ادمین")
         return
 
     bot.answer_callback_query(call.id)

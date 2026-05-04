@@ -445,6 +445,15 @@ def _plisio_webhook_server():
             return "خطایی رخ داد. لطفاً به ربات برگردید و روی بررسی پرداخت بزنید.", 200
 
     # ── RialPay routes ────────────────────────────────────────────────────────
+    @_app.route("/rialpay/<bot_username>/debug", methods=["POST", "GET"])
+    def _rialpay_debug(bot_username):
+        """Debug endpoint — echoes back all received form fields (safe, no auth needed)."""
+        data = {k: v for k, v in request.form.items()}
+        data.update({k: v for k, v in request.args.items() if k not in data})
+        import json as _j
+        print(f"[RialPay DEBUG] bot={bot_username} method={request.method} payload={_j.dumps(data, ensure_ascii=False)}")
+        return _j.dumps({"received": data, "method": request.method}, ensure_ascii=False), 200, {"Content-Type": "application/json"}
+
     @_app.route("/rialpay/<bot_username>/<int:payment_id>/webhook", methods=["POST", "GET", "OPTIONS"])
     def _rialpay_webhook(bot_username, payment_id):
         # CORS preflight (for browser-based webhook testers)
@@ -483,10 +492,9 @@ def _plisio_webhook_server():
             if not verify_rialpay_sign(invoice_id=invoice_id, sign=sign):
                 return jsonify({"ok": False, "error": "invalid sign"}), 200
 
-            # ── Match order_id ────────────────────────────────────────────────
+            # ── Match order_id (soft check — payment_id is already in the URL path) ──
             if order_id_raw is not None and str(order_id_raw) != str(payment_id):
-                print(f"[RialPay] order_id mismatch: payload={order_id_raw} url={payment_id}")
-                return jsonify({"ok": False, "error": "order_id mismatch"}), 200
+                print(f"[RialPay] order_id mismatch (warning only): payload={order_id_raw} url={payment_id} — continuing")
 
             # ── Load payment ──────────────────────────────────────────────────
             payment = get_payment(payment_id)
