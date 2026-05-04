@@ -211,7 +211,7 @@ def get_tronado_order_token(amount_toman: int, order_id: str, user_id: int,
         "WalletAddress":           wallet_address,
         "Description":             (description or "")[:200],
         "wageFromBusinessPercentage": wage_pct,
-        "apiVersion":              3,
+        "apiVersion":              1,
     }
     if callback_url and (callback_url.startswith("https://") or callback_url.startswith("http://")):
         payload["CallbackUrl"] = callback_url

@@ -482,7 +482,10 @@ def _plisio_webhook_server():
             from bot.bot_instance import bot as _bot
 
             # ── Bot username guard (multi-bot server safety) ──────────────────
-            _my_username = (_bot.get_me().username or "").lower().lstrip("@")
+            # Use the cached setting instead of a live get_me() API call —
+            # get_me() is a blocking network round-trip inside a Flask handler
+            # which would stall the server while Tronado/other callbacks queue up.
+            _my_username = (setting_get("bot_username", "") or "").lower().lstrip("@")
             _req_username = (bot_username or "").lower().lstrip("@")
             if _my_username and _req_username and _my_username != _req_username:
                 print(f"[RialPay] bot_username mismatch: url={_req_username} mine={_my_username} — ignoring")
@@ -595,10 +598,17 @@ def _plisio_webhook_server():
     def _make_reuse_server(host, p, app):
         """Subclass Werkzeug's server to set SO_REUSEADDR + SO_REUSEPORT
         *before* the actual bind call inside server_bind(), so Linux allows
-        multiple bot processes to co-exist on the same port."""
+        multiple bot processes to co-exist on the same port.
+        ThreadingMixIn is added so concurrent webhook hits (Tronado + RialPay
+        arriving at the same time) are each handled in their own OS thread
+        rather than queuing behind each other."""
+        import socketserver as _ss
         from werkzeug.serving import BaseWSGIServer as _WS, WSGIRequestHandler as _RH
 
-        class _ReuseServer(_WS):
+        class _ReuseServer(_ss.ThreadingMixIn, _WS):
+            multithread   = True
+            daemon_threads = True
+
             def server_bind(self):
                 self.socket.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
                 try:
