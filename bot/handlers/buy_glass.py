@@ -355,9 +355,11 @@ def build_glass_invoice_text(ses: GlassSession, invoice_description: str = "") -
         f'{_ce(_CE_VOLUME, "🔸")} حجم: <b>{vol_s}</b>',
         "",
         f'{_ce(_CE_TIME,   "🔹")} زمان: <b>{dur_s}</b>',
+        "",
         f'{_ce(_CE_USER,   "👥")} محدودیت کاربر: <b>{mu_s}</b>',
         "",
         f'{_ce(_CE_QTY,    "🔢")} تعداد: <b>{ses.sel_quantity} عدد</b>',
+        "",
         f'{_ce(_CE_MONEY,  "💱")} مبلغ: <b>{price_line}</b>',
     ]
 
@@ -379,9 +381,9 @@ def build_glass_invoice_keyboard(ses: GlassSession, type_id: int) -> str:
 
     # ── Volume row ────────────────────────────────────────────────────────────
     if ses.all_vol_unlimited:
-        rows.append([{"text": "حجم نامحدود", "callback_data": "noop"}])
+        rows.append([{"text": "حجم نامحدود", "callback_data": "noop", "style": "primary"}])
     elif len(ses.volumes) == 1:
-        rows.append([{"text": _fmt_vol(ses.sel_volume), "callback_data": "noop"}])
+        rows.append([{"text": _fmt_vol(ses.sel_volume), "callback_data": "noop", "style": "primary"}])
     else:
         vol_s = "حجم نامحدود" if ses.sel_volume == 0 else _fmt_vol(ses.sel_volume)
         rows.append([
@@ -392,9 +394,9 @@ def build_glass_invoice_keyboard(ses: GlassSession, type_id: int) -> str:
 
     # ── Duration row ──────────────────────────────────────────────────────────
     if ses.all_dur_unlimited:
-        rows.append([{"text": "زمان نامحدود", "callback_data": "noop"}])
+        rows.append([{"text": "زمان نامحدود", "callback_data": "noop", "style": "primary"}])
     elif len(ses.durations) == 1:
-        rows.append([{"text": _fmt_dur(ses.sel_duration), "callback_data": "noop"}])
+        rows.append([{"text": _fmt_dur(ses.sel_duration), "callback_data": "noop", "style": "primary"}])
     else:
         dur_s = "زمان نامحدود" if ses.sel_duration == 0 else _fmt_dur(ses.sel_duration)
         rows.append([
@@ -405,9 +407,9 @@ def build_glass_invoice_keyboard(ses: GlassSession, type_id: int) -> str:
 
     # ── User limit row ────────────────────────────────────────────────────────
     if ses.all_mu_unlimited:
-        rows.append([{"text": "کاربر نامحدود", "callback_data": "noop"}])
+        rows.append([{"text": "کاربر نامحدود", "callback_data": "noop", "style": "primary"}])
     elif len(ses.user_limits) == 1:
-        rows.append([{"text": _fmt_mu(ses.sel_user_limit), "callback_data": "noop"}])
+        rows.append([{"text": _fmt_mu(ses.sel_user_limit), "callback_data": "noop", "style": "primary"}])
     else:
         mu_s = _fmt_mu(ses.sel_user_limit)
         rows.append([
