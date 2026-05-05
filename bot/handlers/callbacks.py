@@ -3071,31 +3071,32 @@ def _build_card_payment_page(card, bank, owner, price, final_amount):
     card_clean = card.replace("-", "").replace(" ", "")
 
     from ..ui.premium_emoji import ce as _ce_cp
-    _bank_icon  = _ce_cp("🏦", "5195302250670476252")
-    _owner_icon = _ce_cp("👤", "5454360341364363439")
-    _card_icon  = _ce_cp("💳", "5195302250670476252")
-    _photo_icon = _ce_cp("📸", "5195302250670476252")
-    _card_title = _ce_cp("💳", "5985796637971191405")
+    _owner_icon  = _ce_cp("👤", "5454360341364363439")
+    _card_icon   = _ce_cp("💳", "5985796637971191405")
+    _photo_icon  = _ce_cp("📸", "5195302250670476252")
+    _card_title  = _ce_cp("💳", "5985796637971191405")
+    _amount_icon = _ce_cp("💰", "5348418461838098123")
+    _warn_icon   = _ce_cp("⚠️", "5987718004475958316")
 
     card_info = (
-        f"{_bank_icon} {esc(bank or 'ثبت نشده')}\n"
+        f"{esc(bank or 'ثبت نشده')}\n"
         f"{_owner_icon} {esc(owner or 'ثبت نشده')}\n"
         f"{_card_icon} <code>{esc(card)}</code>\n\n"
     )
 
+    kb = types.InlineKeyboardMarkup()
     if is_random:
         amount_rial = display_amount * 10
         text = (
             f"{_card_title} <b>کارت به کارت</b>\n\n"
             f"{card_info}"
             "┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅\n"
-            f"💰 <b>مبلغ قابل پرداخت</b>\n"
+            f"{_amount_icon} <b>مبلغ قابل پرداخت</b>\n"
             f"<b>{fmt_price(display_amount)} تومان</b>\n\n"
-            "⚠️ <b>حتما مبلغ را دقیقا به همین مقدار واریز نمایید.\n"
+            f"{_warn_icon} <b>حتما مبلغ را دقیقا به همین مقدار واریز نمایید.\n"
             "در صورت واریز مبلغ غیر دقیق، مسئولیت تایید نشدن رسید بر عهده خود شما خواهد بود.</b>\n\n"
             f"{_photo_icon} پس از واریز، تصویر رسید را ارسال کنید."
         )
-        kb = types.InlineKeyboardMarkup()
         kb.row(
             types.InlineKeyboardButton("کپی قیمت به تومان",
                                        copy_text=types.CopyTextButton(text=str(display_amount)),
@@ -3106,8 +3107,7 @@ def _build_card_payment_page(card, bank, owner, price, final_amount):
         )
         kb.add(types.InlineKeyboardButton("کپی شماره کارت",
                                           copy_text=types.CopyTextButton(text=card_clean),
-                                          icon_custom_emoji_id="5195302250670476252"))
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5352759161945867747"))
+                                          icon_custom_emoji_id="5269381442864963988"))
     else:
         text = (
             f"{_card_title} <b>کارت به کارت</b>\n\n"
@@ -3115,9 +3115,11 @@ def _build_card_payment_page(card, bank, owner, price, final_amount):
             f"{card_info}"
             f"{_photo_icon} پس از واریز، تصویر رسید را ارسال کنید."
         )
-        kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5352759161945867747"))
+        kb.add(types.InlineKeyboardButton("کپی شماره کارت",
+                                          copy_text=types.CopyTextButton(text=card_clean),
+                                          icon_custom_emoji_id="5269381442864963988"))
 
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5352759161945867747"))
     return text, kb
 import string
 
