@@ -5094,7 +5094,7 @@ def _dispatch_callback(call, uid, data):
             ))
         kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
         send_or_edit(call,
-            f"{ce('📱', '6019392692499255094')} <b>آموزش و دریافت اپلیکیشن‌ها</b>\n\n"
+            f"{ce('📱', '5235588635885054955')} <b>دریافت اپلیکیشن‌ها</b>\n\n"
             "سیستم‌عامل خود را انتخاب کنید:",
             kb)
         return
@@ -5111,8 +5111,8 @@ def _dispatch_callback(call, uid, data):
         os_meta = OS_BY_KEY.get(os_key, {})
         os_label = get_os_label(os_key)
         active = get_active_apps(os_key, setting_get)
-        os_icon = ce(os_meta.get("emoji", "📱"), os_meta.get("emoji_id", "6019392692499255094"))
-        text = f"{ce('📱', '6019392692499255094')} <b>اپلیکیشن‌های {os_icon} {esc(os_label)}</b>"
+        os_icon = ce(os_meta.get("emoji", "📱"), os_meta.get("emoji_id", "5235588635885054955"))
+        text = f"{ce('📱', '5235588635885054955')} <b>اپلیکیشن‌های {os_icon} {esc(os_label)}</b>"
         if not active:
             text += "\n\nدر حال حاضر هیچ نرم‌افزاری برای این سیستم‌عامل موجود نیست."
         kb = types.InlineKeyboardMarkup()

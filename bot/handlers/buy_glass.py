@@ -379,50 +379,44 @@ def build_glass_invoice_keyboard(ses: GlassSession, type_id: int) -> str:
     tid = type_id
     rows = []
 
+    _PLUS  = "5274008024585871702"
+    _MINUS = "5339174274877904481"
+
+    def _plus_btn(cb):
+        return {"text": "افزایش", "callback_data": cb, "icon_custom_emoji_id": _PLUS}
+
+    def _minus_btn(cb):
+        return {"text": "کاهش", "callback_data": cb, "icon_custom_emoji_id": _MINUS}
+
     # ── Volume row ────────────────────────────────────────────────────────────
-    if ses.all_vol_unlimited:
-        rows.append([{"text": "حجم نامحدود", "callback_data": "noop", "style": "primary"}])
-    elif len(ses.volumes) == 1:
-        rows.append([{"text": _fmt_vol(ses.sel_volume), "callback_data": "noop", "style": "primary"}])
-    else:
-        vol_s = "حجم نامحدود" if ses.sel_volume == 0 else _fmt_vol(ses.sel_volume)
-        rows.append([
-            {"text": "➕ افزایش", "callback_data": f"buyg:{tid}:v:+"},
-            {"text": vol_s,       "callback_data": "noop", "style": "primary"},
-            {"text": "کاهش ➖",  "callback_data": f"buyg:{tid}:v:-"},
-        ])
+    vol_s = "حجم نامحدود" if ses.sel_volume == 0 else _fmt_vol(ses.sel_volume)
+    rows.append([
+        _plus_btn(f"buyg:{tid}:v:+"),
+        {"text": vol_s, "callback_data": "noop", "style": "primary"},
+        _minus_btn(f"buyg:{tid}:v:-"),
+    ])
 
     # ── Duration row ──────────────────────────────────────────────────────────
-    if ses.all_dur_unlimited:
-        rows.append([{"text": "زمان نامحدود", "callback_data": "noop", "style": "primary"}])
-    elif len(ses.durations) == 1:
-        rows.append([{"text": _fmt_dur(ses.sel_duration), "callback_data": "noop", "style": "primary"}])
-    else:
-        dur_s = "زمان نامحدود" if ses.sel_duration == 0 else _fmt_dur(ses.sel_duration)
-        rows.append([
-            {"text": "➕ افزایش", "callback_data": f"buyg:{tid}:d:+"},
-            {"text": dur_s,       "callback_data": "noop", "style": "primary"},
-            {"text": "کاهش ➖",  "callback_data": f"buyg:{tid}:d:-"},
-        ])
+    dur_s = "زمان نامحدود" if ses.sel_duration == 0 else _fmt_dur(ses.sel_duration)
+    rows.append([
+        _plus_btn(f"buyg:{tid}:d:+"),
+        {"text": dur_s, "callback_data": "noop", "style": "primary"},
+        _minus_btn(f"buyg:{tid}:d:-"),
+    ])
 
     # ── User limit row ────────────────────────────────────────────────────────
-    if ses.all_mu_unlimited:
-        rows.append([{"text": "کاربر نامحدود", "callback_data": "noop", "style": "primary"}])
-    elif len(ses.user_limits) == 1:
-        rows.append([{"text": _fmt_mu(ses.sel_user_limit), "callback_data": "noop", "style": "primary"}])
-    else:
-        mu_s = _fmt_mu(ses.sel_user_limit)
-        rows.append([
-            {"text": "➕ افزایش", "callback_data": f"buyg:{tid}:u:+"},
-            {"text": mu_s,        "callback_data": "noop", "style": "primary"},
-            {"text": "کاهش ➖",  "callback_data": f"buyg:{tid}:u:-"},
-        ])
+    mu_s = _fmt_mu(ses.sel_user_limit)
+    rows.append([
+        _plus_btn(f"buyg:{tid}:u:+"),
+        {"text": mu_s, "callback_data": "noop", "style": "primary"},
+        _minus_btn(f"buyg:{tid}:u:-"),
+    ])
 
     # ── Quantity row ──────────────────────────────────────────────────────────
     rows.append([
-        {"text": "➕ افزایش",         "callback_data": f"buyg:{tid}:q:+"},
+        _plus_btn(f"buyg:{tid}:q:+"),
         {"text": f"{ses.sel_quantity} عدد", "callback_data": "noop", "style": "primary"},
-        {"text": "کاهش ➖",           "callback_data": f"buyg:{tid}:q:-"},
+        _minus_btn(f"buyg:{tid}:q:-"),
     ])
 
     # ── Confirm / Back ────────────────────────────────────────────────────────
@@ -563,10 +557,9 @@ def _reload_session(uid: int, type_id: int) -> Optional[GlassSession]:
 
 
 def _refresh_invoice(call, ses: GlassSession, type_id: int):
-    """Edit the existing message with updated invoice text + keyboard."""
+    """Edit the existing message with updated invoice text + keyboard. Never sends a new message."""
     from ..bot_instance import bot
     from ..db import get_type
-    from ..ui.helpers import send_or_edit
 
     inv_desc = ""
     try:
@@ -578,7 +571,20 @@ def _refresh_invoice(call, ses: GlassSession, type_id: int):
 
     text = build_glass_invoice_text(ses, inv_desc)
     kb   = build_glass_invoice_keyboard(ses, type_id)
-    send_or_edit(call, text, kb)
+
+    try:
+        bot.edit_message_text(
+            text,
+            call.message.chat.id,
+            call.message.message_id,
+            parse_mode="HTML",
+            reply_markup=kb,
+            disable_web_page_preview=True,
+        )
+    except Exception as _e:
+        # "message is not modified" is harmless; log everything else
+        if "message is not modified" not in str(_e).lower():
+            log.warning("_refresh_invoice edit failed: %s", _e)
 
 
 def handle_glass_callback(call, data: str):
@@ -606,7 +612,7 @@ def handle_glass_callback(call, data: str):
         state_clear(uid)
         bot.answer_callback_query(call.id)
         from ..admin.renderers import _fake_call
-        _fake_call(call, f"buy:t:{type_id}")
+        _fake_call(call, "buy:start")
         return True
 
     # ── dimension changes ─────────────────────────────────────────────────────

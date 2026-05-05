@@ -12,11 +12,11 @@ Each app entry:
 from .premium_emoji import ce
 
 OS_LIST = [
-    {"key": "and", "legacy_key": "android", "label": "اندروید", "emoji": "🤖", "emoji_id": "6008224489039466126"},
+    {"key": "and", "legacy_key": "android", "label": "Android", "emoji": "🤖", "emoji_id": "6008224489039466126"},
     {"key": "ios", "legacy_key": "ios",     "label": "iOS",     "emoji": "🍎", "emoji_id": "5764747723651684781"},
-    {"key": "win", "legacy_key": "windows", "label": "ویندوز",  "emoji": "🪟", "emoji_id": "6005916300600152073"},
-    {"key": "mac", "legacy_key": "mac",     "label": "مک",      "emoji": "💻", "emoji_id": "6008199565344248075"},
-    {"key": "lin", "legacy_key": "linux",   "label": "لینوکس",  "emoji": "🐧", "emoji_id": "6008107257907122096"},
+    {"key": "win", "legacy_key": "windows", "label": "Windows",  "emoji": "🪟", "emoji_id": "6005916300600152073"},
+    {"key": "mac", "legacy_key": "mac",     "label": "Mac",      "emoji": "💻", "emoji_id": "6008199565344248075"},
+    {"key": "lin", "legacy_key": "linux",   "label": "Linux",   "emoji": "🐧", "emoji_id": "6008107257907122096"},
 ]
 
 OS_BY_KEY = {item["key"]: item for item in OS_LIST}
