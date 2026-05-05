@@ -180,13 +180,22 @@ class GlassSession:
         self.sel_user_limit = int(pkg["max_users"] if "max_users" in pkg.keys() else 0)
         self.matched_pkg    = pkg
         self.unit_price     = int(pkg["price"])
-        # Panel packages have unlimited effective stock
+        # Panel packages always have unlimited effective stock.
+        # For manual packages, only enforce stock limit when preorder_mode is on.
         _src = pkg["config_source"] if "config_source" in pkg.keys() else "manual"
         if (_src or "manual") == "panel":
             self.stock = None
         else:
-            raw_stock = pkg["stock"] if "stock" in pkg.keys() else None
-            self.stock = int(raw_stock) if raw_stock is not None else None  # None = unlimited
+            try:
+                from ..db import setting_get as _sg
+                _preorder = _sg("preorder_mode", "0") == "1"
+            except Exception:
+                _preorder = False
+            if not _preorder:
+                self.stock = None  # stock not relevant when preorder mode is off
+            else:
+                raw_stock = pkg["stock"] if "stock" in pkg.keys() else None
+                self.stock = int(raw_stock) if raw_stock is not None else None
 
     def _find_package(self, vol, dur, mu) -> Optional[Any]:
         """Exact match first, then closest."""
