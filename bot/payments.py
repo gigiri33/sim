@@ -339,22 +339,25 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
         kb = types.InlineKeyboardMarkup()
         _copy_row = [
             types.InlineKeyboardButton(
-                "📋 کپی آدرس کیف پول",
-                copy_text=types.CopyTextButton(text=addr)
+                "آدرس کیف‌پول",
+                copy_text=types.CopyTextButton(text=addr),
+                icon_custom_emoji_id="5212921495008845628"
             ),
         ]
         if coin_amount_str:
             _copy_row.append(
                 types.InlineKeyboardButton(
-                    "📋 کپی مبلغ",
-                    copy_text=types.CopyTextButton(text=coin_amount_str)
+                    "مبلغ ارز",
+                    copy_text=types.CopyTextButton(text=coin_amount_str),
+                    icon_custom_emoji_id="5212921495008845628"
                 )
             )
         if comment_on and comment_code:
             _copy_row.append(
                 types.InlineKeyboardButton(
-                    "📋 کپی کامنت",
-                    copy_text=types.CopyTextButton(text=comment_code)
+                    "کد کامنت",
+                    copy_text=types.CopyTextButton(text=comment_code),
+                    icon_custom_emoji_id="5212921495008845628"
                 )
             )
         kb.row(*_copy_row)
