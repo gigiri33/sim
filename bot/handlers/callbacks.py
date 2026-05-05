@@ -909,8 +909,8 @@ def _show_discount_prompt(call, amount=None):
         return False
     kb = types.InlineKeyboardMarkup()
     kb.row(
-        types.InlineKeyboardButton("✅ بله، دارم", callback_data="disc:yes"),
-        types.InlineKeyboardButton("❌ خیر، ادامه", callback_data="disc:no"),
+        types.InlineKeyboardButton("بله، دارم", callback_data="disc:yes", icon_custom_emoji_id="5350572310627632617"),
+        types.InlineKeyboardButton("خیر، ادامه", callback_data="disc:no", icon_custom_emoji_id="5348514879558926674"),
     )
     send_or_edit(call, _build_discount_prompt_text(amount), kb)
     return True
@@ -932,7 +932,10 @@ def _show_naming_prompt(target, package_id: int, quantity: int):
         types.InlineKeyboardButton("🎲 نام رندوم",   callback_data=f"buy:naming:random:{package_id}:{quantity}"),
         types.InlineKeyboardButton("✏️ نام دلخواه",  callback_data=f"buy:naming:custom:{package_id}:{quantity}"),
     )
-    kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"buy:p:{package_id}",
+    # Back button: return to glass invoice if came from glass flow, otherwise to package page
+    _sd_nm = state_data(target.from_user.id) if hasattr(target, 'from_user') else {}
+    _back_cb = f"buyg:{_sd_nm.get('type_id', package_id)}:back_to_inv" if _sd_nm.get('_glass') else f"buy:p:{package_id}"
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data=_back_cb,
                                       icon_custom_emoji_id="5253997076169115797"))
     send_or_edit(target,
         "🏷 <b>انتخاب نام سرویس</b>\n\n"

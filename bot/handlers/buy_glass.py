@@ -439,7 +439,7 @@ def build_glass_invoice_keyboard(ses: GlassSession, type_id: int) -> str:
         ])
 
     # ── Confirm / Back ────────────────────────────────────────────────────────
-    rows.append([{"text": "تایید", "callback_data": f"buyg:{tid}:confirm", "style": "success", "icon_custom_emoji_id": "5357069174512303778"}])
+    rows.append([{"text": "تایید", "callback_data": f"buyg:{tid}:confirm", "style": "success", "icon_custom_emoji_id": "5350572310627632617"}])
     rows.append([{"text": "بازگشت", "callback_data": f"buyg:{tid}:back", "icon_custom_emoji_id": "5253997076169115797"}])
 
     return json.dumps({"inline_keyboard": rows})
@@ -641,12 +641,20 @@ def handle_glass_callback(call, data: str):
         _fake_call(call, "buy:start")
         return True
 
+    # ── back_to_inv: return from naming step back to invoice ──────────────────
+    if action == "back_to_inv":
+        state_clear(uid)
+        bot.answer_callback_query(call.id)
+        show_glass_buy(call, type_id)
+        return True
+
     # ── dimension changes (invoice step) ──────────────────────────────────────
     ses = _reload_session(uid, type_id)
     if ses is None:
-        # Session expired — restart
-        bot.answer_callback_query(call.id, "جلسه منقضی شد. دوباره امتحان کنید.", show_alert=True)
+        # Session missing — silently restart the glass buy screen
         state_clear(uid)
+        bot.answer_callback_query(call.id)
+        show_glass_buy(call, type_id)
         return True
 
     direction_map = {"+": 1, "-": -1}
