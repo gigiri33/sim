@@ -512,7 +512,7 @@ def process_tronado_verified_payment(payment_id: int,
         print(f"[Tronado] process_verified: payment {payment_id} is not tronado ({payment['payment_method']})")
         return {"status": "already_processed"}
 
-    if payment["status"] not in ("pending", "rejected", "failed"):
+    if payment["status"] not in ("pending",):
         print(f"[Tronado] process_verified: payment {payment_id} already {payment['status']} (source={source})")
         return {"status": "already_processed"}
 
@@ -538,6 +538,23 @@ def process_tronado_verified_payment(payment_id: int,
     # IMPORTANT: token is read only from this payment row. Never scan/choose an
     # older pending payment or a latest payment.
     token = get_tronado_token_from_payment(payment)
+    if not token:
+        audit_payload = {
+            "source": source,
+            "incoming": raw_payload or {},
+            "provider": "tronado",
+            "internal_order_id": payment_id,
+            "user_id": payment["user_id"],
+            "amount": payment["amount"],
+            "final_decision": "reject",
+            "reason": "missing external_order_id/token",
+        }
+        try:
+            save_tronado_callback_data(payment_id, _json.dumps(audit_payload, ensure_ascii=False)[:4000])
+        except Exception:
+            pass
+        print(f"[Tronado] process_verified: reject payment {payment_id}; no Tronado token/external_order_id saved")
+        return {"status": "missing_external_order"}
     verify_resp = {}
     verify_key = ""
     norm = "unknown"
@@ -551,10 +568,7 @@ def process_tronado_verified_payment(payment_id: int,
             elif cb_uid and cb_uid != str(payment["user_id"]):
                 print(f"[Tronado] process_verified: IPN user mismatch payment={payment_id} db_uid={payment['user_id']} payload_uid={cb_uid}")
             else:
-                verify_key = "trusted_ipn"
-                verify_resp = flat_ipn
-                norm = "paid"
-                print(f"[Tronado] process_verified: trusted successful IPN payment={payment_id}")
+                print(f"[Tronado] process_verified: accepted IPN hint payment={payment_id}; verifying token with API before fulfillment")
 
         if norm != "paid" and token:
             verify_key = token
@@ -562,7 +576,7 @@ def process_tronado_verified_payment(payment_id: int,
             norm = normalize_tronado_status(verify_resp)
             print(f"[Tronado] process_verified: GetStatus by token payment={payment_id} norm={norm}")
 
-        if norm != "paid":
+        if norm != "paid" and token:
             # Primary fallback: exact PaymentID used when creating GetOrderToken.
             verify_key = str(payment_id)
             fallback_resp = get_tronado_status_by_payment_id(str(payment_id))
@@ -572,7 +586,7 @@ def process_tronado_verified_payment(payment_id: int,
                 verify_resp = fallback_resp
                 norm = fallback_norm
 
-        if norm != "paid":
+        if norm != "paid" and token:
             # Legacy fallback only. This endpoint often returns HTTP 500, so it
             # must never be the first or only lookup path.
             verify_key = f"trndorderid_{payment_id}"
@@ -596,9 +610,17 @@ def process_tronado_verified_payment(payment_id: int,
     audit_payload = {
         "source": source,
         "incoming": raw_payload or {},
+        "internal_order_id": payment_id,
+        "user_id": payment["user_id"],
+        "provider": "tronado",
+        "external_order_id": token,
+        "amount": payment["amount"],
+        "discount": None,
+        "final_amount": payment["amount"],
         "verify_key": verify_key,
         "verify_response": verify_resp,
         "normalized_status": norm,
+        "final_decision": "paid" if norm == "paid" else "reject",
     }
 
     # ── Extract audit IDs from verified response/payload ──────────────────────
@@ -652,14 +674,13 @@ def process_tronado_verified_payment(payment_id: int,
         return {"status": "rejected", "raw_resp": verify_resp}
 
     # ── Amount validation ──────────────────────────────────────────────────────
-    for amt_key in ("Amount", "amount", "TomanAmount", "tomanAmount", "Toman", "Price"):
+    for amt_key in ("TomanAmount", "tomanAmount", "Toman", "Price", "amount", "Amount"):
         ext_amount = _deep_get(verify_resp, amt_key)
         if ext_amount is not None and ext_amount != "":
             try:
                 ext_amount_int = int(float(ext_amount))
                 expected = payment["amount"]
-                # Allow ±5% tolerance (Tronado may include slight rounding/fees)
-                if abs(ext_amount_int - expected) > expected * 0.05 + 100:
+                if ext_amount_int != expected:
                     print(f"[Tronado] process_verified: amount mismatch payment {payment_id}"
                           f" expected={expected} got={ext_amount_int}")
                     try:

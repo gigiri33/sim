@@ -110,7 +110,7 @@ from ..gateways.centralpay import (
 )
 from ..gateways.rialpay import (
     create_rialpay_invoice, normalize_rialpay_status, process_rialpay_verified_payment,
-    get_rialpay_callback_base_url, check_rialpay_invoice_status,
+    get_rialpay_callback_base_url, build_rialpay_callback_url, check_rialpay_invoice_status,
 )
 from ..gateways.plisio import (
     create_plisio_invoice, check_plisio_invoice,
@@ -167,6 +167,19 @@ from ..db import (
     get_user_purchases_for_package, get_user_panel_configs_for_package,
     get_referrals_paged, count_referrals,
 )
+
+
+def _mark_payment_creation_failed(payment_id: int, provider: str, reason: str = "") -> None:
+    """Move a locally-created payment out of pending when provider invoice/order creation failed."""
+    try:
+        with get_conn() as conn:
+            conn.execute(
+                "UPDATE payments SET status='payment_creation_failed', admin_note=?, approved_at=? "
+                "WHERE id=? AND payment_method=? AND status='pending'",
+                ((reason or "payment creation failed")[:500], now_str(), payment_id, provider),
+            )
+    except Exception as exc:
+        log.warning("payment_creation_failed update failed payment_id=%s provider=%s: %s", payment_id, provider, exc)
 
 
 # ── OpenVPN helpers (shared with messages.py) ─────────────────────────────────
@@ -6155,6 +6168,7 @@ def _dispatch_callback(call, uid, data):
                                                    f"تمدید {package_row['name']}", cb_url_rtd)
         if not success:
             err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
+            _mark_payment_creation_failed(payment_id, "tronado", err_msg)
             bot.answer_callback_query(call.id)
             send_or_edit(call,
                 f"⚠️ <b>خطا در ایجاد درگاه ترونادو</b>\n\n"
@@ -6430,10 +6444,11 @@ def _dispatch_callback(call, uid, data):
         payment_id = create_payment("renewal", uid, package_id, final_rprice_rp, "rialpay",
                                     status="pending", config_id=item["config_id"])
         _bot_uname_rp2 = bot.get_me().username or ""
-        _cb_url_rp2    = f"{get_rialpay_callback_base_url()}/rialpay/{_bot_uname_rp2}/{payment_id}/webhook"
+        _cb_url_rp2    = build_rialpay_callback_url(payment_id, _bot_uname_rp2)
         ok_rp2, res_rp2 = create_rialpay_invoice(final_rprice_rp, uid, payment_id, _cb_url_rp2)
         if not ok_rp2:
             err_msg_rp2 = res_rp2.get("error", "خطای ناشناخته") if isinstance(res_rp2, dict) else str(res_rp2)
+            _mark_payment_creation_failed(payment_id, "rialpay", err_msg_rp2)
             bot.answer_callback_query(call.id)
             send_or_edit(call,
                 f"⚠️ <b>خطا در ایجاد فاکتور ریال‌پی</b>\n\n<code>{esc(err_msg_rp2[:400])}</code>",
@@ -7767,6 +7782,7 @@ def _dispatch_callback(call, uid, data):
                                                    f"خرید {package_row['name']}", cb_url_td)
         if not success:
             err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
+            _mark_payment_creation_failed(payment_id, "tronado", err_msg)
             bot.answer_callback_query(call.id)
             send_or_edit(call,
                 f"⚠️ <b>خطا در ایجاد درگاه ترونادو</b>\n\n"
@@ -7926,10 +7942,11 @@ def _dispatch_callback(call, uid, data):
         if _snames_rp:
             set_payment_service_names(payment_id, _snames_rp)
         _bot_uname_rp = bot.get_me().username or ""
-        _cb_url_rp    = f"{get_rialpay_callback_base_url()}/rialpay/{_bot_uname_rp}/{payment_id}/webhook"
+        _cb_url_rp    = build_rialpay_callback_url(payment_id, _bot_uname_rp)
         ok_rp, res_rp = create_rialpay_invoice(final_rp_price, uid, payment_id, _cb_url_rp)
         if not ok_rp:
             err_msg_rp = res_rp.get("error", "خطای ناشناخته") if isinstance(res_rp, dict) else str(res_rp)
+            _mark_payment_creation_failed(payment_id, "rialpay", err_msg_rp)
             bot.answer_callback_query(call.id)
             send_or_edit(call,
                 f"⚠️ <b>خطا در ایجاد فاکتور ریال‌پی</b>\n\n<code>{esc(err_msg_rp[:400])}</code>",
@@ -8832,6 +8849,7 @@ def _dispatch_callback(call, uid, data):
         success, result = get_tronado_order_token(final_amount, order_id_td, uid, "شارژ کیف پول", cb_url)
         if not success:
             err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
+            _mark_payment_creation_failed(payment_id, "tronado", err_msg)
             bot.answer_callback_query(call.id)
             send_or_edit(call,
                 f"⚠️ <b>خطا در ایجاد درگاه ترونادو</b>\n\n"
@@ -8961,7 +8979,7 @@ def _dispatch_callback(call, uid, data):
         if status_v != "pending":
             bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True); return
         bot.answer_callback_query(call.id, "⏳ در حال بررسی وضعیت پرداخت…", show_alert=False)
-        bot.send_message(uid, "⏳ پرداخت شما هنوز از طریق وب‌هوک تأیید نشده است.\n\nپس از پرداخت تأیید به صورت خودکار انجام می‌شود. چند دقیقه صبر کنید.", parse_mode="HTML")
+        _do_rialpay_verify(payment_id, payment)
         return
 
     if data == "wallet:charge:rialpay":
@@ -8980,10 +8998,11 @@ def _dispatch_callback(call, uid, data):
         final_amount_rp3 = apply_gateway_fee("rialpay", amount)
         payment_id = create_payment("wallet_charge", uid, None, final_amount_rp3, "rialpay", status="pending")
         _bot_uname_rp3 = bot.get_me().username or ""
-        _cb_url_rp3    = f"{get_rialpay_callback_base_url()}/rialpay/{_bot_uname_rp3}/{payment_id}/webhook"
+        _cb_url_rp3    = build_rialpay_callback_url(payment_id, _bot_uname_rp3)
         ok_rp3, res_rp3 = create_rialpay_invoice(final_amount_rp3, uid, payment_id, _cb_url_rp3)
         if not ok_rp3:
             err_rp3 = res_rp3.get("error", "خطای ناشناخته") if isinstance(res_rp3, dict) else str(res_rp3)
+            _mark_payment_creation_failed(payment_id, "rialpay", err_rp3)
             bot.answer_callback_query(call.id)
             send_or_edit(call,
                 f"⚠️ <b>خطا در ایجاد فاکتور ریال‌پی</b>\n\n<code>{esc(err_rp3[:400])}</code>",
@@ -11394,6 +11413,7 @@ def _dispatch_callback(call, uid, data):
             )
             if not success_td_pnl:
                 err_td_pnl = result_td_pnl.get("error", "خطای ناشناخته") if isinstance(result_td_pnl, dict) else str(result_td_pnl)
+                _mark_payment_creation_failed(payment_id, "tronado", err_td_pnl)
                 bot.answer_callback_query(call.id)
                 send_or_edit(call,
                     f"⚠️ <b>خطا در ایجاد درگاه ترونادو</b>\n\n<code>{esc(err_td_pnl[:400])}</code>",
@@ -11567,10 +11587,11 @@ def _dispatch_callback(call, uid, data):
             payment_id = create_payment("pnlcfg_renewal", uid, package_id, final_rp_pnl, "rialpay",
                                         status="pending", config_id=config_id)
             _bot_uname_rpnl = bot.get_me().username or ""
-            _cb_url_rpnl    = f"{get_rialpay_callback_base_url()}/rialpay/{_bot_uname_rpnl}/{payment_id}/webhook"
+            _cb_url_rpnl    = build_rialpay_callback_url(payment_id, _bot_uname_rpnl)
             ok_rp_pnl, res_rp_pnl = create_rialpay_invoice(final_rp_pnl, uid, payment_id, _cb_url_rpnl)
             if not ok_rp_pnl:
                 err_rp_pnl = res_rp_pnl.get("error", "خطای ناشناخته") if isinstance(res_rp_pnl, dict) else str(res_rp_pnl)
+                _mark_payment_creation_failed(payment_id, "rialpay", err_rp_pnl)
                 bot.answer_callback_query(call.id)
                 send_or_edit(call,
                     f"⚠️ <b>خطا در ایجاد فاکتور ریال‌پی</b>\n\n<code>{esc(err_rp_pnl[:400])}</code>",
@@ -11938,6 +11959,7 @@ def _dispatch_callback(call, uid, data):
                                                              f"تمدید {package_row['name']}", cb_url_td_pnl)
             if not success_td:
                 err_td = result_td.get("error", "خطای ناشناخته") if isinstance(result_td, dict) else str(result_td)
+                _mark_payment_creation_failed(payment_id, "tronado", err_td)
                 bot.answer_callback_query(call.id)
                 send_or_edit(call,
                     f"⚠️ <b>خطا در ایجاد فاکتور ترونادو</b>\n\n<code>{esc(err_td[:400])}</code>",
@@ -12105,10 +12127,11 @@ def _dispatch_callback(call, uid, data):
             payment_id = create_payment("pnlcfg_renewal", uid, package_id, final_rp_pnl2, "rialpay",
                                         status="pending", config_id=config_id)
             _bot_uname_rpnl2 = bot.get_me().username or ""
-            _cb_url_rpnl2    = f"{get_rialpay_callback_base_url()}/rialpay/{_bot_uname_rpnl2}/{payment_id}/webhook"
+            _cb_url_rpnl2    = build_rialpay_callback_url(payment_id, _bot_uname_rpnl2)
             ok_rp_pnl2, res_rp_pnl2 = create_rialpay_invoice(final_rp_pnl2, uid, payment_id, _cb_url_rpnl2)
             if not ok_rp_pnl2:
                 err_rp_pnl2 = res_rp_pnl2.get("error", "خطای ناشناخته") if isinstance(res_rp_pnl2, dict) else str(res_rp_pnl2)
+                _mark_payment_creation_failed(payment_id, "rialpay", err_rp_pnl2)
                 bot.answer_callback_query(call.id)
                 send_or_edit(call,
                     f"⚠️ <b>خطا در ایجاد فاکتور ریال‌پی</b>\n\n<code>{esc(err_rp_pnl2[:400])}</code>",

@@ -455,6 +455,8 @@ def _plisio_webhook_server():
         return _j.dumps({"received": data, "method": request.method}, ensure_ascii=False), 200, {"Content-Type": "application/json"}
 
     @_app.route("/rialpay/<bot_username>/<int:payment_id>/webhook", methods=["POST", "GET", "OPTIONS"])
+    @_app.route("/rialpay/<bot_username>/<int:payment_id>/callback", methods=["POST", "GET", "OPTIONS"])
+    @_app.route("/rialpay/<bot_username>/<int:payment_id>/return", methods=["POST", "GET", "OPTIONS"])
     def _rialpay_webhook(bot_username, payment_id):
         # CORS preflight (for browser-based webhook testers)
         if request.method == "OPTIONS":
@@ -497,7 +499,8 @@ def _plisio_webhook_server():
 
             # ── Match order_id (soft check — payment_id is already in the URL path) ──
             if order_id_raw is not None and str(order_id_raw) != str(payment_id):
-                print(f"[RialPay] order_id mismatch (warning only): payload={order_id_raw} url={payment_id} — continuing")
+                print(f"[RialPay] order_id mismatch: payload={order_id_raw} url={payment_id} — rejecting")
+                return jsonify({"ok": False, "error": "order_id mismatch"}), 200
 
             # ── Load payment ──────────────────────────────────────────────────
             payment = get_payment(payment_id)
@@ -524,7 +527,7 @@ def _plisio_webhook_server():
                 "sign":       sign,
             }
 
-            if norm_status == "paid":
+            if norm_status in ("paid", "unknown", "pending"):
                 result = process_rialpay_verified_payment(payment_id, source="webhook", raw_payload=data)
                 print(f"[RialPay] webhook result payment_id={payment_id}: {result}")
                 status = result.get("status", "")

@@ -91,6 +91,17 @@ def get_rialpay_callback_base_url() -> str:
     return ""
 
 
+def build_rialpay_callback_url(payment_id: int, bot_username: str) -> str:
+    """Build the public RialPay webhook URL for a payment, or empty if no public base URL is configured."""
+    base = get_rialpay_callback_base_url()
+    if not base:
+        return ""
+    slug = (bot_username or "").lstrip("@").strip().lower()
+    if not slug:
+        return ""
+    return f"{base}/rialpay/{slug}/{int(payment_id)}/webhook"
+
+
 def _decode_response_body(resp) -> tuple:
     raw = resp.read().decode("utf-8", errors="replace").strip()
     if not raw:
@@ -126,10 +137,20 @@ def create_rialpay_invoice(amount_toman: int, user_id, order_id, callback_url: s
 
     # Try form-encoded first (most PHP APIs expect this), fallback to JSON
     import urllib.parse as _urlparse
+    if not callback_url or not (str(callback_url).startswith("https://") or str(callback_url).startswith("http://")):
+        return False, {
+            "status": "error",
+            "error": "آدرس callback ریال‌پی تنظیم نشده یا public نیست. rialpay_callback_base_url یا server_public_url را با دامنه http/https تنظیم کنید.",
+            "raw": {},
+        }
+
     form_data = _urlparse.urlencode({
         "api_key":  api_key,
         "amount":   int(amount_toman),
         "callback": callback_url,
+        "callback_url": callback_url,
+        "webhook": callback_url,
+        "redirect_url": callback_url,
         "order_id": str(order_id),
     }).encode("utf-8")
 
@@ -331,6 +352,7 @@ def process_rialpay_verified_payment(payment_id: int,
         get_payment, get_conn, update_balance,
         get_payment_service_names, now_str,
         get_package, get_purchase,
+        is_payment_expired,
     )
     from ..helpers import fmt_price
     from ..payments import apply_gateway_bonus_if_needed
@@ -349,29 +371,43 @@ def process_rialpay_verified_payment(payment_id: int,
         print(f"[RialPay] process_verified: payment {payment_id} already {payment['status']} (source={source})")
         return {"status": "already_processed"}
 
+    if is_payment_expired(payment):
+        print(f"[RialPay] process_verified: payment {payment_id} expired")
+        return {"status": "expired"}
+
+    token = (payment["receipt_text"] or "").strip() if "receipt_text" in payment.keys() else ""
+    if not token:
+        print(f"[RialPay] process_verified: payment {payment_id} has no saved invoice token")
+        return {"status": "missing_external_order"}
+
+    verify_resp = check_rialpay_invoice_status(token)
+    verify_status = verify_resp.get("status", "error") if isinstance(verify_resp, dict) else "error"
+    if verify_status != "paid":
+        print(f"[RialPay] process_verified: direct verify not paid payment={payment_id} status={verify_status} resp={str(verify_resp)[:300]}")
+        return {"status": verify_status if verify_status in ("pending", "rejected") else "not_paid", "raw_resp": verify_resp}
+
     # ── Amount validation ──────────────────────────────────────────────────────
-    if raw_payload and isinstance(raw_payload, dict):
-        ext_amount = raw_payload.get("amount")
-        if ext_amount is not None:
-            try:
-                ext_amount_int = int(float(ext_amount))
-                # Use gateway_ref (RialPay's actual invoice amount) if available,
-                # otherwise fall back to DB amount with generous tolerance (20%)
-                expected_str = (payment["gateway_ref"] or "").strip() if payment["gateway_ref"] else ""
-                if expected_str:
-                    try:
-                        expected = int(float(expected_str))
-                    except Exception:
-                        expected = payment["amount"]
-                else:
+    verify_raw = verify_resp.get("raw", {}) if isinstance(verify_resp, dict) else {}
+    ext_amount = raw_payload.get("amount") if isinstance(raw_payload, dict) else None
+    if not ext_amount and isinstance(verify_raw, dict):
+        ext_amount = verify_raw.get("amount") or verify_raw.get("total_amount") or verify_raw.get("seller_receive")
+    if ext_amount is not None and ext_amount != "":
+        try:
+            ext_amount_int = int(float(ext_amount))
+            expected_str = (payment["gateway_ref"] or "").strip() if payment["gateway_ref"] else ""
+            if expected_str:
+                try:
+                    expected = int(float(expected_str))
+                except Exception:
                     expected = payment["amount"]
-                tolerance = max(int(expected * 0.20), 500)
-                if abs(ext_amount_int - expected) > tolerance:
-                    print(f"[RialPay] process_verified: amount mismatch payment={payment_id}"
-                          f" expected={expected} got={ext_amount_int}")
-                    return {"status": "amount_mismatch", "expected": expected, "got": ext_amount_int}
-            except Exception:
-                pass
+            else:
+                expected = payment["amount"]
+            if ext_amount_int != expected:
+                print(f"[RialPay] process_verified: amount mismatch payment={payment_id}"
+                      f" expected={expected} got={ext_amount_int}")
+                return {"status": "amount_mismatch", "expected": expected, "got": ext_amount_int}
+        except Exception:
+            pass
 
     # ── Extract audit fields ───────────────────────────────────────────────────
     gateway_ref   = ""
@@ -379,6 +415,9 @@ def process_rialpay_verified_payment(payment_id: int,
     if raw_payload and isinstance(raw_payload, dict):
         gateway_ref   = str(raw_payload.get("token")      or raw_payload.get("order_id") or "")[:255]
         external_txid = str(raw_payload.get("invoice_id") or "")[:255]
+    if not external_txid and isinstance(verify_resp, dict):
+        external_txid = str(verify_resp.get("invoice_id") or verify_raw.get("invoice_id") or "")[:255]
+    raw_payload = {"incoming": raw_payload or {}, "verify_response": verify_resp, "final_decision": "paid"}
     raw_payload_str = _json.dumps(raw_payload, ensure_ascii=False)[:4000] if raw_payload else ""
 
     # ── Atomic lock: pending → processing ─────────────────────────────────────
@@ -421,7 +460,7 @@ def process_rialpay_verified_payment(payment_id: int,
 
     try:
         # ── Edit old payment message to remove buttons ────────────────────────
-        notify_msg_id = payment.get("notify_message_id") or 0
+        notify_msg_id = payment["notify_message_id"] if "notify_message_id" in payment.keys() else 0
         if notify_msg_id:
             try:
                 bot.edit_message_reply_markup(uid, int(notify_msg_id), reply_markup=None)

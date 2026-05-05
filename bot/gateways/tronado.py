@@ -504,11 +504,10 @@ def is_tronado_response_paid(resp: dict) -> bool:
     # Skip internal error markers
     if resp.get("__http_error"):
         return False
-    # Flat paid-callback format: UniqueCode + Hash at top level (no Error key)
+    # Flat paid callback format is only an IPN hint. Final fulfillment must use
+    # process_tronado_verified_payment(), which calls GetStatus for the exact
+    # saved order token before delivery.
     if resp.get("UniqueCode") and resp.get("Hash") and "Error" not in resp and "__http_error" not in resp:
-        return True
-    # Also: PaymentID + TronAmount flat at top level (classic callback)
-    if resp.get("PaymentID") and resp.get("TronAmount") and "Error" not in resp:
         return True
     # Data-wrapped response
     data = resp.get("Data") or resp.get("data")
@@ -547,10 +546,9 @@ def normalize_tronado_status(resp: dict) -> str:
         return "unknown"
     if resp.get("__http_error"):
         return "error"
-    # Direct paid indicators at top level
+    # Direct paid indicators at top level. PaymentID+TronAmount alone is not
+    # enough; it can be forged and does not prove a Tronado order exists.
     if resp.get("UniqueCode") and resp.get("Hash") and "Error" not in resp:
-        return "paid"
-    if resp.get("PaymentID") and resp.get("TronAmount") and "Error" not in resp:
         return "paid"
     data = resp.get("Data") or resp.get("data")
     if not isinstance(data, dict):
