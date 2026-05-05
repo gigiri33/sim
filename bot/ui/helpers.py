@@ -9,6 +9,7 @@ from telebot import types
 
 from ..db import setting_get, get_locked_channels
 from ..bot_instance import bot
+from .premium_emoji import ce
 
 # ── Channel membership cache (TTL = 60 s) ─────────────────────────────────────
 # Each bot.get_chat_member() call is an HTTP round-trip to Telegram (~100-300ms).
@@ -178,6 +179,11 @@ def check_channel_membership(user_id):
 def channel_lock_message(target):
     channels = _get_all_locked_channels()
     kb = types.InlineKeyboardMarkup()
+    _bot_username = ""
+    try:
+        _bot_username = bot.get_me().username or ""
+    except Exception:
+        pass
     if channels:
         for channel_id in channels:
             url = _channel_url(channel_id)
@@ -190,12 +196,26 @@ def channel_lock_message(target):
                     label = f"@{chat.username}" if chat.username else channel_id
                 except Exception:
                     label = channel_id
-            kb.add(types.InlineKeyboardButton("📢 {}".format(label), url=url))
+            kb.add(types.InlineKeyboardButton(
+                f"{ce('📢', '5348125643852758491')} {label}",
+                url=url,
+                icon_custom_emoji_id="5348125643852758491",
+            ))
     else:
-        kb.add(types.InlineKeyboardButton("📢 عضویت در کانال", url="https://t.me/"))
-    kb.add(types.InlineKeyboardButton("✅ عضو شدم", callback_data="check_channel"))
+        kb.add(types.InlineKeyboardButton(
+            f"{ce('📢', '5348125643852758491')} عضویت در کانال",
+            url="https://t.me/",
+            icon_custom_emoji_id="5348125643852758491",
+        ))
+    kb.add(types.InlineKeyboardButton(
+        f"{ce('✅', '5350659885010797372')} عضو شدم",
+        callback_data="check_channel",
+        icon_custom_emoji_id="5350659885010797372",
+    ))
+    _bot_mention = f"@{_bot_username}" if _bot_username else "ربات"
     send_or_edit(
         target,
-        "🔒 برای استفاده از ربات، ابتدا باید در کانال‌های ما عضو شوید.\n\nپس از عضویت در همه کانال‌ها، روی «عضو شدم» بزنید.",
+        f"{ce('🔒', '5990125934940787455')} برای استفاده از {_bot_mention}، ابتدا باید در کانال‌های ما عضو شوید.\n\n"
+        f"{ce('✅', '5990309862620271638')} پس از عضویت در همه کانال‌ها، روی «عضو شدم» بزنید.",
         kb
     )
