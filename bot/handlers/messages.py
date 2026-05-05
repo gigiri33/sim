@@ -3772,7 +3772,14 @@ def universal_handler(message):
 
         if sn == "admin_card_add_bank" and is_admin(uid):
             bank = (message.text or "").strip()
-            state_set(uid, "admin_card_add_holder", card_number=sd["card_number"], bank_name=bank)
+            state_set(uid, "admin_card_add_bank_emoji", card_number=sd["card_number"], bank_name=bank)
+            bot.send_message(uid, "ایموجی بانک را ارسال کنید:\n(مثلاً 💙 برای بلوبانک، 🟢 برای ملت و ...)", reply_markup=back_button("adm:gw:card:cards"))
+            return
+
+        if sn == "admin_card_add_bank_emoji" and is_admin(uid):
+            emoji = (message.text or "").strip()
+            bank_with_emoji = f"{sd.get('bank_name', '')} {emoji}".strip() if emoji else sd.get("bank_name", "")
+            state_set(uid, "admin_card_add_holder", card_number=sd["card_number"], bank_name=bank_with_emoji)
             bot.send_message(uid, "👤 نام صاحب کارت را ارسال کنید:", reply_markup=back_button("adm:gw:card:cards"))
             return
 
@@ -3798,8 +3805,17 @@ def universal_handler(message):
 
         if sn == "admin_card_edit_bank" and is_admin(uid):
             bank = (message.text or "").strip()
-            state_set(uid, "admin_card_edit_holder", card_id=sd["card_id"],
+            state_set(uid, "admin_card_edit_bank_emoji", card_id=sd["card_id"],
                       card_number=sd["card_number"], bank_name=bank)
+            bot.send_message(uid, "ایموجی بانک را ارسال کنید:\n(مثلاً 💙 برای بلوبانک، 🟢 برای ملت و ...)",
+                             reply_markup=back_button(f"adm:gw:card:cards:cfg:{sd['card_id']}"))
+            return
+
+        if sn == "admin_card_edit_bank_emoji" and is_admin(uid):
+            emoji = (message.text or "").strip()
+            bank_with_emoji = f"{sd.get('bank_name', '')} {emoji}".strip() if emoji else sd.get("bank_name", "")
+            state_set(uid, "admin_card_edit_holder", card_id=sd["card_id"],
+                      card_number=sd["card_number"], bank_name=bank_with_emoji)
             bot.send_message(uid, "👤 نام صاحب کارت جدید را ارسال کنید:",
                              reply_markup=back_button(f"adm:gw:card:cards:cfg:{sd['card_id']}"))
             return
