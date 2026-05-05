@@ -3363,10 +3363,15 @@ def universal_handler(message):
             raw = message.text or message.caption or ""
             ents = message.entities or message.caption_entities or []
             from ..ui.premium_emoji import serialize_premium_text as _spt
-            setting_set("support_faq_text", _spt(raw, ents))
+            _serialized = _spt(raw, ents)
+            setting_set("support_faq_text", _serialized)
             log_admin_action(uid, "متن سوالات متداول پشتیبانی ذخیره شد")
             state_clear(uid)
-            bot.send_message(uid, "✅ متن سوالات متداول ذخیره شد.", reply_markup=back_button("adm:sup:faq"))
+            _pe_count = sum(1 for e in (ents or []) if getattr(e, "type", "") == "custom_emoji")
+            _confirm = "✅ متن سوالات متداول ذخیره شد."
+            if _pe_count:
+                _confirm += f"\n\n<code>ایموجی پرمیوم: {_pe_count} عدد</code>"
+            bot.send_message(uid, _confirm, parse_mode="HTML", reply_markup=back_button("adm:sup:faq"))
             return
 
         if sn == "admin_sup_add_title" and is_admin(uid):
@@ -4194,7 +4199,7 @@ def universal_handler(message):
             return
 
         if sn == "admin_edit_tariff_text" and is_admin(uid):
-            from ..ui.premium_emoji import serialize_premium_text as _spt, render_premium_text_html as _rph
+            from ..ui.premium_emoji import serialize_premium_text as _spt
             raw_text = message.text if message.text is not None else (message.caption or "")
             entities = message.entities or message.caption_entities or []
             if raw_text.strip() == "-":
@@ -4203,11 +4208,15 @@ def universal_handler(message):
                 state_clear(uid)
                 bot.send_message(uid, "✅ متن تعرفه پاک شد.", reply_markup=back_button("adm:tariff:view"))
             else:
-                tariff_html = _rph(_spt(raw_text, entities))
-                setting_set("tariff_text", tariff_html)
+                _serialized = _spt(raw_text, entities)
+                setting_set("tariff_text", _serialized)
                 log_admin_action(uid, "متن تعرفه تغییر کرد")
                 state_clear(uid)
-                bot.send_message(uid, "✅ متن تعرفه ذخیره شد.", reply_markup=back_button("adm:tariff:view"))
+                _pe_count = sum(1 for e in (entities or []) if getattr(e, "type", "") == "custom_emoji")
+                _confirm = "✅ متن تعرفه ذخیره شد."
+                if _pe_count:
+                    _confirm += f"\n\n<code>ایموجی پرمیوم: {_pe_count} عدد</code>"
+                bot.send_message(uid, _confirm, parse_mode="HTML", reply_markup=back_button("adm:tariff:view"))
             return
 
         if sn == "admin_startmenu_edit_text" and is_admin(uid):
@@ -4932,7 +4941,11 @@ def universal_handler(message):
             setting_set("purchase_rules_text", _spt(text_val, entities))
             log_admin_action(uid, "متن قوانین خرید ویرایش شد")
             state_clear(uid)
-            bot.send_message(uid, "✅ متن قوانین خرید ذخیره شد.", reply_markup=back_button("adm:set:rules"))
+            _pe_count = sum(1 for e in (entities or []) if getattr(e, "type", "") == "custom_emoji")
+            _confirm = "✅ متن قوانین خرید ذخیره شد."
+            if _pe_count:
+                _confirm += f"\n\n<code>ایموجی پرمیوم: {_pe_count} عدد</code>"
+            bot.send_message(uid, _confirm, parse_mode="HTML", reply_markup=back_button("adm:set:rules"))
             return
 
         # ── Admin: Premium Emoji — Extract IDs ────────────────────────────────

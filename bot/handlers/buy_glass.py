@@ -439,7 +439,7 @@ def build_glass_invoice_keyboard(ses: GlassSession, type_id: int) -> str:
         ])
 
     # ── Confirm / Back ────────────────────────────────────────────────────────
-    rows.append([{"text": "تایید", "callback_data": f"buyg:{tid}:confirm", "style": "success", "icon_custom_emoji_id": "5350572310627632617"}])
+    rows.append([{"text": "تایید", "callback_data": f"buyg:{tid}:confirm", "style": "primary", "icon_custom_emoji_id": "5350572310627632617"}])
     rows.append([{"text": "بازگشت", "callback_data": f"buyg:{tid}:back", "icon_custom_emoji_id": "5253997076169115797"}])
 
     return json.dumps({"inline_keyboard": rows})
@@ -714,6 +714,7 @@ def handle_glass_callback(call, data: str):
             _is_panel_package, _show_naming_prompt,
             _show_discount_prompt, _show_purchase_gateways,
         )
+        # Order: 1) service name (if panel package)  2) discount code  3) gateway
         if _is_panel_package(package_row):
             _show_naming_prompt(call, package_id, quantity)
             return True

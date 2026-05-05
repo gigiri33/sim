@@ -795,9 +795,10 @@ def _invoice_expiry_line() -> str:
     """Return the validity notice line to append inside the invoice text."""
     if not _invoice_expiry_enabled():
         return ""
+    from ..ui.premium_emoji import ce as _ce_exp
     mins = _invoice_expiry_minutes()
     return (
-        f"\n\n⏰ مهلت پرداخت: <b>{mins} دقیقه</b>\n"
+        f"\n\n{_ce_exp('⏰', '5348402067947929537')} مهلت پرداخت: <b>{mins} دقیقه</b>\n"
         "پس از پایان این زمان، فاکتور در تمامی درگاه‌ها غیرقابل استفاده خواهد بود."
     )
 
@@ -1016,24 +1017,25 @@ def _show_purchase_gateways(target, uid, package_id, price, package_row):
     else:
         _unit_line = ""
 
+    from ..ui.premium_emoji import ce as _ce
     if disc_amount:
         _price_line = (
-            f"💰 مبلغ اصلی: {fmt_price(orig_amount)} تومان\n"
+            f"{_ce('💰', '5348418461838098123')} مبلغ اصلی: {fmt_price(orig_amount)} تومان\n"
             f"🎟 تخفیف: {fmt_price(disc_amount)} تومان\n"
             f"💚 مبلغ نهایی: {fmt_price(price)} تومان"
         )
     else:
         if quantity > 1:
-            _price_line = f"💰 مبلغ کل: <b>{fmt_price(price)}</b> تومان"
+            _price_line = f"{_ce('💰', '5348418461838098123')} مبلغ کل: <b>{fmt_price(price)}</b> تومان"
         else:
-            _price_line = f"💰 قیمت: {fmt_price(price)} تومان"
+            _price_line = f"{_ce('💰', '5348418461838098123')} قیمت: {fmt_price(price)} تومان"
     _stamp_invoice(uid)
     text = (
-        "💳 <b>انتخاب روش پرداخت</b>\n\n"
-        f"🧩 نوع: {esc(package_row['type_name'])}\n"
+        f"{_ce('💳', '5350729313157135529')} <b>انتخاب روش پرداخت</b>\n\n"
+        f"{_ce('🧩', '5348141492282080981')} نوع: {esc(package_row['type_name'])}\n"
         + (f"📦 پکیج: {esc(package_row['name'])}\n" if _pkg_sn else "")
-        + f"🔋 حجم: {fmt_vol(package_row['volume_gb'])}\n"
-        f"⏰ مدت: {fmt_dur(package_row['duration_days'])}\n"
+        + f"{_ce('🔋', '5350374591808158927')} حجم: {fmt_vol(package_row['volume_gb'])}\n"
+        f"{_ce('⏰', '5348557584418750233')} مدت: {fmt_dur(package_row['duration_days'])}\n"
         f"{_qty_line}"
         f"{_unit_line}"
         f"{_price_line}\n\n"
@@ -5091,16 +5093,39 @@ def _dispatch_callback(call, uid, data):
         if setting_get("tariff_enabled", "0") != "1":
             bot.answer_callback_query(call.id, "تعرفه فعال نیست.", show_alert=True)
             return
-        tariff_text = setting_get("tariff_text", "")
-        if not tariff_text or not tariff_text.strip():
-            text = "📋 <b>تعرفه</b>\n\nتعرفه‌ای ثبت نشده است."
-        else:
-            from ..ui.premium_emoji import render_premium_text_html
-            text = render_premium_text_html(tariff_text)
+        tariff_raw = setting_get("tariff_text", "")
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("🛒 خرید سرویس", callback_data="buy:start"))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
-        send_or_edit(call, text, kb)
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
+        if not tariff_raw or not tariff_raw.strip():
+            send_or_edit(call, "📋 <b>تعرفه</b>\n\nتعرفه‌ای ثبت نشده است.", kb)
+            return
+        from ..ui.premium_emoji import render_premium_text_entities as _rpte_tr
+        _tr_text, _tr_ents = _rpte_tr(tariff_raw)
+        _tr_prefix = "📋 تعرفه\n\n"
+        _tr_full = _tr_prefix + _tr_text
+        if _tr_ents:
+            _tr_shift = len(_tr_prefix.encode("utf-16-le")) // 2
+            for _tre in _tr_ents:
+                _tre.offset += _tr_shift
+        try:
+            bot.edit_message_text(
+                _tr_full,
+                call.message.chat.id,
+                call.message.message_id,
+                entities=_tr_ents,
+                reply_markup=kb,
+                disable_web_page_preview=True,
+            )
+        except Exception as _tre2:
+            if "message is not modified" not in str(_tre2).lower():
+                bot.send_message(
+                    call.message.chat.id,
+                    _tr_full,
+                    entities=_tr_ents,
+                    reply_markup=kb,
+                    disable_web_page_preview=True,
+                )
         return
 
     # ── Apps Menu ─────────────────────────────────────────────────────────────
@@ -5119,7 +5144,7 @@ def _dispatch_callback(call, uid, data):
                 callback_data=f"apps:os:{item['key']}",
                 icon_custom_emoji_id=item["emoji_id"],
             ))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call,
             f"{ce('📱', '5235588635885054955')} <b>دریافت اپلیکیشن‌ها</b>\n\n"
             "سیستم‌عامل خود را انتخاب کنید:",
@@ -6824,8 +6849,16 @@ def _dispatch_callback(call, uid, data):
             accepted = setting_get(f"rules_accepted_{uid}", "0")
             if accepted != "1":
                 rules_text = setting_get("purchase_rules_text", "")
-                from ..ui.premium_emoji import render_premium_text_html as _rph
-                rendered_rules = _rph(rules_text, escape_plain_parts=True)
+                from ..ui.premium_emoji import render_premium_text_entities as _rpte_r
+                from telebot import types as _tgt
+                _r_text, _r_ents = _rpte_r(rules_text)
+                _prefix = "📜 قوانین خرید\n\n"
+                _full_text = _prefix + _r_text
+                if _r_ents:
+                    # shift all entity offsets by len(_prefix) in bytes (UTF-16 code units)
+                    _shift = len(_prefix.encode("utf-16-le")) // 2
+                    for _e in _r_ents:
+                        _e.offset += _shift
                 kb = types.InlineKeyboardMarkup()
                 kb.add(types.InlineKeyboardButton("✅ من قوانین را خواندم و پذیرفتم", callback_data="buy:accept_rules"))
                 kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
@@ -6837,8 +6870,8 @@ def _dispatch_callback(call, uid, data):
                 try:
                     bot.send_message(
                         call.message.chat.id,
-                        f"📜 <b>قوانین خرید</b>\n\n{rendered_rules}",
-                        parse_mode="HTML",
+                        _full_text,
+                        entities=_r_ents,
                         reply_markup=kb,
                         disable_web_page_preview=True,
                     )
@@ -8413,7 +8446,7 @@ def _dispatch_callback(call, uid, data):
         balance = int(user["balance"] or 0) if user else 0
         import json as _json_wm
         kb = _json_wm.dumps({"inline_keyboard": [
-            [{"text": "افزایش موجودی", "callback_data": "wallet:charge", "style": "success", "icon_custom_emoji_id": "5256186332669035163"}],
+            [{"text": "افزایش موجودی", "callback_data": "wallet:charge", "style": "primary", "icon_custom_emoji_id": "5256186332669035163"}],
             [{"text": "بازگشت به منوی اصلی", "callback_data": "nav:main", "icon_custom_emoji_id": "5253997076169115797"}],
         ]})
         bot.answer_callback_query(call.id)

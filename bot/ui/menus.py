@@ -183,7 +183,7 @@ def show_support(target):
             btn["style"] = _color_map[_col]
         btn_rows.append([btn])
     btn_rows.append([{
-        "text": "🔙 بازگشت به منوی اصلی",
+        "text": "بازگشت به منوی اصلی",
         "callback_data": "nav:main",
         "icon_custom_emoji_id": "5253997076169115797",
     }])
@@ -224,12 +224,12 @@ def show_my_configs(target, user_id, page=0, search=None):
     if total == 0 and not active_search:
         import json as _json
         _kb_empty = _json.dumps({"inline_keyboard": [
-            [{"text": "خرید سرویس", "callback_data": "buy:start", "style": "success"}],
+            [{"text": "خرید سرویس", "callback_data": "buy:start", "style": "primary"}],
             [{"text": "بازگشت", "callback_data": "nav:main", "icon_custom_emoji_id": "5253997076169115797"}],
         ]})
         send_or_edit(
             target,
-            f"{ce('😔', '5370781385885751708')} لیست سرویس‌های شما خالی است.\n\n» برای خرید سرویس از دکمه زیر اقدام نمایید.",
+            f"{ce('😔', '5370781385885751708')} {ce('😔', '5458779239941681169')} لیست سرویس‌های شما خالی است.\n\n» برای خرید سرویس از دکمه زیر اقدام نمایید.",
             _kb_empty,
         )
         return
@@ -367,22 +367,21 @@ def show_referral_menu(target, user_id):
         sr_count = setting_get("referral_start_reward_count", "1")
         if sr_type == "wallet":
             sr_amount = setting_get("referral_start_reward_amount", "0")
-            reward_text += f"{ce('🎁', '5215628200578655810')} <b>هدیه عضویت:</b> به ازای هر {sr_count} زیرمجموعه، <b>{fmt_price(int(sr_amount))}</b> تومان شارژ کیف پول\n"
+            reward_text += f"{ce('🎁', '5224635807855296510')} <b>هدیه عضویت:</b> به ازای هر {sr_count} زیرمجموعه، <b>{fmt_price(int(sr_amount))}</b> تومان شارژ کیف پول\n"
         else:
-            reward_text += f"{ce('🎁', '5215628200578655810')} <b>هدیه عضویت:</b> به ازای هر {sr_count} زیرمجموعه، یک کانفیگ رایگان\n"
+            reward_text += f"{ce('🎁', '5224635807855296510')} <b>هدیه عضویت:</b> به ازای هر {sr_count} زیرمجموعه، یک کانفیگ رایگان\n"
 
     if purchase_reward_enabled:
         pr_type = setting_get("referral_purchase_reward_type", "wallet")
         pr_count = setting_get("referral_purchase_reward_count", "1")
         if pr_type == "wallet":
             pr_amount = setting_get("referral_purchase_reward_amount", "0")
-            reward_text += f"💸 <b>هدیه خرید:</b> به ازای هر {pr_count} خرید زیرمجموعه، <b>{fmt_price(int(pr_amount))}</b> تومان شارژ کیف پول\n"
+            reward_text += f"{ce('💸', '5348455218168218503')} <b>هدیه خرید:</b> به ازای هر {pr_count} خرید زیرمجموعه، <b>{fmt_price(int(pr_amount))}</b> تومان شارژ کیف پول\n"
         else:
-            reward_text += f"💸 <b>هدیه خرید:</b> به ازای هر {pr_count} خرید زیرمجموعه، یک کانفیگ رایگان\n"
-    # NOTE: 💸 هدیه خرید uses free emoji as fallback — no custom emoji mapping provided
+            reward_text += f"{ce('💸', '5348455218168218503')} <b>هدیه خرید:</b> به ازای هر {pr_count} خرید زیرمجموعه، یک کانفیگ رایگان\n"
 
     if not reward_text:
-        reward_text = f"{ce('🎁', '5215628200578655810')} هدیه‌ها هنوز توسط ادمین تنظیم نشده است.\n"
+        reward_text = f"{ce('🎁', '5224635807855296510')} هدیه‌ها هنوز توسط ادمین تنظیم نشده است.\n"
 
     # Invitee reward info (shown in the referral menu for the current user as well)
     if setting_get("ref_invitee_reward_enabled", "0") == "1":
@@ -411,16 +410,16 @@ def show_referral_menu(target, user_id):
         )
 
     text = (
-        f"{ce('💼', '5352896944496728039')} <b>زیرمجموعه‌گیری {ce('🎉', '5359785904535774578')} و دعوت دوستان</b>\n\n"
+        f"{ce('💼', '5296533616224906961')} <b>زیرمجموعه‌گیری {ce('🎉', '5348561449889317077')} و دعوت دوستان</b>\n\n"
         "با دعوت دوستان از طریق لینک اختصاصی، بدون پرداخت حتی ۱ ریال "
-        "کیف پولت شارژ می‌شه و از خدمات ربات استفاده می‌کنی! 🎉\n\n"
+        f"کیف پولت شارژ می‌شه و از خدمات ربات استفاده می‌کنی! {ce('🎉', '5348529413728256481')}\n\n"
         f"{reward_text}\n"
-        f"{ce('📊', '5199749070830197566')} <b>آمار شما:</b>\n"
-        f"  {ce('👥', '5472030678633684592')} زیرمجموعه‌ها: <b>{stats['total_referrals']}</b> نفر\n"
-        f"  {ce('🛒', '5431577498364158238')} خریدهای زیرمجموعه: <b>{stats['purchase_count']}</b> عدد\n"
-        f"  {ce('💵', '5431499171045581032')} مجموع خرید زیرمجموعه: <b>{fmt_price(stats['total_purchase_amount'])}</b> تومان\n\n"
-        f"{ce('🔗', '5409048419211682843')} <b>لینک دعوت شما:</b>\n<code>{ref_link}</code>\n\n"
-        f"{ce('📢', '5271604874419647061')} <b>دعوت کن، هدیه بگیر، رشد کن!</b>"
+        f"{ce('📊', '5359664288241829619')} <b>آمار شما:</b>\n"
+        f"  {ce('👥', '5296533616224906961')} زیرمجموعه‌ها: <b>{stats['total_referrals']}</b> نفر\n"
+        f"  {ce('🛒', '5258024802010026053')} خریدهای زیرمجموعه: <b>{stats['purchase_count']}</b> عدد\n"
+        f"  {ce('💵', '5350572310627632617')} مجموع خرید زیرمجموعه: <b>{fmt_price(stats['total_purchase_amount'])}</b> تومان\n\n"
+        f"{ce('🔗', '5348343042212381365')} <b>لینک دعوت شما:</b>\n<code>{ref_link}</code>\n\n"
+        f"{ce('📢', '5350305520144106741')} <b>دعوت کن، هدیه بگیر، رشد کن!</b>"
         f"{pending_text}"
     )
 
