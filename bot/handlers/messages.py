@@ -3360,7 +3360,9 @@ def universal_handler(message):
         # ── New dynamic support system state handlers ──────────────────────────
         if sn == "admin_sup_faq_edit" and is_admin(uid):
             raw = message.text or message.caption or ""
-            setting_set("support_faq_text", raw)
+            ents = message.entities or message.caption_entities or []
+            from ..ui.premium_emoji import serialize_premium_text as _spt
+            setting_set("support_faq_text", _spt(raw, ents))
             log_admin_action(uid, "متن سوالات متداول پشتیبانی ذخیره شد")
             state_clear(uid)
             bot.send_message(uid, "✅ متن سوالات متداول ذخیره شد.", reply_markup=back_button("adm:sup:faq"))

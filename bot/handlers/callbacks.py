@@ -5050,16 +5050,35 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id, "سوالات متداول در حال حاضر فعال نیست.", show_alert=True)
             return
         bot.answer_callback_query(call.id)
-        faq_text = setting_get("support_faq_text", "").strip()
+        faq_raw = setting_get("support_faq_text", "").strip()
         kb_faq = types.InlineKeyboardMarkup()
         kb_faq.add(types.InlineKeyboardButton(
             "بازگشت", callback_data="support:menu",
             icon_custom_emoji_id="5253997076169115797"
         ))
-        if not faq_text:
+        if not faq_raw:
             send_or_edit(call, "❔ متن سوالات متداول هنوز ثبت نشده است.", kb_faq)
         else:
-            send_or_edit(call, faq_text, kb_faq)
+            from ..ui.premium_emoji import render_premium_text_entities as _rpte
+            _faq_text, _faq_ents = _rpte(faq_raw)
+            try:
+                bot.edit_message_text(
+                    _faq_text,
+                    call.message.chat.id,
+                    call.message.message_id,
+                    entities=_faq_ents,
+                    reply_markup=kb_faq,
+                    disable_web_page_preview=True,
+                )
+            except Exception as _fe:
+                if "message is not modified" not in str(_fe).lower():
+                    bot.send_message(
+                        call.message.chat.id,
+                        _faq_text,
+                        entities=_faq_ents,
+                        reply_markup=kb_faq,
+                        disable_web_page_preview=True,
+                    )
         return
 
     # ── Tariff ────────────────────────────────────────────────────────────────
