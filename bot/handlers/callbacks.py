@@ -5080,6 +5080,7 @@ def _dispatch_callback(call, uid, data):
     # ── Apps Menu ─────────────────────────────────────────────────────────────
     if data == "apps:menu":
         bot.answer_callback_query(call.id)
+        state_clear(uid)
         if setting_get("apps_enabled", "0") != "1":
             bot.answer_callback_query(call.id, "این بخش فعال نیست.", show_alert=True)
             return
@@ -5117,9 +5118,8 @@ def _dispatch_callback(call, uid, data):
             text += "\n\nدر حال حاضر هیچ نرم‌افزاری برای این سیستم‌عامل موجود نیست."
         kb = types.InlineKeyboardMarkup()
         for app in active:
-            kb.add(types.InlineKeyboardButton(f"📥 {app['name']}", url=app["url"]))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت به لیست سیستم‌عامل‌ها", callback_data="apps:menu"))
-        kb.add(types.InlineKeyboardButton("🏠 بازگشت به منوی اصلی", callback_data="nav:main"))
+            kb.add(types.InlineKeyboardButton(app['name'], url=app["url"], icon_custom_emoji_id="5244612521087749872"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="apps:menu", icon_custom_emoji_id="5253997076169115797"))
         send_or_edit(call, text, kb)
         return
 
