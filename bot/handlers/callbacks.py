@@ -3073,7 +3073,6 @@ def _build_card_payment_page(card, bank, owner, price, final_amount):
     from ..ui.premium_emoji import ce as _ce_cp
     _owner_icon  = _ce_cp("👤", "5454360341364363439")
     _card_icon   = _ce_cp("💳", "5985796637971191405")
-    _bank_icon   = _ce_cp("🪪", "5287661248878490473")
     _photo_icon  = _ce_cp("📸", "5195302250670476252")
     _card_title  = _ce_cp("💳", "5985796637971191405")
     _amount_icon = _ce_cp("💰", "5348418461838098123")
@@ -3082,7 +3081,7 @@ def _build_card_payment_page(card, bank, owner, price, final_amount):
     from ..ui.premium_emoji import render_premium_text_html as _rpth_cp
     _bank_display = _rpth_cp(bank, escape_plain_parts=True) if bank else 'ثبت نشده'
     card_info = (
-        f"{_bank_icon} {_bank_display}\n"
+        f"{_bank_display}\n"
         f"{_owner_icon} {esc(owner or 'ثبت نشده')}\n"
         f"{_card_icon} <code>{esc(card)}</code>\n\n"
     )

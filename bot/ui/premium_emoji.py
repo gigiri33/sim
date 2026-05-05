@@ -203,6 +203,25 @@ def deserialize_premium_text(data: str) -> dict:
         return {"text": "", "entities": []}
     stripped = data.strip()
     if not stripped.startswith("{"):
+        # Handle trailing JSON blob (e.g. `بلوبانک {"text": "🪪", "entities": [...]}`)
+        # The JSON part is a serialized premium emoji intended as a prefix icon.
+        brace_idx = stripped.find(" {")
+        if brace_idx != -1:
+            try:
+                candidate = stripped[brace_idx + 1:]
+                obj = json.loads(candidate)
+                if isinstance(obj, dict) and ("text" in obj or "entities" in obj):
+                    prefix_text = stripped[:brace_idx].strip()
+                    emoji_text  = obj.get("text", "")
+                    emoji_ents  = obj.get("entities", [])
+                    if emoji_text:
+                        # Render as "{emoji} {bank_name}" — emoji entities are at offset 0
+                        combined_text = emoji_text + " " + prefix_text
+                        return {"text": combined_text, "entities": emoji_ents}
+                    else:
+                        return {"text": prefix_text, "entities": []}
+            except (json.JSONDecodeError, ValueError):
+                pass
         return {"text": data, "entities": []}
     try:
         obj = json.loads(stripped)
