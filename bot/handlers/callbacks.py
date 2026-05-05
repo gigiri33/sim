@@ -5870,22 +5870,26 @@ def _dispatch_callback(call, uid, data):
             if ('show_name' not in package_row.keys() or package_row['show_name'])
             else f"تمدید {fmt_vol(package_row['volume_gb'])} | {fmt_dur(package_row['duration_days'])}"
         )
-        success, result = create_tetrapay_order(price, hash_id, order_label)
+        final_tp_rnw_price = apply_gateway_fee("tetrapay", price)
+        success, result = create_tetrapay_order(final_tp_rnw_price, hash_id, order_label)
         if not success:
             bot.answer_callback_query(call.id, "خطا در ایجاد درخواست پرداخت آنلاین.", show_alert=True)
             return
         authority = result.get("Authority", "")
         pay_url_bot = result.get("payment_url_bot", "")
         pay_url_web = result.get("payment_url_web", "")
-        payment_id = create_payment("renewal", uid, package_id, price, "tetrapay", status="pending",
+        payment_id = create_payment("renewal", uid, package_id, final_tp_rnw_price, "tetrapay", status="pending",
                                      config_id=item["config_id"])
         with get_conn() as conn:
             conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (authority, payment_id))
         state_set(uid, "await_renewal_tetrapay_verify", payment_id=payment_id, authority=authority,
                   purchase_id=purchase_id)
+        fee_line_tp_rnw = ""
+        if final_tp_rnw_price != price:
+            fee_line_tp_rnw = f"\n💸 کارمزد: {fmt_price(final_tp_rnw_price - price)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_tp_rnw_price)}</b> تومان"
         text = (
             "🏦 <b>پرداخت آنلاین (تمدید)</b>\n\n"
-            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n\n"
+            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_tp_rnw}\n\n"
             "لطفاً از یکی از لینک‌های زیر پرداخت را انجام دهید.\n\n"
             "⏳ <b>تا یک ساعت</b> اگر پرداخت‌تون تایید بشه به صورت خودکار عملیات انجام می‌شود.\n"
             "در غیر این صورت دکمه <b>بررسی پرداخت</b> را بزنید."
@@ -5982,34 +5986,39 @@ def _dispatch_callback(call, uid, data):
             if ('show_name' not in package_row.keys() or package_row['show_name'])
             else f"تمدید {fmt_vol(package_row['volume_gb'])} | {fmt_dur(package_row['duration_days'])}"
         )
-        success, result = create_tronpays_rial_invoice(price, hash_id, order_label)
-        if not success:
-            err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
-            bot.answer_callback_query(call.id)
-            send_or_edit(call,
-                f"⚠️ <b>خطا در ایجاد درگاه TronPays</b>\n\n"
-                f"<code>{esc(err_msg[:400])}</code>\n\n"
-                "💡 مطمئن شوید کلید API صحیح وارد شده باشد.",
-                back_button(f"renew:{purchase_id}"))
-            return
-        invoice_id = result.get("invoice_id")
-        invoice_url = result.get("invoice_url")
-        if not invoice_id or not invoice_url:
-            bot.answer_callback_query(call.id)
-            send_or_edit(call,
-                f"⚠️ <b>خطا در ایجاد فاکتور TronPays</b>\n\n"
-                f"<code>پاسخ API: {esc(str(result)[:400])}</code>",
-                back_button(f"renew:{purchase_id}"))
-            return
-        payment_id = create_payment("renewal", uid, package_id, price, "tronpays_rial", status="pending",
+        final_trp_rnw = apply_gateway_fee("tronpays_rial", price)
+        if final_trp_rnw != price:
+            success, result = create_tronpays_rial_invoice(final_trp_rnw, hash_id, order_label)
+            if not success:
+                err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
+                bot.answer_callback_query(call.id)
+                send_or_edit(call,
+                    f"⚠️ <b>خطا در ایجاد درگاه TronPays</b>\n\n"
+                    f"<code>{esc(err_msg[:400])}</code>\n\n"
+                    "💡 مطمئن شوید کلید API صحیح وارد شده باشد.",
+                    back_button(f"renew:{purchase_id}"))
+                return
+            invoice_id = result.get("invoice_id")
+            invoice_url = result.get("invoice_url")
+            if not invoice_id or not invoice_url:
+                bot.answer_callback_query(call.id)
+                send_or_edit(call,
+                    f"⚠️ <b>خطا در ایجاد فاکتور TronPays</b>\n\n"
+                    f"<code>پاسخ API: {esc(str(result)[:400])}</code>",
+                    back_button(f"renew:{purchase_id}"))
+                return
+        payment_id = create_payment("renewal", uid, package_id, final_trp_rnw, "tronpays_rial", status="pending",
                                     config_id=item["config_id"])
         with get_conn() as conn:
             conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id, payment_id))
         state_set(uid, "await_renewal_tronpays_rial_verify", payment_id=payment_id,
                   invoice_id=invoice_id, purchase_id=purchase_id)
+        fee_line_trp_rnw = ""
+        if final_trp_rnw != price:
+            fee_line_trp_rnw = f"\n💸 کارمزد: {fmt_price(final_trp_rnw - price)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_trp_rnw)}</b> تومان"
         text = (
             "💳 <b>پرداخت ریالی (TronPays) — تمدید</b>\n\n"
-            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n\n"
+            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_trp_rnw}\n\n"
             "از لینک زیر پرداخت را انجام دهید.\n\n"
             "⏳ <b>تا یک ساعت</b> پرداخت به صورت خودکار بررسی می‌شود.\n"
             "در غیر این صورت دکمه «بررسی پرداخت» را بزنید."
@@ -6092,7 +6101,8 @@ def _dispatch_callback(call, uid, data):
                 "لطفاً درگاه دیگری متناسب با این مبلغ انتخاب کنید.",
                 show_alert=True)
             return
-        success, result = create_pazzlenet_invoice(price, uid)
+        final_pz_rnw = apply_gateway_fee("pazzlenet", price)
+        success, result = create_pazzlenet_invoice(final_pz_rnw, uid)
         if not success:
             err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
             hint = ("💡 اتصال اینترنت سرور را بررسی کنید."
@@ -6114,15 +6124,18 @@ def _dispatch_callback(call, uid, data):
                 f"<code>پاسخ API: {esc(str(result)[:400])}</code>",
                 back_button(f"renew:{purchase_id}"))
             return
-        payment_id = create_payment("renewal", uid, package_id, price, "pazzlenet", status="pending",
+        payment_id = create_payment("renewal", uid, package_id, final_pz_rnw, "pazzlenet", status="pending",
                                     config_id=item["config_id"])
         with get_conn() as conn:
             conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (pz_pid, payment_id))
         state_set(uid, "await_renewal_pazzlenet_verify", payment_id=payment_id,
                   pazzlenet_id=pz_pid, purchase_id=purchase_id)
+        fee_line_pz_rnw = ""
+        if final_pz_rnw != price:
+            fee_line_pz_rnw = f"\n💸 کارمزد: {fmt_price(final_pz_rnw - price)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_pz_rnw)}</b> تومان"
         text = (
             "💳 <b>پرداخت ریالی (PazzleNet) — تمدید</b>\n\n"
-            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n\n"
+            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_pz_rnw}\n\n"
             "از لینک زیر پرداخت را انجام دهید.\n\n"
             "⏳ <b>تا یک ساعت</b> پرداخت به صورت خودکار بررسی می‌شود.\n"
             "در غیر این صورت دکمه «بررسی پرداخت» را بزنید."
@@ -7485,14 +7498,15 @@ def _dispatch_callback(call, uid, data):
             if ('show_name' not in package_row.keys() or package_row['show_name'])
             else f"خرید {fmt_vol(package_row['volume_gb'])} | {fmt_dur(package_row['duration_days'])}"
         )
-        success, result = create_tetrapay_order(price, hash_id, order_label)
+        final_tp_price = apply_gateway_fee("tetrapay", price)
+        success, result = create_tetrapay_order(final_tp_price, hash_id, order_label)
         if not success:
             bot.answer_callback_query(call.id, "خطا در ایجاد درخواست پرداخت آنلاین.", show_alert=True)
             return
         authority = result.get("Authority", "")
         pay_url_bot = result.get("payment_url_bot", "")
         pay_url_web = result.get("payment_url_web", "")
-        payment_id = create_payment("config_purchase", uid, package_id, price, "tetrapay",
+        payment_id = create_payment("config_purchase", uid, package_id, final_tp_price, "tetrapay",
                                     status="pending", quantity=_qty_tetra)
         _snames_tetra = state_data(uid).get("service_names")
         if _snames_tetra:
@@ -7500,9 +7514,12 @@ def _dispatch_callback(call, uid, data):
         with get_conn() as conn:
             conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (authority, payment_id))
         state_set(uid, "await_tetrapay_verify", payment_id=payment_id, authority=authority)
+        fee_line_tp_buy = ""
+        if final_tp_price != price:
+            fee_line_tp_buy = f"\n💸 کارمزد: {fmt_price(final_tp_price - price)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_tp_price)}</b> تومان"
         text = (
             "🏦 <b>پرداخت آنلاین (TetraPay)</b>\n\n"
-            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n\n"
+            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_tp_buy}\n\n"
             "لطفاً از یکی از لینک‌های زیر پرداخت را انجام دهید.\n\n"
             "⏳ <b>تا یک ساعت</b> اگر پرداخت‌تون تایید بشه به صورت خودکار عملیات انجام می‌شود.\n"
             "در غیر این صورت دکمه <b>بررسی پرداخت</b> را بزنید."
@@ -7607,7 +7624,8 @@ def _dispatch_callback(call, uid, data):
             if ('show_name' not in package_row.keys() or package_row['show_name'])
             else f"خرید {fmt_vol(package_row['volume_gb'])} | {fmt_dur(package_row['duration_days'])}"
         )
-        success, result = create_tronpays_rial_invoice(price, hash_id, order_label)
+        final_trp_buy = apply_gateway_fee("tronpays_rial", price)
+        success, result = create_tronpays_rial_invoice(final_trp_buy, hash_id, order_label)
         if not success:
             err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
             bot.answer_callback_query(call.id)
@@ -7626,7 +7644,7 @@ def _dispatch_callback(call, uid, data):
                 f"<code>پاسخ API: {esc(str(result)[:400])}</code>",
                 back_button(f"buy:p:{package_id}"))
             return
-        payment_id = create_payment("config_purchase", uid, package_id, price, "tronpays_rial",
+        payment_id = create_payment("config_purchase", uid, package_id, final_trp_buy, "tronpays_rial",
                                     status="pending", quantity=_qty_tp_rial)
         _snames_tp = state_data(uid).get("service_names")
         if _snames_tp:
@@ -7634,9 +7652,12 @@ def _dispatch_callback(call, uid, data):
         with get_conn() as conn:
             conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id, payment_id))
         state_set(uid, "await_tronpays_rial_verify", payment_id=payment_id, invoice_id=invoice_id)
+        fee_line_trp_buy = ""
+        if final_trp_buy != price:
+            fee_line_trp_buy = f"\n💸 کارمزد: {fmt_price(final_trp_buy - price)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_trp_buy)}</b> تومان"
         text = (
             "💳 <b>پرداخت ریالی (TronPays)</b>\n\n"
-            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n\n"
+            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_trp_buy}\n\n"
             "از لینک زیر پرداخت را انجام دهید.\n\n"
             "⏳ <b>تا یک ساعت</b> پرداخت به صورت خودکار بررسی می‌شود.\n"
             "در غیر این صورت دکمه «بررسی پرداخت» را بزنید."
@@ -7732,7 +7753,8 @@ def _dispatch_callback(call, uid, data):
                 "لطفاً درگاه دیگری متناسب با این مبلغ انتخاب کنید.",
                 show_alert=True)
             return
-        success, result = create_pazzlenet_invoice(price, uid)
+        final_pz_buy = apply_gateway_fee("pazzlenet", price)
+        success, result = create_pazzlenet_invoice(final_pz_buy, uid)
         if not success:
             err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
             hint = ("💡 اتصال اینترنت سرور را بررسی کنید."
@@ -7754,7 +7776,7 @@ def _dispatch_callback(call, uid, data):
                 f"<code>پاسخ API: {esc(str(result)[:400])}</code>",
                 back_button(f"buy:p:{package_id}"))
             return
-        payment_id = create_payment("config_purchase", uid, package_id, price, "pazzlenet",
+        payment_id = create_payment("config_purchase", uid, package_id, final_pz_buy, "pazzlenet",
                                     status="pending", quantity=_qty_pz_buy)
         _snames_pz = state_data(uid).get("service_names")
         if _snames_pz:
@@ -7762,9 +7784,12 @@ def _dispatch_callback(call, uid, data):
         with get_conn() as conn:
             conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (pz_pid, payment_id))
         state_set(uid, "await_pazzlenet_verify", payment_id=payment_id, pazzlenet_id=pz_pid)
+        fee_line_pz_buy = ""
+        if final_pz_buy != price:
+            fee_line_pz_buy = f"\n💸 کارمزد: {fmt_price(final_pz_buy - price)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_pz_buy)}</b> تومان"
         text = (
             "💳 <b>پرداخت ریالی (PazzleNet)</b>\n\n"
-            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n\n"
+            f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_pz_buy}\n\n"
             "از لینک زیر پرداخت را انجام دهید.\n\n"
             "⏳ <b>تا یک ساعت</b> پرداخت به صورت خودکار بررسی می‌شود.\n"
             "در غیر این صورت دکمه «بررسی پرداخت» را بزنید."
@@ -8572,21 +8597,25 @@ def _dispatch_callback(call, uid, data):
                 "لطفاً درگاه دیگری متناسب با این مبلغ انتخاب کنید.",
                 show_alert=True)
             return
+        final_amount_tp_wc = apply_gateway_fee("tetrapay", amount)
         hash_id = f"wallet-{uid}-{int(datetime.now().timestamp())}"
-        success, result = create_tetrapay_order(amount, hash_id, "شارژ کیف پول")
+        success, result = create_tetrapay_order(final_amount_tp_wc, hash_id, "شارژ کیف پول")
         if not success:
             bot.answer_callback_query(call.id, "خطا در ایجاد درخواست پرداخت آنلاین.", show_alert=True)
             return
         authority = result.get("Authority", "")
         pay_url_bot = result.get("payment_url_bot", "")
         pay_url_web = result.get("payment_url_web", "")
-        payment_id = create_payment("wallet_charge", uid, None, amount, "tetrapay", status="pending")
+        payment_id = create_payment("wallet_charge", uid, None, final_amount_tp_wc, "tetrapay", status="pending")
         with get_conn() as conn:
             conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (authority, payment_id))
         state_set(uid, "await_tetrapay_verify", payment_id=payment_id, authority=authority)
+        fee_line_tp_wc = ""
+        if final_amount_tp_wc != amount:
+            fee_line_tp_wc = f"\n💸 کارمزد: {fmt_price(final_amount_tp_wc - amount)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_amount_tp_wc)}</b> تومان"
         text = (
             "🏦 <b>شارژ کیف پول - پرداخت آنلاین (TetraPay)</b>\n\n"
-            f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان\n\n"
+            f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان{fee_line_tp_wc}\n\n"
             "لطفاً از یکی از لینک‌های زیر پرداخت را انجام دهید.\n\n"
             "⏳ <b>تا یک ساعت</b> اگر پرداخت‌تون تایید بشه به صورت خودکار کیف پول شارژ می‌شود.\n"
             "در غیر این صورت دکمه <b>بررسی پرداخت</b> را بزنید."
@@ -8677,7 +8706,8 @@ def _dispatch_callback(call, uid, data):
                 show_alert=True)
             return
         order_id = f"wallet-{uid}-{int(datetime.now().timestamp())}"
-        success, result = create_tronpays_rial_invoice(amount, order_id, "شارژ کیف پول")
+        final_trp_wc = apply_gateway_fee("tronpays_rial", amount)
+        success, result = create_tronpays_rial_invoice(final_trp_wc, order_id, "شارژ کیف پول")
         if not success:
             err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
             bot.answer_callback_query(call.id)
@@ -8696,13 +8726,16 @@ def _dispatch_callback(call, uid, data):
                 f"<code>پاسخ API: {esc(str(result)[:400])}</code>",
                 back_button("wallet:charge"))
             return
-        payment_id = create_payment("wallet_charge", uid, None, amount, "tronpays_rial", status="pending")
+        payment_id = create_payment("wallet_charge", uid, None, final_trp_wc, "tronpays_rial", status="pending")
         with get_conn() as conn:
             conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id, payment_id))
         state_set(uid, "await_tronpays_rial_verify", payment_id=payment_id, invoice_id=invoice_id)
+        fee_line_trp_wc = ""
+        if final_trp_wc != amount:
+            fee_line_trp_wc = f"\n💸 کارمزد: {fmt_price(final_trp_wc - amount)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_trp_wc)}</b> تومان"
         text = (
             "💳 <b>شارژ کیف پول — TronPays</b>\n\n"
-            f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان\n\n"
+            f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان{fee_line_trp_wc}\n\n"
             "از لینک زیر پرداخت را انجام دهید.\n\n"
             "⏳ <b>تا یک ساعت</b> پرداخت به صورت خودکار بررسی می‌شود.\n"
             "در غیر این صورت دکمه «بررسی پرداخت» را بزنید."
@@ -8735,7 +8768,8 @@ def _dispatch_callback(call, uid, data):
                 "لطفاً درگاه دیگری متناسب با این مبلغ انتخاب کنید.",
                 show_alert=True)
             return
-        success, result = create_pazzlenet_invoice(amount, uid)
+        final_pz_wc = apply_gateway_fee("pazzlenet", amount)
+        success, result = create_pazzlenet_invoice(final_pz_wc, uid)
         if not success:
             err_msg = result.get("error", "خطای ناشناخته") if isinstance(result, dict) else str(result)
             hint = ("💡 اتصال اینترنت سرور را بررسی کنید."
@@ -8757,13 +8791,16 @@ def _dispatch_callback(call, uid, data):
                 f"<code>پاسخ API: {esc(str(result)[:400])}</code>",
                 back_button("wallet:charge"))
             return
-        payment_id = create_payment("wallet_charge", uid, None, amount, "pazzlenet", status="pending")
+        payment_id = create_payment("wallet_charge", uid, None, final_pz_wc, "pazzlenet", status="pending")
         with get_conn() as conn:
             conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (pz_pid, payment_id))
         state_set(uid, "await_pazzlenet_verify", payment_id=payment_id, pazzlenet_id=pz_pid)
+        fee_line_pz_wc = ""
+        if final_pz_wc != amount:
+            fee_line_pz_wc = f"\n💸 کارمزد: {fmt_price(final_pz_wc - amount)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_pz_wc)}</b> تومان"
         text = (
             "💳 <b>شارژ کیف پول — PazzleNet</b>\n\n"
-            f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان\n\n"
+            f"💰 مبلغ: <b>{fmt_price(amount)}</b> تومان{fee_line_pz_wc}\n\n"
             "از لینک زیر پرداخت را انجام دهید.\n\n"
             "⏳ <b>تا یک ساعت</b> پرداخت به صورت خودکار بررسی می‌شود.\n"
             "در غیر این صورت دکمه «بررسی پرداخت» را بزنید."
@@ -11414,7 +11451,8 @@ def _dispatch_callback(call, uid, data):
                 if ('show_name' not in package_row.keys() or package_row['show_name'])
                 else f"تمدید {fmt_vol(package_row['volume_gb'])} | {fmt_dur(package_row['duration_days'])}"
             )
-            success_tp, result_tp = create_tetrapay_order(price, order_id_tp, order_label_tp)
+            final_tp_pnl_price = apply_gateway_fee("tetrapay", price)
+            success_tp, result_tp = create_tetrapay_order(final_tp_pnl_price, order_id_tp, order_label_tp)
             if not success_tp:
                 err_msg_tp = result_tp.get("error", "خطای ناشناخته") if isinstance(result_tp, dict) else str(result_tp)
                 bot.answer_callback_query(call.id)
@@ -11424,15 +11462,18 @@ def _dispatch_callback(call, uid, data):
             authority_tp = result_tp.get("Authority", "")
             pay_url_bot_tp = result_tp.get("payment_url_bot", "")
             pay_url_web_tp = result_tp.get("payment_url_web", "")
-            payment_id = create_payment("pnlcfg_renewal", uid, package_id, price, "tetrapay",
+            payment_id = create_payment("pnlcfg_renewal", uid, package_id, final_tp_pnl_price, "tetrapay",
                                         status="pending", config_id=config_id)
             with get_conn() as conn:
                 conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (authority_tp, payment_id))
             state_set(uid, "await_pnlcfg_renewal_tetrapay_verify",
                       payment_id=payment_id, authority=authority_tp, config_id=config_id)
+            fee_line_tp_pnl = ""
+            if final_tp_pnl_price != price:
+                fee_line_tp_pnl = f"\n💸 کارمزد: {fmt_price(final_tp_pnl_price - price)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_tp_pnl_price)}</b> تومان"
             text_tp = (
                 "🏦 <b>پرداخت آنلاین (تمدید)</b>\n\n"
-                f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n\n"
+                f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_tp_pnl}\n\n"
                 "لطفاً از یکی از لینک‌های زیر پرداخت را انجام دهید.\n\n"
                 "⏳ <b>تا یک ساعت</b> اگر پرداخت‌تون تایید بشه به صورت خودکار عملیات انجام می‌شود.\n"
                 "در غیر این صورت دکمه <b>بررسی پرداخت</b> را بزنید."
@@ -11484,25 +11525,30 @@ def _dispatch_callback(call, uid, data):
                 if ('show_name' not in package_row.keys() or package_row['show_name'])
                 else f"تمدید {fmt_vol(package_row['volume_gb'])} | {fmt_dur(package_row['duration_days'])}"
             )
-            success_trp, result_trp = create_tronpays_rial_invoice(price, hash_id_trp, order_label_trp)
-            if not success_trp:
-                err_msg_trp = result_trp.get("error", "خطای ناشناخته") if isinstance(result_trp, dict) else str(result_trp)
-                bot.answer_callback_query(call.id)
-                send_or_edit(call,
-                    f"⚠️ <b>خطا در ایجاد فاکتور TronPays</b>\n\n<code>{esc(err_msg_trp[:400])}</code>",
-                    back_button(f"mypnlcfg:renewconfirm:{config_id}")); return
-            invoice_id_trp = result_trp.get("invoice_id")
-            invoice_url_trp = result_trp.get("invoice_url")
-            if not invoice_id_trp or not invoice_url_trp:
-                bot.answer_callback_query(call.id)
-                send_or_edit(call, "⚠️ خطا در ایجاد فاکتور TronPays. لطفاً دوباره تلاش کنید.",
-                             back_button(f"mypnlcfg:renewconfirm:{config_id}")); return
-            payment_id = create_payment("pnlcfg_renewal", uid, package_id, price, "tronpays_rial",
+            final_trp_pnl = apply_gateway_fee("tronpays_rial", price)
+            if final_trp_pnl != price:
+                success_trp, result_trp = create_tronpays_rial_invoice(final_trp_pnl, hash_id_trp, order_label_trp)
+                if not success_trp:
+                    err_msg_trp = result_trp.get("error", "خطای ناشناخته") if isinstance(result_trp, dict) else str(result_trp)
+                    bot.answer_callback_query(call.id)
+                    send_or_edit(call,
+                        f"⚠️ <b>خطا در ایجاد فاکتور TronPays</b>\n\n<code>{esc(err_msg_trp[:400])}</code>",
+                        back_button(f"mypnlcfg:renewconfirm:{config_id}")); return
+                invoice_id_trp = result_trp.get("invoice_id")
+                invoice_url_trp = result_trp.get("invoice_url")
+                if not invoice_id_trp or not invoice_url_trp:
+                    bot.answer_callback_query(call.id)
+                    send_or_edit(call, "⚠️ خطا در ایجاد فاکتور TronPays. لطفاً دوباره تلاش کنید.",
+                                 back_button(f"mypnlcfg:renewconfirm:{config_id}")); return
+            payment_id = create_payment("pnlcfg_renewal", uid, package_id, final_trp_pnl, "tronpays_rial",
                                         status="pending", config_id=config_id)
             with get_conn() as conn:
                 conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (invoice_id_trp, payment_id))
             state_set(uid, "await_pnlcfg_renewal_tronpays_verify",
                       payment_id=payment_id, invoice_id=invoice_id_trp, config_id=config_id)
+            fee_line_trp_pnl = ""
+            if final_trp_pnl != price:
+                fee_line_trp_pnl = f"\n💸 کارمزد: {fmt_price(final_trp_pnl - price)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_trp_pnl)}</b> تومان"
             kb_trp = types.InlineKeyboardMarkup()
             kb_trp.add(types.InlineKeyboardButton("💳 پرداخت", url=invoice_url_trp))
             kb_trp.add(types.InlineKeyboardButton("🔍 بررسی پرداخت",
@@ -11510,7 +11556,7 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id)
             send_or_edit(call,
                 "🏦 <b>پرداخت آنلاین TronPays (تمدید)</b>\n\n"
-                f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n\n"
+                f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_trp_pnl}\n\n"
                 "⏳ پس از پرداخت، دکمه <b>بررسی پرداخت</b> را بزنید.",
                 kb_trp)
             _start_tronpays_rial_auto_verify(
@@ -11569,25 +11615,30 @@ def _dispatch_callback(call, uid, data):
                     f"⛔️ مبلغ {fmt_price(price)} تومان برای درگاه PazzleNet مجاز نیست.\n"
                     f"محدوده مجاز: {_rng}\n\nلطفاً درگاه دیگری انتخاب کنید.",
                     show_alert=True); return
-            success_pz, result_pz = create_pazzlenet_invoice(price, uid)
-            if not success_pz:
-                err_pz = result_pz.get("error", "خطای ناشناخته") if isinstance(result_pz, dict) else str(result_pz)
-                bot.answer_callback_query(call.id)
-                send_or_edit(call,
-                    f"⚠️ <b>خطا در ایجاد فاکتور PazzleNet</b>\n\n<code>{esc(err_pz[:400])}</code>",
-                    back_button(f"mypnlcfg:renewconfirm:{config_id}")); return
-            pz_pid2 = result_pz.get("payment_id")
-            pz_url2 = result_pz.get("payment_link")
-            if not pz_pid2 or not pz_url2:
-                bot.answer_callback_query(call.id)
-                send_or_edit(call, "⚠️ خطا در ایجاد فاکتور PazzleNet. لطفاً دوباره تلاش کنید.",
-                             back_button(f"mypnlcfg:renewconfirm:{config_id}")); return
-            payment_id = create_payment("pnlcfg_renewal", uid, package_id, price, "pazzlenet",
+            final_pz_pnl = apply_gateway_fee("pazzlenet", price)
+            if final_pz_pnl != price:
+                success_pz, result_pz = create_pazzlenet_invoice(final_pz_pnl, uid)
+                if not success_pz:
+                    err_pz = result_pz.get("error", "خطای ناشناخته") if isinstance(result_pz, dict) else str(result_pz)
+                    bot.answer_callback_query(call.id)
+                    send_or_edit(call,
+                        f"⚠️ <b>خطا در ایجاد فاکتور PazzleNet</b>\n\n<code>{esc(err_pz[:400])}</code>",
+                        back_button(f"mypnlcfg:renewconfirm:{config_id}")); return
+                pz_pid2 = result_pz.get("payment_id")
+                pz_url2 = result_pz.get("payment_link")
+                if not pz_pid2 or not pz_url2:
+                    bot.answer_callback_query(call.id)
+                    send_or_edit(call, "⚠️ خطا در ایجاد فاکتور PazzleNet. لطفاً دوباره تلاش کنید.",
+                                 back_button(f"mypnlcfg:renewconfirm:{config_id}")); return
+            payment_id = create_payment("pnlcfg_renewal", uid, package_id, final_pz_pnl, "pazzlenet",
                                         status="pending", config_id=config_id)
             with get_conn() as conn:
                 conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (pz_pid2, payment_id))
             state_set(uid, "await_pnlcfg_renewal_pazzlenet_verify",
                       payment_id=payment_id, pazzlenet_id=pz_pid2, config_id=config_id)
+            fee_line_pz_pnl = ""
+            if final_pz_pnl != price:
+                fee_line_pz_pnl = f"\n💸 کارمزد: {fmt_price(final_pz_pnl - price)} تومان\n💰 مبلغ نهایی: <b>{fmt_price(final_pz_pnl)}</b> تومان"
             kb_pz = types.InlineKeyboardMarkup()
             kb_pz.add(types.InlineKeyboardButton("💳 پرداخت", url=pz_url2))
             kb_pz.add(types.InlineKeyboardButton("🔍 بررسی پرداخت",
@@ -11595,7 +11646,7 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id)
             send_or_edit(call,
                 "🏦 <b>پرداخت آنلاین PazzleNet (تمدید)</b>\n\n"
-                f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان\n\n"
+                f"💰 مبلغ: <b>{fmt_price(price)}</b> تومان{fee_line_pz_pnl}\n\n"
                 "⏳ پس از پرداخت، دکمه <b>بررسی پرداخت</b> را بزنید.",
                 kb_pz)
             _start_pazzlenet_auto_verify(
