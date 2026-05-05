@@ -143,19 +143,44 @@ def show_support(target):
     from ..db import get_support_methods as _gsm
     faq_enabled = setting_get("support_faq_enabled", "1") == "1"
     methods = _gsm(enabled_only=True)
-    _tgemoji_re = _re_sup.compile(r'<tg-emoji[^>]+emoji-id="(\d+)"', _re_sup.I)
+    _tgemoji_re = _re_sup.compile(r'<tg-emoji[^>]+emoji-id="(\d+)"[^>]*>(.*?)</tg-emoji>', _re_sup.I | _re_sup.S)
     _tag_re     = _re_sup.compile(r'<[^>]+>')
+    _color_map  = {"green": "success", "red": "danger", "blue": "primary"}
     btn_rows = []
     if faq_enabled:
         btn_rows.append([{"text": "سوالات متداول", "callback_data": "support:faq"}])
     for m in methods:
         emoji_raw = (m["emoji"] or "").strip()
-        _em = _tgemoji_re.search(emoji_raw)
-        _plain = _tag_re.sub("", emoji_raw).strip()
-        _btn_text = ((_plain + " ") if _plain else "") + m["title"]
-        btn = {"text": _btn_text, "url": m["url"]}
-        if _em:
-            btn["icon_custom_emoji_id"] = _em.group(1)
+        _icon_id = None
+        _text_pfx = ""
+        if emoji_raw:
+            _em = _tgemoji_re.search(emoji_raw)
+            if _em:
+                _icon_id = _em.group(1)
+            elif emoji_raw.startswith("{"):
+                # serialized premium text: {"text": "...", "entities": [...]}
+                try:
+                    _ej = _json_sup.loads(emoji_raw)
+                    for _ent in _ej.get("entities", []):
+                        if _ent.get("type") == "custom_emoji":
+                            _icon_id = _ent["custom_emoji_id"]
+                            break
+                    if not _icon_id:
+                        _text_pfx = _tag_re.sub("", _ej.get("text", "")).strip()
+                        if _text_pfx:
+                            _text_pfx += " "
+                except Exception:
+                    pass
+            if not _icon_id and not _text_pfx:
+                _plain = _tag_re.sub("", emoji_raw).strip()
+                if _plain:
+                    _text_pfx = _plain + " "
+        btn = {"text": _text_pfx + m["title"], "url": m["url"]}
+        if _icon_id:
+            btn["icon_custom_emoji_id"] = _icon_id
+        _col = (m["color"] or "default") if "color" in m.keys() else "default"
+        if _col in _color_map:
+            btn["style"] = _color_map[_col]
         btn_rows.append([btn])
     btn_rows.append([{
         "text": "🔙 بازگشت به منوی اصلی",

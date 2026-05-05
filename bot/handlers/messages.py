@@ -3401,13 +3401,10 @@ def universal_handler(message):
                       sup_emoji=emoji_val)
             import json as _json_ac
             _ac_kb = _json_ac.dumps({"inline_keyboard": [
-                [{"text": "پیش‌فرض", "callback_data": "adm:sup:add:color:default"}],
-                [{"text": "🔵 آبی", "callback_data": "adm:sup:add:color:blue"},
-                 {"text": "🟢 سبز", "callback_data": "adm:sup:add:color:green"}],
-                [{"text": "🔴 قرمز", "callback_data": "adm:sup:add:color:red"},
-                 {"text": "🟡 زرد", "callback_data": "adm:sup:add:color:yellow"}],
-                [{"text": "🟣 بنفش", "callback_data": "adm:sup:add:color:purple"},
-                 {"text": "⬜ خاکستری", "callback_data": "adm:sup:add:color:gray"}],
+                [{"text": "⬜ پیش‌فرض", "callback_data": "adm:sup:add:color:default"}],
+                [{"text": "🔵 آبی",   "callback_data": "adm:sup:add:color:blue"},
+                 {"text": "🟢 سبز",   "callback_data": "adm:sup:add:color:green"},
+                 {"text": "🔴 قرمز", "callback_data": "adm:sup:add:color:red"}],
                 [{"text": "بازگشت", "callback_data": "adm:sup",
                   "icon_custom_emoji_id": "5253997076169115797"}],
             ]})

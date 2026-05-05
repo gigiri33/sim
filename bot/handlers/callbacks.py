@@ -3698,18 +3698,15 @@ def _show_sup_method(call, method_id):
     send_or_edit(call, text, kb)
 
 
-def _sup_color_keyboard(back_cb):
+def _sup_color_keyboard(back_cb, back_target="adm:sup"):
     """Return a raw-JSON inline keyboard for picking a support button color."""
     import json as _jsck
     return _jsck.dumps({"inline_keyboard": [
-        [{"text": "پیش‌فرض", "callback_data": f"{back_cb}:default"}],
-        [{"text": "🔵 آبی", "callback_data": f"{back_cb}:blue"},
-         {"text": "🟢 سبز", "callback_data": f"{back_cb}:green"}],
-        [{"text": "🔴 قرمز", "callback_data": f"{back_cb}:red"},
-         {"text": "🟡 زرد", "callback_data": f"{back_cb}:yellow"}],
-        [{"text": "🟣 بنفش", "callback_data": f"{back_cb}:purple"},
-         {"text": "⬜ خاکستری", "callback_data": f"{back_cb}:gray"}],
-        [{"text": "بازگشت", "callback_data": "adm:sup",
+        [{"text": "⬜ پیش‌فرض", "callback_data": f"{back_cb}:default"}],
+        [{"text": "🔵 آبی",    "callback_data": f"{back_cb}:blue"},
+         {"text": "🟢 سبز",    "callback_data": f"{back_cb}:green"},
+         {"text": "🔴 قرمز",  "callback_data": f"{back_cb}:red"}],
+        [{"text": "بازگشت", "callback_data": back_target,
           "icon_custom_emoji_id": "5253997076169115797"}],
     ]})
 
@@ -16749,7 +16746,7 @@ def _dispatch_callback(call, uid, data):
             "🎨 <b>مرحله ۳ از ۴: رنگ دکمه</b>\n\n"
             "رنگ دکمه را انتخاب کنید.\n\n"
             "<i>رنگ برای قالب‌هایی که پشتیبانی کنند استفاده می‌شود.</i>",
-            _sup_color_keyboard("adm:sup:add:color"))
+            _sup_color_keyboard("adm:sup:add:color", "adm:sup"))
         return
 
     if data.startswith("adm:sup:add:color:"):
@@ -16757,7 +16754,7 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
             return
         _color = data[len("adm:sup:add:color:"):]
-        _allowed_colors = {"default", "blue", "green", "red", "yellow", "purple", "gray"}
+        _allowed_colors = {"default", "blue", "green", "red"}
         if _color not in _allowed_colors:
             bot.answer_callback_query(call.id)
             return
@@ -16880,12 +16877,12 @@ def _dispatch_callback(call, uid, data):
                 "🎨 <b>ویرایش رنگ دکمه</b>\n\n"
                 "رنگ مورد نظر را انتخاب کنید.\n\n"
                 "<i>رنگ برای قالب‌هایی که پشتیبانی کنند نمایش داده می‌شود.</i>",
-                _sup_color_keyboard(f"adm:sup:m:{_sup_id}:color"))
+                _sup_color_keyboard(f"adm:sup:m:{_sup_id}:color", f"adm:sup:m:{_sup_id}"))
             return
 
         if _sup_action.startswith("color:"):
             _new_color = _sup_action[6:]
-            _allowed_colors = {"default", "blue", "green", "red", "yellow", "purple", "gray"}
+            _allowed_colors = {"default", "blue", "green", "red"}
             if _new_color not in _allowed_colors:
                 bot.answer_callback_query(call.id)
                 return
