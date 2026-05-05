@@ -469,6 +469,11 @@ def process_rialpay_verified_payment(payment_id: int,
             # config_purchase / renewal / pnlcfg_renewal
             _fulfill_rialpay_non_wallet(payment_id, kind, uid, amount, payment)
 
+        try:
+            from ..group_manager import log_gateway_payment as _lgp
+            _lgp(payment_id)
+        except Exception:
+            pass
         return {"status": "ok"}
 
     except Exception as exc:

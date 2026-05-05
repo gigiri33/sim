@@ -441,6 +441,11 @@ def process_centralpay_verified_payment(payment_id: int,
                     (now_str(), now_str(), payment_id)
                 )
 
+        try:
+            from .group_manager import log_gateway_payment as _lgp
+            _lgp(payment_id)
+        except Exception:
+            pass
         return {"status": "ok"}
 
     except Exception as exc:
@@ -729,6 +734,11 @@ def process_tronado_verified_payment(payment_id: int,
             # We directly call the fulfillment body with status='processing'.
             _fulfill_tronado_non_wallet(payment_id, kind, uid, amount, payment)
 
+        try:
+            from .group_manager import log_gateway_payment as _lgp
+            _lgp(payment_id)
+        except Exception:
+            pass
         return {"status": "ok"}
 
     except Exception as exc:

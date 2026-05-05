@@ -270,6 +270,7 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
     """
     import logging as _logging
     _log = _logging.getLogger(__name__)
+    _chat = target.message.chat.id if hasattr(target, "message") else target.chat.id
     try:
         from .db import setting_get
         addr   = setting_get(f"crypto_{coin_key}", "")
@@ -362,6 +363,8 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
             )
         kb.row(*_copy_row)
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="pm:back"))
+        send_or_edit(target, text, kb)
+        return True
 
     except Exception as _ex:
         _log.exception("show_crypto_payment_info error coin=%s uid=%s: %s", coin_key, uid, _ex)
