@@ -3300,7 +3300,7 @@ def universal_handler(message):
             setting_set("support_username", (message.text or "").strip())
             log_admin_action(uid, "آیدی پشتیبانی تغییر کرد")
             state_clear(uid)
-            bot.send_message(uid, "✅ آیدی پشتیبانی ذخیره شد.", reply_markup=back_button("adm:set:support"))
+            bot.send_message(uid, "✅ آیدی پشتیبانی ذخیره شد.", reply_markup=back_button("adm:sup"))
             return
 
         if sn == "admin_set_support_link" and is_admin(uid):
@@ -3308,7 +3308,7 @@ def universal_handler(message):
             setting_set("support_link", "" if val == "-" else val)
             log_admin_action(uid, "لینک پشتیبانی تغییر کرد")
             state_clear(uid)
-            bot.send_message(uid, "✅ لینک پشتیبانی ذخیره شد.", reply_markup=back_button("adm:set:support"))
+            bot.send_message(uid, "✅ لینک پشتیبانی ذخیره شد.", reply_markup=back_button("adm:sup"))
             return
 
         if sn == "admin_set_support_desc" and is_admin(uid):
@@ -3316,7 +3316,143 @@ def universal_handler(message):
             setting_set("support_link_desc", "" if val == "-" else val)
             log_admin_action(uid, "توضیحات پشتیبانی تغییر کرد")
             state_clear(uid)
-            bot.send_message(uid, "✅ توضیحات پشتیبانی ذخیره شد.", reply_markup=back_button("adm:set:support"))
+            bot.send_message(uid, "✅ توضیحات پشتیبانی ذخیره شد.", reply_markup=back_button("adm:sup"))
+            return
+
+        # ── New dynamic support system state handlers ──────────────────────────
+        if sn == "admin_sup_faq_edit" and is_admin(uid):
+            raw = message.text or message.caption or ""
+            setting_set("support_faq_text", raw)
+            log_admin_action(uid, "متن سوالات متداول پشتیبانی ذخیره شد")
+            state_clear(uid)
+            bot.send_message(uid, "✅ متن سوالات متداول ذخیره شد.", reply_markup=back_button("adm:sup:faq"))
+            return
+
+        if sn == "admin_sup_add_title" and is_admin(uid):
+            title = (message.text or "").strip()
+            if not title:
+                bot.send_message(uid, "⚠️ متن دکمه نمی‌تواند خالی باشد.",
+                                 reply_markup=back_button("adm:sup"))
+                return
+            state_set(uid, "admin_sup_add_emoji", sup_title=title)
+            import json as _json_ae
+            _ae_kb = _json_ae.dumps({"inline_keyboard": [
+                [{"text": "بدون ایموجی", "callback_data": "adm:sup:add:noemoji"}],
+                [{"text": "بازگشت", "callback_data": "adm:sup",
+                  "icon_custom_emoji_id": "5253997076169115797"}],
+            ]})
+            bot.send_message(uid,
+                "🎨 <b>مرحله ۲ از ۴: ایموجی دکمه</b>\n\n"
+                "ایموجی دکمه را ارسال کنید یا «بدون ایموجی» را انتخاب کنید.\n\n"
+                "• عدد emoji_id: فقط عدد را بفرستید\n"
+                "• تگ <tg-emoji>: همان را بفرستید\n"
+                "• ایموجی عادی: همان را بفرستید\n"
+                "• «ندارد» یا «بدون»: بدون ایموجی",
+                parse_mode="HTML", reply_markup=_ae_kb)
+            return
+
+        if sn == "admin_sup_add_emoji" and is_admin(uid):
+            text_in = (message.text or "").strip()
+            entities = message.entities or []
+            emoji_val = _parse_type_emoji(text_in, entities)
+            _cur_sd = state_data(uid)
+            state_set(uid, "admin_sup_add_color",
+                      sup_title=_cur_sd.get("sup_title", ""),
+                      sup_emoji=emoji_val)
+            import json as _json_ac
+            _ac_kb = _json_ac.dumps({"inline_keyboard": [
+                [{"text": "پیش‌فرض", "callback_data": "adm:sup:add:color:default"}],
+                [{"text": "🔵 آبی", "callback_data": "adm:sup:add:color:blue"},
+                 {"text": "🟢 سبز", "callback_data": "adm:sup:add:color:green"}],
+                [{"text": "🔴 قرمز", "callback_data": "adm:sup:add:color:red"},
+                 {"text": "🟡 زرد", "callback_data": "adm:sup:add:color:yellow"}],
+                [{"text": "🟣 بنفش", "callback_data": "adm:sup:add:color:purple"},
+                 {"text": "⬜ خاکستری", "callback_data": "adm:sup:add:color:gray"}],
+                [{"text": "بازگشت", "callback_data": "adm:sup",
+                  "icon_custom_emoji_id": "5253997076169115797"}],
+            ]})
+            bot.send_message(uid,
+                "🎨 <b>مرحله ۳ از ۴: رنگ دکمه</b>\n\n"
+                "رنگ دکمه را انتخاب کنید.\n\n"
+                "<i>رنگ برای قالب‌هایی که پشتیبانی کنند نمایش داده می‌شود.</i>",
+                parse_mode="HTML", reply_markup=_ac_kb)
+            return
+
+        if sn == "admin_sup_add_url" and is_admin(uid):
+            url_in = (message.text or "").strip()
+            if url_in.startswith("@"):
+                url_in = "https://t.me/" + url_in[1:]
+            if not (url_in.startswith("http://") or url_in.startswith("https://")):
+                bot.send_message(uid,
+                    "⚠️ لینک باید با https:// یا http:// شروع شود.\n"
+                    "@username هم قابل قبول است.\n\nدوباره وارد کنید:")
+                return
+            _cur_sd = state_data(uid)
+            import re as _re_su, json as _json_ap
+            _tag_re = _re_su.compile(r'<[^>]+>')
+            _emoji_disp = _tag_re.sub("", _cur_sd.get("sup_emoji", "")).strip()
+            _btn_preview = ((_emoji_disp + " ") if _emoji_disp else "") + _cur_sd["sup_title"]
+            state_set(uid, "admin_sup_add_preview",
+                      sup_title=_cur_sd["sup_title"],
+                      sup_emoji=_cur_sd.get("sup_emoji", ""),
+                      sup_color=_cur_sd.get("sup_color", "default"),
+                      sup_url=url_in)
+            _ap_kb = _json_ap.dumps({"inline_keyboard": [
+                [{"text": "✅ تأیید و ذخیره", "callback_data": "adm:sup:add:confirm"}],
+                [{"text": "❌ لغو", "callback_data": "adm:sup:add:cancel"}],
+            ]})
+            bot.send_message(uid,
+                f"<b>مرحله ۴ از ۴: تأیید نهایی</b>\n\n"
+                f"📌 دکمه: <b>{esc(_btn_preview)}</b>\n"
+                f"🔗 لینک: <code>{esc(url_in)}</code>\n"
+                f"🎨 رنگ: {esc(_cur_sd.get('sup_color', 'default'))}\n\n"
+                "آیا اطلاعات صحیح است؟",
+                parse_mode="HTML", reply_markup=_ap_kb)
+            return
+
+        if sn == "admin_sup_edit_title" and is_admin(uid):
+            title = (message.text or "").strip()
+            if not title:
+                bot.send_message(uid, "⚠️ متن نمی‌تواند خالی باشد.")
+                return
+            _cur_sd = state_data(uid)
+            from ..db import update_support_method_field as _usmf
+            _usmf(_cur_sd["method_id"], "title", title)
+            log_admin_action(uid, f"متن دکمه روش پشتیبانی #{_cur_sd['method_id']} ویرایش شد")
+            state_clear(uid)
+            bot.send_message(uid, "✅ متن دکمه ذخیره شد.",
+                             reply_markup=back_button(f"adm:sup:m:{_cur_sd['method_id']}"))
+            return
+
+        if sn == "admin_sup_edit_emoji" and is_admin(uid):
+            text_in = (message.text or "").strip()
+            entities = message.entities or []
+            emoji_val = _parse_type_emoji(text_in, entities)
+            _cur_sd = state_data(uid)
+            from ..db import update_support_method_field as _usmf2
+            _usmf2(_cur_sd["method_id"], "emoji", emoji_val)
+            log_admin_action(uid, f"ایموجی روش پشتیبانی #{_cur_sd['method_id']} ویرایش شد")
+            state_clear(uid)
+            bot.send_message(uid, "✅ ایموجی ذخیره شد.",
+                             reply_markup=back_button(f"adm:sup:m:{_cur_sd['method_id']}"))
+            return
+
+        if sn == "admin_sup_edit_url" and is_admin(uid):
+            url_in = (message.text or "").strip()
+            if url_in.startswith("@"):
+                url_in = "https://t.me/" + url_in[1:]
+            if not (url_in.startswith("http://") or url_in.startswith("https://")):
+                bot.send_message(uid,
+                    "⚠️ لینک باید با https:// یا http:// شروع شود.\n"
+                    "@username هم قابل قبول است.\n\nدوباره وارد کنید:")
+                return
+            _cur_sd = state_data(uid)
+            from ..db import update_support_method_field as _usmf3
+            _usmf3(_cur_sd["method_id"], "url", url_in)
+            log_admin_action(uid, f"لینک روش پشتیبانی #{_cur_sd['method_id']} ویرایش شد")
+            state_clear(uid)
+            bot.send_message(uid, "✅ لینک ذخیره شد.",
+                             reply_markup=back_button(f"adm:sup:m:{_cur_sd['method_id']}"))
             return
 
         # ── Referral settings inputs ───────────────────────────────────────────

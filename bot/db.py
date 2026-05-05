@@ -374,8 +374,10 @@ def _run_init_db_migrations():
             "shop_open":         "1",
             "preorder_mode":     "0",
             "panel_renewal_enabled": "1",
-            "support_link":     "",
-            "support_link_desc": "",
+            "support_link":        "",
+            "support_link_desc":   "",
+            "support_faq_enabled": "1",
+            "support_faq_text":    "",
             "start_text":       "",
             "channel_id":       "",
             "backup_enabled":   "0",
@@ -815,6 +817,20 @@ def _run_init_db_migrations():
             # ── Config types: emoji and button color ──────────────────────────
             "ALTER TABLE config_types ADD COLUMN emoji TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE config_types ADD COLUMN button_color TEXT NOT NULL DEFAULT 'glass'",
+            # ── Support methods table ──────────────────────────────────────────
+            (
+                "CREATE TABLE IF NOT EXISTS support_methods ("
+                " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                " title TEXT NOT NULL,"
+                " emoji TEXT NOT NULL DEFAULT '',"
+                " color TEXT NOT NULL DEFAULT 'default',"
+                " url TEXT NOT NULL,"
+                " enabled INTEGER NOT NULL DEFAULT 1,"
+                " sort_order INTEGER NOT NULL DEFAULT 0,"
+                " created_at TEXT NOT NULL DEFAULT '',"
+                " updated_at TEXT NOT NULL DEFAULT ''"
+                ")"
+            ),
         ]
         for sql in migrations:
             try:
@@ -843,6 +859,40 @@ def _run_init_db_migrations():
             conn.execute(
                 "UPDATE config_types SET sort_order=id WHERE sort_order=0"
             )
+        except Exception:
+            pass
+        # ── Seed support_methods from legacy settings (if table is empty) ─────
+        try:
+            if conn.execute("SELECT COUNT(*) FROM support_methods").fetchone()[0] == 0:
+                from datetime import datetime as _dt_seed
+                _ts_seed = _dt_seed.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+                _sort_seed = 0
+                _tg_row = conn.execute(
+                    "SELECT value FROM settings WHERE key='support_username'"
+                ).fetchone()
+                _lk_row = conn.execute(
+                    "SELECT value FROM settings WHERE key='support_link'"
+                ).fetchone()
+                _tg_val = (_tg_row[0] if _tg_row else "").strip()
+                _lk_val = (_lk_row[0] if _lk_row else "").strip()
+                if _tg_val:
+                    if not _tg_val.startswith("http"):
+                        _tg_val = "https://t.me/" + _tg_val.lstrip("@")
+                    _sort_seed += 1
+                    conn.execute(
+                        "INSERT INTO support_methods"
+                        "(title, emoji, color, url, enabled, sort_order, created_at, updated_at)"
+                        " VALUES(?, ?, ?, ?, 1, ?, ?, ?)",
+                        ("پشتیبانی تلگرام", "", "default", _tg_val, _sort_seed, _ts_seed, _ts_seed),
+                    )
+                if _lk_val:
+                    _sort_seed += 1
+                    conn.execute(
+                        "INSERT INTO support_methods"
+                        "(title, emoji, color, url, enabled, sort_order, created_at, updated_at)"
+                        " VALUES(?, ?, ?, ?, 1, ?, ?, ?)",
+                        ("پشتیبانی آنلاین", "", "default", _lk_val, _sort_seed, _ts_seed, _ts_seed),
+                    )
         except Exception:
             pass
         conn.commit()
@@ -1310,6 +1360,71 @@ def reorder_type(type_id, new_position):
 def delete_type(type_id):
     with get_conn() as conn:
         conn.execute("DELETE FROM config_types WHERE id=?", (type_id,))
+
+
+# ── Support Methods ────────────────────────────────────────────────────────────────────────────────────
+def get_support_methods(enabled_only=False):
+    with get_conn() as conn:
+        if enabled_only:
+            return conn.execute(
+                "SELECT * FROM support_methods WHERE enabled=1 ORDER BY sort_order ASC, id ASC"
+            ).fetchall()
+        return conn.execute(
+            "SELECT * FROM support_methods ORDER BY sort_order ASC, id ASC"
+        ).fetchall()
+
+
+def get_support_method(method_id):
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM support_methods WHERE id=?", (method_id,)
+        ).fetchone()
+
+
+def add_support_method(title, emoji, color, url):
+    ts = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    with get_conn() as conn:
+        max_order = conn.execute(
+            "SELECT COALESCE(MAX(sort_order), 0) FROM support_methods"
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO support_methods(title, emoji, color, url, enabled, sort_order, created_at, updated_at) "
+            "VALUES(?, ?, ?, ?, 1, ?, ?, ?)",
+            (title.strip(), (emoji or "").strip(), color or "default", url.strip(), max_order + 1, ts, ts)
+        )
+
+
+def update_support_method_field(method_id, field, value):
+    _allowed = {"title", "emoji", "color", "url", "enabled", "sort_order"}
+    if field not in _allowed:
+        return
+    ts = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    with get_conn() as conn:
+        conn.execute(
+            f"UPDATE support_methods SET {field}=?, updated_at=? WHERE id=?",
+            (value, ts, method_id)
+        )
+
+
+def toggle_support_method(method_id):
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT enabled FROM support_methods WHERE id=?", (method_id,)
+        ).fetchone()
+        if row:
+            new_val = 0 if row["enabled"] else 1
+            ts = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+            conn.execute(
+                "UPDATE support_methods SET enabled=?, updated_at=? WHERE id=?",
+                (new_val, ts, method_id)
+            )
+            return new_val
+    return None
+
+
+def delete_support_method(method_id):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM support_methods WHERE id=?", (method_id,))
 
 
 # ── Packages ───────────────────────────────────────────────────────────────────

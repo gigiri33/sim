@@ -138,33 +138,37 @@ def show_profile(target, user_id):
 
 
 def show_support(target):
-    support_raw      = setting_get("support_username", DEFAULT_ADMIN_HANDLE)
-    from ..helpers import safe_support_url
-    support_url      = safe_support_url(support_raw)
-    support_link     = setting_get("support_link", "")
-    support_link_desc = setting_get("support_link_desc", "")
-
-    kb = types.InlineKeyboardMarkup()
-    has_any = False
-    if support_url:
-        kb.add(types.InlineKeyboardButton("پشتیبانی تلگرام", url=support_url))
-        # NOTE: icon_custom_emoji_id not supported on url buttons via pyTelegramBotAPI types; fallback text kept
-        has_any = True
-    if support_link:
-        kb.add(types.InlineKeyboardButton("پشتیبانی آنلاین", url=support_link))
-        # NOTE: icon_custom_emoji_id not supported on url buttons via pyTelegramBotAPI types; fallback text kept
-        has_any = True
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
-
-    if not has_any:
-        send_or_edit(target, "⚠️ پشتیبانی هنوز تنظیم نشده است.", back_button("main"))
+    import json as _json_sup
+    import re as _re_sup
+    from ..db import get_support_methods as _gsm
+    faq_enabled = setting_get("support_faq_enabled", "1") == "1"
+    methods = _gsm(enabled_only=True)
+    _tgemoji_re = _re_sup.compile(r'<tg-emoji[^>]+emoji-id="(\d+)"', _re_sup.I)
+    _tag_re     = _re_sup.compile(r'<[^>]+>')
+    btn_rows = []
+    if faq_enabled:
+        btn_rows.append([{"text": "سوالات متداول", "callback_data": "support:faq"}])
+    for m in methods:
+        emoji_raw = (m["emoji"] or "").strip()
+        _em = _tgemoji_re.search(emoji_raw)
+        _plain = _tag_re.sub("", emoji_raw).strip()
+        _btn_text = ((_plain + " ") if _plain else "") + m["title"]
+        btn = {"text": _btn_text, "url": m["url"]}
+        if _em:
+            btn["icon_custom_emoji_id"] = _em.group(1)
+        btn_rows.append([btn])
+    btn_rows.append([{
+        "text": "🔙 بازگشت به منوی اصلی",
+        "callback_data": "nav:main",
+        "icon_custom_emoji_id": "5253997076169115797",
+    }])
+    kb = _json_sup.dumps({"inline_keyboard": btn_rows})
+    if not faq_enabled and not methods:
+        send_or_edit(target,
+            "⚠️ در حال حاضر روش پشتیبانی فعالی ثبت نشده است.",
+            back_button("main"))
         return
-
-    text = f"{ce('🎧', '5190458330719461749')} <b>ارتباط با پشتیبانی</b>\n\n"
-    if support_link_desc:
-        text += f"{esc(support_link_desc)}\n\n"
-    else:
-        text += "از طریق یکی از روش‌های زیر با ما در ارتباط باشید.\n\n"
+    text = f"{ce('🎧', '5467539229468793355')} <b>پشتیبانی</b>\n\nاز گزینه‌های زیر انتخاب کنید:"
     send_or_edit(target, text, kb)
 
 

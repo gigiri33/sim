@@ -67,6 +67,9 @@ from ..db import (
     remove_referral_restriction_by_id, remove_referral_restriction_by_user,
     toggle_referral_restriction_type, get_referral_restrictions_paged,
     set_user_restricted as _set_user_restricted_db,
+    # Support methods
+    get_support_methods, get_support_method, add_support_method,
+    update_support_method_field, toggle_support_method, delete_support_method,
     # Card management
     get_payment_cards, get_payment_card, add_payment_card, update_payment_card,
     toggle_payment_card_active, delete_payment_card, pick_card_for_payment,
@@ -3608,6 +3611,87 @@ def _show_admin_user_configs_for_package(call, uid, target_id, pkg_id, ptype, pa
     send_or_edit(call, f"{title} ({total} عدد):", kb)
 
 
+
+
+# ── Admin support helpers ─────────────────────────────────────────────────────
+
+def _show_sup_menu(call):
+    kb = types.InlineKeyboardMarkup()
+    faq_en = setting_get("support_faq_enabled", "1") == "1"
+    faq_icon = "✅" if faq_en else "❌"
+    kb.add(types.InlineKeyboardButton(f"{faq_icon} سوالات متداول", callback_data="adm:sup:faq"))
+    kb.add(types.InlineKeyboardButton("➕ اضافه کردن روش پشتیبانی", callback_data="adm:sup:add"))
+    kb.add(types.InlineKeyboardButton("📋 مدیریت روش‌های پشتیبانی", callback_data="adm:sup:list"))
+    kb.add(types.InlineKeyboardButton(
+        "بازگشت", callback_data="admin:settings",
+        icon_custom_emoji_id="5253997076169115797"
+    ))
+    send_or_edit(call, "🎧 <b>تنظیمات پشتیبانی</b>", kb)
+
+
+def _show_sup_list(call):
+    kb = types.InlineKeyboardMarkup()
+    rows = get_support_methods()
+    if not rows:
+        kb.add(types.InlineKeyboardButton("هنوز روشی ثبت نشده", callback_data="noop"))
+    else:
+        for m in rows:
+            icon = "✅" if m["enabled"] else "❌"
+            kb.add(types.InlineKeyboardButton(
+                f"{icon} {m['title']}", callback_data=f"adm:sup:m:{m['id']}"
+            ))
+    kb.add(types.InlineKeyboardButton(
+        "بازگشت", callback_data="adm:sup",
+        icon_custom_emoji_id="5253997076169115797"
+    ))
+    send_or_edit(call, "📋 <b>مدیریت روش‌های پشتیبانی</b>", kb)
+
+
+def _show_sup_method(call, method_id):
+    row = get_support_method(method_id)
+    if not row:
+        bot.answer_callback_query(call.id, "روش مورد نظر یافت نشد.", show_alert=True)
+        return
+    is_en = row["enabled"]
+    toggle_lbl = "✅ فعال — کلیک برای غیرفعال کردن" if is_en else "❌ غیرفعال — کلیک برای فعال کردن"
+    kb = types.InlineKeyboardMarkup()
+    kb.add(types.InlineKeyboardButton(toggle_lbl, callback_data=f"adm:sup:m:{method_id}:toggle"))
+    kb.add(types.InlineKeyboardButton("✏️ ویرایش متن دکمه", callback_data=f"adm:sup:m:{method_id}:title"))
+    kb.add(types.InlineKeyboardButton("🎨 ویرایش ایموجی", callback_data=f"adm:sup:m:{method_id}:emoji"))
+    kb.add(types.InlineKeyboardButton("🎨 ویرایش رنگ", callback_data=f"adm:sup:m:{method_id}:color"))
+    kb.add(types.InlineKeyboardButton("🔗 ویرایش لینک", callback_data=f"adm:sup:m:{method_id}:url"))
+    kb.add(types.InlineKeyboardButton("🗑 حذف", callback_data=f"adm:sup:m:{method_id}:del"))
+    kb.add(types.InlineKeyboardButton(
+        "بازگشت", callback_data="adm:sup:list",
+        icon_custom_emoji_id="5253997076169115797"
+    ))
+    text = (
+        f"✏️ <b>مدیریت روش پشتیبانی</b>\n\n"
+        f"📌 متن دکمه: <b>{esc(row['title'])}</b>\n"
+        f"🎨 ایموجی: {esc(row['emoji'] or 'ندارد')}\n"
+        f"🔗 لینک: <code>{esc(row['url'])}</code>\n"
+        f"🎨 رنگ: {esc(row['color'] or 'پیش‌فرض')}\n"
+        f"🔘 وضعیت: {'<b>فعال</b>' if is_en else '<b>غیرفعال</b>'}"
+    )
+    send_or_edit(call, text, kb)
+
+
+def _sup_color_keyboard(back_cb):
+    """Return a raw-JSON inline keyboard for picking a support button color."""
+    import json as _jsck
+    return _jsck.dumps({"inline_keyboard": [
+        [{"text": "پیش‌فرض", "callback_data": f"{back_cb}:default"}],
+        [{"text": "🔵 آبی", "callback_data": f"{back_cb}:blue"},
+         {"text": "🟢 سبز", "callback_data": f"{back_cb}:green"}],
+        [{"text": "🔴 قرمز", "callback_data": f"{back_cb}:red"},
+         {"text": "🟡 زرد", "callback_data": f"{back_cb}:yellow"}],
+        [{"text": "🟣 بنفش", "callback_data": f"{back_cb}:purple"},
+         {"text": "⬜ خاکستری", "callback_data": f"{back_cb}:gray"}],
+        [{"text": "بازگشت", "callback_data": "adm:sup",
+          "icon_custom_emoji_id": "5253997076169115797"}],
+    ]})
+
+
 @bot.callback_query_handler(func=lambda c: True)
 def on_callback(call):
     uid  = call.from_user.id
@@ -4938,9 +5022,26 @@ def _dispatch_callback(call, uid, data):
         show_profile(call, uid)
         return
 
-    if data == "support":
+    if data in ("support", "support:menu"):
         bot.answer_callback_query(call.id)
         show_support(call)
+        return
+
+    if data == "support:faq":
+        if setting_get("support_faq_enabled", "1") != "1":
+            bot.answer_callback_query(call.id, "سوالات متداول در حال حاضر فعال نیست.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        faq_text = setting_get("support_faq_text", "").strip()
+        kb_faq = types.InlineKeyboardMarkup()
+        kb_faq.add(types.InlineKeyboardButton(
+            "بازگشت", callback_data="support:menu",
+            icon_custom_emoji_id="5253997076169115797"
+        ))
+        if not faq_text:
+            send_or_edit(call, "❔ متن سوالات متداول هنوز ثبت نشده است.", kb_faq)
+        else:
+            send_or_edit(call, faq_text, kb_faq)
         return
 
     # ── Tariff ────────────────────────────────────────────────────────────────
@@ -6776,6 +6877,7 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data.startswith("buy:t:"):
+        _shop_st2 = setting_get("shop_open", "1")
         if _shop_st2 not in ("1", "2"):
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5253997076169115797"))
@@ -15654,7 +15756,7 @@ def _dispatch_callback(call, uid, data):
             return
         kb = types.InlineKeyboardMarkup()
         kb.row(
-            types.InlineKeyboardButton("🎧 پشتیبانی",           callback_data="adm:set:support"),
+            types.InlineKeyboardButton("🎧 پشتیبانی",           callback_data="adm:sup"),
             types.InlineKeyboardButton("💳 درگاه‌های پرداخت",   callback_data="adm:set:gateways"),
         )
         kb.add(types.InlineKeyboardButton("📢 کانال قفل",           callback_data="adm:locked_channels"))
@@ -16091,7 +16193,7 @@ def _dispatch_callback(call, uid, data):
             pct          = setting_get("agency_default_discount_pct", "20")
             kb           = types.InlineKeyboardMarkup()
             kb.row(
-                types.InlineKeyboardButton("🎧 پشتیبانی",           callback_data="adm:set:support"),
+                types.InlineKeyboardButton("🎧 پشتیبانی",           callback_data="adm:sup"),
                 types.InlineKeyboardButton("💳 درگاه‌های پرداخت",   callback_data="adm:set:gateways"),
             )
             kb.add(types.InlineKeyboardButton("📢 کانال قفل",           callback_data="adm:locked_channels"))
@@ -16307,46 +16409,296 @@ def _dispatch_callback(call, uid, data):
         return
     # ── End Notification Management ───────────────────────────────────────────
 
-    if data == "adm:set:support":
-        support_raw = setting_get("support_username", "")
-        support_link = setting_get("support_link", "")
-        support_link_desc = setting_get("support_link_desc", "")
+    # ── Admin support (new dynamic system) ────────────────────────────────────
+    if data in ("adm:set:support", "adm:sup"):
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        _show_sup_menu(call)
+        return
+
+    if data == "adm:sup:faq":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        faq_en = setting_get("support_faq_enabled", "1") == "1"
+        faq_text = setting_get("support_faq_text", "")
         kb = types.InlineKeyboardMarkup()
-        tg_status = "✅" if support_raw else "❌"
-        link_status = "✅" if support_link else "❌"
-        kb.add(types.InlineKeyboardButton(f"{tg_status} پشتیبانی تلگرام", callback_data="adm:set:support_tg"))
-        kb.add(types.InlineKeyboardButton(f"{link_status} پشتیبانی آنلاین (لینک)", callback_data="adm:set:support_link"))
-        kb.add(types.InlineKeyboardButton("✏️ توضیحات پشتیبانی", callback_data="adm:set:support_desc"))
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
-        text = (
-            "🎧 <b>تنظیمات پشتیبانی</b>\n\n"
-            f"📱 تلگرام: <code>{esc(support_raw or 'ثبت نشده')}</code>\n"
-            f"🌐 لینک: <code>{esc(support_link or 'ثبت نشده')}</code>\n"
-            f"📝 توضیحات: {esc(support_link_desc or 'پیش‌فرض')}"
+        faq_toggle_lbl = ("✅ فعال — کلیک برای غیرفعال کردن" if faq_en
+                          else "❌ غیرفعال — کلیک برای فعال کردن")
+        kb.add(types.InlineKeyboardButton(faq_toggle_lbl, callback_data="adm:sup:faq:toggle"))
+        kb.add(types.InlineKeyboardButton("✏️ ویرایش متن سوالات متداول", callback_data="adm:sup:faq:edit"))
+        kb.add(types.InlineKeyboardButton(
+            "بازگشت", callback_data="adm:sup",
+            icon_custom_emoji_id="5253997076169115797"
+        ))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"❔ <b>سوالات متداول</b>\n\n"
+            f"وضعیت: {'فعال' if faq_en else 'غیرفعال'}\n"
+            f"متن: {'ثبت شده' if faq_text.strip() else 'ثبت نشده'}",
+            kb)
+        return
+
+    if data == "adm:sup:faq:toggle":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        cur = setting_get("support_faq_enabled", "1")
+        new = "0" if cur == "1" else "1"
+        setting_set("support_faq_enabled", new)
+        log_admin_action(uid, f"سوالات متداول پشتیبانی {'فعال' if new == '1' else 'غیرفعال'} شد")
+        bot.answer_callback_query(call.id, f"✅ {'فعال' if new == '1' else 'غیرفعال'} شد.")
+        _fake_call(call, "adm:sup:faq")
+        return
+
+    if data == "adm:sup:faq:edit":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        state_set(uid, "admin_sup_faq_edit")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "✏️ <b>ویرایش سوالات متداول</b>\n\n"
+            "متن سوالات متداول را ارسال کنید.\n\n"
+            "می‌توانید از ایموجی پرمیوم، بولد، لینک و فرمت HTML تلگرام استفاده کنید.",
+            back_button("adm:sup:faq"))
+        return
+
+    if data == "adm:sup:add":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        state_set(uid, "admin_sup_add_title")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "➕ <b>اضافه کردن روش پشتیبانی</b>\n\n"
+            "<b>مرحله ۱ از ۴: متن دکمه</b>\n\n"
+            "متن دکمه‌ای که در منوی پشتیبانی نمایش داده می‌شود را ارسال کنید.\n\n"
+            "مثال:\n"
+            "پشتیبانی تلگرام\n"
+            "پشتیبانی آنلاین\n"
+            "واتساپ\n"
+            "ارسال تیکت",
+            back_button("adm:sup"))
+        return
+
+    if data == "adm:sup:list":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        _show_sup_list(call)
+        return
+
+    if data == "adm:sup:add:noemoji":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        _sn2 = state_name(uid)
+        _sd2 = state_data(uid)
+        if _sn2 != "admin_sup_add_emoji":
+            bot.answer_callback_query(call.id)
+            return
+        state_set(uid, "admin_sup_add_color", sup_title=_sd2.get("sup_title", ""), sup_emoji="")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "🎨 <b>مرحله ۳ از ۴: رنگ دکمه</b>\n\n"
+            "رنگ دکمه را انتخاب کنید.\n\n"
+            "<i>رنگ برای قالب‌هایی که پشتیبانی کنند استفاده می‌شود.</i>",
+            _sup_color_keyboard("adm:sup:add:color"))
+        return
+
+    if data.startswith("adm:sup:add:color:"):
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        _color = data[len("adm:sup:add:color:"):]
+        _allowed_colors = {"default", "blue", "green", "red", "yellow", "purple", "gray"}
+        if _color not in _allowed_colors:
+            bot.answer_callback_query(call.id)
+            return
+        _sn2 = state_name(uid)
+        _sd2 = state_data(uid)
+        if _sn2 != "admin_sup_add_color":
+            bot.answer_callback_query(call.id)
+            return
+        state_set(uid, "admin_sup_add_url",
+                  sup_title=_sd2.get("sup_title", ""),
+                  sup_emoji=_sd2.get("sup_emoji", ""),
+                  sup_color=_color)
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "🔗 <b>مرحله ۴ از ۴: لینک پشتیبانی</b>\n\n"
+            "لینک پشتیبانی را ارسال کنید.\n\n"
+            "نمونه‌ها:\n"
+            "<code>https://t.me/username</code>\n"
+            "<code>https://example.com/support</code>\n"
+            "<code>https://wa.me/989123456789</code>\n"
+            "<code>@username</code> (تبدیل به t.me/username می‌شود)",
+            back_button("adm:sup"))
+        return
+
+    if data == "adm:sup:add:confirm":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        _sn2 = state_name(uid)
+        _sd2 = state_data(uid)
+        if _sn2 != "admin_sup_add_preview":
+            bot.answer_callback_query(call.id)
+            return
+        add_support_method(
+            _sd2["sup_title"], _sd2.get("sup_emoji", ""),
+            _sd2.get("sup_color", "default"), _sd2["sup_url"]
         )
-        bot.answer_callback_query(call.id)
-        send_or_edit(call, text, kb)
+        state_clear(uid)
+        log_admin_action(uid, f"روش پشتیبانی جدید اضافه شد: {_sd2['sup_title']}")
+        bot.answer_callback_query(call.id, "✅ روش پشتیبانی ذخیره شد.")
+        _show_sup_list(call)
         return
 
-    if data == "adm:set:support_tg":
-        state_set(uid, "admin_set_support")
-        bot.answer_callback_query(call.id)
-        send_or_edit(call, "🎧 آیدی یا لینک پشتیبانی تلگرام را ارسال کنید.\nمثال: <code>@username</code>",
-                     back_button("adm:set:support"))
+    if data == "adm:sup:add:cancel":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        state_clear(uid)
+        bot.answer_callback_query(call.id, "لغو شد.")
+        _show_sup_menu(call)
         return
 
-    if data == "adm:set:support_link":
-        state_set(uid, "admin_set_support_link")
+    if data.startswith("adm:sup:m:"):
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        _parts = data.split(":")
+        try:
+            _sup_id = int(_parts[3])
+        except (IndexError, ValueError):
+            bot.answer_callback_query(call.id)
+            return
+        _sup_action = ":".join(_parts[4:]) if len(_parts) > 4 else ""
+
+        if not _sup_action:
+            bot.answer_callback_query(call.id)
+            _show_sup_method(call, _sup_id)
+            return
+
+        if _sup_action == "toggle":
+            _row = get_support_method(_sup_id)
+            if not _row:
+                bot.answer_callback_query(call.id, "روش یافت نشد.", show_alert=True)
+                return
+            toggle_support_method(_sup_id)
+            _new_st = "غیرفعال" if _row["enabled"] else "فعال"
+            bot.answer_callback_query(call.id, f"✅ {_new_st} شد.")
+            log_admin_action(uid, f"روش پشتیبانی #{_sup_id} {_new_st} شد")
+            _show_sup_method(call, _sup_id)
+            return
+
+        if _sup_action == "title":
+            state_set(uid, "admin_sup_edit_title", method_id=_sup_id)
+            bot.answer_callback_query(call.id)
+            send_or_edit(call, "✏️ متن جدید دکمه را ارسال کنید:",
+                         back_button(f"adm:sup:m:{_sup_id}"))
+            return
+
+        if _sup_action == "emoji":
+            state_set(uid, "admin_sup_edit_emoji", method_id=_sup_id)
+            bot.answer_callback_query(call.id)
+            import json as _json_ee
+            _ee_kb = _json_ee.dumps({"inline_keyboard": [
+                [{"text": "حذف ایموجی", "callback_data": f"adm:sup:m:{_sup_id}:emoji:clear"}],
+                [{"text": "بازگشت", "callback_data": f"adm:sup:m:{_sup_id}",
+                  "icon_custom_emoji_id": "5253997076169115797"}],
+            ]})
+            send_or_edit(call,
+                "🎨 <b>ویرایش ایموجی</b>\n\n"
+                "ایموجی جدید را ارسال کنید:\n\n"
+                "• عدد emoji_id: فقط عدد را بفرستید\n"
+                "• تگ <tg-emoji>: همان را بفرستید\n"
+                "• ایموجی عادی: همان را بفرستید\n"
+                "• «ندارد»: ایموجی حذف می‌شود",
+                _ee_kb)
+            return
+
+        if _sup_action == "emoji:clear":
+            update_support_method_field(_sup_id, "emoji", "")
+            state_clear(uid)
+            log_admin_action(uid, f"ایموجی روش پشتیبانی #{_sup_id} حذف شد")
+            bot.answer_callback_query(call.id, "✅ ایموجی حذف شد.")
+            _show_sup_method(call, _sup_id)
+            return
+
+        if _sup_action == "color":
+            bot.answer_callback_query(call.id)
+            from ..ui.menus import show_support as _dummy  # noqa — ensure module loaded
+            send_or_edit(call,
+                "🎨 <b>ویرایش رنگ دکمه</b>\n\n"
+                "رنگ مورد نظر را انتخاب کنید.\n\n"
+                "<i>رنگ برای قالب‌هایی که پشتیبانی کنند نمایش داده می‌شود.</i>",
+                _sup_color_keyboard(f"adm:sup:m:{_sup_id}:color"))
+            return
+
+        if _sup_action.startswith("color:"):
+            _new_color = _sup_action[6:]
+            _allowed_colors = {"default", "blue", "green", "red", "yellow", "purple", "gray"}
+            if _new_color not in _allowed_colors:
+                bot.answer_callback_query(call.id)
+                return
+            update_support_method_field(_sup_id, "color", _new_color)
+            log_admin_action(uid, f"رنگ روش پشتیبانی #{_sup_id} به {_new_color} تغییر کرد")
+            bot.answer_callback_query(call.id, "✅ رنگ ذخیره شد.")
+            _show_sup_method(call, _sup_id)
+            return
+
+        if _sup_action == "url":
+            state_set(uid, "admin_sup_edit_url", method_id=_sup_id)
+            bot.answer_callback_query(call.id)
+            send_or_edit(call,
+                "🔗 <b>ویرایش لینک</b>\n\n"
+                "لینک جدید را وارد کنید.\n\n"
+                "نمونه‌ها:\n"
+                "<code>https://t.me/username</code>\n"
+                "<code>https://example.com/support</code>\n"
+                "<code>@username</code> (تبدیل به t.me/username می‌شود)",
+                back_button(f"adm:sup:m:{_sup_id}"))
+            return
+
+        if _sup_action == "del":
+            _row = get_support_method(_sup_id)
+            if not _row:
+                bot.answer_callback_query(call.id, "روش یافت نشد.", show_alert=True)
+                return
+            kb_del = types.InlineKeyboardMarkup()
+            kb_del.row(
+                types.InlineKeyboardButton("✅ بله، حذف شود",
+                                           callback_data=f"adm:sup:m:{_sup_id}:del:yes"),
+                types.InlineKeyboardButton("❌ خیر",
+                                           callback_data=f"adm:sup:m:{_sup_id}"),
+            )
+            bot.answer_callback_query(call.id)
+            send_or_edit(call, f"🗑 آیا روش «<b>{esc(_row['title'])}</b>» حذف شود؟", kb_del)
+            return
+
+        if _sup_action == "del:yes":
+            delete_support_method(_sup_id)
+            log_admin_action(uid, f"روش پشتیبانی #{_sup_id} حذف شد")
+            bot.answer_callback_query(call.id, "✅ حذف شد.")
+            _show_sup_list(call)
+            return
+
         bot.answer_callback_query(call.id)
-        send_or_edit(call, "🌐 لینک پشتیبانی آنلاین را ارسال کنید.\nمثال: <code>https://example.com/chat</code>\n\nبرای حذف، <code>-</code> بفرستید.",
-                     back_button("adm:set:support"))
         return
 
-    if data == "adm:set:support_desc":
-        state_set(uid, "admin_set_support_desc")
+    # ── Legacy sub-actions redirect to new system ──────────────────────────────
+    if data in ("adm:set:support_tg", "adm:set:support_link", "adm:set:support_desc"):
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
         bot.answer_callback_query(call.id)
-        send_or_edit(call, "📝 توضیحات نمایشی بالای دکمه‌های پشتیبانی را بنویسید.\n\nبرای بازگشت به پیش‌فرض، <code>-</code> بفرستید.",
-                     back_button("adm:set:support"))
+        _show_sup_menu(call)
         return
 
     # ── Shop management settings ─────────────────────────────────────────────
