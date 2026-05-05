@@ -130,6 +130,7 @@ class GlassSession:
         type_id: int,
         packages: list,
         max_qty: int,
+        enabled_dims: Optional[set] = None,
     ):
         self.type_id  = type_id
         self.packages = sort_packages([p for p in packages if p["price"] > 0])
@@ -150,6 +151,7 @@ class GlassSession:
         self.sel_user_limit = int(first["max_users"] if "max_users" in first.keys() else 0)
         self.sel_quantity   = 1
 
+        self.enabled_dims = set(enabled_dims) if enabled_dims else {"v", "d", "u", "q"}
         self._sync_package()  # find matched package + amount + stock
 
     # ── dim list builders ────────────────────────────────────────────────────
@@ -280,6 +282,7 @@ class GlassSession:
             "sel_user_limit": self.sel_user_limit,
             "sel_quantity":   self.sel_quantity,
             "max_qty":        self.max_qty,
+            "enabled_dims":   list(self.enabled_dims),
         }
 
     @classmethod
@@ -295,6 +298,7 @@ class GlassSession:
         obj.sel_duration   = state_dict["sel_duration"]
         obj.sel_user_limit = state_dict["sel_user_limit"]
         obj.sel_quantity   = state_dict["sel_quantity"]
+        obj.enabled_dims   = set(state_dict.get("enabled_dims", ["v", "d", "u", "q"]))
         obj._sync_package()
         return obj
 
@@ -390,38 +394,50 @@ def build_glass_invoice_keyboard(ses: GlassSession, type_id: int) -> str:
 
     # ── Volume row ────────────────────────────────────────────────────────────
     vol_s = "حجم نامحدود" if ses.sel_volume == 0 else _fmt_vol(ses.sel_volume)
-    rows.append([
-        _plus_btn(f"buyg:{tid}:v:+"),
-        {"text": vol_s, "callback_data": "noop", "style": "primary"},
-        _minus_btn(f"buyg:{tid}:v:-"),
-    ])
+    if "v" in ses.enabled_dims:
+        rows.append([
+            _plus_btn(f"buyg:{tid}:v:+"),
+            {"text": vol_s, "callback_data": "noop", "style": "primary"},
+            _minus_btn(f"buyg:{tid}:v:-"),
+        ])
+    else:
+        rows.append([{"text": vol_s, "callback_data": "noop", "style": "primary"}])
 
     # ── Duration row ──────────────────────────────────────────────────────────
     dur_s = "زمان نامحدود" if ses.sel_duration == 0 else _fmt_dur(ses.sel_duration)
-    rows.append([
-        _plus_btn(f"buyg:{tid}:d:+"),
-        {"text": dur_s, "callback_data": "noop", "style": "primary"},
-        _minus_btn(f"buyg:{tid}:d:-"),
-    ])
+    if "d" in ses.enabled_dims:
+        rows.append([
+            _plus_btn(f"buyg:{tid}:d:+"),
+            {"text": dur_s, "callback_data": "noop", "style": "primary"},
+            _minus_btn(f"buyg:{tid}:d:-"),
+        ])
+    else:
+        rows.append([{"text": dur_s, "callback_data": "noop", "style": "primary"}])
 
     # ── User limit row ────────────────────────────────────────────────────────
     mu_s = _fmt_mu(ses.sel_user_limit)
-    rows.append([
-        _plus_btn(f"buyg:{tid}:u:+"),
-        {"text": mu_s, "callback_data": "noop", "style": "primary"},
-        _minus_btn(f"buyg:{tid}:u:-"),
-    ])
+    if "u" in ses.enabled_dims:
+        rows.append([
+            _plus_btn(f"buyg:{tid}:u:+"),
+            {"text": mu_s, "callback_data": "noop", "style": "primary"},
+            _minus_btn(f"buyg:{tid}:u:-"),
+        ])
+    else:
+        rows.append([{"text": mu_s, "callback_data": "noop", "style": "primary"}])
 
     # ── Quantity row ──────────────────────────────────────────────────────────
-    rows.append([
-        _plus_btn(f"buyg:{tid}:q:+"),
-        {"text": f"{ses.sel_quantity} عدد", "callback_data": "noop", "style": "primary"},
-        _minus_btn(f"buyg:{tid}:q:-"),
-    ])
+    if "q" in ses.enabled_dims:
+        rows.append([
+            _plus_btn(f"buyg:{tid}:q:+"),
+            {"text": f"{ses.sel_quantity} عدد", "callback_data": "noop", "style": "primary"},
+            _minus_btn(f"buyg:{tid}:q:-"),
+        ])
+    else:
+        rows.append([{"text": f"{ses.sel_quantity} عدد", "callback_data": "noop", "style": "primary"}])
 
     # ── Confirm / Back ────────────────────────────────────────────────────────
-    rows.append([{"text": "✅ تأیید و پرداخت", "callback_data": f"buyg:{tid}:confirm", "style": "success"}])
-    rows.append([{"text": "↩️ بازگشت",          "callback_data": f"buyg:{tid}:back",    "icon_custom_emoji_id": "5253997076169115797"}])
+    rows.append([{"text": "تایید", "callback_data": f"buyg:{tid}:confirm", "style": "success", "icon_custom_emoji_id": "5357069174512303778"}])
+    rows.append([{"text": "بازگشت", "callback_data": f"buyg:{tid}:back", "icon_custom_emoji_id": "5253997076169115797"}])
 
     return json.dumps({"inline_keyboard": rows})
 
@@ -499,29 +515,57 @@ def show_glass_buy(call, type_id: int):
         bot.answer_callback_query(call.id, _ALERTS["empty"], show_alert=True)
         return
 
-    try:
-        max_qty = int(setting_get("max_order_quantity", "10") or "10")
-    except Exception:
-        max_qty = 10
-
-    try:
-        ses = GlassSession(type_id=type_id, packages=packages, max_qty=max_qty)
-    except ValueError:
-        bot.answer_callback_query(call.id, _ALERTS["empty"], show_alert=True)
-        return
-
-    state_set(uid, "glass_buy", **ses.to_state())
-
-    inv_desc = ""
-    try:
-        inv_desc = type_row["invoice_description"] if "invoice_description" in type_row.keys() else ""
-    except Exception:
-        pass
-
-    text = build_glass_invoice_text(ses, inv_desc)
-    kb   = build_glass_invoice_keyboard(ses, type_id)
+    # Show dimension selection step first
+    state_set(uid, "glass_dimsel", type_id=type_id,
+              en_v=1, en_d=1, en_u=1, en_q=1)
     bot.answer_callback_query(call.id)
-    send_or_edit(call, text, kb)
+    _show_dimsel(call, type_id, {"v": 1, "d": 1, "u": 1, "q": 1})
+
+
+def _show_dimsel(call, type_id: int, enabled: dict):
+    """Show the dimension selection step before the glass invoice."""
+    from ..bot_instance import bot
+    from ..ui.helpers import send_or_edit
+
+    _DIM_INFO = [
+        ("v", "حجم"),
+        ("d", "زمان"),
+        ("u", "کاربر"),
+        ("q", "تعداد"),
+    ]
+    rows = []
+    for dim, label in _DIM_INFO:
+        tick = "✅" if enabled.get(dim, 1) else "☑️"
+        rows.append([{
+            "text": f"{tick} {label}",
+            "callback_data": f"buyg:{type_id}:dimtoggle:{dim}",
+        }])
+    rows.append([{
+        "text": "ادامه",
+        "callback_data": f"buyg:{type_id}:dimconfirm",
+        "style": "success",
+        "icon_custom_emoji_id": "5357069174512303778",
+    }])
+    rows.append([{
+        "text": "بازگشت",
+        "callback_data": f"buyg:{type_id}:back",
+        "icon_custom_emoji_id": "5253997076169115797",
+    }])
+
+    text = (
+        f'{_ce(_CE_SHOP, "🛍")} <b>تنظیم فاکتور شیشه\u200cای</b>\n\n'
+        "موارد زیر را که می\u200cخواهید در فاکتور <b>قابل تغییر</b> باشند انتخاب کنید:"
+    )
+    try:
+        bot.edit_message_text(
+            text, call.message.chat.id, call.message.message_id,
+            parse_mode="HTML",
+            reply_markup=json.dumps({"inline_keyboard": rows}),
+            disable_web_page_preview=True,
+        )
+    except Exception as _e:
+        if "message is not modified" not in str(_e).lower():
+            send_or_edit(call, text, json.dumps({"inline_keyboard": rows}))
 
 
 def _reload_session(uid: int, type_id: int) -> Optional[GlassSession]:
@@ -609,13 +653,99 @@ def handle_glass_callback(call, data: str):
 
     # ── back ─────────────────────────────────────────────────────────────────
     if action == "back":
-        state_clear(uid)
-        bot.answer_callback_query(call.id)
-        from ..admin.renderers import _fake_call
-        _fake_call(call, "buy:start")
+        from ..helpers import state_name as _sn_bk, state_data as _sd_bk
+        if _sn_bk(uid) == "glass_buy":
+            # On invoice page → return to dimsel
+            sd_bk = _sd_bk(uid)
+            ed = set(sd_bk.get("enabled_dims", ["v", "d", "u", "q"]))
+            enabled = {d: (1 if d in ed else 0) for d in ("v", "d", "u", "q")}
+            state_set(uid, "glass_dimsel", type_id=type_id,
+                      **{f"en_{d}": v for d, v in enabled.items()})
+            bot.answer_callback_query(call.id)
+            _show_dimsel(call, type_id, enabled)
+        else:
+            # On dimsel page → return to service list
+            state_clear(uid)
+            bot.answer_callback_query(call.id)
+            from ..admin.renderers import _fake_call
+            _fake_call(call, "buy:start")
         return True
 
-    # ── dimension changes ─────────────────────────────────────────────────────
+    # ── dim-selection toggles (pre-invoice step) ─────────────────────────────
+    if action == "dimtoggle":
+        if len(parts) < 4 or parts[3] not in ("v", "d", "u", "q"):
+            bot.answer_callback_query(call.id)
+            return True
+        from ..helpers import state_name as _sn_dt, state_data as _sd_dt
+        if _sn_dt(uid) != "glass_dimsel":
+            bot.answer_callback_query(call.id, "جلسه منقضی شد. دوباره امتحان کنید.", show_alert=True)
+            return True
+        sd_dt = _sd_dt(uid)
+        dim = parts[3]
+        en_key = f"en_{dim}"
+        sd_dt[en_key] = 0 if sd_dt.get(en_key, 1) else 1
+        state_set(uid, "glass_dimsel", **{k: v for k, v in sd_dt.items()})
+        bot.answer_callback_query(call.id)
+        enabled = {d: sd_dt.get(f"en_{d}", 1) for d in ("v", "d", "u", "q")}
+        _show_dimsel(call, type_id, enabled)
+        return True
+
+    # ── dim-selection confirm → create session + show invoice ─────────────────
+    if action == "dimconfirm":
+        from ..helpers import state_name as _sn_dc, state_data as _sd_dc
+        from ..db import get_packages, get_type, setting_get
+        if _sn_dc(uid) != "glass_dimsel":
+            bot.answer_callback_query(call.id, "جلسه منقضی شد. دوباره امتحان کنید.", show_alert=True)
+            return True
+        sd_dc = _sd_dc(uid)
+        enabled_dims = {d for d in ("v", "d", "u", "q") if sd_dc.get(f"en_{d}", 1)}
+        type_row = get_type(type_id)
+        if not type_row:
+            bot.answer_callback_query(call.id, "نوع سرویس یافت نشد.", show_alert=True)
+            return True
+        user_row_dc = None
+        try:
+            from ..db import get_user as _gu_dc
+            user_row_dc = _gu_dc(uid)
+        except Exception:
+            pass
+        _is_agent_dc = bool(user_row_dc and user_row_dc["is_agent"])
+        stock_only_dc = setting_get("preorder_mode", "0") == "1"
+        packages_dc = [p for p in get_packages(type_id=type_id)
+                       if p["price"] > 0 and _br_ok(p, _is_agent_dc) and _pkg_has_stock(p, stock_only_dc)]
+        if not packages_dc:
+            bot.answer_callback_query(call.id, _ALERTS["empty"], show_alert=True)
+            return True
+        try:
+            max_qty_dc = int(setting_get("max_order_quantity", "10") or "10")
+        except Exception:
+            max_qty_dc = 10
+        try:
+            ses_dc = GlassSession(type_id=type_id, packages=packages_dc,
+                                  max_qty=max_qty_dc, enabled_dims=enabled_dims)
+        except ValueError:
+            bot.answer_callback_query(call.id, _ALERTS["empty"], show_alert=True)
+            return True
+        state_set(uid, "glass_buy", **ses_dc.to_state())
+        inv_desc_dc = ""
+        try:
+            inv_desc_dc = type_row["invoice_description"] if "invoice_description" in type_row.keys() else ""
+        except Exception:
+            pass
+        text_dc = build_glass_invoice_text(ses_dc, inv_desc_dc)
+        kb_dc   = build_glass_invoice_keyboard(ses_dc, type_id)
+        bot.answer_callback_query(call.id)
+        try:
+            bot.edit_message_text(
+                text_dc, call.message.chat.id, call.message.message_id,
+                parse_mode="HTML", reply_markup=kb_dc, disable_web_page_preview=True,
+            )
+        except Exception as _e_dc:
+            if "message is not modified" not in str(_e_dc).lower():
+                log.warning("dimconfirm edit failed: %s", _e_dc)
+        return True
+
+    # ── dimension changes (invoice step) ──────────────────────────────────────
     ses = _reload_session(uid, type_id)
     if ses is None:
         # Session expired — restart
