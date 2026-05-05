@@ -16597,7 +16597,7 @@ def _dispatch_callback(call, uid, data):
         if key not in BUTTONS:
             bot.answer_callback_query(call.id, "کلید نامعتبر است.", show_alert=True)
             return
-        save_val = "" if style_val == "default" else style_val
+        save_val = "glass" if style_val == "default" else style_val
         setting_set(f"start_menu_style:{key}", save_val)
         _style_labels = {"primary": "🔵 آبی", "success": "🟢 سبز", "danger": "🔴 قرمز", "default": "⬜ پیش‌فرض"}
         bot.answer_callback_query(call.id, f"رنگ دکمه {key} تغییر کرد به {_style_labels.get(style_val, style_val)}")

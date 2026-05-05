@@ -112,6 +112,9 @@ def get_button_style(key: str) -> str:
     """Return button style (primary/success/danger) for Telegram API or empty string."""
     override = setting_get(f"start_menu_style:{key}", "")
     if override:
+        # 'glass' stored as explicit override means user wants no style
+        if override == "glass":
+            return ""
         return override
     button = BUTTONS.get(key)
     return button.default_style if button else ""

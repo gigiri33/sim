@@ -547,7 +547,8 @@ def show_glass_buy(call, type_id: int):
         bot.answer_callback_query(call.id, _ALERTS["empty"], show_alert=True)
         return
 
-    state_set(uid, "glass_buy", **ses.to_state())
+    _gs = ses.to_state(); _gs.pop("uid", None)
+    state_set(uid, "glass_buy", **_gs)
 
     inv_desc = ""
     try:
@@ -690,7 +691,8 @@ def handle_glass_callback(call, data: str):
             return True
 
         # Save updated state
-        state_set(uid, "glass_buy", **ses.to_state())
+        _gs2 = ses.to_state(); _gs2.pop("uid", None)
+        state_set(uid, "glass_buy", **_gs2)
         bot.answer_callback_query(call.id)
         _refresh_invoice(call, ses, type_id)
         return True
