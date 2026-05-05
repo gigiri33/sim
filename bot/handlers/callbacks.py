@@ -10109,7 +10109,7 @@ def _dispatch_callback(call, uid, data):
         _rows_gd.append([{"text": "بازگشت", "callback_data": f"admin:type:edit:{type_id}", "icon_custom_emoji_id": "5253997076169115797"}])
         send_or_edit(call,
             f"🛍️ <b>ابعاد قابل تغییر در فاکتور {esc(row['name'])}</b>\n\n"
-            "ابعاد تیک‌خورده دکمه بعلاوه/کاهش دارند. غیرفعال فقط مقدار ثابت نشان داده می‌شود.",
+            "ابعاد تیک‌خورده در فاکتور کاربر نمایش داده می‌شوند و دکمه +/- دارند. ابعاد غیرفعال کاملاً پنهان می‌شوند.",
             _j_gd.dumps({"inline_keyboard": _rows_gd}))
         return
 

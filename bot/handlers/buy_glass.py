@@ -353,19 +353,16 @@ def build_glass_invoice_text(ses: GlassSession, invoice_description: str = "") -
     else:
         stock_line = f"{ses.stock} کانفیگ"
 
-    lines = [
-        _build_title(ses),
-        "",
-        f'{_ce(_CE_VOLUME, "🔸")} حجم: <b>{vol_s}</b>',
-        "",
-        f'{_ce(_CE_TIME,   "🔹")} زمان: <b>{dur_s}</b>',
-        "",
-        f'{_ce(_CE_USER,   "👥")} محدودیت کاربر: <b>{mu_s}</b>',
-        "",
-        f'{_ce(_CE_QTY,    "🔢")} تعداد: <b>{ses.sel_quantity} عدد</b>',
-        "",
-        f'{_ce(_CE_MONEY,  "💱")} مبلغ: <b>{price_line}</b>',
-    ]
+    lines = [_build_title(ses), ""]
+    if "v" in ses.enabled_dims:
+        lines += [f'{_ce(_CE_VOLUME, "🔸")} حجم: <b>{vol_s}</b>', ""]
+    if "d" in ses.enabled_dims:
+        lines += [f'{_ce(_CE_TIME,   "🔹")} زمان: <b>{dur_s}</b>', ""]
+    if "u" in ses.enabled_dims:
+        lines += [f'{_ce(_CE_USER,   "👥")} محدودیت کاربر: <b>{mu_s}</b>', ""]
+    if "q" in ses.enabled_dims:
+        lines += [f'{_ce(_CE_QTY,    "🔢")} تعداد: <b>{ses.sel_quantity} عدد</b>', ""]
+    lines.append(f'{_ce(_CE_MONEY,  "💱")} مبلغ: <b>{price_line}</b>')
 
     if invoice_description:
         lines += [
@@ -393,37 +390,31 @@ def build_glass_invoice_keyboard(ses: GlassSession, type_id: int) -> str:
         return {"text": "کاهش", "callback_data": cb, "icon_custom_emoji_id": _MINUS}
 
     # ── Volume row ────────────────────────────────────────────────────────────
-    vol_s = "حجم نامحدود" if ses.sel_volume == 0 else _fmt_vol(ses.sel_volume)
     if "v" in ses.enabled_dims:
+        vol_s = "حجم نامحدود" if ses.sel_volume == 0 else _fmt_vol(ses.sel_volume)
         rows.append([
             _plus_btn(f"buyg:{tid}:v:+"),
             {"text": vol_s, "callback_data": "noop", "style": "primary"},
             _minus_btn(f"buyg:{tid}:v:-"),
         ])
-    else:
-        rows.append([{"text": vol_s, "callback_data": "noop", "style": "primary"}])
 
     # ── Duration row ──────────────────────────────────────────────────────────
-    dur_s = "زمان نامحدود" if ses.sel_duration == 0 else _fmt_dur(ses.sel_duration)
     if "d" in ses.enabled_dims:
+        dur_s = "زمان نامحدود" if ses.sel_duration == 0 else _fmt_dur(ses.sel_duration)
         rows.append([
             _plus_btn(f"buyg:{tid}:d:+"),
             {"text": dur_s, "callback_data": "noop", "style": "primary"},
             _minus_btn(f"buyg:{tid}:d:-"),
         ])
-    else:
-        rows.append([{"text": dur_s, "callback_data": "noop", "style": "primary"}])
 
     # ── User limit row ────────────────────────────────────────────────────────
-    mu_s = _fmt_mu(ses.sel_user_limit)
     if "u" in ses.enabled_dims:
+        mu_s = _fmt_mu(ses.sel_user_limit)
         rows.append([
             _plus_btn(f"buyg:{tid}:u:+"),
             {"text": mu_s, "callback_data": "noop", "style": "primary"},
             _minus_btn(f"buyg:{tid}:u:-"),
         ])
-    else:
-        rows.append([{"text": mu_s, "callback_data": "noop", "style": "primary"}])
 
     # ── Quantity row ──────────────────────────────────────────────────────────
     if "q" in ses.enabled_dims:
@@ -432,8 +423,6 @@ def build_glass_invoice_keyboard(ses: GlassSession, type_id: int) -> str:
             {"text": f"{ses.sel_quantity} عدد", "callback_data": "noop", "style": "primary"},
             _minus_btn(f"buyg:{tid}:q:-"),
         ])
-    else:
-        rows.append([{"text": f"{ses.sel_quantity} عدد", "callback_data": "noop", "style": "primary"}])
 
     # ── Confirm / Back ────────────────────────────────────────────────────────
     rows.append([{"text": "تایید", "callback_data": f"buyg:{tid}:confirm", "style": "success", "icon_custom_emoji_id": "5357069174512303778"}])
