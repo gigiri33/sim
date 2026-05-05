@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 import io
 import json
 import logging
@@ -949,37 +949,37 @@ def _show_purchase_gateways(target, uid, package_id, price, package_row):
     _gw_labels = []
     kb = types.InlineKeyboardMarkup()
     if wallet_pay_enabled_for(uid):
-        kb.add(types.InlineKeyboardButton("💰 پرداخت از موجودی", callback_data=f"pay:wallet:{package_id}", icon_custom_emoji_id="5224648456533984542"))
+        kb.add(types.InlineKeyboardButton("پرداخت از موجودی", callback_data=f"pay:wallet:{package_id}", icon_custom_emoji_id="5224648456533984542"))
     if is_gateway_available("card", uid) and is_card_info_complete():
-        _lbl = setting_get("gw_card_display_name", "").strip() or "💳 کارت به کارت"
+        _lbl = setting_get("gw_card_display_name", "").strip() or "کارت به کارت"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:card:{package_id}", icon_custom_emoji_id="5985796637971191405"))
         _gw_labels.append(("card", _lbl))
     if is_gateway_available("crypto", uid):
-        _lbl = setting_get("gw_crypto_display_name", "").strip() or "💎 ارز دیجیتال"
+        _lbl = setting_get("gw_crypto_display_name", "").strip() or "ارز دیجیتال"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:crypto:{package_id}", icon_custom_emoji_id="5237761614458933049"))
         _gw_labels.append(("crypto", _lbl))
     if is_gateway_available("tetrapay", uid):
-        _lbl = setting_get("gw_tetrapay_display_name", "").strip() or "💳 درگاه کارت به کارت (TetraPay)"
+        _lbl = setting_get("gw_tetrapay_display_name", "").strip() or "درگاه کارت به کارت (TetraPay)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:tetrapay:{package_id}", icon_custom_emoji_id="5985796637971191405"))
         _gw_labels.append(("tetrapay", _lbl))
     if is_gateway_available("swapwallet_crypto", uid):
-        _lbl = setting_get("gw_swapwallet_crypto_display_name", "").strip() or "💳 درگاه کارت به کارت و ارز دیجیتال (SwapWallet)"
+        _lbl = setting_get("gw_swapwallet_crypto_display_name", "").strip() or "درگاه کارت به کارت و ارز دیجیتال (SwapWallet)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:swapwallet_crypto:{package_id}", icon_custom_emoji_id="5985796637971191405"))
         _gw_labels.append(("swapwallet_crypto", _lbl))
     if is_gateway_available("tronpays_rial", uid):
-        _lbl = setting_get("gw_tronpays_rial_display_name", "").strip() or "💳 درگاه کارت به کارت (TronPay)"
+        _lbl = setting_get("gw_tronpays_rial_display_name", "").strip() or "درگاه کارت به کارت (TronPay)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:tronpays_rial:{package_id}", icon_custom_emoji_id="5985796637971191405"))
         _gw_labels.append(("tronpays_rial", _lbl))
     if is_gateway_available("pazzlenet", uid):
-        _lbl = setting_get("gw_pazzlenet_display_name", "").strip() or "💳 درگاه کارت به کارت (PazzleNet)"
+        _lbl = setting_get("gw_pazzlenet_display_name", "").strip() or "درگاه کارت به کارت (PazzleNet)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:pazzlenet:{package_id}", icon_custom_emoji_id="5985796637971191405"))
         _gw_labels.append(("pazzlenet", _lbl))
     if is_gateway_available("plisio", uid):
-        _lbl = setting_get("gw_plisio_display_name", "").strip() or "💎 پرداخت کریپتو (Plisio)"
+        _lbl = setting_get("gw_plisio_display_name", "").strip() or "پرداخت کریپتو (Plisio)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:plisio:{package_id}", icon_custom_emoji_id="5237761614458933049"))
         _gw_labels.append(("plisio", _lbl))
     if is_gateway_available("nowpayments", uid):
-        _lbl = setting_get("gw_nowpayments_display_name", "").strip() or "💎 پرداخت کریپتو (NowPayments)"
+        _lbl = setting_get("gw_nowpayments_display_name", "").strip() or "پرداخت کریپتو (NowPayments)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"pay:nowpayments:{package_id}", icon_custom_emoji_id="5237761614458933049"))
         _gw_labels.append(("nowpayments", _lbl))
     if is_gateway_available("tronado", uid):
@@ -1004,9 +1004,9 @@ def _show_purchase_gateways(target, uid, package_id, price, package_row):
     unit_price  = int(sd.get("unit_price", 0) or 0) or (orig_amount // quantity if quantity > 1 else orig_amount)
 
     # Build price / quantity lines
-    _qty_line = f"🔢 تعداد: <b>{quantity}</b> عدد\n" if quantity > 1 else ""
+    _qty_line = f"تعداد: <b>{quantity}</b> عدد\n" if quantity > 1 else ""
     if quantity > 1:
-        _unit_line = f"💵 قیمت هر عدد: <b>{fmt_price(unit_price)}</b> تومان\n"
+        _unit_line = f"قیمت هر عدد: <b>{fmt_price(unit_price)}</b> تومان\n"
     else:
         _unit_line = ""
 
@@ -1014,8 +1014,8 @@ def _show_purchase_gateways(target, uid, package_id, price, package_row):
     if disc_amount:
         _price_line = (
             f"{_ce('💰', '5348418461838098123')} مبلغ اصلی: {fmt_price(orig_amount)} تومان\n"
-            f"🎟 تخفیف: {fmt_price(disc_amount)} تومان\n"
-            f"💚 مبلغ نهایی: {fmt_price(price)} تومان"
+            f"تخفیف: {fmt_price(disc_amount)} تومان\n"
+            f"مبلغ نهایی: {fmt_price(price)} تومان"
         )
     else:
         if quantity > 1:
@@ -1026,7 +1026,7 @@ def _show_purchase_gateways(target, uid, package_id, price, package_row):
     text = (
         f"{_ce('💳', '5350729313157135529')} <b>انتخاب روش پرداخت</b>\n\n"
         f"{_ce('🧩', '5348141492282080981')} نوع: {esc(package_row['type_name'])}\n"
-        + (f"📦 پکیج: {esc(package_row['name'])}\n" if _pkg_sn else "")
+        + (f"پکیج: {esc(package_row['name'])}\n" if _pkg_sn else "")
         + f"{_ce('🔋', '5350374591808158927')} حجم: {fmt_vol(package_row['volume_gb'])}\n"
         f"{_ce('⏰', '5348557584418750233')} مدت: {fmt_dur(package_row['duration_days'])}\n"
         f"{_qty_line}"
@@ -1044,37 +1044,37 @@ def _show_renewal_gateways(target, uid, purchase_id, package_id, price, package_
     _gw_labels = []
     kb = types.InlineKeyboardMarkup()
     if wallet_pay_enabled_for(uid):
-        kb.add(types.InlineKeyboardButton("💰 پرداخت از موجودی", callback_data=f"rpay:wallet:{purchase_id}:{package_id}", icon_custom_emoji_id="5224648456533984542"))
+        kb.add(types.InlineKeyboardButton("پرداخت از موجودی", callback_data=f"rpay:wallet:{purchase_id}:{package_id}", icon_custom_emoji_id="5224648456533984542"))
     if is_gateway_available("card", uid) and is_card_info_complete():
-        _lbl = setting_get("gw_card_display_name", "").strip() or "💳 کارت به کارت"
+        _lbl = setting_get("gw_card_display_name", "").strip() or "کارت به کارت"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:card:{purchase_id}:{package_id}", icon_custom_emoji_id="5985796637971191405"))
         _gw_labels.append(("card", _lbl))
     if is_gateway_available("crypto", uid):
-        _lbl = setting_get("gw_crypto_display_name", "").strip() or "💎 ارز دیجیتال"
+        _lbl = setting_get("gw_crypto_display_name", "").strip() or "ارز دیجیتال"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:crypto:{purchase_id}:{package_id}", icon_custom_emoji_id="5237761614458933049"))
         _gw_labels.append(("crypto", _lbl))
     if is_gateway_available("tetrapay", uid):
-        _lbl = setting_get("gw_tetrapay_display_name", "").strip() or "💳 درگاه کارت به کارت (TetraPay)"
+        _lbl = setting_get("gw_tetrapay_display_name", "").strip() or "درگاه کارت به کارت (TetraPay)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:tetrapay:{purchase_id}:{package_id}", icon_custom_emoji_id="5985796637971191405"))
         _gw_labels.append(("tetrapay", _lbl))
     if is_gateway_available("swapwallet_crypto", uid):
-        _lbl = setting_get("gw_swapwallet_crypto_display_name", "").strip() or "💳 درگاه کارت به کارت و ارز دیجیتال (SwapWallet)"
+        _lbl = setting_get("gw_swapwallet_crypto_display_name", "").strip() or "درگاه کارت به کارت و ارز دیجیتال (SwapWallet)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:swapwallet_crypto:{purchase_id}:{package_id}", icon_custom_emoji_id="5985796637971191405"))
         _gw_labels.append(("swapwallet_crypto", _lbl))
     if is_gateway_available("tronpays_rial", uid):
-        _lbl = setting_get("gw_tronpays_rial_display_name", "").strip() or "💳 درگاه کارت به کارت (TronPay)"
+        _lbl = setting_get("gw_tronpays_rial_display_name", "").strip() or "درگاه کارت به کارت (TronPay)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:tronpays_rial:{purchase_id}:{package_id}", icon_custom_emoji_id="5985796637971191405"))
         _gw_labels.append(("tronpays_rial", _lbl))
     if is_gateway_available("pazzlenet", uid):
-        _lbl = setting_get("gw_pazzlenet_display_name", "").strip() or "💳 درگاه کارت به کارت (PazzleNet)"
+        _lbl = setting_get("gw_pazzlenet_display_name", "").strip() or "درگاه کارت به کارت (PazzleNet)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:pazzlenet:{purchase_id}:{package_id}", icon_custom_emoji_id="5985796637971191405"))
         _gw_labels.append(("pazzlenet", _lbl))
     if is_gateway_available("plisio", uid):
-        _lbl = setting_get("gw_plisio_display_name", "").strip() or "💎 پرداخت کریپتو (Plisio)"
+        _lbl = setting_get("gw_plisio_display_name", "").strip() or "پرداخت کریپتو (Plisio)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:plisio:{purchase_id}:{package_id}", icon_custom_emoji_id="5237761614458933049"))
         _gw_labels.append(("plisio", _lbl))
     if is_gateway_available("nowpayments", uid):
-        _lbl = setting_get("gw_nowpayments_display_name", "").strip() or "💎 پرداخت کریپتو (NowPayments)"
+        _lbl = setting_get("gw_nowpayments_display_name", "").strip() or "پرداخت کریپتو (NowPayments)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"rpay:nowpayments:{purchase_id}:{package_id}", icon_custom_emoji_id="5237761614458933049"))
         _gw_labels.append(("nowpayments", _lbl))
     if is_gateway_available("tronado", uid):
@@ -1097,19 +1097,19 @@ def _show_renewal_gateways(target, uid, purchase_id, package_id, price, package_
     orig_amount = sd.get("original_amount", price)
     if disc_amount:
         _price_line = (
-            f"💰 قیمت اصلی: {fmt_price(orig_amount)} تومان\n"
-            f"🎟 تخفیف: {fmt_price(disc_amount)} تومان\n"
-            f"💚 قیمت نهایی: {fmt_price(price)} تومان"
+            f"قیمت اصلی: {fmt_price(orig_amount)} تومان\n"
+            f"تخفیف: {fmt_price(disc_amount)} تومان\n"
+            f"قیمت نهایی: {fmt_price(price)} تومان"
         )
     else:
-        _price_line = f"💰 قیمت: {fmt_price(price)} تومان"
+        _price_line = f"قیمت: {fmt_price(price)} تومان"
     _stamp_invoice(uid)
     text = (
-        "♻️ <b>تمدید سرویس</b>\n\n"
-        f"🔮 سرویس فعلی: {esc(move_leading_emoji(urllib.parse.unquote(item['service_name'] or '')))}\n"
-        + (f"📦 پکیج تمدید: {esc(package_row['name'])}\n" if _pkg_sn_renew else "")
-        + f"🔋 حجم: {fmt_vol(package_row['volume_gb'])}\n"
-        f"⏰ مدت: {fmt_dur(package_row['duration_days'])}\n"
+        "<b>تمدید سرویس</b>\n\n"
+        f"سرویس فعلی: {esc(move_leading_emoji(urllib.parse.unquote(item['service_name'] or '')))}\n"
+        + (f"پکیج تمدید: {esc(package_row['name'])}\n" if _pkg_sn_renew else "")
+        + f"حجم: {fmt_vol(package_row['volume_gb'])}\n"
+        f"مدت: {fmt_dur(package_row['duration_days'])}\n"
         f"{_price_line}\n\n"
         + (_range_guide + "\n\n" if _range_guide else "")
         + "روش پرداخت را انتخاب کنید:"
@@ -1513,39 +1513,39 @@ def _show_pnlcfg_renewal_gateways(target, uid, config_id, package_id, price, pac
     _gw_labels = []
     kb = types.InlineKeyboardMarkup()
     if wallet_pay_enabled_for(uid):
-        kb.add(types.InlineKeyboardButton("💰 پرداخت از موجودی",
+        kb.add(types.InlineKeyboardButton("پرداخت از موجودی",
                callback_data=f"mypnlcfgrpay:wallet:{config_id}:{package_id}",
                icon_custom_emoji_id="5224648456533984542"))
     if is_gateway_available("card", uid) and is_card_info_complete():
-        _lbl = setting_get("gw_card_display_name", "").strip() or "💳 کارت به کارت"
+        _lbl = setting_get("gw_card_display_name", "").strip() or "کارت به کارت"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"mypnlcfgrpay:card:{config_id}:{package_id}", icon_custom_emoji_id="5985796637971191405"))
         _gw_labels.append(("card", _lbl))
     if is_gateway_available("crypto", uid):
-        _lbl = setting_get("gw_crypto_display_name", "").strip() or "💎 ارز دیجیتال"
+        _lbl = setting_get("gw_crypto_display_name", "").strip() or "ارز دیجیتال"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"mypnlcfgrpay:crypto:{config_id}:{package_id}", icon_custom_emoji_id="5237761614458933049"))
         _gw_labels.append(("crypto", _lbl))
     if is_gateway_available("tetrapay", uid):
-        _lbl = setting_get("gw_tetrapay_display_name", "").strip() or "💳 درگاه کارت به کارت (TetraPay)"
+        _lbl = setting_get("gw_tetrapay_display_name", "").strip() or "درگاه کارت به کارت (TetraPay)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"mypnlcfgrpay:tetrapay:{config_id}:{package_id}", icon_custom_emoji_id="5985796637971191405"))
         _gw_labels.append(("tetrapay", _lbl))
     if is_gateway_available("swapwallet_crypto", uid):
-        _lbl = setting_get("gw_swapwallet_crypto_display_name", "").strip() or "💳 درگاه کارت به کارت و ارز دیجیتال (SwapWallet)"
+        _lbl = setting_get("gw_swapwallet_crypto_display_name", "").strip() or "درگاه کارت به کارت و ارز دیجیتال (SwapWallet)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"mypnlcfgrpay:swapwallet_crypto:{config_id}:{package_id}", icon_custom_emoji_id="5985796637971191405"))
         _gw_labels.append(("swapwallet_crypto", _lbl))
     if is_gateway_available("tronpays_rial", uid):
-        _lbl = setting_get("gw_tronpays_rial_display_name", "").strip() or "💳 درگاه کارت به کارت (TronPay)"
+        _lbl = setting_get("gw_tronpays_rial_display_name", "").strip() or "درگاه کارت به کارت (TronPay)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"mypnlcfgrpay:tronpays_rial:{config_id}:{package_id}", icon_custom_emoji_id="5985796637971191405"))
         _gw_labels.append(("tronpays_rial", _lbl))
     if is_gateway_available("pazzlenet", uid):
-        _lbl = setting_get("gw_pazzlenet_display_name", "").strip() or "💳 درگاه کارت به کارت (PazzleNet)"
+        _lbl = setting_get("gw_pazzlenet_display_name", "").strip() or "درگاه کارت به کارت (PazzleNet)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"mypnlcfgrpay:pazzlenet:{config_id}:{package_id}", icon_custom_emoji_id="5985796637971191405"))
         _gw_labels.append(("pazzlenet", _lbl))
     if is_gateway_available("plisio", uid):
-        _lbl = setting_get("gw_plisio_display_name", "").strip() or "💎 پرداخت کریپتو (Plisio)"
+        _lbl = setting_get("gw_plisio_display_name", "").strip() or "پرداخت کریپتو (Plisio)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"mypnlcfgrpay:plisio:{config_id}:{package_id}", icon_custom_emoji_id="5237761614458933049"))
         _gw_labels.append(("plisio", _lbl))
     if is_gateway_available("nowpayments", uid):
-        _lbl = setting_get("gw_nowpayments_display_name", "").strip() or "💎 پرداخت کریپتو (NowPayments)"
+        _lbl = setting_get("gw_nowpayments_display_name", "").strip() or "پرداخت کریپتو (NowPayments)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data=f"mypnlcfgrpay:nowpayments:{config_id}:{package_id}", icon_custom_emoji_id="5237761614458933049"))
         _gw_labels.append(("nowpayments", _lbl))
     if is_gateway_available("tronado", uid):
@@ -1569,20 +1569,20 @@ def _show_pnlcfg_renewal_gateways(target, uid, config_id, package_id, price, pac
     orig_amount = sd.get("original_amount", price)
     if disc_amount:
         _price_line = (
-            f"💰 قیمت اصلی: {fmt_price(orig_amount)} تومان\n"
-            f"🎟 تخفیف: {fmt_price(disc_amount)} تومان\n"
-            f"💚 قیمت نهایی: {fmt_price(price)} تومان"
+            f"قیمت اصلی: {fmt_price(orig_amount)} تومان\n"
+            f"تخفیف: {fmt_price(disc_amount)} تومان\n"
+            f"قیمت نهایی: {fmt_price(price)} تومان"
         )
     else:
-        _price_line = f"💰 قیمت: {fmt_price(price)} تومان"
+        _price_line = f"قیمت: {fmt_price(price)} تومان"
     _stamp_invoice(uid)
     svc_name = cfg.get("client_name") or ""
     text = (
-        "♻️ <b>تمدید سرویس</b>\n\n"
-        f"🔮 سرویس: {esc(svc_name)}\n"
-        + (f"📦 پکیج تمدید: {esc(package_row['name'])}\n" if _pkg_sn_renew else "")
-        + f"🔋 حجم: {fmt_vol(package_row['volume_gb'])}\n"
-        f"⏰ مدت: {fmt_dur(package_row['duration_days'])}\n"
+        "<b>تمدید سرویس</b>\n\n"
+        f"سرویس: {esc(svc_name)}\n"
+        + (f"پکیج تمدید: {esc(package_row['name'])}\n" if _pkg_sn_renew else "")
+        + f"حجم: {fmt_vol(package_row['volume_gb'])}\n"
+        f"مدت: {fmt_dur(package_row['duration_days'])}\n"
         f"{_price_line}\n\n"
         + (_range_guide + "\n\n" if _range_guide else "")
         + "روش پرداخت را انتخاب کنید:"
@@ -1596,35 +1596,35 @@ def _show_wallet_gateways(target, uid, amount):
     _gw_labels = []
     kb = types.InlineKeyboardMarkup()
     if is_gateway_available("card", uid) and is_card_info_complete():
-        _lbl = setting_get("gw_card_display_name", "").strip() or "💳 کارت به کارت"
+        _lbl = setting_get("gw_card_display_name", "").strip() or "کارت به کارت"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:card", icon_custom_emoji_id="5985796637971191405"))
         _gw_labels.append(("card", _lbl))
     if is_gateway_available("crypto", uid):
-        _lbl = setting_get("gw_crypto_display_name", "").strip() or "💎 ارز دیجیتال"
+        _lbl = setting_get("gw_crypto_display_name", "").strip() or "ارز دیجیتال"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:crypto", icon_custom_emoji_id="5237761614458933049"))
         _gw_labels.append(("crypto", _lbl))
     if is_gateway_available("tetrapay", uid):
-        _lbl = setting_get("gw_tetrapay_display_name", "").strip() or "💳 درگاه کارت به کارت (TetraPay)"
+        _lbl = setting_get("gw_tetrapay_display_name", "").strip() or "درگاه کارت به کارت (TetraPay)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:tetrapay", icon_custom_emoji_id="5985796637971191405"))
         _gw_labels.append(("tetrapay", _lbl))
     if is_gateway_available("swapwallet_crypto", uid):
-        _lbl = setting_get("gw_swapwallet_crypto_display_name", "").strip() or "💳 درگاه کارت به کارت و ارز دیجیتال (SwapWallet)"
+        _lbl = setting_get("gw_swapwallet_crypto_display_name", "").strip() or "درگاه کارت به کارت و ارز دیجیتال (SwapWallet)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:swapwallet_crypto", icon_custom_emoji_id="5985796637971191405"))
         _gw_labels.append(("swapwallet_crypto", _lbl))
     if is_gateway_available("tronpays_rial", uid):
-        _lbl = setting_get("gw_tronpays_rial_display_name", "").strip() or "💳 درگاه کارت به کارت (TronPay)"
+        _lbl = setting_get("gw_tronpays_rial_display_name", "").strip() or "درگاه کارت به کارت (TronPay)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:tronpays_rial", icon_custom_emoji_id="5985796637971191405"))
         _gw_labels.append(("tronpays_rial", _lbl))
     if is_gateway_available("pazzlenet", uid):
-        _lbl = setting_get("gw_pazzlenet_display_name", "").strip() or "💳 درگاه کارت به کارت (PazzleNet)"
+        _lbl = setting_get("gw_pazzlenet_display_name", "").strip() or "درگاه کارت به کارت (PazzleNet)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:pazzlenet", icon_custom_emoji_id="5985796637971191405"))
         _gw_labels.append(("pazzlenet", _lbl))
     if is_gateway_available("plisio", uid):
-        _lbl = setting_get("gw_plisio_display_name", "").strip() or "💎 پرداخت کریپتو (Plisio)"
+        _lbl = setting_get("gw_plisio_display_name", "").strip() or "پرداخت کریپتو (Plisio)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:plisio", icon_custom_emoji_id="5237761614458933049"))
         _gw_labels.append(("plisio", _lbl))
     if is_gateway_available("nowpayments", uid):
-        _lbl = setting_get("gw_nowpayments_display_name", "").strip() or "💎 پرداخت کریپتو (NowPayments)"
+        _lbl = setting_get("gw_nowpayments_display_name", "").strip() or "پرداخت کریپتو (NowPayments)"
         kb.add(types.InlineKeyboardButton(_lbl, callback_data="wallet:charge:nowpayments", icon_custom_emoji_id="5237761614458933049"))
         _gw_labels.append(("nowpayments", _lbl))
     if is_gateway_available("tronado", uid):
@@ -1646,15 +1646,15 @@ def _show_wallet_gateways(target, uid, amount):
     orig_amount = sd.get("original_amount", amount)
     if disc_amount:
         _price_line = (
-            f"💰 مبلغ اصلی: {fmt_price(orig_amount)} تومان\n"
-            f"🎟 تخفیف: {fmt_price(disc_amount)} تومان\n"
-            f"💚 مبلغ نهایی: {fmt_price(amount)} تومان"
+            f"مبلغ اصلی: {fmt_price(orig_amount)} تومان\n"
+            f"تخفیف: {fmt_price(disc_amount)} تومان\n"
+            f"مبلغ نهایی: {fmt_price(amount)} تومان"
         )
     else:
-        _price_line = f"💰 مبلغ: {fmt_price(amount)} تومان"
+        _price_line = f"مبلغ: {fmt_price(amount)} تومان"
     _stamp_invoice(uid)
     text = (
-        "💳 <b>شارژ کیف پول</b>\n\n"
+        "<b>شارژ کیف پول</b>\n\n"
         f"{_price_line}\n\n"
         + (_range_guide + "\n\n" if _range_guide else "")
         + "روش پرداخت را انتخاب کنید:"
@@ -1689,7 +1689,7 @@ def _show_qty_prompt(call, package_row, unit_price):
         "🛒 <b>خرید تعدادی</b>\n\n"
         f"🧩 نوع سرویس: <b>{esc(package_row['type_name'])}</b>\n"
         f"{_name_line}"
-        f"🔋 حجم: {fmt_vol(package_row['volume_gb'])}  |  ⏰ مدت: {fmt_dur(package_row['duration_days'])}\n"
+        f"حجم: {fmt_vol(package_row['volume_gb'])}  |  ⏰ مدت: {fmt_dur(package_row['duration_days'])}\n"
         f"💰 قیمت هر عدد: <b>{fmt_price(unit_price)}</b> تومان\n\n"
         "━━━━━━━━━━━━━━━━━━\n"
         f"🔢 چه تعداد کانفیگ نیاز دارید؟\n\n"
@@ -1709,7 +1709,7 @@ def _qty_order_summary_text(package_row, unit_price, quantity):
         "📋 <b>خلاصه سفارش</b>\n\n"
         f"🧩 نوع سرویس: <b>{esc(package_row['type_name'])}</b>\n"
         f"{_name_line}"
-        f"🔋 حجم: {fmt_vol(package_row['volume_gb'])}  |  ⏰ مدت: {fmt_dur(package_row['duration_days'])}\n\n"
+        f"حجم: {fmt_vol(package_row['volume_gb'])}  |  ⏰ مدت: {fmt_dur(package_row['duration_days'])}\n\n"
         "━━━━━━━━━━━━━━━━━━\n"
         f"🔢 تعداد: <b>{quantity}</b> عدد\n"
         f"💵 قیمت هر عدد: <b>{fmt_price(unit_price)}</b> تومان\n"
@@ -1861,7 +1861,7 @@ def _show_addon_invoice(target, uid, addon_type):
 
     # Card gateway
     if is_gateway_available("card", uid) and is_card_info_complete():
-        lbl = setting_get("gw_card_display_name", "").strip() or "💳 کارت به کارت"
+        lbl = setting_get("gw_card_display_name", "").strip() or "کارت به کارت"
         kb.add(types.InlineKeyboardButton(lbl,
                                           callback_data=f"addon:pay:{config_id}:{addon_type}:card"))
 
@@ -5142,7 +5142,7 @@ def _dispatch_callback(call, uid, data):
                 callback_data=f"apps:os:{item['key']}",
                 icon_custom_emoji_id=item["emoji_id"],
             ))
-        kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main", icon_custom_emoji_id="5352759161945867747"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5352759161945867747"))
         send_or_edit(call,
             f"{ce('📱', '5235588635885054955')} <b>دریافت اپلیکیشن‌ها</b>\n\n"
             "سیستم‌عامل خود را انتخاب کنید:",
@@ -5647,7 +5647,7 @@ def _dispatch_callback(call, uid, data):
         if not packages:
             send_or_edit(call, "📭 در حال حاضر پکیجی برای تمدید موجود نیست.", kb)
         else:
-            send_or_edit(call, f"♻️ <b>تمدید سرویس</b>\n\nپکیج مورد نظر برای تمدید را انتخاب کنید:{agent_note}", kb)
+            send_or_edit(call, f"<b>تمدید سرویس</b>\n\nپکیج مورد نظر برای تمدید را انتخاب کنید:{agent_note}", kb)
         return
 
     if data.startswith("renew:p:"):
@@ -8502,7 +8502,7 @@ def _dispatch_callback(call, uid, data):
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5352759161945867747"))
         bot.answer_callback_query(call.id)
-        send_or_edit(call, "💳 <b>شارژ کیف پول</b>\n\nمبلغ مورد نظر را به تومان وارد کنید:", kb)
+        send_or_edit(call, "<b>شارژ کیف پول</b>\n\nمبلغ مورد نظر را به تومان وارد کنید:", kb)
         return
 
     if data == "wallet:charge:card":

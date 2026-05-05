@@ -530,11 +530,11 @@ def show_referral_menu(target, user_id):
     banner_photo = setting_get("referral_banner_photo", "").strip()
     if banner_photo:
         kb.row(
-            types.InlineKeyboardButton("📤 دریافت پست آماده", callback_data="referral:get_banner"),
-            types.InlineKeyboardButton("🔗 اشتراک‌گذاری لینک", url=share_url),
+            types.InlineKeyboardButton("دریافت پست آماده", callback_data="referral:get_banner", icon_custom_emoji_id="5348343042212381365"),
+            types.InlineKeyboardButton("اشتراک‌گذاری لینک", url=share_url, icon_custom_emoji_id="5348343042212381365"),
         )
     else:
-        kb.add(types.InlineKeyboardButton("🔗 اشتراک‌گذاری لینک دعوت", url=share_url))
+        kb.add(types.InlineKeyboardButton("اشتراک‌گذاری لینک دعوت", url=share_url, icon_custom_emoji_id="5348343042212381365"))
 
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
 
