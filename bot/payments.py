@@ -528,11 +528,15 @@ def send_payment_to_admins(payment_id):
             save_payment_admin_message(payment_id, sub_id, msg.message_id)
 
     # Group topic: unified message (photo+caption+buttons or text+buttons)
+    # Track the message so its buttons are removed when the payment is reviewed.
+    _group_id = get_group_id()
     if file_id:
         caption = text if len(text) <= 1024 else text[:1021] + "..."
-        send_photo_to_topic("payment_approval", file_id, caption=caption, reply_markup=kb)
+        _topic_msg = send_photo_to_topic("payment_approval", file_id, caption=caption, reply_markup=kb)
     else:
-        send_to_topic("payment_approval", text, reply_markup=kb)
+        _topic_msg = send_to_topic("payment_approval", text, reply_markup=kb)
+    if _topic_msg and _group_id:
+        save_payment_admin_message(payment_id, _group_id, _topic_msg.message_id)
 
 
 # ── Card payment approval / rejection ─────────────────────────────────────────
@@ -540,29 +544,36 @@ def _clear_payment_admin_buttons(payment_id, status_text, file_id=None):
     """Remove approve/reject buttons from all admin notification messages."""
     msgs = get_payment_admin_messages(payment_id)
     for row in msgs:
+        _chat_id = row["admin_id"]
+        # Remove the inline keyboard from the notification message
         try:
-            bot.edit_message_reply_markup(row["admin_id"], row["message_id"], reply_markup=None)
+            bot.edit_message_reply_markup(_chat_id, row["message_id"], reply_markup=None)
         except Exception:
             pass
+        # Send status follow-up only to individual admin DMs (positive IDs).
+        # Group/channel chats (negative IDs) already had their buttons removed;
+        # sending an extra message there would pollute the group.
+        if _chat_id <= 0:
+            continue
         try:
             if file_id:
                 # Send photo with full status text as caption (max 1024 chars)
                 caption = status_text[:1024]
                 sent = False
                 try:
-                    bot.send_photo(row["admin_id"], file_id, caption=caption, parse_mode="HTML")
+                    bot.send_photo(_chat_id, file_id, caption=caption, parse_mode="HTML")
                     sent = True
                 except Exception:
                     try:
-                        bot.send_document(row["admin_id"], file_id, caption=caption, parse_mode="HTML")
+                        bot.send_document(_chat_id, file_id, caption=caption, parse_mode="HTML")
                         sent = True
                     except Exception:
                         pass
                 # If media failed or text was truncated, also send as plain text
                 if not sent or len(status_text) > 1024:
-                    bot.send_message(row["admin_id"], status_text, parse_mode="HTML")
+                    bot.send_message(_chat_id, status_text, parse_mode="HTML")
             else:
-                bot.send_message(row["admin_id"], status_text, parse_mode="HTML")
+                bot.send_message(_chat_id, status_text, parse_mode="HTML")
         except Exception:
             pass
     delete_payment_admin_messages(payment_id)
