@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 Glass Buy Flow
 ==============
@@ -440,7 +440,7 @@ def build_glass_invoice_keyboard(ses: GlassSession, type_id: int) -> str:
 
     # ── Confirm / Back ────────────────────────────────────────────────────────
     rows.append([{"text": "تایید", "callback_data": f"buyg:{tid}:confirm", "style": "primary", "icon_custom_emoji_id": "5350572310627632617"}])
-    rows.append([{"text": "بازگشت", "callback_data": f"buyg:{tid}:back", "icon_custom_emoji_id": "5253997076169115797"}])
+    rows.append([{"text": "بازگشت", "callback_data": f"buyg:{tid}:back", "icon_custom_emoji_id": "5352759161945867747"}])
 
     return json.dumps({"inline_keyboard": rows})
 

@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 Admin Analytics Dashboard
 Provides comprehensive sales & user statistics with Persian Jalali dates.
@@ -17,7 +17,7 @@ from ..ui.helpers import send_or_edit
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-_BACK_ICON = "5253997076169115797"
+_BACK_ICON = "5352759161945867747"
 
 
 def _back_btn(cb):

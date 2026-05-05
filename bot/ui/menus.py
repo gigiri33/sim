@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 Main menu screens: home, profile, support, my configs.
 """
@@ -187,19 +187,19 @@ def show_profile(target, user_id):
         used_credit = max(0, -balance) if balance < 0 else 0
         credit_remaining = credit_limit - used_credit
         credit_line = (
-            f"\n{ce('💳', '5931368295545443065')} اعتبار خرید: <b>{fmt_price(credit_limit)}</b> تومان"
-            f"\n{ce('💳', '5931368295545443065')} مانده اعتبار: <b>{fmt_price(credit_remaining)}</b> تومان"
+            f"\n{ce('💳', '5350626672028697529')} اعتبار خرید: <b>{fmt_price(credit_limit)}</b> تومان"
+            f"\n{ce('💳', '5350417283783084711')} مانده اعتبار: <b>{fmt_price(credit_remaining)}</b> تومان"
         )
     text = (
-        f"{ce('👤', '5373012449597335010')} <b>پروفایل کاربری</b>\n\n"
+        f"{ce('👤', '5454371323595744068')} <b>پروفایل کاربری</b>\n\n"
         f"{ce('📱', '5258011929993026890')} نام: {esc(user['full_name'])}\n"
-        f"{ce('🆔', '6118316934766266392')} نام کاربری: {esc(display_username(user['username']))}\n"
-        f"{ce('🔢', '5875335525136602241')} آیدی: <code>{user['user_id']}</code>\n\n"
-        f"{ce('💰', '5375296873982604963')} موجودی: <b>{fmt_price(user['balance'])}</b> تومان"
+        f"{ce('🆔', '5258274739041883702')} نام کاربری: {esc(display_username(user['username']))}\n"
+        f"{ce('🔢', '5348141492282080981')} آیدی: <code>{user['user_id']}</code>\n\n"
+        f"{ce('💰', '5283232570660634549')} موجودی: <b>{fmt_price(user['balance'])}</b> تومان"
         f"{credit_line}"
     )
     if user["is_agent"]:
-        text += f"\n\n{ce('🤝', '5287478403530767368')} <b>حساب نمایندگی فعال است</b>"
+        text += f"\n\n{ce('🤝', '5908990051349434897')} <b>حساب نمایندگی فعال است</b>"
     kb = types.InlineKeyboardMarkup()
     kb.add(types.InlineKeyboardButton(" بازگشت", callback_data="nav:main"))
     send_or_edit(target, text, kb)
@@ -253,7 +253,7 @@ def show_support(target):
     btn_rows.append([{
         "text": "بازگشت به منوی اصلی",
         "callback_data": "nav:main",
-        "icon_custom_emoji_id": "5253997076169115797",
+        "icon_custom_emoji_id": "5352759161945867747",
     }])
     kb = _json_sup.dumps({"inline_keyboard": btn_rows})
     if not faq_enabled and not methods:
@@ -261,7 +261,7 @@ def show_support(target):
             "⚠️ در حال حاضر روش پشتیبانی فعالی ثبت نشده است.",
             back_button("main"))
         return
-    text = f"{ce('🎧', '5467539229468793355')} <b>پشتیبانی</b>\n\nاز گزینه‌های زیر انتخاب کنید:"
+    text = f"{ce('🎧', '5348090777308251395')} <b>پشتیبانی</b>\n\nاز گزینه‌های زیر انتخاب کنید:"
     send_or_edit(target, text, kb)
 
 
@@ -293,7 +293,7 @@ def show_my_configs(target, user_id, page=0, search=None):
         import json as _json
         _kb_empty = _json.dumps({"inline_keyboard": [
             [{"text": "خرید سرویس", "callback_data": "buy:start", "style": "primary"}],
-            [{"text": "بازگشت", "callback_data": "nav:main", "icon_custom_emoji_id": "5253997076169115797"}],
+            [{"text": "بازگشت", "callback_data": "nav:main", "icon_custom_emoji_id": "5352759161945867747"}],
         ]})
         send_or_edit(
             target,

@@ -504,28 +504,9 @@ def is_tronado_response_paid(resp: dict) -> bool:
     # Skip internal error markers
     if resp.get("__http_error"):
         return False
-    # Flat paid callback format is only an IPN hint. Final fulfillment must use
-    # process_tronado_verified_payment(), which calls GetStatus for the exact
-    # saved order token before delivery.
-    if resp.get("UniqueCode") and resp.get("Hash") and "Error" not in resp and "__http_error" not in resp:
-        return True
-    # Data-wrapped response
-    data = resp.get("Data") or resp.get("data")
-    if not isinstance(data, dict):
-        data = resp
-    # IsPaid boolean (from API docs)
-    is_paid = data.get("IsPaid") or data.get("isPaid")
-    if is_paid is True:
-        return True
-    # UniqueCode+Hash inside Data
-    if data.get("UniqueCode") and data.get("Hash") and "Error" not in data:
-        return True
-    # Status string check
-    for key in ("OrderStatusTitle", "Status", "status", "PaymentStatus", "paymentStatus", "State", "state"):
-        val = data.get(key) or ""
-        if str(val).lower() in ("paid", "completed", "success", "confirmed", "finish", "finished", "done"):
-            return True
-    return False
+    # Use normalize_tronado_status for consistency — avoids duplicating the
+    # UniqueCode/Hash ambiguity fix in two places.
+    return normalize_tronado_status(resp) == "paid"
 
 
 _PAID_STATUSES     = frozenset({"paid", "success", "successful", "confirmed", "completed",
@@ -546,26 +527,40 @@ def normalize_tronado_status(resp: dict) -> str:
         return "unknown"
     if resp.get("__http_error"):
         return "error"
-    # Direct paid indicators at top level. PaymentID+TronAmount alone is not
-    # enough; it can be forged and does not prove a Tronado order exists.
-    if resp.get("UniqueCode") and resp.get("Hash") and "Error" not in resp:
-        return "paid"
     data = resp.get("Data") or resp.get("data")
     if not isinstance(data, dict):
         data = resp
+
+    # IsPaid boolean is the most reliable paid indicator.
     if data.get("IsPaid") is True or data.get("isPaid") is True:
         return "paid"
-    if data.get("UniqueCode") and data.get("Hash") and "Error" not in data:
-        return "paid"
+
+    # UniqueCode + Hash indicates a confirmed Tronado payment, but ONLY when
+    # accompanied by a paid status string or IsPaid=True.
+    # Tronado can return UniqueCode/Hash for newly-created (unpaid) orders;
+    # relying on their mere presence caused false fulfillments.
+    _has_uc_hash = bool(
+        (data.get("UniqueCode") or resp.get("UniqueCode")) and
+        (data.get("Hash") or resp.get("Hash")) and
+        "Error" not in data and "Error" not in resp
+    )
+
     for key in ("OrderStatusTitle", "Status", "status", "PaymentStatus",
                 "paymentStatus", "State", "state"):
         val = str(data.get(key) or resp.get(key) or "").strip().lower()
         if val in _PAID_STATUSES:
             return "paid"
         if val in _PENDING_STATUSES:
+            # Even if UniqueCode+Hash present, a "pending" status wins.
             return "pending"
         if val in _REJECTED_STATUSES:
             return "rejected"
+
+    # Only accept UniqueCode+Hash as "paid" if no status contradicts it
+    # (i.e. no status key was found at all — legacy IPN-only payloads).
+    if _has_uc_hash:
+        return "paid"
+
     # "No order found with this txid" is returned when the wrong lookup key is
     # used (e.g. token/trndorderid before Tronado has indexed it). Treat it as
     # unknown/pending, not as a final rejection, otherwise paid orders can be

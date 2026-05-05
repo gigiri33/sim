@@ -386,29 +386,6 @@ def process_rialpay_verified_payment(payment_id: int,
         print(f"[RialPay] process_verified: direct verify not paid payment={payment_id} status={verify_status} resp={str(verify_resp)[:300]}")
         return {"status": verify_status if verify_status in ("pending", "rejected") else "not_paid", "raw_resp": verify_resp}
 
-    # ── Amount validation ──────────────────────────────────────────────────────
-    verify_raw = verify_resp.get("raw", {}) if isinstance(verify_resp, dict) else {}
-    ext_amount = raw_payload.get("amount") if isinstance(raw_payload, dict) else None
-    if not ext_amount and isinstance(verify_raw, dict):
-        ext_amount = verify_raw.get("amount") or verify_raw.get("total_amount") or verify_raw.get("seller_receive")
-    if ext_amount is not None and ext_amount != "":
-        try:
-            ext_amount_int = int(float(ext_amount))
-            expected_str = (payment["gateway_ref"] or "").strip() if payment["gateway_ref"] else ""
-            if expected_str:
-                try:
-                    expected = int(float(expected_str))
-                except Exception:
-                    expected = payment["amount"]
-            else:
-                expected = payment["amount"]
-            if ext_amount_int != expected:
-                print(f"[RialPay] process_verified: amount mismatch payment={payment_id}"
-                      f" expected={expected} got={ext_amount_int}")
-                return {"status": "amount_mismatch", "expected": expected, "got": ext_amount_int}
-        except Exception:
-            pass
-
     # ── Extract audit fields ───────────────────────────────────────────────────
     gateway_ref   = ""
     external_txid = ""

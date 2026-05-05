@@ -174,18 +174,27 @@ def is_gateway_in_range(gw_name, amount):
     return True
 
 
+_CRYPTO_GWS = frozenset({"crypto", "nowpayments", "plisio"})
+
+
 def build_gateway_range_guide(gw_label_pairs):
     """Build a guide text listing each gateway's range.
     gw_label_pairs: list of (gw_name, display_label) tuples.
     Returns a string like:
       📋 راهنمای انتخاب درگاه پرداخت:
-      • کارت به کارت: ۵۰۰٬۰۰۰ تا ۱٬۸۰۰٬۰۰۰ تومان
-      • ارز دیجیتال: بدون محدودیت مبلغی
+      💳 کارت به کارت: ۵۰۰٬۰۰۰ تا ۱٬۸۰۰٬۰۰۰ تومان
+      💎 ارز دیجیتال: بدون محدودیت مبلغی
     """
+    from ..ui.premium_emoji import ce as _ce
     lines = []
     for gw_name, label in gw_label_pairs:
         rng = get_gateway_range_text(gw_name)
-        lines.append(f"  • {label}: {rng}")
+        if gw_name in _CRYPTO_GWS:
+            icon = _ce("💎", "5237761614458933049")
+        else:
+            icon = _ce("💳", "5985796637971191405")
+        lines.append(f"  {icon} {label}: {rng}")
     if not lines:
         return ""
-    return "📋 <b>راهنمای انتخاب درگاه پرداخت:</b>\n" + "\n".join(lines)
+    header = _ce("📋", "5269381442864963988")
+    return f"{header} <b>راهنمای انتخاب درگاه پرداخت:</b>\n" + "\n".join(lines)

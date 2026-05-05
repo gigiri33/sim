@@ -50,7 +50,7 @@ def _show_admin_types(call):
                 types.InlineKeyboardButton("✏️", callback_data=f"admin:pkg:edit:{p['id']}"),
                 types.InlineKeyboardButton("🗑",  callback_data=f"admin:pkg:del:{p['id']}"),
             )
-    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5352759161945867747"))
     send_or_edit(call, "🧩 <b>مدیریت نوع و پکیج‌ها</b>", kb)
 
 
@@ -75,7 +75,7 @@ def _show_admin_stock(call):
             f"📦 {row['type_name']} - {row['name']} | 🟢{row['stock']} 🔴{row['sold_count']} ❌{row['expired_count']}{pending_label}",
             callback_data=f"adm:stk:pk:{row['id']}"
         ))
-    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5352759161945867747"))
     send_or_edit(call, "📁 <b>کانفیگ‌ها</b>", kb)
 
 
@@ -91,7 +91,7 @@ def _show_admin_admins_panel(call):
             f"👮 {name} | {row['user_id']}",
             callback_data=f"adm:mgr:v:{row['user_id']}"
         ))
-    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5352759161945867747"))
     count = len(admins)
     text = (
         f"👮 <b>مدیریت ادمین‌ها</b>\n\n"
@@ -209,7 +209,7 @@ def _show_admin_users_list(call, page=0, filter_mode="all"):
         nav.append(types.InlineKeyboardButton("➡️ بعدی", callback_data=f"adm:usr:fl:{filter_mode}:{page + 1}"))
     if nav:
         kb.row(*nav)
-    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5253997076169115797"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:panel", icon_custom_emoji_id="5352759161945867747"))
 
     text = (
         f"👥 <b>مدیریت کاربران</b>\n\n"
@@ -283,7 +283,7 @@ def _show_admin_user_detail(call, user_id, back_cb="admin:users"):
     kb.add(types.InlineKeyboardButton("👥 زیرمجموعه‌ها",      callback_data=f"adm:usr:refs:{uid_t}:0"))
     kb.add(types.InlineKeyboardButton("💰 قیمت نمایندگی کاربر", callback_data=f"adm:agcfg:{uid_t}"))
     kb.add(types.InlineKeyboardButton("✉️ پیام خصوصی به کاربر", callback_data=f"adm:usr:dm:{uid_t}"))
-    kb.add(types.InlineKeyboardButton("بازگشت", callback_data=back_cb, icon_custom_emoji_id="5253997076169115797"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data=back_cb, icon_custom_emoji_id="5352759161945867747"))
     send_or_edit(call, text, kb)
 
 
@@ -339,7 +339,7 @@ def _show_admin_user_detail_msg(chat_id, user_id):
     kb.add(types.InlineKeyboardButton("👥 زیرمجموعه‌ها",      callback_data=f"adm:usr:refs:{uid_t}:0"))
     kb.add(types.InlineKeyboardButton("💰 قیمت نمایندگی کاربر", callback_data=f"adm:agcfg:{uid_t}"))
     kb.add(types.InlineKeyboardButton("✉️ پیام خصوصی به کاربر", callback_data=f"adm:usr:dm:{uid_t}"))
-    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:users", icon_custom_emoji_id="5253997076169115797"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:users", icon_custom_emoji_id="5352759161945867747"))
     bot.send_message(chat_id, text, reply_markup=kb, parse_mode="HTML")
 
 
@@ -351,7 +351,7 @@ def _show_admin_assign_config_type(call, target_id):
             f"🧩 {item['name']}",
             callback_data=f"adm:acfg:t:{target_id}:{item['id']}"
         ))
-    kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:usr:v:{target_id}", icon_custom_emoji_id="5253997076169115797"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:usr:v:{target_id}", icon_custom_emoji_id="5352759161945867747"))
     send_or_edit(call, "📝 نوع کانفیگ را انتخاب کنید:", kb)
 
 
@@ -400,7 +400,7 @@ def _show_admin_panels(call):
 
     rows.append([_btn("➕ افزودن پنل", callback_data="adm:pnl:add")])
     rows.append([_btn("بازگشت", callback_data="admin:panel",
-                       emoji_id="5253997076169115797")])
+                       emoji_id="5352759161945867747")])
 
     from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
     kb = InlineKeyboardMarkup()
@@ -482,7 +482,7 @@ def _show_panel_detail(call, panel_id):
         InlineKeyboardButton("🗑 حذف پنل",     callback_data=f"adm:pnl:del:{panel_id}"),
     )
     kb.add(InlineKeyboardButton("بازگشت", callback_data="admin:panels",
-                                icon_custom_emoji_id="5253997076169115797"))
+                                icon_custom_emoji_id="5352759161945867747"))
     send_or_edit(call, text, kb)
 
 
@@ -506,7 +506,7 @@ def _show_panel_edit_menu(call, panel_id):
         InlineKeyboardButton("🔑 رمز عبور",   callback_data=f"adm:pnl:ef:password:{panel_id}"),
     )
     kb.add(InlineKeyboardButton("بازگشت", callback_data=f"adm:pnl:detail:{panel_id}",
-                                icon_custom_emoji_id="5253997076169115797"))
+                                icon_custom_emoji_id="5352759161945867747"))
     from ..db import get_panel as _gp
     p = _gp(panel_id)
     send_or_edit(call,
@@ -541,7 +541,7 @@ def _show_panel_client_packages(call, panel_id):
             )
 
     kb.add(InlineKeyboardButton("بازگشت", callback_data=f"adm:pnl:detail:{panel_id}",
-                                icon_custom_emoji_id="5253997076169115797"))
+                                icon_custom_emoji_id="5352759161945867747"))
     count_line = f"\n\n{len(cpkgs)} کلاینت پکیج ثبت‌شده" if cpkgs else "\n\nهنوز کلاینت پکیجی ثبت نشده."
     send_or_edit(
         call,
@@ -590,7 +590,7 @@ def _show_cpkg_edit_menu(call, cpkg_id):
         callback_data=f"adm:pnl:cpkg:ef:sample_client_name:{cpkg_id}"
     ))
     kb.add(InlineKeyboardButton("بازگشت", callback_data=f"adm:pnl:cpkgs:{cp['panel_id']}",
-                                icon_custom_emoji_id="5253997076169115797"))
+                                icon_custom_emoji_id="5352759161945867747"))
     send_or_edit(call, text, kb)
 
 
@@ -615,7 +615,7 @@ def _show_panel_client_package_preview(call, cpkg_id):
         parts.append(f"\n🔗 <b>نمونه ساب:</b>\n<code>{esc(cp['sample_sub_url'])}</code>")
     kb = InlineKeyboardMarkup()
     kb.add(InlineKeyboardButton("بازگشت", callback_data=f"adm:pnl:cpkgs:{cp['panel_id']}",
-                                icon_custom_emoji_id="5253997076169115797"))
+                                icon_custom_emoji_id="5352759161945867747"))
     send_or_edit(call, "\n".join(parts), kb)
 
 
@@ -685,7 +685,7 @@ def _show_panel_configs(call, page=0, search=None, only_expired=False,
             ))
 
     kb.add(InlineKeyboardButton("بازگشت", callback_data="admin:panel",
-                                icon_custom_emoji_id="5253997076169115797"))
+                                icon_custom_emoji_id="5352759161945867747"))
     send_or_edit(call, text, kb)
 
 
@@ -752,7 +752,7 @@ def _show_panel_config_list(call, filter_type="all", package_id=None,
         kb.row(*nav)
 
     kb.add(InlineKeyboardButton("بازگشت", callback_data=back_cb,
-                                icon_custom_emoji_id="5253997076169115797"))
+                                icon_custom_emoji_id="5352759161945867747"))
     send_or_edit(call, text, kb)
 
 
@@ -784,7 +784,7 @@ def _show_panel_config_pkg(call, package_id):
         callback_data=f"admin:pcfg:fl:expired:0:{package_id}"
     ))
     kb.add(InlineKeyboardButton("بازگشت", callback_data="admin:panel_configs",
-                                icon_custom_emoji_id="5253997076169115797"))
+                                icon_custom_emoji_id="5352759161945867747"))
     send_or_edit(call, text, kb)
 
 
@@ -950,7 +950,7 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
             InlineKeyboardButton("🗑 حذف کانفیگ",        callback_data=f"admin:pcfg:del:{config_id}"),
         )
         kb.add(InlineKeyboardButton("بازگشت", callback_data=back_data,
-                                    icon_custom_emoji_id="5253997076169115797"))
+                                    icon_custom_emoji_id="5352759161945867747"))
         # Send with QR photo attached
         qr_source = cfg.get("client_config_text") or ""
         if not qr_source and has_sub:
@@ -984,7 +984,7 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
                 InlineKeyboardButton(ar_label,          callback_data=f"mypnlcfg:autorenew:{config_id}"),
             )
         kb.add(InlineKeyboardButton("بازگشت", callback_data=back_data,
-                                    icon_custom_emoji_id="5253997076169115797"))
+                                    icon_custom_emoji_id="5352759161945867747"))
 
         # Determine QR source
         qr_source = cfg.get("client_config_text") or cfg.get("client_sub_url") or ""
