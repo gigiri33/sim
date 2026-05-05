@@ -221,7 +221,7 @@ def show_payment_method_selection(target, uid, context_data):
     _add_gw("tronado", "pm:tronado")
     _add_gw("rialpay", "pm:rialpay")
 
-    rows.append([_btn("بازگشت", callback_data="nav:main", emoji_id="5352759161945867747")])
+    rows.append([_btn("بازگشت", callback_data="wallet:menu", emoji_id="5352759161945867747")])
     kb = _raw_markup(rows)
 
     user       = get_user(uid)
@@ -361,9 +361,7 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
                 )
             )
         kb.row(*_copy_row)
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main"))
-        send_or_edit(target, text, kb)
-        return True
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="pm:back"))
 
     except Exception as _ex:
         _log.exception("show_crypto_payment_info error coin=%s uid=%s: %s", coin_key, uid, _ex)
@@ -372,8 +370,7 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
             _addr  = _sg(f"crypto_{coin_key}", "")
             _label = next((l for k, l in CRYPTO_COINS if k == coin_key), coin_key)
             _kb = types.InlineKeyboardMarkup()
-            _kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main"))
-            _chat = (target.message.chat.id if hasattr(target, "message") else target.chat.id)
+            _kb.add(types.InlineKeyboardButton("بازگشت", callback_data="pm:back"))
             bot.send_message(
                 _chat,
                 f"{ce('💎', '5471952986970267163')} <b>پرداخت با {_label}</b>\n\n"

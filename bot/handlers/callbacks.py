@@ -3061,7 +3061,7 @@ def _generate_card_final_amount(base_amount, payment_id):
     return base + random.randint(1, 999)
 
 
-def _build_card_payment_page(card, bank, owner, price, final_amount):
+def _build_card_payment_page(card, bank, owner, price, final_amount, back_cb="nav:main"):
     """Return (text, kb) for the card-to-card payment page.
     When final_amount != price (random mode active), shows prominent amount
     with warning + copy buttons. Otherwise shows the standard layout.
@@ -3111,19 +3111,27 @@ def _build_card_payment_page(card, bank, owner, price, final_amount):
                                           copy_text=types.CopyTextButton(text=card_clean),
                                           icon_custom_emoji_id="5212921495008845628"))
     else:
+        amount_rial = price * 10
         text = (
             f"{_card_title} <b>کارت به کارت</b>\n\n"
             f"لطفاً مبلغ <b>{fmt_price(price)}</b> تومان را به کارت زیر واریز کنید:\n\n"
             f"{card_info}"
             f"{_photo_icon} پس از واریز، تصویر رسید را ارسال کنید."
         )
+        kb.row(
+            types.InlineKeyboardButton("مبلغ تومان",
+                                       copy_text=types.CopyTextButton(text=str(price)),
+                                       icon_custom_emoji_id="5212921495008845628"),
+            types.InlineKeyboardButton("مبلغ ریال",
+                                       copy_text=types.CopyTextButton(text=str(amount_rial)),
+                                       icon_custom_emoji_id="5212921495008845628"),
+        )
         kb.add(types.InlineKeyboardButton("شماره کارت",
                                           copy_text=types.CopyTextButton(text=card_clean),
                                           icon_custom_emoji_id="5212921495008845628"))
 
-    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5352759161945867747"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data=back_cb, icon_custom_emoji_id="5352759161945867747"))
     return text, kb
-import string
 
 def _generate_voucher_codes(count, prefix="GIFT"):
     """Generate `count` unique random voucher codes with a prefix."""
@@ -5777,7 +5785,8 @@ def _dispatch_callback(call, uid, data):
             final_amount = _generate_card_final_amount(price, payment_id)
             update_payment_final_amount(payment_id, final_amount)
         state_set(uid, "await_renewal_receipt", payment_id=payment_id, purchase_id=purchase_id)
-        text, kb = _build_card_payment_page(card, bank, owner, price, final_amount)
+        text, kb = _build_card_payment_page(card, bank, owner, price, final_amount,
+                                             back_cb=f"renew:p:{purchase_id}:{package_id}")
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
         return
@@ -7313,7 +7322,8 @@ def _dispatch_callback(call, uid, data):
             final_amount = _generate_card_final_amount(price, payment_id)
             update_payment_final_amount(payment_id, final_amount)
         state_set(uid, "await_purchase_receipt", payment_id=payment_id)
-        text, kb = _build_card_payment_page(card, bank, owner, price, final_amount)
+        text, kb = _build_card_payment_page(card, bank, owner, price, final_amount,
+                                             back_cb=f"buy:p:{package_id}")
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
         return
@@ -7414,9 +7424,52 @@ def _dispatch_callback(call, uid, data):
 
     if data == "pm:back":
         bot.answer_callback_query(call.id)
-
-    # ── Crypto copy buttons use CopyTextButton (Bot API 7.0) ─────────────────
-    # No callback handlers needed — buttons copy directly to clipboard.
+        sn = state_name(uid)
+        sd = state_data(uid)
+        if sn in ("buy_crypto_select_coin", "buy_select_method"):
+            package_id  = sd.get("package_id")
+            package_row = get_package(package_id)
+            if package_row:
+                price = sd.get("amount") or get_effective_price(uid, package_row)
+                state_set(uid, "buy_select_method",
+                          package_id=package_id, amount=price,
+                          original_amount=sd.get("original_amount", price),
+                          discount_amount=sd.get("discount_amount", 0),
+                          kind="purchase", quantity=sd.get("quantity", 1),
+                          service_names=sd.get("service_names"),
+                          invoice_created_at=sd.get("invoice_created_at"))
+                _show_purchase_gateways(call, uid, package_id, price, package_row)
+                return
+        elif sn in ("renew_crypto_select_coin", "renew_select_method"):
+            purchase_id = sd.get("purchase_id")
+            package_id  = sd.get("package_id")
+            item        = get_purchase(purchase_id) if purchase_id else None
+            package_row = get_package(package_id) if package_id else None
+            if item and package_row:
+                price = sd.get("amount") or get_effective_price(uid, package_row)
+                state_set(uid, "renew_select_method",
+                          package_id=package_id, amount=price,
+                          original_amount=sd.get("original_amount", price),
+                          kind="renewal", purchase_id=purchase_id,
+                          invoice_created_at=sd.get("invoice_created_at"))
+                _show_renewal_gateways(call, uid, purchase_id, package_id, price, package_row, item)
+                return
+        elif sn in ("pnlcfg_renew_crypto_select_coin",):
+            config_id  = sd.get("config_id")
+            package_id = sd.get("package_id")
+            cfg        = get_panel_config(config_id) if config_id else None
+            package_row = get_package(package_id) if package_id else None
+            if cfg and package_row:
+                price = sd.get("amount") or get_effective_price(uid, package_row)
+                _show_pnlcfg_renewal_gateways(call, uid, config_id, package_id, price, package_row, cfg)
+                return
+        elif sn in ("wallet_crypto_select_coin", "wallet_charge_method"):
+            amount = sd.get("amount")
+            if amount:
+                state_set(uid, "wallet_charge_method", amount=amount,
+                          invoice_created_at=sd.get("invoice_created_at"))
+                show_payment_method_selection(call, uid, {"kind": "wallet_charge", "amount": amount})
+                return
         show_main_menu(call)
         return
 
@@ -8567,7 +8620,8 @@ def _dispatch_callback(call, uid, data):
             final_amount = _generate_card_final_amount(amount, payment_id)
             update_payment_final_amount(payment_id, final_amount)
         state_set(uid, "await_wallet_receipt", payment_id=payment_id, amount=amount)
-        text, kb = _build_card_payment_page(card, bank, owner, amount, final_amount)
+        text, kb = _build_card_payment_page(card, bank, owner, amount, final_amount,
+                                             back_cb="wallet:charge")
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
         return
@@ -11406,7 +11460,8 @@ def _dispatch_callback(call, uid, data):
                 final_amount = _generate_card_final_amount(price, payment_id)
                 update_payment_final_amount(payment_id, final_amount)
             state_set(uid, "await_renewal_receipt", payment_id=payment_id, config_id=config_id)
-            text, kb = _build_card_payment_page(card, bank, owner, price, final_amount)
+            text, kb = _build_card_payment_page(card, bank, owner, price, final_amount,
+                                                 back_cb=f"mypnlcfg:renewconfirm:{config_id}")
             bot.answer_callback_query(call.id)
             send_or_edit(call, text, kb)
             return
