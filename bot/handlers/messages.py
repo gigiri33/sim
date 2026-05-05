@@ -3777,8 +3777,12 @@ def universal_handler(message):
             return
 
         if sn == "admin_card_add_bank_emoji" and is_admin(uid):
-            emoji = (message.text or "").strip()
-            bank_with_emoji = f"{sd.get('bank_name', '')} {emoji}".strip() if emoji else sd.get("bank_name", "")
+            from ..ui.premium_emoji import serialize_premium_text as _spt_bk
+            emoji_text = (message.text or "").strip()
+            emoji_ents = message.entities or []
+            emoji_stored = _spt_bk(emoji_text, emoji_ents) if emoji_text else ""
+            bank_name_base = sd.get("bank_name", "")
+            bank_with_emoji = f"{bank_name_base} {emoji_stored}".strip() if emoji_stored else bank_name_base
             state_set(uid, "admin_card_add_holder", card_number=sd["card_number"], bank_name=bank_with_emoji)
             bot.send_message(uid, "👤 نام صاحب کارت را ارسال کنید:", reply_markup=back_button("adm:gw:card:cards"))
             return
@@ -3812,8 +3816,12 @@ def universal_handler(message):
             return
 
         if sn == "admin_card_edit_bank_emoji" and is_admin(uid):
-            emoji = (message.text or "").strip()
-            bank_with_emoji = f"{sd.get('bank_name', '')} {emoji}".strip() if emoji else sd.get("bank_name", "")
+            from ..ui.premium_emoji import serialize_premium_text as _spt_bk2
+            emoji_text = (message.text or "").strip()
+            emoji_ents = message.entities or []
+            emoji_stored = _spt_bk2(emoji_text, emoji_ents) if emoji_text else ""
+            bank_name_base = sd.get("bank_name", "")
+            bank_with_emoji = f"{bank_name_base} {emoji_stored}".strip() if emoji_stored else bank_name_base
             state_set(uid, "admin_card_edit_holder", card_id=sd["card_id"],
                       card_number=sd["card_number"], bank_name=bank_with_emoji)
             bot.send_message(uid, "👤 نام صاحب کارت جدید را ارسال کنید:",

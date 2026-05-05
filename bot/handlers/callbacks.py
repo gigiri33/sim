@@ -3078,8 +3078,10 @@ def _build_card_payment_page(card, bank, owner, price, final_amount):
     _amount_icon = _ce_cp("💰", "5348418461838098123")
     _warn_icon   = _ce_cp("⚠️", "5987718004475958316")
 
+    from ..ui.premium_emoji import render_premium_text_html as _rpth_cp
+    _bank_display = _rpth_cp(bank, escape_plain_parts=True) if bank else 'ثبت نشده'
     card_info = (
-        f"{esc(bank or 'ثبت نشده')}\n"
+        f"{_bank_display}\n"
         f"{_owner_icon} {esc(owner or 'ثبت نشده')}\n"
         f"{_card_icon} <code>{esc(card)}</code>\n\n"
     )
