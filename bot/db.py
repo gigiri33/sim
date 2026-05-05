@@ -820,6 +820,7 @@ def _run_init_db_migrations():
             # ── Config types: purchase mode and invoice description ────────────
             "ALTER TABLE config_types ADD COLUMN purchase_mode TEXT NOT NULL DEFAULT 'step'",
             "ALTER TABLE config_types ADD COLUMN invoice_description TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE config_types ADD COLUMN glass_enabled_dims TEXT NOT NULL DEFAULT 'v,d,u,q'",
             # ── Glass buy: max order quantity setting ─────────────────────────
             "INSERT OR IGNORE INTO settings(key,value) VALUES('max_order_quantity','10')",
             # ── Support methods table ──────────────────────────────────────────

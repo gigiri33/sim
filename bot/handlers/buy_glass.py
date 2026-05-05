@@ -180,8 +180,13 @@ class GlassSession:
         self.sel_user_limit = int(pkg["max_users"] if "max_users" in pkg.keys() else 0)
         self.matched_pkg    = pkg
         self.unit_price     = int(pkg["price"])
-        raw_stock = pkg["stock"] if "stock" in pkg.keys() else None
-        self.stock          = int(raw_stock) if raw_stock is not None else None   # None = unlimited
+        # Panel packages have unlimited effective stock
+        _src = pkg["config_source"] if "config_source" in pkg.keys() else "manual"
+        if (_src or "manual") == "panel":
+            self.stock = None
+        else:
+            raw_stock = pkg["stock"] if "stock" in pkg.keys() else None
+            self.stock = int(raw_stock) if raw_stock is not None else None  # None = unlimited
 
     def _find_package(self, vol, dur, mu) -> Optional[Any]:
         """Exact match first, then closest."""
@@ -687,8 +692,8 @@ def handle_glass_callback(call, data: str):
 
         bot.answer_callback_query(call.id)
 
-        # Re-use existing _show_naming_prompt / _show_discount_prompt / _show_purchase_gateways
-        from ..handlers.callbacks import (
+        # Re-use existing helpers from callbacks (same package — lazy import avoids circular)
+        from .callbacks import (
             _is_panel_package, _show_naming_prompt,
             _show_discount_prompt, _show_purchase_gateways,
         )
@@ -697,7 +702,6 @@ def handle_glass_callback(call, data: str):
             return True
         if _show_discount_prompt(call, price):
             return True
-        from ..db import get_user as _gu3
         _show_purchase_gateways(call, uid, package_id, price, package_row)
         return True
 
