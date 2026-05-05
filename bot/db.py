@@ -1321,6 +1321,13 @@ def update_type_invoice_description(type_id, desc):
         )
 
 
+def update_type_glass_enabled_dims(type_id, dims_str):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE config_types SET glass_enabled_dims=? WHERE id=?", (dims_str or "v,d,u,q", type_id)
+        )
+
+
 def update_type_button_color(type_id, color):
     with get_conn() as conn:
         conn.execute(

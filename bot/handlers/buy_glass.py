@@ -515,57 +515,36 @@ def show_glass_buy(call, type_id: int):
         bot.answer_callback_query(call.id, _ALERTS["empty"], show_alert=True)
         return
 
-    # Show dimension selection step first
-    state_set(uid, "glass_dimsel", type_id=type_id,
-              en_v=1, en_d=1, en_u=1, en_q=1)
-    bot.answer_callback_query(call.id)
-    _show_dimsel(call, type_id, {"v": 1, "d": 1, "u": 1, "q": 1})
-
-
-def _show_dimsel(call, type_id: int, enabled: dict):
-    """Show the dimension selection step before the glass invoice."""
-    from ..bot_instance import bot
-    from ..ui.helpers import send_or_edit
-
-    _DIM_INFO = [
-        ("v", "حجم"),
-        ("d", "زمان"),
-        ("u", "کاربر"),
-        ("q", "تعداد"),
-    ]
-    rows = []
-    for dim, label in _DIM_INFO:
-        tick = "✅" if enabled.get(dim, 1) else "☑️"
-        rows.append([{
-            "text": f"{tick} {label}",
-            "callback_data": f"buyg:{type_id}:dimtoggle:{dim}",
-        }])
-    rows.append([{
-        "text": "ادامه",
-        "callback_data": f"buyg:{type_id}:dimconfirm",
-        "style": "success",
-        "icon_custom_emoji_id": "5357069174512303778",
-    }])
-    rows.append([{
-        "text": "بازگشت",
-        "callback_data": f"buyg:{type_id}:back",
-        "icon_custom_emoji_id": "5253997076169115797",
-    }])
-
-    text = (
-        f'{_ce(_CE_SHOP, "🛍")} <b>تنظیم فاکتور شیشه\u200cای</b>\n\n'
-        "موارد زیر را که می\u200cخواهید در فاکتور <b>قابل تغییر</b> باشند انتخاب کنید:"
-    )
     try:
-        bot.edit_message_text(
-            text, call.message.chat.id, call.message.message_id,
-            parse_mode="HTML",
-            reply_markup=json.dumps({"inline_keyboard": rows}),
-            disable_web_page_preview=True,
-        )
-    except Exception as _e:
-        if "message is not modified" not in str(_e).lower():
-            send_or_edit(call, text, json.dumps({"inline_keyboard": rows}))
+        max_qty = int(setting_get("max_order_quantity", "10") or "10")
+    except Exception:
+        max_qty = 10
+
+    # Read admin-configured enabled dims from DB
+    try:
+        _dims_str = type_row["glass_enabled_dims"] if "glass_enabled_dims" in type_row.keys() else "v,d,u,q"
+        enabled_dims = set((_dims_str or "v,d,u,q").split(","))
+    except Exception:
+        enabled_dims = {"v", "d", "u", "q"}
+
+    try:
+        ses = GlassSession(type_id=type_id, packages=packages, max_qty=max_qty, enabled_dims=enabled_dims)
+    except ValueError:
+        bot.answer_callback_query(call.id, _ALERTS["empty"], show_alert=True)
+        return
+
+    state_set(uid, "glass_buy", **ses.to_state())
+
+    inv_desc = ""
+    try:
+        inv_desc = type_row["invoice_description"] if "invoice_description" in type_row.keys() else ""
+    except Exception:
+        pass
+
+    text = build_glass_invoice_text(ses, inv_desc)
+    kb   = build_glass_invoice_keyboard(ses, type_id)
+    bot.answer_callback_query(call.id)
+    send_or_edit(call, text, kb)
 
 
 def _reload_session(uid: int, type_id: int) -> Optional[GlassSession]:
@@ -653,96 +632,10 @@ def handle_glass_callback(call, data: str):
 
     # ── back ─────────────────────────────────────────────────────────────────
     if action == "back":
-        from ..helpers import state_name as _sn_bk, state_data as _sd_bk
-        if _sn_bk(uid) == "glass_buy":
-            # On invoice page → return to dimsel
-            sd_bk = _sd_bk(uid)
-            ed = set(sd_bk.get("enabled_dims", ["v", "d", "u", "q"]))
-            enabled = {d: (1 if d in ed else 0) for d in ("v", "d", "u", "q")}
-            state_set(uid, "glass_dimsel", type_id=type_id,
-                      **{f"en_{d}": v for d, v in enabled.items()})
-            bot.answer_callback_query(call.id)
-            _show_dimsel(call, type_id, enabled)
-        else:
-            # On dimsel page → return to service list
-            state_clear(uid)
-            bot.answer_callback_query(call.id)
-            from ..admin.renderers import _fake_call
-            _fake_call(call, "buy:start")
-        return True
-
-    # ── dim-selection toggles (pre-invoice step) ─────────────────────────────
-    if action == "dimtoggle":
-        if len(parts) < 4 or parts[3] not in ("v", "d", "u", "q"):
-            bot.answer_callback_query(call.id)
-            return True
-        from ..helpers import state_name as _sn_dt, state_data as _sd_dt
-        if _sn_dt(uid) != "glass_dimsel":
-            bot.answer_callback_query(call.id, "جلسه منقضی شد. دوباره امتحان کنید.", show_alert=True)
-            return True
-        sd_dt = _sd_dt(uid)
-        dim = parts[3]
-        en_key = f"en_{dim}"
-        sd_dt[en_key] = 0 if sd_dt.get(en_key, 1) else 1
-        state_set(uid, "glass_dimsel", **{k: v for k, v in sd_dt.items()})
+        state_clear(uid)
         bot.answer_callback_query(call.id)
-        enabled = {d: sd_dt.get(f"en_{d}", 1) for d in ("v", "d", "u", "q")}
-        _show_dimsel(call, type_id, enabled)
-        return True
-
-    # ── dim-selection confirm → create session + show invoice ─────────────────
-    if action == "dimconfirm":
-        from ..helpers import state_name as _sn_dc, state_data as _sd_dc
-        from ..db import get_packages, get_type, setting_get
-        if _sn_dc(uid) != "glass_dimsel":
-            bot.answer_callback_query(call.id, "جلسه منقضی شد. دوباره امتحان کنید.", show_alert=True)
-            return True
-        sd_dc = _sd_dc(uid)
-        enabled_dims = {d for d in ("v", "d", "u", "q") if sd_dc.get(f"en_{d}", 1)}
-        type_row = get_type(type_id)
-        if not type_row:
-            bot.answer_callback_query(call.id, "نوع سرویس یافت نشد.", show_alert=True)
-            return True
-        user_row_dc = None
-        try:
-            from ..db import get_user as _gu_dc
-            user_row_dc = _gu_dc(uid)
-        except Exception:
-            pass
-        _is_agent_dc = bool(user_row_dc and user_row_dc["is_agent"])
-        stock_only_dc = setting_get("preorder_mode", "0") == "1"
-        packages_dc = [p for p in get_packages(type_id=type_id)
-                       if p["price"] > 0 and _br_ok(p, _is_agent_dc) and _pkg_has_stock(p, stock_only_dc)]
-        if not packages_dc:
-            bot.answer_callback_query(call.id, _ALERTS["empty"], show_alert=True)
-            return True
-        try:
-            max_qty_dc = int(setting_get("max_order_quantity", "10") or "10")
-        except Exception:
-            max_qty_dc = 10
-        try:
-            ses_dc = GlassSession(type_id=type_id, packages=packages_dc,
-                                  max_qty=max_qty_dc, enabled_dims=enabled_dims)
-        except ValueError:
-            bot.answer_callback_query(call.id, _ALERTS["empty"], show_alert=True)
-            return True
-        state_set(uid, "glass_buy", **ses_dc.to_state())
-        inv_desc_dc = ""
-        try:
-            inv_desc_dc = type_row["invoice_description"] if "invoice_description" in type_row.keys() else ""
-        except Exception:
-            pass
-        text_dc = build_glass_invoice_text(ses_dc, inv_desc_dc)
-        kb_dc   = build_glass_invoice_keyboard(ses_dc, type_id)
-        bot.answer_callback_query(call.id)
-        try:
-            bot.edit_message_text(
-                text_dc, call.message.chat.id, call.message.message_id,
-                parse_mode="HTML", reply_markup=kb_dc, disable_web_page_preview=True,
-            )
-        except Exception as _e_dc:
-            if "message is not modified" not in str(_e_dc).lower():
-                log.warning("dimconfirm edit failed: %s", _e_dc)
+        from ..admin.renderers import _fake_call
+        _fake_call(call, "buy:start")
         return True
 
     # ── dimension changes (invoice step) ──────────────────────────────────────

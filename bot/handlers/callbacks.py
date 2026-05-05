@@ -27,7 +27,7 @@ from ..db import (
     get_purchase, get_available_configs_for_package,
     get_all_types, get_active_types, get_type, add_type, update_type, update_type_description, update_type_active, delete_type,
     update_type_emoji as _db_update_type_emoji, update_type_button_color as _db_update_type_button_color,
-    update_type_purchase_mode, update_type_invoice_description,
+    update_type_purchase_mode, update_type_invoice_description, update_type_glass_enabled_dims,
     get_packages, get_package, add_package, update_package_field, toggle_package_active, delete_package,
     get_registered_packages_stock, get_configs_paginated, count_configs,
     expire_config, add_config,
@@ -9810,6 +9810,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("🎨 ویرایش ایموجی", callback_data=f"admin:type:editemoji:{type_id}"))
         kb.add(types.InlineKeyboardButton("🎨 ویرایش رنگ", callback_data=f"admin:type:editcolor:{type_id}"))
         kb.add(types.InlineKeyboardButton("🛒 ویرایش روش خرید", callback_data=f"admin:type:editpurchasemode:{type_id}"))
+        kb.add(types.InlineKeyboardButton("🛍️ ویرایش ابعاد فاکتور", callback_data=f"admin:type:glassdims:{type_id}"))
         kb.add(types.InlineKeyboardButton("📋 ویرایش توضیحات فاکتور", callback_data=f"admin:type:editinvdesc:{type_id}"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:types", icon_custom_emoji_id="5253997076169115797"))
         _pmode = row["purchase_mode"] if "purchase_mode" in row.keys() else "step"
@@ -10088,6 +10089,52 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id, "✅ توضیحات حذف شد.")
         log_admin_action(uid, f"توضیحات نوع #{type_id} حذف شد")
         _show_admin_types(call)
+        return
+
+    # ── admin:type:glassdims:{id} ─────────────────────────────────────────────
+    if data.startswith("admin:type:glassdims:"):
+        type_id = int(data.split(":")[-1])
+        row = get_type(type_id)
+        if not row:
+            bot.answer_callback_query(call.id, "نوع یافت نشد.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        _cur_dims = set((row["glass_enabled_dims"] if "glass_enabled_dims" in row.keys() else "v,d,u,q").split(","))
+        import json as _j_gd
+        _DIM_LABELS_GD = [("v", "حجم"), ("d", "زمان"), ("u", "کاربر"), ("q", "تعداد")]
+        _rows_gd = []
+        for _dim, _lbl in _DIM_LABELS_GD:
+            _tick = "✅" if _dim in _cur_dims else "☑️"
+            _rows_gd.append([{"text": f"{_tick} {_lbl}", "callback_data": f"admin:type:glassdimtoggle:{type_id}:{_dim}"}])
+        _rows_gd.append([{"text": "بازگشت", "callback_data": f"admin:type:edit:{type_id}", "icon_custom_emoji_id": "5253997076169115797"}])
+        send_or_edit(call,
+            f"🛍️ <b>ابعاد قابل تغییر در فاکتور {esc(row['name'])}</b>\n\n"
+            "ابعاد تیک‌خورده دکمه بعلاوه/کاهش دارند. غیرفعال فقط مقدار ثابت نشان داده می‌شود.",
+            _j_gd.dumps({"inline_keyboard": _rows_gd}))
+        return
+
+    # ── admin:type:glassdimtoggle:{id}:{dim} ──────────────────────────────────
+    if data.startswith("admin:type:glassdimtoggle:"):
+        _p_gdt = data.split(":")
+        type_id = int(_p_gdt[3])
+        dim     = _p_gdt[4] if len(_p_gdt) > 4 else ""
+        if dim not in ("v", "d", "u", "q"):
+            bot.answer_callback_query(call.id)
+            return
+        row = get_type(type_id)
+        if not row:
+            bot.answer_callback_query(call.id, "نوع یافت نشد.", show_alert=True)
+            return
+        _cur_dims = set((row["glass_enabled_dims"] if "glass_enabled_dims" in row.keys() else "v,d,u,q").split(","))
+        if dim in _cur_dims:
+            _cur_dims.discard(dim)
+        else:
+            _cur_dims.add(dim)
+        if not _cur_dims:
+            _cur_dims = {dim}
+        update_type_glass_enabled_dims(type_id, ",".join(sorted(_cur_dims)))
+        bot.answer_callback_query(call.id)
+        _fake_call(call, f"admin:type:glassdims:{type_id}")
         return
 
     # ── admin:type:editpurchasemode:{id} ──────────────────────────────────────
