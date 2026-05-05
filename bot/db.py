@@ -1219,6 +1219,18 @@ def _bulk_where(filter_type, user_ids):
         return "is_agent=0", []
     if filter_type == "agents":
         return "is_agent=1", []
+    if filter_type == "buyers":
+        return (
+            "(EXISTS (SELECT 1 FROM purchases p WHERE p.user_id=users.user_id)"
+            " OR EXISTS (SELECT 1 FROM panel_configs pc WHERE pc.user_id=users.user_id))",
+            []
+        )
+    if filter_type == "non_buyers":
+        return (
+            "(NOT EXISTS (SELECT 1 FROM purchases p WHERE p.user_id=users.user_id)"
+            " AND NOT EXISTS (SELECT 1 FROM panel_configs pc WHERE pc.user_id=users.user_id))",
+            []
+        )
     # specific list
     if not user_ids:
         return "0=1", []
@@ -1248,7 +1260,7 @@ def bulk_set_status(filter_type, user_ids, status):
 
 
 def count_users_by_filter(filter_type):
-    """Count users for a given filter type ('all', 'public', 'agents')."""
+    """Count users for a given filter type."""
     with get_conn() as conn:
         if filter_type == "all":
             return conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
@@ -1256,6 +1268,18 @@ def count_users_by_filter(filter_type):
             return conn.execute("SELECT COUNT(*) FROM users WHERE is_agent=0").fetchone()[0]
         if filter_type == "agents":
             return conn.execute("SELECT COUNT(*) FROM users WHERE is_agent=1").fetchone()[0]
+        if filter_type == "buyers":
+            return conn.execute(
+                "SELECT COUNT(*) FROM users WHERE"
+                " (EXISTS (SELECT 1 FROM purchases p WHERE p.user_id=users.user_id)"
+                "  OR EXISTS (SELECT 1 FROM panel_configs pc WHERE pc.user_id=users.user_id))"
+            ).fetchone()[0]
+        if filter_type == "non_buyers":
+            return conn.execute(
+                "SELECT COUNT(*) FROM users WHERE"
+                " (NOT EXISTS (SELECT 1 FROM purchases p WHERE p.user_id=users.user_id)"
+                "  AND NOT EXISTS (SELECT 1 FROM panel_configs pc WHERE pc.user_id=users.user_id))"
+            ).fetchone()[0]
     return 0
 
 

@@ -238,7 +238,7 @@ def show_payment_method_selection(target, uid, context_data):
 
 
 # ── Crypto UI ──────────────────────────────────────────────────────────────────
-def show_crypto_selection(target, amount=None):
+def show_crypto_selection(target, amount=None, back_cb="pm:back"):
     from .db import setting_get
     rows   = []
     prices = _get_prices() if amount else {}
@@ -257,7 +257,7 @@ def show_crypto_selection(target, amount=None):
     if not has_any:
         send_or_edit(target, "⚠️ هیچ آدرس ارز دیجیتالی توسط ادمین ثبت نشده است.", back_button("main"))
         return
-    rows.append([_btn("بازگشت", callback_data="pm:back", emoji_id="5352759161945867747")])
+    rows.append([_btn("بازگشت", callback_data=back_cb, emoji_id="5352759161945867747")])
     send_or_edit(target, f"{ce('💎', '5454409660473827001')} <b>ارز دیجیتال</b>\n\nنوع ارز مورد نظر را انتخاب کنید:", _raw_markup(rows))
 
 

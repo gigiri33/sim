@@ -5818,7 +5818,7 @@ def _dispatch_callback(call, uid, data):
         state_set(uid, "renew_crypto_select_coin", package_id=package_id, amount=price,
                   purchase_id=purchase_id, config_id=item["config_id"])
         bot.answer_callback_query(call.id)
-        show_crypto_selection(call, amount=price)
+        show_crypto_selection(call, amount=price, back_cb=f"pm:back:renew:{purchase_id}:{package_id}:{int(price)}")
         return
 
     if data.startswith("rpay:tetrapay:verify:"):
@@ -7349,7 +7349,7 @@ def _dispatch_callback(call, uid, data):
             return
         state_set(uid, "buy_crypto_select_coin", package_id=package_id, amount=price, quantity=_qty_cr)
         bot.answer_callback_query(call.id)
-        show_crypto_selection(call, amount=price)
+        show_crypto_selection(call, amount=price, back_cb=f"pm:back:buy:{package_id}:{int(price)}")
         return
 
     # Crypto coin selection (after buy)
@@ -7422,6 +7422,82 @@ def _dispatch_callback(call, uid, data):
         show_crypto_selection(call, amount=amount)
         return
 
+    # ── Stateless back from crypto coin selection → wallet gateway selection ──
+    if data.startswith("wallet:gateways:"):
+        try:
+            amount = int(data.split(":")[2])
+        except (IndexError, ValueError):
+            amount = None
+        bot.answer_callback_query(call.id)
+        if amount:
+            state_set(uid, "wallet_charge_method", amount=amount)
+            _show_wallet_gateways(call, uid, amount)
+        else:
+            show_main_menu(call)
+        return
+
+    # ── Stateless back from crypto coin selection → buy gateway selection ─────
+    if data.startswith("pm:back:buy:"):
+        parts = data.split(":")
+        try:
+            package_id = int(parts[3])
+            amount     = int(parts[4])
+        except (IndexError, ValueError):
+            bot.answer_callback_query(call.id)
+            show_main_menu(call)
+            return
+        package_row = get_package(package_id)
+        bot.answer_callback_query(call.id)
+        if package_row:
+            state_set(uid, "buy_select_method", package_id=package_id, amount=amount,
+                      original_amount=amount, discount_amount=0, kind="purchase", quantity=1)
+            _show_purchase_gateways(call, uid, package_id, amount, package_row)
+        else:
+            show_main_menu(call)
+        return
+
+    # ── Stateless back from crypto coin selection → renew gateway selection ───
+    if data.startswith("pm:back:renew:"):
+        parts = data.split(":")
+        try:
+            purchase_id = int(parts[3])
+            package_id  = int(parts[4])
+            amount      = int(parts[5])
+        except (IndexError, ValueError):
+            bot.answer_callback_query(call.id)
+            show_main_menu(call)
+            return
+        item        = get_purchase(purchase_id)
+        package_row = get_package(package_id)
+        bot.answer_callback_query(call.id)
+        if item and item["user_id"] == uid and package_row:
+            state_set(uid, "renew_select_method", package_id=package_id, amount=amount,
+                      original_amount=amount, kind="renewal", purchase_id=purchase_id)
+            _show_renewal_gateways(call, uid, purchase_id, package_id, amount, package_row, item)
+        else:
+            show_main_menu(call)
+        return
+
+    # ── Stateless back from crypto coin selection → pnlcfg renew gateways ────
+    if data.startswith("pm:back:pnlcfg:"):
+        parts = data.split(":")
+        try:
+            config_id  = int(parts[3])
+            package_id = int(parts[4])
+            amount     = int(parts[5])
+        except (IndexError, ValueError):
+            bot.answer_callback_query(call.id)
+            show_main_menu(call)
+            return
+        cfg         = get_panel_config(config_id)
+        package_row = get_package(package_id)
+        bot.answer_callback_query(call.id)
+        if cfg and cfg["user_id"] == uid and package_row:
+            _show_pnlcfg_renewal_gateways(call, uid, config_id, package_id, amount, package_row, cfg)
+        else:
+            show_main_menu(call)
+        return
+
     if data == "pm:back":
         bot.answer_callback_query(call.id)
         sn = state_name(uid)
@@ -7433,23 +7509,33 @@ def _dispatch_callback(call, uid, data):
             if _pmt and _pmt["payment_method"] == "crypto":
                 _amount = sd.get("amount")
                 _kind   = _pmt["kind"]
+                _back_cb = "pm:back"
                 if _kind == "config_purchase":
+                    _pkg_id = sd.get("package_id")
                     state_set(uid, "buy_crypto_select_coin",
-                              package_id=sd.get("package_id"), amount=_amount,
+                              package_id=_pkg_id, amount=_amount,
                               quantity=sd.get("quantity", 1))
+                    _back_cb = f"pm:back:buy:{_pkg_id}:{int(_amount or 0)}"
                 elif _kind == "wallet_charge":
                     state_set(uid, "wallet_crypto_select_coin", amount=_amount,
                               payment_id=_pid)
+                    _back_cb = f"wallet:gateways:{int(_amount or 0)}"
                 elif _kind == "renewal":
+                    _pkg_id = sd.get("package_id")
+                    _pur_id = sd.get("purchase_id")
                     state_set(uid, "renew_crypto_select_coin",
-                              package_id=sd.get("package_id"), amount=_amount,
+                              package_id=_pkg_id, amount=_amount,
                               config_id=sd.get("config_id") or _pmt["config_id"],
-                              purchase_id=sd.get("purchase_id"))
+                              purchase_id=_pur_id)
+                    _back_cb = f"pm:back:renew:{_pur_id}:{_pkg_id}:{int(_amount or 0)}"
                 elif _kind == "pnlcfg_renewal":
+                    _pkg_id = sd.get("package_id")
+                    _cfg_id = sd.get("config_id") or _pmt["config_id"]
                     state_set(uid, "pnlcfg_renew_crypto_select_coin",
-                              package_id=sd.get("package_id"), amount=_amount,
-                              config_id=sd.get("config_id") or _pmt["config_id"])
-                show_crypto_selection(call, amount=_amount)
+                              package_id=_pkg_id, amount=_amount,
+                              config_id=_cfg_id)
+                    _back_cb = f"pm:back:pnlcfg:{_cfg_id}:{_pkg_id}:{int(_amount or 0)}"
+                show_crypto_selection(call, amount=_amount, back_cb=_back_cb)
                 return
         if sn in ("buy_crypto_select_coin", "buy_select_method", "await_purchase_receipt"):
             package_id  = sd.get("package_id")
@@ -8670,7 +8756,7 @@ def _dispatch_callback(call, uid, data):
             return
         state_set(uid, "wallet_crypto_select_coin", amount=amount)
         bot.answer_callback_query(call.id)
-        show_crypto_selection(call, amount=amount)
+        show_crypto_selection(call, amount=amount, back_cb=f"wallet:gateways:{int(amount)}")
         return
 
     if data == "wallet:charge:tetrapay":
@@ -11515,7 +11601,7 @@ def _dispatch_callback(call, uid, data):
             state_set(uid, "pnlcfg_renew_crypto_select_coin",
                       config_id=config_id, package_id=package_id, amount=price)
             bot.answer_callback_query(call.id)
-            show_crypto_selection(call, amount=price)
+            show_crypto_selection(call, amount=price, back_cb=f"pm:back:pnlcfg:{config_id}:{package_id}:{int(price)}")
             return
 
         # mypnlcfgrpay:tetrapay:{config_id}:{package_id}
@@ -14657,10 +14743,12 @@ def _dispatch_callback(call, uid, data):
             "set_restricted": "🚫 محدود کردن",
         }
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("👥 همه کاربران",        callback_data=f"adm:bulk:tgt:{op}:all"))
-        kb.add(types.InlineKeyboardButton("👤 فقط کاربران عادی",   callback_data=f"adm:bulk:tgt:{op}:public"))
-        kb.add(types.InlineKeyboardButton("🤝 فقط نمایندگان",      callback_data=f"adm:bulk:tgt:{op}:agents"))
-        kb.add(types.InlineKeyboardButton("🔎 انتخاب کاربران خاص", callback_data=f"adm:bulk:tgt:{op}:pick:0"))
+        kb.add(types.InlineKeyboardButton("👥 همه کاربران",              callback_data=f"adm:bulk:tgt:{op}:all"))
+        kb.add(types.InlineKeyboardButton("👤 فقط کاربران عادی",         callback_data=f"adm:bulk:tgt:{op}:public"))
+        kb.add(types.InlineKeyboardButton("🤝 فقط نمایندگان",            callback_data=f"adm:bulk:tgt:{op}:agents"))
+        kb.add(types.InlineKeyboardButton("🛒 انتخاب همه خریداران",      callback_data=f"adm:bulk:tgt:{op}:buyers"))
+        kb.add(types.InlineKeyboardButton("🚶 انتخاب همه کسانی که خرید نکردن", callback_data=f"adm:bulk:tgt:{op}:non_buyers"))
+        kb.add(types.InlineKeyboardButton("🔎 انتخاب کاربران خاص",       callback_data=f"adm:bulk:tgt:{op}:pick:0"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:usr:bulk",
                                           icon_custom_emoji_id="5352759161945867747"))
         send_or_edit(call,
@@ -14724,7 +14812,8 @@ def _dispatch_callback(call, uid, data):
         _needs_amount = op in ("add_balance", "sub_balance")
         if _needs_amount:
             state_set(uid, "bulk_amount", op=op, filter_type=filt)
-            _FLT = {"all": "همه کاربران", "public": "کاربران عادی", "agents": "نمایندگان"}
+            _FLT = {"all": "همه کاربران", "public": "کاربران عادی", "agents": "نمایندگان",
+                    "buyers": "همه خریداران", "non_buyers": "کسانی که خرید نکردن"}
             _OP_L = {"add_balance": "افزودن", "sub_balance": "کاهش"}
             send_or_edit(call,
                 f"⚡ <b>عملیات گروهی</b>: {_OP_L[op]} موجودی\n"
@@ -14734,7 +14823,8 @@ def _dispatch_callback(call, uid, data):
         else:
             count = count_users_by_filter(filt)
             state_set(uid, "bulk_confirm_ready", op=op, filter_type=filt, selected=[], amount=0)
-            _FLT = {"all": "همه کاربران", "public": "کاربران عادی", "agents": "نمایندگان"}
+            _FLT = {"all": "همه کاربران", "public": "کاربران عادی", "agents": "نمایندگان",
+                    "buyers": "همه خریداران", "non_buyers": "کسانی که خرید نکردن"}
             _OP_L2 = {
                 "zero_balance": "صفر کردن موجودی",
                 "set_safe": "امن کردن",
