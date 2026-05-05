@@ -1034,7 +1034,7 @@ def notify_first_start_if_needed(tg_user):
     _send_to_topic("new_users", text)
 
 
-def get_users(has_purchase=None, limit=None, offset=0, status=None):
+def get_users(has_purchase=None, limit=None, offset=0, status=None, with_balance=False):
     q = (
         "SELECT u.*, "
         "(SELECT COUNT(*) FROM purchases p WHERE p.user_id=u.user_id)"
@@ -1055,7 +1055,11 @@ def get_users(has_purchase=None, limit=None, offset=0, status=None):
     if status is not None:
         q += " AND u.status=?"
         params.append(status)
-    q += " ORDER BY u.user_id DESC"
+    if with_balance:
+        q += " AND u.balance > 0"
+        q += " ORDER BY u.balance DESC"
+    else:
+        q += " ORDER BY u.user_id DESC"
     if limit is not None:
         q += f" LIMIT {int(limit)} OFFSET {int(offset)}"
     with get_conn() as conn:

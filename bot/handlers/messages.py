@@ -1242,9 +1242,8 @@ def universal_handler(message):
                       package_id=package_id, amount=total, original_amount=total,
                       unit_price=unit_price, quantity=1, kind="config_purchase",
                       service_names=[chosen_name])
-            if setting_get("discount_codes_enabled", "0") == "1":
-                if _show_discount_prompt(message, total):
-                    return
+            if _show_discount_prompt(message, total):
+                return
             _show_purchase_gateways(message, uid, package_id, total, package_row)
             return
 
@@ -1264,9 +1263,8 @@ def universal_handler(message):
                       package_id=package_id, amount=total, original_amount=total,
                       unit_price=unit_price, quantity=quantity, kind="config_purchase",
                       service_names=chosen_names)
-            if setting_get("discount_codes_enabled", "0") == "1":
-                if _show_discount_prompt(message, total):
-                    return
+            if _show_discount_prompt(message, total):
+                return
             _show_purchase_gateways(message, uid, package_id, total, package_row)
             return
 

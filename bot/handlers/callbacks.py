@@ -903,6 +903,9 @@ def _pkg_has_stock(p, stock_only: bool) -> bool:
 
 def _show_discount_prompt(call, amount=None):
     """Show the discount code prompt. Returns True if shown, False if skipped."""
+    # Check global toggle first
+    if setting_get("discount_codes_enabled", "0") != "1":
+        return False
     # Check if any eligible discount codes exist for this user
     from telebot.types import Message
     uid = call.from_user.id if hasattr(call, "from_user") else call.chat.id
@@ -7117,9 +7120,8 @@ def _dispatch_callback(call, uid, data):
                       package_id=package_id, amount=total, original_amount=total,
                       unit_price=unit_price, quantity=quantity, kind="config_purchase",
                       service_names=chosen_names)
-            if setting_get("discount_codes_enabled", "0") == "1":
-                if _show_discount_prompt(call, total):
-                    return
+            if _show_discount_prompt(call, total):
+                return
             _show_purchase_gateways(call, uid, package_id, total, package_row)
             return
         # naming == "custom"

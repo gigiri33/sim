@@ -133,20 +133,23 @@ def _show_admin_users_list(call, page=0, filter_mode="all"):
     # Map filter_mode to has_purchase arg and status filter
     hp = None
     status_filter = None
+    with_balance = False
     if filter_mode == "buyers":
         hp = True
     elif filter_mode == "new":
         hp = False
     elif filter_mode in ("safe", "unsafe", "restricted"):
         status_filter = filter_mode
+    elif filter_mode == "with_balance":
+        with_balance = True
 
     # DB-level pagination — no Python re-sort, newest users first
     # We need total for this filter to build pages
-    all_count_q_rows = get_users(has_purchase=hp, status=status_filter)
+    all_count_q_rows = get_users(has_purchase=hp, status=status_filter, with_balance=with_balance)
     total_filtered   = len(all_count_q_rows)
     total_pages      = max(1, (total_filtered + PER_PAGE - 1) // PER_PAGE)
     page             = max(0, min(page, total_pages - 1))
-    page_rows        = get_users(has_purchase=hp, status=status_filter, limit=PER_PAGE, offset=page * PER_PAGE)
+    page_rows        = get_users(has_purchase=hp, status=status_filter, with_balance=with_balance, limit=PER_PAGE, offset=page * PER_PAGE)
 
     total, buyers, new_today = count_users_stats()
 
@@ -158,10 +161,16 @@ def _show_admin_users_list(call, page=0, filter_mode="all"):
     all_icon    = "▶️ " if filter_mode == "all"    else ""
     buyers_icon = "▶️ " if filter_mode == "buyers" else ""
     new_icon    = "▶️ " if filter_mode == "new"    else ""
+    bal_icon    = "▶️ " if filter_mode == "with_balance" else ""
+    _bal_count  = total_filtered if filter_mode == "with_balance" else len(get_users(with_balance=True))
     kb.row(
         types.InlineKeyboardButton(f"{all_icon}همه ({total})",          callback_data="adm:usr:fl:all:0"),
         types.InlineKeyboardButton(f"{buyers_icon}خریداران ({buyers})", callback_data="adm:usr:fl:buyers:0"),
         types.InlineKeyboardButton(f"{new_icon}بدون خرید",              callback_data="adm:usr:fl:new:0"),
+    )
+    kb.add(
+        types.InlineKeyboardButton(f"{bal_icon}💰 موجودی دار ({_bal_count})",
+                                   callback_data="adm:usr:fl:with_balance:0"),
     )
 
     # Filter bar — row 2: security status
@@ -185,7 +194,12 @@ def _show_admin_users_list(call, page=0, filter_mode="all"):
         buy_icon    = f" 🛍{row['purchase_count']}" if row["purchase_count"] else ""
         name_part   = row["full_name"] or f"بدون نام ({row['user_id']})"
         uname_part  = f" | @{row['username']}" if row["username"] else ""
-        label       = f"{status_icon}{agent_icon} {name_part}{uname_part}{buy_icon}"
+        if filter_mode == "with_balance":
+            from ..helpers import fmt_price as _fp
+            bal_part = f" 💰{_fp(row['balance'])}"
+        else:
+            bal_part = ""
+        label       = f"{status_icon}{agent_icon} {name_part}{uname_part}{buy_icon}{bal_part}"
         kb.add(types.InlineKeyboardButton(label, callback_data=f"adm:usr:v:{row['user_id']}"))
 
     nav = []
