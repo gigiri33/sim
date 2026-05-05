@@ -18,6 +18,7 @@ TOPICS = [
     ("purchase_log",     "لاگ خرید"),
     ("renewal_log",      "لاگ تمدید"),
     ("wallet_log",       "لاگ کیف‌پول"),
+    ("gateway_payment_log", "لاگ درگاه‌ها"),
     ("test_report",      "گزارش تست"),
     ("broadcast_report", "اطلاع‌رسانی و پین"),
     ("referral_log",     "لاگ زیرمجموعه‌گیری"),
@@ -208,6 +209,87 @@ def log_admin_action(admin_id, action_text):
         f"👤 اجراکننده: <code>{admin_id}</code>\n"
         f"📌 عملیات: {action_text}"
     )
+
+
+# Gateway display name map (fallback if no custom setting)
+_GW_DISPLAY_NAMES = {
+    "card":              "کارت به کارت",
+    "wallet":            "کیف‌پول",
+    "crypto":            "ارز دیجیتال",
+    "tetrapay":          "TetraPay",
+    "swapwallet_crypto": "SwapWallet",
+    "tronpays_rial":     "TronPay",
+    "pazzlenet":         "PazzleNet",
+    "plisio":            "Plisio",
+    "nowpayments":       "NowPayments",
+    "tronado":           "Tronado",
+    "centralpay":        "CentralPay",
+    "rialpay":           "RialPay",
+}
+
+
+def log_gateway_payment(payment_id: int):
+    """
+    Send a successful-payment log message to the gateway_payment_log topic.
+    Accumulates per-gateway running total in settings.
+    Called from complete_payment() in db.py after the race is won.
+    """
+    try:
+        from .db import get_payment, get_user, setting_get, setting_set, fmt_price
+        payment = get_payment(payment_id)
+        if not payment:
+            return
+        # Only log actual money payments (skip wallet-charge internally funded ones here)
+        gw = (payment["payment_method"] or "").strip() or "نامشخص"
+        amount = int(payment["amount"] or 0)
+        user_id = payment["user_id"]
+        kind = payment["kind"] or ""
+
+        user_row = get_user(user_id)
+        user_name = user_row["full_name"] if user_row and user_row["full_name"] else str(user_id)
+
+        # Resolve display name
+        gw_display = setting_get(f"gw_{gw}_display_name", "").strip()
+        if not gw_display:
+            gw_display = _GW_DISPLAY_NAMES.get(gw, gw)
+
+        # Kind label
+        _KIND_LABELS = {
+            "config_purchase": "خرید سرویس",
+            "wallet_charge":   "شارژ کیف‌پول",
+            "renewal":         "تمدید سرویس",
+            "pnlcfg_renewal":  "تمدید پنل",
+        }
+        kind_label = _KIND_LABELS.get(kind, kind or "پرداخت")
+
+        # Running total per gateway
+        _total_key = f"gw_paid_total_{gw}"
+        try:
+            prev_total = int(setting_get(_total_key, "0") or "0")
+        except Exception:
+            prev_total = 0
+        new_total = prev_total + amount
+        setting_set(_total_key, str(new_total))
+
+        # Format money
+        try:
+            from .helpers import fmt_price as _fp
+            _fmt = _fp
+        except Exception:
+            def _fmt(x): return f"{x:,}"
+
+        text = (
+            f"💳 <b>پرداخت موفق — {gw_display}</b>\n\n"
+            f"👤 کاربر: <b>{user_name}</b>\n"
+            f"🆔 آیدی: <code>{user_id}</code>\n"
+            f"💰 مبلغ: <b>{_fmt(amount)}</b> تومان\n"
+            f"📌 نوع: {kind_label}\n"
+            f"🧾 شناسه: <code>#{payment_id}</code>\n\n"
+            f"📊 مجموع پرداختی موفق <b>{gw_display}</b>: <b>{_fmt(new_total)}</b> تومان"
+        )
+        send_to_topic("gateway_payment_log", text)
+    except Exception:
+        pass  # Never raise — this is fire-and-forget logging
 
 
 # ── Background loop ────────────────────────────────────────────────────────────

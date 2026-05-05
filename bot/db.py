@@ -399,6 +399,7 @@ def _run_init_db_migrations():
             "group_topic_purchase_log":     "",
             "group_topic_renewal_log":      "",
             "group_topic_wallet_log":       "",
+            "group_topic_gateway_payment_log": "",
             "group_topic_test_report":      "",
             "group_topic_broadcast_report": "",
             "group_topic_error_log":        "",
@@ -2459,7 +2460,15 @@ def complete_payment(payment_id, force=False):
             (now_str(), now_str(), payment_id)
         )
         changed = conn.execute("SELECT changes() AS c").fetchone()["c"]
-        return changed > 0
+        won = changed > 0
+    if won:
+        try:
+            import threading as _thr
+            from .group_manager import log_gateway_payment as _lgp
+            _thr.Thread(target=_lgp, args=(payment_id,), daemon=True).start()
+        except Exception:
+            pass
+    return won
 
 
 def lock_tronado_payment(payment_id: int) -> bool:
