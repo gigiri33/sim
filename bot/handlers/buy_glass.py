@@ -353,11 +353,12 @@ def build_glass_invoice_text(ses: GlassSession, invoice_description: str = "") -
         _build_title(ses),
         "",
         f'{_ce(_CE_VOLUME, "🔸")} حجم: <b>{vol_s}</b>',
+        "",
         f'{_ce(_CE_TIME,   "🔹")} زمان: <b>{dur_s}</b>',
         f'{_ce(_CE_USER,   "👥")} محدودیت کاربر: <b>{mu_s}</b>',
+        "",
         f'{_ce(_CE_QTY,    "🔢")} تعداد: <b>{ses.sel_quantity} عدد</b>',
         f'{_ce(_CE_MONEY,  "💱")} مبلغ: <b>{price_line}</b>',
-        f"📦 موجودی: <b>{stock_line}</b>",
     ]
 
     if invoice_description:
@@ -384,9 +385,9 @@ def build_glass_invoice_keyboard(ses: GlassSession, type_id: int) -> str:
     else:
         vol_s = "حجم نامحدود" if ses.sel_volume == 0 else _fmt_vol(ses.sel_volume)
         rows.append([
-            {"text": f'{_ce(_CE_PLUS, "➕")} افزایش', "callback_data": f"buyg:{tid}:v:+"},
-            {"text": vol_s,                             "callback_data": "noop"},
-            {"text": f'کاهش {_ce(_CE_MINUS, "➖")}',   "callback_data": f"buyg:{tid}:v:-"},
+            {"text": "➕ افزایش", "callback_data": f"buyg:{tid}:v:+"},
+            {"text": vol_s,       "callback_data": "noop", "style": "primary"},
+            {"text": "کاهش ➖",  "callback_data": f"buyg:{tid}:v:-"},
         ])
 
     # ── Duration row ──────────────────────────────────────────────────────────
@@ -397,9 +398,9 @@ def build_glass_invoice_keyboard(ses: GlassSession, type_id: int) -> str:
     else:
         dur_s = "زمان نامحدود" if ses.sel_duration == 0 else _fmt_dur(ses.sel_duration)
         rows.append([
-            {"text": f'{_ce(_CE_PLUS, "➕")} افزایش', "callback_data": f"buyg:{tid}:d:+"},
-            {"text": dur_s,                             "callback_data": "noop"},
-            {"text": f'کاهش {_ce(_CE_MINUS, "➖")}',   "callback_data": f"buyg:{tid}:d:-"},
+            {"text": "➕ افزایش", "callback_data": f"buyg:{tid}:d:+"},
+            {"text": dur_s,       "callback_data": "noop", "style": "primary"},
+            {"text": "کاهش ➖",  "callback_data": f"buyg:{tid}:d:-"},
         ])
 
     # ── User limit row ────────────────────────────────────────────────────────
@@ -410,16 +411,16 @@ def build_glass_invoice_keyboard(ses: GlassSession, type_id: int) -> str:
     else:
         mu_s = _fmt_mu(ses.sel_user_limit)
         rows.append([
-            {"text": f'{_ce(_CE_PLUS, "➕")} افزایش', "callback_data": f"buyg:{tid}:u:+"},
-            {"text": mu_s,                              "callback_data": "noop"},
-            {"text": f'کاهش {_ce(_CE_MINUS, "➖")}',   "callback_data": f"buyg:{tid}:u:-"},
+            {"text": "➕ افزایش", "callback_data": f"buyg:{tid}:u:+"},
+            {"text": mu_s,        "callback_data": "noop", "style": "primary"},
+            {"text": "کاهش ➖",  "callback_data": f"buyg:{tid}:u:-"},
         ])
 
     # ── Quantity row ──────────────────────────────────────────────────────────
     rows.append([
-        {"text": f'{_ce(_CE_PLUS, "➕")} افزایش', "callback_data": f"buyg:{tid}:q:+"},
-        {"text": f"{ses.sel_quantity} عدد",         "callback_data": "noop"},
-        {"text": f'کاهش {_ce(_CE_MINUS, "➖")}',   "callback_data": f"buyg:{tid}:q:-"},
+        {"text": "➕ افزایش",         "callback_data": f"buyg:{tid}:q:+"},
+        {"text": f"{ses.sel_quantity} عدد", "callback_data": "noop", "style": "primary"},
+        {"text": "کاهش ➖",           "callback_data": f"buyg:{tid}:q:-"},
     ])
 
     # ── Confirm / Back ────────────────────────────────────────────────────────
