@@ -69,37 +69,33 @@ def show_main_menu(target):
         )
         entities = None
 
-    # Prepend prefix emoji if set
+    # Send prefix emoji as a separate message before the main menu
     if prefix_raw:
         from .premium_emoji import render_premium_text_entities as _rpe, deserialize_premium_text as _dpt
         prefix_parsed = _dpt(prefix_raw)
         if prefix_parsed.get("entities"):
             prefix_text, prefix_entities = _rpe(prefix_raw)
-            if prefix_entities:
-                import telebot.types as _tbtypes
-                # Merge prefix + main text with entity offset adjustment
-                separator = "\n"
-                offset_shift = len(prefix_text.encode("utf-16-le")) // 2 + len(separator.encode("utf-16-le")) // 2
-                adjusted = []
-                for e in (entities or []):
-                    ne = _tbtypes.MessageEntity(
-                        type=e.type,
-                        offset=e.offset + offset_shift,
-                        length=e.length,
-                        url=getattr(e, "url", None),
-                        user=getattr(e, "user", None),
-                        language=getattr(e, "language", None),
-                        custom_emoji_id=getattr(e, "custom_emoji_id", None),
-                    )
-                    adjusted.append(ne)
-                entities = list(prefix_entities) + adjusted
-                text = prefix_text + separator + text
-            else:
-                text = prefix_text + "\n" + text
+            try:
+                bot.send_message(
+                    chat_id, prefix_text,
+                    parse_mode="",
+                    entities=prefix_entities,
+                    disable_web_page_preview=True,
+                    message_thread_id=thread_id,
+                )
+            except Exception:
+                pass
         else:
             prefix_text = render_premium_text_html(prefix_raw)
-            if not entities:
-                text = prefix_text + "\n" + text
+            try:
+                bot.send_message(
+                    chat_id, prefix_text,
+                    parse_mode="HTML",
+                    disable_web_page_preview=True,
+                    message_thread_id=thread_id,
+                )
+            except Exception:
+                pass
 
     if photo_id:
         # Send as photo with caption
