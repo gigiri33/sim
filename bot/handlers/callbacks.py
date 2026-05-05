@@ -6814,6 +6814,8 @@ def _dispatch_callback(call, uid, data):
 
     # ── Buy flow ──────────────────────────────────────────────────────────────
     if data == "buy:start":
+        # Clear any in-progress state (glass buy, naming prompt, etc.)
+        state_clear(uid)
         # Check purchase rules
         if setting_get("purchase_rules_enabled", "0") == "1":
             accepted = setting_get(f"rules_accepted_{uid}", "0")

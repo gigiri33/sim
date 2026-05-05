@@ -492,13 +492,16 @@ def universal_handler(message):
 
     # ── Popup menu routing ────────────────────────────────────────────────────
     # When start_menu_mode == "popup", the start menu is a ReplyKeyboardMarkup.
-    # Button presses arrive as text messages. Route them like callbacks if no
-    # active state is pending (so we don't hijack mid-flow inputs).
-    if (not sn and message.content_type == "text"
+    # Button presses arrive as text messages. Always route them as navigation —
+    # clear any active state so they act as an "escape" from mid-flow operations.
+    if (message.content_type == "text"
             and setting_get("start_menu_mode", "inline") == "popup"):
         from ..ui.start_menu import find_button_callback_by_text
         _popup_cb = find_button_callback_by_text(message.text or "")
         if _popup_cb:
+            # Cancel any in-progress operation before navigating
+            if sn:
+                state_clear(uid)
             from .callbacks import _dispatch_callback as _dcb
             _src_msg = message
             _src_user = message.from_user

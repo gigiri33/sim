@@ -713,6 +713,10 @@ def main():
     except Exception as e:
         print(f"⚠️ Could not delete webhook: {e}")
 
+    # Start watchdog — kills process (→ systemd restart) if bot stops responding
+    from bot.watchdog import start_watchdog
+    start_watchdog(bot, interval=300)
+
     print("✅ Bot is running...")
     bot.infinity_polling(
         skip_pending=True,
