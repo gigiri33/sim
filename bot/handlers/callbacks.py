@@ -7321,9 +7321,9 @@ def _dispatch_callback(call, uid, data):
         if setting_get("gw_card_random_amount", "0") == "1":
             final_amount = _generate_card_final_amount(price, payment_id)
             update_payment_final_amount(payment_id, final_amount)
-        state_set(uid, "await_purchase_receipt", payment_id=payment_id)
+        state_set(uid, "await_purchase_receipt", payment_id=payment_id, package_id=package_id, amount=price)
         text, kb = _build_card_payment_page(card, bank, owner, price, final_amount,
-                                             back_cb=f"buy:p:{package_id}")
+                                             back_cb="pm:back")
         bot.answer_callback_query(call.id)
         send_or_edit(call, text, kb)
         return
@@ -7426,7 +7426,7 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id)
         sn = state_name(uid)
         sd = state_data(uid)
-        if sn in ("buy_crypto_select_coin", "buy_select_method"):
+        if sn in ("buy_crypto_select_coin", "buy_select_method", "await_purchase_receipt"):
             package_id  = sd.get("package_id")
             package_row = get_package(package_id)
             if package_row:
@@ -18978,8 +18978,15 @@ def _dispatch_callback(call, uid, data):
             randamt_on  = setting_get(f"crypto_{coin_key}_rand_amount", "0") == "1"
             comment_lbl = "کامنت: ✅" if comment_on else "کامنت: 🔴"
             randamt_lbl = "مبلغ رندم: ✅" if randamt_on else "مبلغ رندم: 🔴"
+            _coin_emoji_id = CRYPTO_EMOJI_IDS.get(coin_key)
+            _coin_btn = types.InlineKeyboardButton(
+                f"{status_icon} {coin_label}",
+                callback_data=f"adm:set:cw:{coin_key}",
+            )
+            if _coin_emoji_id:
+                _coin_btn.icon_custom_emoji_id = _coin_emoji_id
             kb.row(
-                types.InlineKeyboardButton(f"{status_icon} {coin_label}", callback_data=f"adm:set:cw:{coin_key}"),
+                _coin_btn,
                 types.InlineKeyboardButton(comment_lbl,  callback_data=f"adm:gw:cw:{coin_key}:comment"),
                 types.InlineKeyboardButton(randamt_lbl, callback_data=f"adm:gw:cw:{coin_key}:randamt"),
             )

@@ -69,32 +69,44 @@ PERM_USER_FULL = {"agency", "assign_config", "manage_balance", "user_status"}
 # ── Crypto Configuration ───────────────────────────────────────────────────────
 CRYPTO_API_SYMBOLS = {
     "tron":       "TRX",
-    "ton":        "TON",
     "usdt_trc20": "USDT",
-    "usdt_ton":   "USDT",
     "usdt_bep20": "USDT",
+    "usdt_ton":   "USDT",
     "usdc_bep20": "USDC",
+    "eth":        "ETH",
+    "btc":        "BTC",
+    "bnb":        "BNB",
+    "ton":        "TON",
+    "sol":        "SOL",
     "ltc":        "LTC",
 }
 
 CRYPTO_COINS = [
-    ("tron",       "Tron (TRC20)"),
-    ("ton",        "TON"),
-    ("usdt_trc20", "USDT (TRC20 — Tron)"),
-    ("usdt_ton",   "USDT (TON)"),
-    ("usdt_bep20", "USDT (BEP20)"),
-    ("usdc_bep20", "USDC (BEP20)"),
-    ("ltc",        "LTC (Litecoin)"),
+    ("tron",       "ترون (TRC20)"),
+    ("usdt_trc20", "تتر (TRC20)"),
+    ("usdt_bep20", "تتر (BEP20)"),
+    ("eth",        "اتریوم (ETH)"),
+    ("btc",        "بیتکوین (BTC)"),
+    ("bnb",        "بایننس‌کوین (BNB)"),
+    ("usdc_bep20", "یو‌اس‌دی‌سی (BEP20)"),
+    ("usdt_ton",   "تتر (TON)"),
+    ("ton",        "تون (TON)"),
+    ("sol",        "سولانا (SOL)"),
+    ("ltc",        "لایت‌کوین (LTC)"),
 ]
 
 # Custom emoji IDs for crypto coin labels
 CRYPTO_EMOJI_IDS = {
-    "tron":       "5794054896852409524",
-    "ton":        "5796252975215156083",
-    "usdt_trc20": "5796237685131582541",
-    "usdt_ton":   "5796237685131582541",
-    "usdt_bep20": "5796237685131582541",
-    "usdc_bep20": "5796237685131582541",
+    "tron":       "6028143164378845862",
+    "usdt_trc20": "6030561364110479647",
+    "usdt_bep20": "6028584717081645421",
+    "usdt_ton":   "6030396841093238910",
+    "usdc_bep20": "6030598017361383746",
+    "eth":        "6028270411374925919",
+    "btc":        "6030734193594470413",
+    "bnb":        "6030374056291733605",
+    "ton":        "6030549140633555631",
+    "sol":        "6028283511025176940",
     "ltc":        "5796399747132563586",
 }
 
