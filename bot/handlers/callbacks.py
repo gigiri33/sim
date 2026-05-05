@@ -3483,6 +3483,23 @@ def _render_discount_code_detail(call, uid, code_id):
 
 
 
+# ── Module-level helper: build package color picker keyboard ─────────────────
+_PKG_COLOR_LABELS = {
+    "glass":  "⬜ شیشه‌ای (پیش‌فرض)",
+    "green":  "🟢 سبز",
+    "blue":   "🔵 آبی",
+    "red":    "🔴 قرمز",
+}
+
+def _pkg_color_picker_kb(package_id, current_color="glass"):
+    kb = types.InlineKeyboardMarkup()
+    for color, label in _PKG_COLOR_LABELS.items():
+        mark = "✅ " if color == (current_color or "glass") else ""
+        kb.add(types.InlineKeyboardButton(f"{mark}{label}", callback_data=f"admin:pkg:set_btncolor:{color}:{package_id}"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"admin:pkg:edit:{package_id}", icon_custom_emoji_id="5352759161945867747"))
+    return kb
+
+
 # ── Module-level helper: build package edit panel text + keyboard ────────────
 def _pkg_edit_text_kb(package_row):
     _BR_LABELS = {"all": "همه", "agents": "فقط نمایندگان", "public": "فقط کاربران عادی", "nobody": "هیچ‌کس (فقط هدیه)"}
@@ -3515,6 +3532,9 @@ def _pkg_edit_text_kb(package_row):
     kb.add(types.InlineKeyboardButton("👥 محدودیت کاربر", callback_data=f"admin:pkg:ef:maxusers:{package_id}"))
     kb.add(types.InlineKeyboardButton(show_name_lbl,      callback_data=f"admin:pkg:toggle_sn:{package_id}"))
     kb.add(types.InlineKeyboardButton(f"🔑 خریداران: {br_label} — تغییر", callback_data=f"admin:pkg:set_br:{package_id}"))
+    pkg_color = package_row["button_color"] if "button_color" in package_row.keys() else "glass"
+    color_label = _PKG_COLOR_LABELS.get(pkg_color or "glass", "⬜ شیشه‌ای")
+    kb.add(types.InlineKeyboardButton(f"🎨 رنگ دکمه: {color_label} — تغییر", callback_data=f"admin:pkg:ef:btncolor:{package_id}"))
     src_lbl = "ثبت دستی" if config_source == "manual" else f"پنل #{panel_id} اینباند {panel_port}"
     kb.add(types.InlineKeyboardButton(f"🔌 منبع کانفیگ: {src_lbl} — تغییر", callback_data=f"admin:pkg:src:{package_id}"))
     kb.add(types.InlineKeyboardButton(pkg_status_label, callback_data=f"admin:pkg:toggleactive:{package_id}"))
@@ -3524,6 +3544,8 @@ def _pkg_edit_text_kb(package_row):
     sn_line      = "✅ بله" if show_name_val else "❌ خیر"
     mu_val       = package_row["max_users"] if "max_users" in package_row.keys() else 0
     mu_line      = "نامحدود" if not mu_val else f"{mu_val} کاربره"
+    pkg_color    = package_row["button_color"] if "button_color" in package_row.keys() else "glass"
+    color_line   = _PKG_COLOR_LABELS.get(pkg_color or "glass", "⬜ شیشه‌ای")
     if config_source == "panel":
         src_info = f"پنل #{panel_id} | اینباند {panel_port} | {_DM_LABELS.get(delivery_mode, delivery_mode)}"
     else:
@@ -3538,6 +3560,7 @@ def _pkg_edit_text_kb(package_row):
         f"محدودیت کاربر: {mu_line}\n"
         f"نمایش نام به کاربر: {sn_line}\n"
         f"خریداران مجاز: {br_label}\n"
+        f"رنگ دکمه: {color_line}\n"
         f"منبع کانفیگ: {src_info}\n"
         f"وضعیت: {pkg_status_line}"
     )
@@ -7024,20 +7047,29 @@ def _dispatch_callback(call, uid, data):
             send_or_edit(call, "👥 تعداد کاربر مورد نظر را انتخاب کنید:", kb)
             return
         kb   = types.InlineKeyboardMarkup()
-        for p in packages:
-            price = get_effective_price(uid, p)
-            stock_tag = "" if _pkg_has_stock(p, True) else " ⏳"
-            _sn = p['show_name'] if 'show_name' in p.keys() else 1
-            _name_part = f"{p['name']}{stock_tag} | " if _sn else (f"{stock_tag} | " if stock_tag else "")
-            title = f"{_name_part}{fmt_vol(p['volume_gb'])} | {fmt_dur(p['duration_days'])} | {fmt_price(price)} ت"
-            kb.add(types.InlineKeyboardButton(title, callback_data=f"buy:p:{p['id']}"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="buy:start", icon_custom_emoji_id="5352759161945867747"))
         bot.answer_callback_query(call.id)
         agent_note = "\n\n🤝 <i>این قیمت‌ها مخصوص همکاری شماست</i>" if user and user["is_agent"] else ""
         if not packages:
             send_or_edit(call, "📭 در حال حاضر بسته‌ای برای فروش در این نوع موجود نیست.", kb)
         else:
-            send_or_edit(call, f"📦 یکی از پکیج‌ها را انتخاب کنید:{agent_note}", kb)
+            import json as _json_pkg
+            _color_map_pkg = {"green": "success", "red": "danger", "blue": "primary"}
+            _btn_rows_pkg = []
+            for p in packages:
+                price = get_effective_price(uid, p)
+                stock_tag = "" if _pkg_has_stock(p, True) else " ⏳"
+                _sn = p['show_name'] if 'show_name' in p.keys() else 1
+                _name_part = f"{p['name']}{stock_tag} | " if _sn else (f"{stock_tag} | " if stock_tag else "")
+                title = f"{_name_part}{fmt_vol(p['volume_gb'])} | {fmt_dur(p['duration_days'])} | {fmt_price(price)} ت"
+                _pkg_color = p["button_color"] if "button_color" in p.keys() else "glass"
+                _b = {"text": title, "callback_data": f"buy:p:{p['id']}"}
+                if _pkg_color in _color_map_pkg:
+                    _b["style"] = _color_map_pkg[_pkg_color]
+                _btn_rows_pkg.append([_b])
+            _btn_rows_pkg.append([{"text": "بازگشت", "callback_data": "buy:start", "icon_custom_emoji_id": "5352759161945867747"}])
+            kb_json = _json_pkg.dumps({"inline_keyboard": _btn_rows_pkg})
+            send_or_edit(call, f"📦 یکی از پکیج‌ها را انتخاب کنید:{agent_note}", kb_json)
         return
 
     if data.startswith("buy:mu:"):
@@ -7062,21 +7094,30 @@ def _dispatch_callback(call, uid, data):
         _is_agent = bool(user and user["is_agent"])
         all_pkgs = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and _br_ok(p, _is_agent) and _pkg_has_stock(p, stock_only)]
         packages = [p for p in all_pkgs if (p["max_users"] if "max_users" in p.keys() else 0) == selected_mu]
-        kb   = types.InlineKeyboardMarkup()
-        for p in packages:
-            price     = get_effective_price(uid, p)
-            stock_tag = "" if _pkg_has_stock(p, True) else " ⏳"
-            _sn       = p['show_name'] if 'show_name' in p.keys() else 1
-            _name_part = f"{p['name']}{stock_tag} | " if _sn else (f"{stock_tag} | " if stock_tag else "")
-            title = f"{_name_part}{fmt_vol(p['volume_gb'])} | {fmt_dur(p['duration_days'])} | {fmt_price(price)} ت"
-            kb.add(types.InlineKeyboardButton(title, callback_data=f"buy:p:{p['id']}"))
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"buy:t:{type_id}", icon_custom_emoji_id="5352759161945867747"))
         bot.answer_callback_query(call.id)
         agent_note = "\n\n🤝 <i>این قیمت‌ها مخصوص همکاری شماست</i>" if user and user["is_agent"] else ""
         if not packages:
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"buy:t:{type_id}", icon_custom_emoji_id="5352759161945867747"))
             send_or_edit(call, "📭 در حال حاضر بسته‌ای برای فروش در این نوع موجود نیست.", kb)
         else:
-            send_or_edit(call, f"📦 یکی از پکیج‌ها را انتخاب کنید:{agent_note}", kb)
+            import json as _json_mu
+            _color_map_mu = {"green": "success", "red": "danger", "blue": "primary"}
+            _btn_rows_mu = []
+            for p in packages:
+                price     = get_effective_price(uid, p)
+                stock_tag = "" if _pkg_has_stock(p, True) else " ⏳"
+                _sn       = p['show_name'] if 'show_name' in p.keys() else 1
+                _name_part = f"{p['name']}{stock_tag} | " if _sn else (f"{stock_tag} | " if stock_tag else "")
+                title = f"{_name_part}{fmt_vol(p['volume_gb'])} | {fmt_dur(p['duration_days'])} | {fmt_price(price)} ت"
+                _pkg_color = p["button_color"] if "button_color" in p.keys() else "glass"
+                _b = {"text": title, "callback_data": f"buy:p:{p['id']}"}
+                if _pkg_color in _color_map_mu:
+                    _b["style"] = _color_map_mu[_pkg_color]
+                _btn_rows_mu.append([_b])
+            _btn_rows_mu.append([{"text": "بازگشت", "callback_data": f"buy:t:{type_id}", "icon_custom_emoji_id": "5352759161945867747"}])
+            kb_json_mu = _json_mu.dumps({"inline_keyboard": _btn_rows_mu})
+            send_or_edit(call, f"📦 یکی از پکیج‌ها را انتخاب کنید:{agent_note}", kb_json_mu)
         return
 
     # ── Glass buy callbacks (buyg:{type_id}:{action}) ─────────────────────────
@@ -10600,12 +10641,38 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id)
             return
         sd = state_data(uid)
-        state_set(uid, "admin_add_package_config_source",
+        state_set(uid, "admin_add_package_btn_color",
                   type_id=sd["type_id"], package_name=sd["package_name"],
                   volume=sd["volume"], duration=sd["duration"],
                   price=sd["price"], show_name=sd.get("show_name", 1),
                   max_users=int(sd.get("max_users", 0) or 0),
                   buyer_role=buyer_role)
+        bot.answer_callback_query(call.id)
+        kb_color = types.InlineKeyboardMarkup()
+        for color, label in _PKG_COLOR_LABELS.items():
+            kb_color.add(types.InlineKeyboardButton(label, callback_data=f"admin:pkg:add:btncolor:{color}"))
+        send_or_edit(call,
+            "🎨 <b>رنگ دکمه پکیج</b>\n\n"
+            "رنگ دکمه این پکیج را در منوی خرید مرحله‌ای انتخاب کنید:",
+            kb_color)
+        return
+
+    if data.startswith("admin:pkg:add:btncolor:"):
+        if state_name(uid) != "admin_add_package_btn_color" or not is_admin(uid):
+            bot.answer_callback_query(call.id)
+            return
+        btn_color = data.split(":")[4]
+        if btn_color not in _PKG_COLOR_LABELS:
+            bot.answer_callback_query(call.id)
+            return
+        sd = state_data(uid)
+        state_set(uid, "admin_add_package_config_source",
+                  type_id=sd["type_id"], package_name=sd["package_name"],
+                  volume=sd["volume"], duration=sd["duration"],
+                  price=sd["price"], show_name=sd.get("show_name", 1),
+                  max_users=int(sd.get("max_users", 0) or 0),
+                  buyer_role=sd.get("buyer_role", "all"),
+                  btn_color=btn_color)
         bot.answer_callback_query(call.id)
         kb_cs = types.InlineKeyboardMarkup()
         kb_cs.row(
@@ -10628,8 +10695,10 @@ def _dispatch_callback(call, uid, data):
         show_name_val = sd.get("show_name", 1)
         max_users     = int(sd.get("max_users", 0) or 0)
         buyer_role    = sd.get("buyer_role", "all")
+        btn_color     = sd.get("btn_color", "glass")
         pkg_id = add_package(sd["type_id"], sd["package_name"], sd["volume"], sd["duration"], sd["price"],
-                             show_name=show_name_val, max_users=max_users, buyer_role=buyer_role)
+                             show_name=show_name_val, max_users=max_users, buyer_role=buyer_role,
+                             button_color=btn_color)
         update_package_panel_settings(pkg_id, "manual")
         log_admin_action(uid, f"پکیج '{sd['package_name']}' (دستی) ثبت شد")
         state_clear(uid)
@@ -10721,8 +10790,10 @@ def _dispatch_callback(call, uid, data):
         show_name_val = sd.get("show_name", 1)
         max_users     = int(sd.get("max_users", 0) or 0)
         buyer_role    = sd.get("buyer_role", "all")
+        btn_color     = sd.get("btn_color", "glass")
         pkg_id = add_package(sd["type_id"], sd["package_name"], sd["volume"], sd["duration"], sd["price"],
-                             show_name=show_name_val, max_users=max_users, buyer_role=buyer_role)
+                             show_name=show_name_val, max_users=max_users, buyer_role=buyer_role,
+                             button_color=btn_color)
         update_package_panel_settings(pkg_id, "panel",
                                        panel_id=cp["panel_id"],
                                        panel_type="sanaei",
@@ -10819,6 +10890,39 @@ def _dispatch_callback(call, uid, data):
         update_package_field(package_id, "buyer_role", role)
         log_admin_action(uid, f"buyer_role پکیج #{package_id} به {role} تغییر کرد")
         bot.answer_callback_query(call.id, "✅ محدودیت خریدار بروزرسانی شد.")
+        package_row = get_package(package_id)
+        text, kb = _pkg_edit_text_kb(package_row)
+        send_or_edit(call, text, kb)
+        return
+
+    if data.startswith("admin:pkg:ef:btncolor:"):
+        package_id  = int(data.split(":")[4])
+        package_row = get_package(package_id)
+        if not package_row:
+            bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
+            return
+        current_color = package_row["button_color"] if "button_color" in package_row.keys() else "glass"
+        bot.answer_callback_query(call.id)
+        kb = _pkg_color_picker_kb(package_id, current_color)
+        send_or_edit(call,
+            f"📦 <b>{esc(package_row['name'])}</b>\n\n"
+            "🎨 رنگ دکمه این پکیج را در منوی خرید مرحله‌ای انتخاب کنید:", kb)
+        return
+
+    if data.startswith("admin:pkg:set_btncolor:"):
+        parts      = data.split(":")
+        color      = parts[3]
+        package_id = int(parts[4])
+        if color not in _PKG_COLOR_LABELS:
+            bot.answer_callback_query(call.id)
+            return
+        package_row = get_package(package_id)
+        if not package_row:
+            bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
+            return
+        update_package_field(package_id, "button_color", color)
+        log_admin_action(uid, f"رنگ دکمه پکیج #{package_id} به {color} تغییر کرد")
+        bot.answer_callback_query(call.id, f"✅ رنگ دکمه به {_PKG_COLOR_LABELS[color]} تغییر کرد.")
         package_row = get_package(package_id)
         text, kb = _pkg_edit_text_kb(package_row)
         send_or_edit(call, text, kb)

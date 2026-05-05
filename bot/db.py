@@ -840,6 +840,8 @@ def _run_init_db_migrations():
                 " updated_at TEXT NOT NULL DEFAULT ''"
                 ")"
             ),
+            # ── Packages: per-package button color ────────────────────────────
+            "ALTER TABLE packages ADD COLUMN button_color TEXT NOT NULL DEFAULT 'glass'",
         ]
         for sql in migrations:
             try:
@@ -1526,15 +1528,15 @@ def get_package(package_id):
         ).fetchone()
 
 
-def add_package(type_id, name, volume_gb, duration_days, price, show_name=1, max_users=0, buyer_role='all'):
+def add_package(type_id, name, volume_gb, duration_days, price, show_name=1, max_users=0, buyer_role='all', button_color='glass'):
     with get_conn() as conn:
         max_pos = conn.execute(
             "SELECT COALESCE(MAX(position),0) FROM packages WHERE type_id=?", (type_id,)
         ).fetchone()[0]
         conn.execute(
-            "INSERT INTO packages(type_id,name,volume_gb,duration_days,price,active,position,show_name,max_users,buyer_role)"
-            " VALUES(?,?,?,?,?,1,?,?,?,?)",
-            (type_id, name.strip(), volume_gb, duration_days, price, max_pos + 1, show_name, max_users, buyer_role)
+            "INSERT INTO packages(type_id,name,volume_gb,duration_days,price,active,position,show_name,max_users,buyer_role,button_color)"
+            " VALUES(?,?,?,?,?,1,?,?,?,?,?)",
+            (type_id, name.strip(), volume_gb, duration_days, price, max_pos + 1, show_name, max_users, buyer_role, button_color or 'glass')
         )
 
 
@@ -1546,7 +1548,7 @@ def toggle_package_active(package_id):
 
 
 def update_package_field(package_id, field, value):
-    allowed = {"name", "volume_gb", "duration_days", "price", "position", "show_name", "max_users", "buyer_role"}
+    allowed = {"name", "volume_gb", "duration_days", "price", "position", "show_name", "max_users", "buyer_role", "button_color"}
     if field not in allowed:
         return
     with get_conn() as conn:
