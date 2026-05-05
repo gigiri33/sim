@@ -296,7 +296,7 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
                     coin_amount_str = f"{coin_amount:.6f}"
 
         equiv_line = (
-            f"\n{ce('💱', '5402186569006210455')} <b>معادل ارزی:</b> <code>{coin_amount_str}</code> {esc(symbol)}\n"
+            f"\n{ce('💱', '5987693802335245516')} <b>معادل ارزی:</b> <code>{coin_amount_str}</code> {esc(symbol)}\n"
             if coin_amount_str else ""
         )
 
@@ -306,8 +306,8 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
             chars = string.ascii_uppercase + string.digits
             comment_code = "".join(random.choices(chars, k=8))
             comment_section = (
-                f"\n\n{ce('🔑', '5330115548900501467')} <b>کامنت:</b> <code>{comment_code}</code>\n\n"
-                f"{ce('⚠️', '5314346928660554905')} <b>هنگام پرداخت حتماً مقدار کامنت را دقیقاً وارد کنید، در غیر این صورت رسید شما تأیید نخواهد شد.</b>"
+                f"\n\n{ce('🔑', '5454386656628991407')} <b>کامنت:</b> <code>{comment_code}</code>\n\n"
+                f"{ce('⚠️', '5987718004475958316')} <b>هنگام پرداخت حتماً مقدار کامنت را دقیقاً وارد کنید، در غیر این صورت رسید شما تأیید نخواهد شد.</b>"
             )
             # Save the comment code to the DB so admins can see it
             if payment_id:
@@ -326,13 +326,13 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
                 pass
 
         text = (
-            f"{ce('💎', '5471952986970267163')} <b>پرداخت با {esc(label)}</b>\n\n"
-            f"{ce('💰', '5375296873982604963')} مبلغ: <b>{fmt_price(amount)}</b> تومان"
+            f"{ce('💎', '5454409660473827001')} <b>پرداخت با {esc(label)}</b>\n\n"
+            f"{ce('💰', '5987758377168540855')} مبلغ: <b>{fmt_price(amount)}</b> تومان"
             f"{equiv_line}\n"
-            f"{ce('👛', '5796280694934085416')} <b>آدرس ولت:</b>\n<code>{esc(addr)}</code>"
+            f"{ce('👛', '5987881105859024173')} <b>آدرس ولت:</b>\n<code>{esc(addr)}</code>"
             f"{comment_section}\n\n"
-            f"{ce('⬇️', '5314453632828055816')} پس از واریز، تصویر تراکنش یا هش آن را ارسال کنید.\n\n"
-            f"{ce('⚠️', '5314346928660554905')} <i>تمامی کارمزد انتقال ارز دیجیتال به عهده واریزکننده می‌باشد</i>"
+            f"{ce('⬇️', '5987671584469422871')} پس از واریز، تصویر تراکنش یا هش آن را ارسال کنید.\n\n"
+            f"{ce('⚠️', '5989790729923203577')} <i>تمامی کارمزد انتقال ارز دیجیتال به عهده واریزکننده می‌باشد</i>"
         )
 
         # ── Crypto copy buttons use CopyTextButton (Bot API 7.0) ─────────────
@@ -376,10 +376,10 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
             _kb.add(types.InlineKeyboardButton("بازگشت", callback_data="pm:back"))
             bot.send_message(
                 _chat,
-                f"{ce('💎', '5471952986970267163')} <b>پرداخت با {_label}</b>\n\n"
-                f"{ce('💰', '5375296873982604963')} مبلغ: <b>{fmt_price(amount)}</b> تومان\n"
-                f"{ce('👛', '5796280694934085416')} آدرس ولت:\n<code>{esc(_addr)}</code>\n\n"
-                f"{ce('⬇️', '5314453632828055816')} پس از واریز، تصویر تراکنش یا هش آن را ارسال کنید.",
+                f"{ce('💎', '5454409660473827001')} <b>پرداخت با {_label}</b>\n\n"
+                f"{ce('💰', '5987758377168540855')} مبلغ: <b>{fmt_price(amount)}</b> تومان\n"
+                f"{ce('👛', '5987881105859024173')} آدرس ولت:\n<code>{esc(_addr)}</code>\n\n"
+                f"{ce('⬇️', '5987671584469422871')} پس از واریز، تصویر تراکنش یا هش آن را ارسال کنید.",
                 parse_mode="HTML",
                 reply_markup=_kb,
             )

@@ -7426,6 +7426,31 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id)
         sn = state_name(uid)
         sd = state_data(uid)
+        # ── Back from crypto payment info page → return to coin selection ────
+        if sn in ("await_purchase_receipt", "await_wallet_receipt", "await_renewal_receipt"):
+            _pid = sd.get("payment_id")
+            _pmt = get_payment(_pid) if _pid else None
+            if _pmt and _pmt["payment_method"] == "crypto":
+                _amount = sd.get("amount")
+                _kind   = _pmt["kind"]
+                if _kind == "config_purchase":
+                    state_set(uid, "buy_crypto_select_coin",
+                              package_id=sd.get("package_id"), amount=_amount,
+                              quantity=sd.get("quantity", 1))
+                elif _kind == "wallet_charge":
+                    state_set(uid, "wallet_crypto_select_coin", amount=_amount,
+                              payment_id=_pid)
+                elif _kind == "renewal":
+                    state_set(uid, "renew_crypto_select_coin",
+                              package_id=sd.get("package_id"), amount=_amount,
+                              config_id=sd.get("config_id") or _pmt["config_id"],
+                              purchase_id=sd.get("purchase_id"))
+                elif _kind == "pnlcfg_renewal":
+                    state_set(uid, "pnlcfg_renew_crypto_select_coin",
+                              package_id=sd.get("package_id"), amount=_amount,
+                              config_id=sd.get("config_id") or _pmt["config_id"])
+                show_crypto_selection(call, amount=_amount)
+                return
         if sn in ("buy_crypto_select_coin", "buy_select_method", "await_purchase_receipt"):
             package_id  = sd.get("package_id")
             package_row = get_package(package_id)
@@ -7468,7 +7493,7 @@ def _dispatch_callback(call, uid, data):
             if amount:
                 state_set(uid, "wallet_charge_method", amount=amount,
                           invoice_created_at=sd.get("invoice_created_at"))
-                show_payment_method_selection(call, uid, {"kind": "wallet_charge", "amount": amount})
+                _show_wallet_gateways(call, uid, amount)
                 return
         show_main_menu(call)
         return
