@@ -3101,15 +3101,12 @@ def _build_card_payment_page(card, bank, owner, price, final_amount, back_cb="na
         )
         kb.row(
             types.InlineKeyboardButton("مبلغ تومان",
-                                       copy_text=types.CopyTextButton(text=str(display_amount)),
-                                       icon_custom_emoji_id="5212921495008845628"),
+                                       copy_text=types.CopyTextButton(text=str(display_amount))),
             types.InlineKeyboardButton("مبلغ ریال",
-                                       copy_text=types.CopyTextButton(text=str(amount_rial)),
-                                       icon_custom_emoji_id="5212921495008845628"),
+                                       copy_text=types.CopyTextButton(text=str(amount_rial))),
         )
         kb.add(types.InlineKeyboardButton("شماره کارت",
-                                          copy_text=types.CopyTextButton(text=card_clean),
-                                          icon_custom_emoji_id="5212921495008845628"))
+                                          copy_text=types.CopyTextButton(text=card_clean)))
     else:
         amount_rial = price * 10
         text = (
@@ -3120,15 +3117,12 @@ def _build_card_payment_page(card, bank, owner, price, final_amount, back_cb="na
         )
         kb.row(
             types.InlineKeyboardButton("مبلغ تومان",
-                                       copy_text=types.CopyTextButton(text=str(price)),
-                                       icon_custom_emoji_id="5212921495008845628"),
+                                       copy_text=types.CopyTextButton(text=str(price))),
             types.InlineKeyboardButton("مبلغ ریال",
-                                       copy_text=types.CopyTextButton(text=str(amount_rial)),
-                                       icon_custom_emoji_id="5212921495008845628"),
+                                       copy_text=types.CopyTextButton(text=str(amount_rial))),
         )
         kb.add(types.InlineKeyboardButton("شماره کارت",
-                                          copy_text=types.CopyTextButton(text=card_clean),
-                                          icon_custom_emoji_id="5212921495008845628"))
+                                          copy_text=types.CopyTextButton(text=card_clean)))
 
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data=back_cb, icon_custom_emoji_id="5352759161945867747"))
     return text, kb
@@ -7373,7 +7367,8 @@ def _dispatch_callback(call, uid, data):
                     set_payment_service_names(payment_id, _snames_crypto)
                 bot.answer_callback_query(call.id)
                 if show_crypto_payment_info(call, uid, coin_key, amount, payment_id=payment_id):
-                    state_set(uid, "await_purchase_receipt", payment_id=payment_id)
+                    state_set(uid, "await_purchase_receipt", payment_id=payment_id,
+                              package_id=package_id, amount=amount, quantity=_qty_coin)
             elif sn == "wallet_crypto_select_coin":
                 amount     = sd.get("amount")
                 payment_id = sd.get("payment_id") or create_payment("wallet_charge", uid, None, amount, "crypto",

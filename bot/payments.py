@@ -342,7 +342,6 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
             types.InlineKeyboardButton(
                 "آدرس کیف‌پول",
                 copy_text=types.CopyTextButton(text=addr),
-                icon_custom_emoji_id="5212921495008845628"
             ),
         ]
         if coin_amount_str:
@@ -350,7 +349,6 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
                 types.InlineKeyboardButton(
                     "مبلغ ارز",
                     copy_text=types.CopyTextButton(text=coin_amount_str),
-                    icon_custom_emoji_id="5212921495008845628"
                 )
             )
         if comment_on and comment_code:
@@ -358,7 +356,6 @@ def show_crypto_payment_info(target, uid, coin_key, amount, payment_id=None):
                 types.InlineKeyboardButton(
                     "کد کامنت",
                     copy_text=types.CopyTextButton(text=comment_code),
-                    icon_custom_emoji_id="5212921495008845628"
                 )
             )
         kb.row(*_copy_row)

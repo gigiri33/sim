@@ -131,8 +131,10 @@ class GlassSession:
         packages: list,
         max_qty: int,
         enabled_dims: Optional[set] = None,
+        uid: int = 0,
     ):
         self.type_id  = type_id
+        self.uid      = uid
         self.packages = sort_packages([p for p in packages if p["price"] > 0])
         self.max_qty  = max(1, max_qty)
 
@@ -180,6 +182,13 @@ class GlassSession:
         self.sel_user_limit = int(pkg["max_users"] if "max_users" in pkg.keys() else 0)
         self.matched_pkg    = pkg
         self.unit_price     = int(pkg["price"])
+        # Apply agent / reseller effective price if uid is known
+        if getattr(self, "uid", 0):
+            try:
+                from ..payments import get_effective_price as _gep
+                self.unit_price = _gep(self.uid, pkg)
+            except Exception:
+                pass
         # Panel packages always have unlimited effective stock.
         # For manual packages, only enforce stock limit when preorder_mode is on.
         _src = pkg["config_source"] if "config_source" in pkg.keys() else "manual"
@@ -291,6 +300,7 @@ class GlassSession:
         return {
             "_glass": True,
             "type_id":        self.type_id,
+            "uid":            getattr(self, "uid", 0),
             "sel_volume":     self.sel_volume,
             "sel_duration":   self.sel_duration,
             "sel_user_limit": self.sel_user_limit,
@@ -303,6 +313,7 @@ class GlassSession:
     def from_state(cls, state_dict: dict, packages: list) -> "GlassSession":
         obj = object.__new__(cls)
         obj.type_id      = state_dict["type_id"]
+        obj.uid          = int(state_dict.get("uid", 0))
         obj.max_qty      = state_dict["max_qty"]
         obj.packages     = sort_packages([p for p in packages if p["price"] > 0])
         obj.volumes      = obj._unique_vals("volume_gb",   _vol_sort)
@@ -531,7 +542,7 @@ def show_glass_buy(call, type_id: int):
         enabled_dims = {"v", "d", "u", "q"}
 
     try:
-        ses = GlassSession(type_id=type_id, packages=packages, max_qty=max_qty, enabled_dims=enabled_dims)
+        ses = GlassSession(type_id=type_id, packages=packages, max_qty=max_qty, enabled_dims=enabled_dims, uid=uid)
     except ValueError:
         bot.answer_callback_query(call.id, _ALERTS["empty"], show_alert=True)
         return
@@ -690,19 +701,22 @@ def handle_glass_callback(call, data: str):
             bot.answer_callback_query(call.id, _ALERTS["no_stock"], show_alert=True)
             return True
 
-        package_id = ses.matched_pkg["id"]
-        quantity   = ses.sel_quantity
-        price      = ses.total_price
-        unit_price = ses.unit_price
+        package_id  = ses.matched_pkg["id"]
+        quantity    = ses.sel_quantity
+        unit_price  = ses.unit_price
+        price       = unit_price * quantity
         package_row = ses.matched_pkg
+        raw_unit    = int(package_row["price"])
+        orig_amount = raw_unit * quantity
+        disc_amount = max(0, orig_amount - price)
 
         # Save into buy_select_method so existing payment flow works unchanged
         from ..helpers import state_set as _ss
         _ss(uid, "buy_select_method",
             package_id=package_id,
             amount=price,
-            original_amount=price,
-            discount_amount=0,
+            original_amount=orig_amount,
+            discount_amount=disc_amount,
             kind="config_purchase",
             unit_price=unit_price,
             quantity=quantity)

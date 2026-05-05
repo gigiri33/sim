@@ -50,16 +50,16 @@ def _free_test_visible(user_id: int) -> bool:
 
 
 BUTTONS: dict[str, StartMenuButton] = {
-    "buy_service": StartMenuButton("buy_service", "خرید سرویس جدید", "buy:start", "5350295774863311434"),
-    "my_services": StartMenuButton("my_services", "سرویس‌های من", "my_configs", "5348136664738839786"),
-    "free_test": StartMenuButton("free_test", "تست رایگان", "test:start", "5359664288241829619", "free_test_enabled", condition=_free_test_visible),
-    "wallet": StartMenuButton("wallet", "کیف پول", "wallet:menu", "5283232570660634549", condition=wallet_pay_enabled_for),
-    "account": StartMenuButton("account", "حساب کاربری", "profile", "5373012449597335010"),
+    "buy_service": StartMenuButton("buy_service", "خرید سرویس جدید", "buy:start", "5258024802010026053"),
+    "my_services": StartMenuButton("my_services", "سرویس‌های من", "my_configs", "5350295774863311434"),
+    "free_test": StartMenuButton("free_test", "تست رایگان", "test:start", "5355198656125352105", "free_test_enabled", condition=_free_test_visible),
+    "wallet": StartMenuButton("wallet", "کیف پول", "wallet:menu", "5256186332669035163", condition=wallet_pay_enabled_for),
+    "account": StartMenuButton("account", "حساب کاربری", "profile", "5348136664738839786"),
     "voucher": StartMenuButton("voucher", "ثبت کارت هدیه", "voucher:redeem", "5224635807855296510", "vouchers_enabled"),
     "referral": StartMenuButton("referral", "زیرمجموعه‌گیری", "referral:menu", "5944970130554359187", "referral_enabled"),
     "tariff": StartMenuButton("tariff", "تعرفه", "tariff:show", "5307706033047609765", "tariff_enabled"),
     "apps": StartMenuButton("apps", "دریافت اپلیکیشن‌ها", "apps:menu", "5244612521087749872", "apps_enabled"),
-    "support": StartMenuButton("support", "پشتیبانی", "support", "5258023599419171861"),
+    "support": StartMenuButton("support", "پشتیبانی", "support", "5348090777308251395"),
     "agency": StartMenuButton("agency", "درخواست نمایندگی", "agency:request", "5908990051349434897", "agency_request_enabled", condition=lambda uid: not _user_is_agent(uid)),
     "admin_panel": StartMenuButton("admin_panel", "ورود به پنل مدیریت", "admin:panel", "5990197574995286240", admin_only=True),
 }

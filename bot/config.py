@@ -82,17 +82,17 @@ CRYPTO_API_SYMBOLS = {
 }
 
 CRYPTO_COINS = [
-    ("tron",       "ترون (TRC20)"),
-    ("usdt_trc20", "تتر (TRC20)"),
-    ("usdt_bep20", "تتر (BEP20)"),
-    ("eth",        "اتریوم (ETH)"),
-    ("btc",        "بیتکوین (BTC)"),
-    ("bnb",        "بایننس‌کوین (BNB)"),
-    ("usdc_bep20", "یو‌اس‌دی‌سی (BEP20)"),
-    ("usdt_ton",   "تتر (TON)"),
-    ("ton",        "تون (TON)"),
-    ("sol",        "سولانا (SOL)"),
-    ("ltc",        "لایت‌کوین (LTC)"),
+    ("tron",       "TRX (TRC20)"),
+    ("usdt_trc20", "USDT (TRC20)"),
+    ("usdt_bep20", "USDT (BEP20)"),
+    ("eth",        "ETH (ERC20)"),
+    ("btc",        "BTC (Bitcoin)"),
+    ("bnb",        "BNB (BEP20)"),
+    ("usdc_bep20", "USDC (BEP20)"),
+    ("usdt_ton",   "USDT (TON)"),
+    ("ton",        "TON (TON)"),
+    ("sol",        "SOL (Solana)"),
+    ("ltc",        "LTC (Litecoin)"),
 ]
 
 # Custom emoji IDs for crypto coin labels
