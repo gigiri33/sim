@@ -5072,6 +5072,7 @@ def _dispatch_callback(call, uid, data):
                     _faq_text,
                     call.message.chat.id,
                     call.message.message_id,
+                    parse_mode=None,
                     entities=_faq_ents,
                     reply_markup=kb_faq,
                     disable_web_page_preview=True,
@@ -5081,10 +5082,11 @@ def _dispatch_callback(call, uid, data):
                     bot.send_message(
                         call.message.chat.id,
                         _faq_text,
+                        parse_mode=None,
                         entities=_faq_ents,
                         reply_markup=kb_faq,
                         disable_web_page_preview=True,
-                    )
+                )
         return
 
     # ── Tariff ────────────────────────────────────────────────────────────────
@@ -5113,6 +5115,7 @@ def _dispatch_callback(call, uid, data):
                 _tr_full,
                 call.message.chat.id,
                 call.message.message_id,
+                parse_mode=None,
                 entities=_tr_ents,
                 reply_markup=kb,
                 disable_web_page_preview=True,
@@ -5122,6 +5125,7 @@ def _dispatch_callback(call, uid, data):
                 bot.send_message(
                     call.message.chat.id,
                     _tr_full,
+                    parse_mode=None,
                     entities=_tr_ents,
                     reply_markup=kb,
                     disable_web_page_preview=True,
@@ -6871,6 +6875,7 @@ def _dispatch_callback(call, uid, data):
                     bot.send_message(
                         call.message.chat.id,
                         _full_text,
+                        parse_mode=None,
                         entities=_r_ents,
                         reply_markup=kb,
                         disable_web_page_preview=True,
