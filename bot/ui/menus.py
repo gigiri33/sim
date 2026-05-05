@@ -41,6 +41,8 @@ def show_main_menu(target):
     uid         = target.from_user.id if hasattr(target, "from_user") else target.chat.id
     popup_mode  = setting_get("start_menu_mode", "inline") == "popup"
     custom_raw  = setting_get("start_text", "")
+    prefix_raw  = setting_get("start_prefix_emoji", "")
+    photo_id    = setting_get("start_photo_file_id", "")
 
     if hasattr(target, "message"):
         chat_id = target.message.chat.id
@@ -54,45 +56,9 @@ def show_main_menu(target):
         if parsed.get("entities"):
             # Has premium/custom emoji → send via entities (no parse_mode, no HTML issues)
             text, entities = render_premium_text_entities(custom_raw)
-            if popup_mode:
-                _send_popup_main_menu(uid, chat_id, text, entities=entities, thread_id=thread_id)
-                return
-            kb = kb_main(uid)
-            try:
-                if hasattr(target, "message"):
-                    bot.edit_message_text(
-                        text,
-                        target.message.chat.id,
-                        target.message.message_id,
-                        parse_mode="",
-                        entities=entities,
-                        reply_markup=kb,
-                        disable_web_page_preview=True,
-                    )
-                else:
-                    bot.send_message(
-                        chat_id, text,
-                        parse_mode="",
-                        entities=entities,
-                        reply_markup=kb,
-                        disable_web_page_preview=True,
-                    )
-            except Exception:
-                try:
-                    bot.send_message(
-                        chat_id, text,
-                        parse_mode="",
-                        entities=entities,
-                        reply_markup=kb,
-                        disable_web_page_preview=True,
-                    )
-                except Exception:
-                    # Last resort: send without emoji formatting
-                    bot.send_message(chat_id, text, reply_markup=kb,
-                                     disable_web_page_preview=True)
-            return
         else:
             text = render_premium_text_html(custom_raw)
+            entities = None
     else:
         text = (
             f"{ce('✨', '5325547803936572038')} <b>به فروشگاه {BRAND_TITLE} خوش آمدید!</b>\n\n"
@@ -101,6 +67,112 @@ def show_main_menu(target):
             f"{ce('📞', '5467539229468793355')} پشتیبانی حرفه‌ای ۲۴ ساعته\n\n"
             "از منوی زیر بخش مورد نظر خود را انتخاب کنید."
         )
+        entities = None
+
+    # Prepend prefix emoji if set
+    if prefix_raw:
+        from .premium_emoji import render_premium_text_entities as _rpe, deserialize_premium_text as _dpt
+        prefix_parsed = _dpt(prefix_raw)
+        if prefix_parsed.get("entities"):
+            prefix_text, prefix_entities = _rpe(prefix_raw)
+            if prefix_entities:
+                import telebot.types as _tbtypes
+                # Merge prefix + main text with entity offset adjustment
+                separator = "\n"
+                offset_shift = len(prefix_text.encode("utf-16-le")) // 2 + len(separator.encode("utf-16-le")) // 2
+                adjusted = []
+                for e in (entities or []):
+                    ne = _tbtypes.MessageEntity(
+                        type=e.type,
+                        offset=e.offset + offset_shift,
+                        length=e.length,
+                        url=getattr(e, "url", None),
+                        user=getattr(e, "user", None),
+                        language=getattr(e, "language", None),
+                        custom_emoji_id=getattr(e, "custom_emoji_id", None),
+                    )
+                    adjusted.append(ne)
+                entities = list(prefix_entities) + adjusted
+                text = prefix_text + separator + text
+            else:
+                text = prefix_text + "\n" + text
+        else:
+            prefix_text = render_premium_text_html(prefix_raw)
+            if not entities:
+                text = prefix_text + "\n" + text
+
+    if photo_id:
+        # Send as photo with caption
+        kb = kb_main(uid)
+        caption = text
+        caption_entities = entities if entities else None
+        try:
+            if hasattr(target, "message"):
+                # For callback: delete old message and send new photo
+                try:
+                    bot.delete_message(target.message.chat.id, target.message.message_id)
+                except Exception:
+                    pass
+            bot.send_photo(
+                chat_id, photo_id,
+                caption=caption,
+                parse_mode="" if caption_entities else "HTML",
+                caption_entities=caption_entities,
+                reply_markup=kb,
+                message_thread_id=thread_id,
+            )
+        except Exception:
+            # Fallback: send without photo
+            try:
+                bot.send_message(chat_id, caption,
+                                 parse_mode="" if caption_entities else "HTML",
+                                 entities=caption_entities,
+                                 reply_markup=kb,
+                                 disable_web_page_preview=True,
+                                 message_thread_id=thread_id)
+            except Exception:
+                bot.send_message(chat_id, caption, reply_markup=kb,
+                                 disable_web_page_preview=True, message_thread_id=thread_id)
+        return
+
+    if entities:
+        if popup_mode:
+            _send_popup_main_menu(uid, chat_id, text, entities=entities, thread_id=thread_id)
+            return
+        kb = kb_main(uid)
+        try:
+            if hasattr(target, "message"):
+                bot.edit_message_text(
+                    text,
+                    target.message.chat.id,
+                    target.message.message_id,
+                    parse_mode="",
+                    entities=entities,
+                    reply_markup=kb,
+                    disable_web_page_preview=True,
+                )
+            else:
+                bot.send_message(
+                    chat_id, text,
+                    parse_mode="",
+                    entities=entities,
+                    reply_markup=kb,
+                    disable_web_page_preview=True,
+                )
+        except Exception:
+            try:
+                bot.send_message(
+                    chat_id, text,
+                    parse_mode="",
+                    entities=entities,
+                    reply_markup=kb,
+                    disable_web_page_preview=True,
+                )
+            except Exception:
+                bot.send_message(chat_id, text, reply_markup=kb,
+                                 disable_web_page_preview=True)
+        return
+
     if popup_mode:
         _send_popup_main_menu(uid, chat_id, text, thread_id=thread_id)
     else:
@@ -229,7 +301,7 @@ def show_my_configs(target, user_id, page=0, search=None):
         ]})
         send_or_edit(
             target,
-            f"{ce('😔', '5370781385885751708')} {ce('😔', '5458779239941681169')} لیست سرویس‌های شما خالی است.\n\n» برای خرید سرویس از دکمه زیر اقدام نمایید.",
+            f"{ce('😔', '5458779239941681169')} لیست سرویس‌های شما خالی است.\n\n» برای خرید سرویس از دکمه زیر اقدام نمایید.",
             _kb_empty,
         )
         return

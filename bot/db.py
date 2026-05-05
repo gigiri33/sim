@@ -379,6 +379,8 @@ def _run_init_db_migrations():
             "support_faq_enabled": "1",
             "support_faq_text":    "",
             "start_text":       "",
+            "start_prefix_emoji": "",
+            "start_photo_file_id": "",
             "channel_id":       "",
             "backup_enabled":   "0",
             "backup_interval":  "1440",

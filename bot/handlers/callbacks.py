@@ -907,14 +907,7 @@ def _show_discount_prompt(call, amount=None):
     # Check global toggle first
     if setting_get("discount_codes_enabled", "0") != "1":
         return False
-    # Check if any eligible discount codes exist for this user
-    from telebot.types import Message
     uid = call.from_user.id if hasattr(call, "from_user") else call.chat.id
-    user = get_user(uid)
-    is_agent = bool(user and user["is_agent"])
-    if not has_eligible_discount_codes(is_agent):
-        # No eligible codes — skip this step entirely, return False so caller can proceed
-        return False
     kb = types.InlineKeyboardMarkup()
     kb.row(
         types.InlineKeyboardButton("بله، دارم", callback_data="disc:yes", icon_custom_emoji_id="5350572310627632617"),
@@ -6956,7 +6949,7 @@ def _dispatch_callback(call, uid, data):
             send_or_edit(call, "📭 در حال حاضر بسته‌ای برای فروش موجود نیست.", kb)
         else:
             from ..ui.premium_emoji import ce as _ce
-            send_or_edit(call, f"{_ce('🛒', '5431499171045581032')} برای خرید سرویس لطفا یکی از دسته‌بندی‌های زیر را انتخاب کنید.", kb)
+            send_or_edit(call, f"{_ce('🛒', '5258024802010026053')} برای خرید سرویس لطفا یکی از دسته‌بندی‌های زیر را انتخاب کنید.", kb)
         return
 
     if data.startswith("buy:t:"):
@@ -20173,6 +20166,8 @@ def _dispatch_callback(call, uid, data):
             return
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("✏️ ویرایش متن استارت", callback_data="adm:set:start_text"))
+        kb.add(types.InlineKeyboardButton("✨ ایموجی پرمیوم قبل از استارت", callback_data="adm:set:start_prefix_emoji"))
+        kb.add(types.InlineKeyboardButton("🖼 پوستر منوی استارت", callback_data="adm:set:start_photo"))
         kb.add(types.InlineKeyboardButton("📜 قوانین خرید",        callback_data="adm:set:rules"))
         kb.add(types.InlineKeyboardButton("📋 تعرفه",              callback_data="adm:tariff:view"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5253997076169115797"))
@@ -20241,6 +20236,74 @@ def _dispatch_callback(call, uid, data):
             "برای بازگشت به متن پیش‌فرض، <code>-</code> بفرستید.",
             back_button("adm:bot_texts")
         )
+        return
+
+    if data == "adm:set:start_prefix_emoji":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        current = setting_get("start_prefix_emoji", "")
+        has_emoji = bool(current)
+        kb = types.InlineKeyboardMarkup()
+        if has_emoji:
+            kb.add(types.InlineKeyboardButton("🗑 حذف ایموجی پرمیوم", callback_data="adm:set:start_prefix_emoji:clear"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:bot_texts", icon_custom_emoji_id="5253997076169115797"))
+        state_set(uid, "admin_set_start_prefix_emoji")
+        bot.answer_callback_query(call.id)
+        send_or_edit(
+            call,
+            f"✨ <b>ایموجی پرمیوم قبل از متن استارت</b>\n\n"
+            f"وضعیت: {'🟢 تنظیم شده' if has_emoji else '🔴 تنظیم نشده'}\n\n"
+            "یک پیام حاوی ایموجی پرمیوم ارسال کنید.\n"
+            "این ایموجی قبل از متن استارت نمایش داده می‌شود.\n"
+            "برای حذف ایموجی، <code>-</code> بفرستید.",
+            kb
+        )
+        return
+
+    if data == "adm:set:start_prefix_emoji:clear":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        setting_set("start_prefix_emoji", "")
+        state_clear(uid)
+        log_admin_action(uid, "ایموجی پرمیوم قبل از استارت حذف شد")
+        bot.answer_callback_query(call.id, "✅ ایموجی حذف شد.")
+        _fake_call(call, "adm:set:start_prefix_emoji")
+        return
+
+    if data == "adm:set:start_photo":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        current = setting_get("start_photo_file_id", "")
+        has_photo = bool(current)
+        kb = types.InlineKeyboardMarkup()
+        if has_photo:
+            kb.add(types.InlineKeyboardButton("🗑 حذف پوستر", callback_data="adm:set:start_photo:clear"))
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:bot_texts", icon_custom_emoji_id="5253997076169115797"))
+        state_set(uid, "admin_set_start_photo")
+        bot.answer_callback_query(call.id)
+        send_or_edit(
+            call,
+            f"🖼 <b>پوستر منوی استارت</b>\n\n"
+            f"وضعیت: {'🟢 تنظیم شده' if has_photo else '🔴 تنظیم نشده'}\n\n"
+            "یک عکس ارسال کنید تا به عنوان تصویر منوی استارت ذخیره شود.\n"
+            "متن استارت به عنوان کپشن عکس نمایش داده می‌شود.\n"
+            "برای حذف پوستر، <code>-</code> بفرستید.",
+            kb
+        )
+        return
+
+    if data == "adm:set:start_photo:clear":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        setting_set("start_photo_file_id", "")
+        state_clear(uid)
+        log_admin_action(uid, "پوستر منوی استارت حذف شد")
+        bot.answer_callback_query(call.id, "✅ پوستر حذف شد.")
+        _fake_call(call, "adm:set:start_photo")
         return
 
     # ── Admin: Locked Channels Management ────────────────────────────────────
@@ -20534,7 +20597,7 @@ def _dispatch_callback(call, uid, data):
                              parse_mode="HTML", reply_markup=kb)
         else:
             from ..ui.premium_emoji import ce as _ce
-            bot.send_message(uid, f"{_ce('🛒', '5431499171045581032')} برای خرید سرویس لطفا یکی از دسته‌بندی‌های زیر را انتخاب کنید.",
+            bot.send_message(uid, f"{_ce('🛒', '5258024802010026053')} برای خرید سرویس لطفا یکی از دسته‌بندی‌های زیر را انتخاب کنید.",
                              parse_mode="HTML", reply_markup=kb)
         return
 
@@ -20771,7 +20834,7 @@ def _dispatch_callback(call, uid, data):
         sd = state_data(uid)
         state_set(uid, "admin_vch_pick_pkg", vch_name=sd.get("vch_name", ""), type_id=type_id)
         bot.answer_callback_query(call.id)
-        pkgs = [p for p in get_packages(type_id=type_id) if p.get("active", 1)]
+        pkgs = [p for p in get_packages(type_id=type_id) if p["active"]]
         kb = types.InlineKeyboardMarkup()
         for p in pkgs:
             _sn = p['show_name'] if 'show_name' in p.keys() else 1

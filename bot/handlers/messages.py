@@ -4198,6 +4198,42 @@ def universal_handler(message):
                     reply_markup=back_button("adm:bot_texts"))
             return
 
+        if sn == "admin_set_start_prefix_emoji" and is_admin(uid):
+            from ..ui.premium_emoji import serialize_premium_text as _spt
+            raw_text = (message.text or message.caption or "").strip()
+            entities = message.entities or message.caption_entities or []
+            state_clear(uid)
+            if raw_text == "-":
+                setting_set("start_prefix_emoji", "")
+                log_admin_action(uid, "ایموجی پرمیوم قبل از استارت حذف شد")
+                bot.send_message(uid, "✅ ایموجی پرمیوم قبل از استارت حذف شد.", reply_markup=back_button("adm:bot_texts"))
+            else:
+                serialized = _spt(raw_text, entities)
+                setting_set("start_prefix_emoji", serialized)
+                custom_count = sum(1 for e in entities if e.type == "custom_emoji")
+                log_admin_action(uid, "ایموجی پرمیوم قبل از استارت تنظیم شد")
+                bot.send_message(uid,
+                    f"✅ ایموجی پرمیوم ذخیره شد.\n"
+                    f"<code>ایموجی پرمیوم: {custom_count}</code>",
+                    parse_mode="HTML",
+                    reply_markup=back_button("adm:bot_texts"))
+            return
+
+        if sn == "admin_set_start_photo" and is_admin(uid):
+            state_clear(uid)
+            if message.content_type == "photo":
+                file_id = message.photo[-1].file_id
+                setting_set("start_photo_file_id", file_id)
+                log_admin_action(uid, "پوستر منوی استارت تنظیم شد")
+                bot.send_message(uid, "✅ پوستر منوی استارت ذخیره شد.", reply_markup=back_button("adm:bot_texts"))
+            elif (message.text or "").strip() == "-":
+                setting_set("start_photo_file_id", "")
+                log_admin_action(uid, "پوستر منوی استارت حذف شد")
+                bot.send_message(uid, "✅ پوستر منوی استارت حذف شد.", reply_markup=back_button("adm:bot_texts"))
+            else:
+                bot.send_message(uid, "⚠️ لطفاً یک عکس ارسال کنید یا <code>-</code> برای حذف پوستر.", parse_mode="HTML", reply_markup=back_button("adm:set:start_photo"))
+            return
+
         if sn == "admin_edit_tariff_text" and is_admin(uid):
             from ..ui.premium_emoji import serialize_premium_text as _spt
             raw_text = message.text if message.text is not None else (message.caption or "")
