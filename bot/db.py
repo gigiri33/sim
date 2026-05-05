@@ -426,7 +426,7 @@ def _run_init_db_migrations():
             "bulk_min_qty":                       "1",
             "bulk_max_qty":                       "0",
             # ── Referral Anti-Spam ─────────────────────────────────────────────
-            "referral_antispam_enabled":    "0",
+            "referral_antispam_enabled":    "1",
             "referral_antispam_window":     "15",
             "referral_antispam_threshold":  "10",
             "referral_antispam_action":     "report_only",

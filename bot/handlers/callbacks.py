@@ -749,13 +749,17 @@ def _get_user_cb_lock(uid: int) -> threading.Lock:
 _PASSTHROUGH_CALLBACKS = frozenset({"noop", "check_channel"})
 
 def _build_discount_prompt_text(amount=None):
-    amount_line = f"\n💰 مبلغ قابل پرداخت: <b>{fmt_price(amount)}</b> تومان\n" if amount else ""
+    _ce = lambda eid, fb: f'<tg-emoji emoji-id="{eid}">{fb}</tg-emoji>'
+    amount_line = (
+        f"\n{_ce('5350305520144106741','💰')} مبلغ قابل پرداخت: <b>{fmt_price(amount)}</b> تومان "
+        f"{_ce('5350700390847365132','✨')}\n"
+    ) if amount else ""
     return (
-        "🎟✨ <b>کد تخفیف ویژه</b> ✨🎟\n"
+        f"{_ce('5348470692935384957','🎟')} <b>کد تخفیف ویژه</b> {_ce('5348470692935384957','🎟')}\n"
         f"{amount_line}\n"
-        "🌸 پیش از پرداخت، اگر کد تخفیف اختصاصی دارید وارد کنید\n"
-        "و از مزایای ویژه‌ی آن بهره‌مند شوید! 🎁\n\n"
-        "🔖 آیا کد تخفیف دارید؟"
+        "پیش از پرداخت، اگر کد تخفیف اختصاصی دارید وارد کنید\n"
+        f"و از مزایای ویژه‌ی آن بهره‌مند شوید {_ce('5348529413728256481','🎁')}\n\n"
+        f"{_ce('5348402067947929537','🔖')} آیا کد تخفیف دارید؟"
     )
 
 
@@ -17479,7 +17483,6 @@ def _dispatch_callback(call, uid, data):
         rc_label = "📢 دعوت + عضویت در کانال" if reward_condition == "channel" else "🚀 فقط دعوت به ربات"
 
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("✏️ تغییر نام دکمه", callback_data="adm:ref:btn_title"))
         kb.add(types.InlineKeyboardButton("📸 تنظیم بنر اشتراک‌گذاری", callback_data="adm:ref:banner"))
         # Reward condition
         kb.add(types.InlineKeyboardButton("── 🔐 شرط دریافت پاداش ──", callback_data="adm:ops:noop"))
@@ -17552,9 +17555,15 @@ def _dispatch_callback(call, uid, data):
 
         # Anti-spam section
         kb.add(types.InlineKeyboardButton("── 🛡 سیستم ضد اسپم ──", callback_data="adm:ops:noop"))
-        as_enabled = setting_get("referral_antispam_enabled", "0")
-        as_label = "✅ فعال" if as_enabled == "1" else "❌ غیرفعال"
-        kb.add(types.InlineKeyboardButton(f"🛡 ضد اسپم: {as_label}", callback_data="adm:ref:antispam"))
+        as_enabled = setting_get("referral_antispam_enabled", "1")
+        cap_enabled = setting_get("referral_captcha_enabled", "1")
+        as_label  = "✅ فعال" if as_enabled  == "1" else "❌ غیرفعال"
+        cap_label = "✅ فعال" if cap_enabled == "1" else "❌ غیرفعال"
+        kb.row(
+            types.InlineKeyboardButton(f"🛡 ضد اسپم: {as_label}",  callback_data="adm:ref:as:qtoggle"),
+            types.InlineKeyboardButton(f"🤖 کپچا: {cap_label}",     callback_data="adm:ref:captcha:qtoggle"),
+        )
+        kb.add(types.InlineKeyboardButton("⚙️ تنظیمات پیشرفته ضد اسپم", callback_data="adm:ref:antispam"))
 
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:ops", icon_custom_emoji_id="5253997076169115797"))
         return kb
@@ -17974,6 +17983,32 @@ def _dispatch_callback(call, uid, data):
             return
         bot.answer_callback_query(call.id)
         send_or_edit(call, _antispam_text(), _antispam_kb())
+        return
+
+    if data == "adm:ref:as:qtoggle":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        cur = setting_get("referral_antispam_enabled", "1")
+        new_val = "0" if cur == "1" else "1"
+        setting_set("referral_antispam_enabled", new_val)
+        state_fa = "فعال" if new_val == "1" else "غیرفعال"
+        log_admin_action(uid, f"سیستم ضد اسپم {state_fa} شد")
+        bot.answer_callback_query(call.id, f"✅ ضد اسپم {state_fa} شد.")
+        _fake_call(call, "adm:ref:settings")
+        return
+
+    if data == "adm:ref:captcha:qtoggle":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        cur = setting_get("referral_captcha_enabled", "1")
+        new_val = "0" if cur == "1" else "1"
+        setting_set("referral_captcha_enabled", new_val)
+        state_fa = "فعال" if new_val == "1" else "غیرفعال"
+        log_admin_action(uid, f"کپچای رفرال {state_fa} شد")
+        bot.answer_callback_query(call.id, f"✅ کپچا {state_fa} شد.")
+        _fake_call(call, "adm:ref:settings")
         return
 
     if data == "adm:ref:as:enable":

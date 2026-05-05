@@ -235,7 +235,8 @@ def log_gateway_payment(payment_id: int):
     Called from complete_payment() in db.py after the race is won.
     """
     try:
-        from .db import get_payment, get_user, setting_get, setting_set, fmt_price
+        from .db import get_payment, get_user, setting_get, setting_set
+        from .helpers import fmt_price as _fmt_price
         payment = get_payment(payment_id)
         if not payment:
             return
@@ -273,8 +274,7 @@ def log_gateway_payment(payment_id: int):
 
         # Format money
         try:
-            from .helpers import fmt_price as _fp
-            _fmt = _fp
+            _fmt = _fmt_price
         except Exception:
             def _fmt(x): return f"{x:,}"
 
