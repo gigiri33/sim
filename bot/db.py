@@ -817,6 +817,11 @@ def _run_init_db_migrations():
             # ── Config types: emoji and button color ──────────────────────────
             "ALTER TABLE config_types ADD COLUMN emoji TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE config_types ADD COLUMN button_color TEXT NOT NULL DEFAULT 'glass'",
+            # ── Config types: purchase mode and invoice description ────────────
+            "ALTER TABLE config_types ADD COLUMN purchase_mode TEXT NOT NULL DEFAULT 'step'",
+            "ALTER TABLE config_types ADD COLUMN invoice_description TEXT NOT NULL DEFAULT ''",
+            # ── Glass buy: max order quantity setting ─────────────────────────
+            "INSERT OR IGNORE INTO settings(key,value) VALUES('max_order_quantity','10')",
             # ── Support methods table ──────────────────────────────────────────
             (
                 "CREATE TABLE IF NOT EXISTS support_methods ("
@@ -1278,15 +1283,15 @@ def get_type(type_id):
         ).fetchone()
 
 
-def add_type(name, description="", emoji="", button_color="glass"):
+def add_type(name, description="", emoji="", button_color="glass", purchase_mode="step", invoice_description=""):
     with get_conn() as conn:
         try:
             max_order = conn.execute(
                 "SELECT COALESCE(MAX(sort_order), 0) FROM config_types"
             ).fetchone()[0]
             conn.execute(
-                "INSERT INTO config_types(name, description, emoji, button_color, sort_order) VALUES(?, ?, ?, ?, ?)",
-                (name.strip(), description.strip(), (emoji or "").strip(), button_color or "glass", max_order + 1)
+                "INSERT INTO config_types(name, description, emoji, button_color, sort_order, purchase_mode, invoice_description) VALUES(?, ?, ?, ?, ?, ?, ?)",
+                (name.strip(), description.strip(), (emoji or "").strip(), button_color or "glass", max_order + 1, purchase_mode or "step", invoice_description or "")
             )
         except Exception:
             conn.execute(
@@ -1299,6 +1304,20 @@ def update_type_emoji(type_id, emoji):
     with get_conn() as conn:
         conn.execute(
             "UPDATE config_types SET emoji=? WHERE id=?", ((emoji or "").strip(), type_id)
+        )
+
+
+def update_type_purchase_mode(type_id, mode):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE config_types SET purchase_mode=? WHERE id=?", (mode or "step", type_id)
+        )
+
+
+def update_type_invoice_description(type_id, desc):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE config_types SET invoice_description=? WHERE id=?", (desc or "", type_id)
         )
 
 

@@ -1944,6 +1944,44 @@ def universal_handler(message):
             _show_admin_types(message)
             return
 
+        if sn == "admin_edit_type_invdesc" and is_admin(uid):
+            from ..ui.premium_emoji import serialize_premium_text as _spt_id
+            from ..db import update_type_invoice_description as _utid
+            raw_text = message.text or message.caption or ""
+            entities = message.entities or message.caption_entities or []
+            # Store raw with premium emoji preserved — do NOT escape
+            inv_desc = _spt_id(raw_text.strip(), entities) if raw_text.strip() else ""
+            _utid(sd["type_id"], inv_desc)
+            log_admin_action(uid, f"توضیحات فاکتور نوع #{sd['type_id']} ویرایش شد")
+            state_clear(uid)
+            bot.send_message(uid, "✅ توضیحات فاکتور ذخیره شد.")
+            _show_admin_types(message)
+            return
+
+        if sn == "admin_add_type_invdesc" and is_admin(uid):
+            from ..ui.premium_emoji import serialize_premium_text as _spt_aid
+            from ..db import add_type as _add_type
+            raw_text = message.text or message.caption or ""
+            entities = message.entities or message.caption_entities or []
+            inv_desc = _spt_aid(raw_text.strip(), entities) if raw_text.strip() else ""
+            name  = sd.get("type_name", "")
+            emoji = sd.get("type_emoji", "")
+            color = sd.get("type_color", "glass")
+            pmode = sd.get("type_purchase_mode", "step")
+            try:
+                _add_type(name, "", emoji, color, pmode, inv_desc)
+                log_admin_action(uid, f"نوع جدید '{name}' ثبت شد")
+                state_clear(uid)
+                bot.send_message(uid, "✅ نوع جدید ثبت شد.")
+                _show_admin_types(message)
+            except Exception as _e_ait:
+                if "UNIQUE" in str(_e_ait).upper() or "unique" in str(_e_ait):
+                    state_clear(uid)
+                    bot.send_message(uid, "⚠️ این نوع قبلاً ثبت شده.")
+                else:
+                    bot.send_message(uid, f"⚠️ خطا: {_e_ait}")
+            return
+
         if sn == "admin_edit_type_order" and is_admin(uid):
             val = (message.text or "").strip()
             if not val.isdigit() or int(val) < 1:

@@ -26,6 +26,8 @@ from ..db import (
     set_user_agent, update_balance, get_user_detail, get_user_purchases,
     get_purchase, get_available_configs_for_package,
     get_all_types, get_active_types, get_type, add_type, update_type, update_type_description, update_type_active, delete_type,
+    update_type_emoji as _db_update_type_emoji, update_type_button_color as _db_update_type_button_color,
+    update_type_purchase_mode, update_type_invoice_description,
     get_packages, get_package, add_package, update_package_field, toggle_package_active, delete_package,
     get_registered_packages_stock, get_configs_paginated, count_configs,
     expire_config, add_config,
@@ -6906,6 +6908,15 @@ def _dispatch_callback(call, uid, data):
             send_or_edit(call, "🟡 <b>خرید جدید فعلاً غیرفعال است.</b>\n\nدر حال حاضر فقط تمدید سرویس و افزایش حجم/زمان امکان‌پذیر است.", kb)
             return
         type_id   = int(data.split(":")[2])
+        # ── Glass purchase mode check ────────────────────────────────────────
+        _type_row = get_type(type_id)
+        if _type_row:
+            _pmode = _type_row["purchase_mode"] if "purchase_mode" in _type_row.keys() else "step"
+            if (_pmode or "step") == "glass":
+                from .buy_glass import show_glass_buy
+                show_glass_buy(call, type_id)
+                return
+        # ── Default: step purchase flow ──────────────────────────────────────
         stock_only = setting_get("preorder_mode", "0") == "1"
         user = get_user(uid)
         _is_agent = bool(user and user["is_agent"])
@@ -6976,6 +6987,13 @@ def _dispatch_callback(call, uid, data):
             send_or_edit(call, "📭 در حال حاضر بسته‌ای برای فروش در این نوع موجود نیست.", kb)
         else:
             send_or_edit(call, f"📦 یکی از پکیج‌ها را انتخاب کنید:{agent_note}", kb)
+        return
+
+    # ── Glass buy callbacks (buyg:{type_id}:{action}) ─────────────────────────
+    if data.startswith("buyg:"):
+        from .buy_glass import handle_glass_callback
+        if not handle_glass_callback(call, data):
+            bot.answer_callback_query(call.id)
         return
 
     if data.startswith("buy:p:"):
@@ -9791,11 +9809,15 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton(f"🔢 جایگاه (فعلاً {_cur_pos} از {_total})", callback_data=f"admin:type:sortorder:{type_id}"))
         kb.add(types.InlineKeyboardButton("🎨 ویرایش ایموجی", callback_data=f"admin:type:editemoji:{type_id}"))
         kb.add(types.InlineKeyboardButton("🎨 ویرایش رنگ", callback_data=f"admin:type:editcolor:{type_id}"))
+        kb.add(types.InlineKeyboardButton("🛒 ویرایش روش خرید", callback_data=f"admin:type:editpurchasemode:{type_id}"))
+        kb.add(types.InlineKeyboardButton("📋 ویرایش توضیحات فاکتور", callback_data=f"admin:type:editinvdesc:{type_id}"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:types", icon_custom_emoji_id="5253997076169115797"))
+        _pmode = row["purchase_mode"] if "purchase_mode" in row.keys() else "step"
+        _pmode_label = "🪜 مرحله‌ای" if (_pmode or "step") == "step" else "🪟 شیشه‌ای"
         desc_preview = f"\n📝 توضیحات: {esc(row['description'][:80])}..." if row["description"] and len(row["description"]) > 80 else (f"\n📝 توضیحات: {esc(row['description'])}" if row["description"] else "\n📝 توضیحات: ندارد")
         status_line  = "\n🔘 وضعیت: <b>فعال</b>" if is_active else "\n🔘 وضعیت: <b>غیرفعال</b>"
         bot.answer_callback_query(call.id)
-        send_or_edit(call, f"✏️ <b>ویرایش نوع:</b> {esc(row['name'])}{desc_preview}{status_line}\n🔢 جایگاه: <b>{_cur_pos}</b> از <b>{_total}</b>", kb)
+        send_or_edit(call, f"✏️ <b>ویرایش نوع:</b> {esc(row['name'])}{desc_preview}{status_line}\n🔢 جایگاه: <b>{_cur_pos}</b> از <b>{_total}</b>\n🛒 روش خرید: <b>{_pmode_label}</b>", kb)
         return
 
     if data.startswith("admin:type:pkgs:"):
@@ -9923,8 +9945,63 @@ def _dispatch_callback(call, uid, data):
             return
         name  = sd2.get("type_name", "")
         emoji = sd2.get("type_emoji", "")
+        # Move to purchase mode selection step
+        state_set(uid, "admin_add_type_purchasemode", type_name=name, type_emoji=emoji, type_color=color)
+        bot.answer_callback_query(call.id)
+        import json as _json_apm
+        _pm_kb = _json_apm.dumps({"inline_keyboard": [
+            [
+                {"text": "🪜 خرید مرحله‌ای", "callback_data": "admin:type:buymodeadd:step"},
+                {"text": "🪟 خرید شیشه‌ای",  "callback_data": "admin:type:buymodeadd:glass"},
+            ],
+            [{"text": "بازگشت", "callback_data": "admin:types", "icon_custom_emoji_id": "5253997076169115797"}],
+        ]})
+        send_or_edit(call, "🛒 <b>روش خرید این نوع سرویس را انتخاب کنید:</b>", _pm_kb)
+        return
+
+    # ── admin:type:buymodeadd:{mode} — purchase mode chosen in add flow ────────
+    if data.startswith("admin:type:buymodeadd:"):
+        mode = data.split(":")[-1]
+        if mode not in ("step", "glass"):
+            bot.answer_callback_query(call.id)
+            return
+        sn2 = state_name(uid)
+        sd2 = state_data(uid)
+        if sn2 != "admin_add_type_purchasemode":
+            bot.answer_callback_query(call.id)
+            return
+        state_set(uid, "admin_add_type_invdesc",
+                  type_name=sd2.get("type_name", ""),
+                  type_emoji=sd2.get("type_emoji", ""),
+                  type_color=sd2.get("type_color", "glass"),
+                  type_purchase_mode=mode)
+        bot.answer_callback_query(call.id)
+        import json as _json_aid
+        _aid_kb = _json_aid.dumps({"inline_keyboard": [
+            [{"text": "⏭ فاکتور بدون توضیح", "callback_data": "admin:type:skipinvdesc"}],
+            [{"text": "بازگشت", "callback_data": "admin:types", "icon_custom_emoji_id": "5253997076169115797"}],
+        ]})
+        send_or_edit(call,
+            "📋 <b>توضیحات فاکتور این نوع سرویس را ارسال کنید.</b>\n\n"
+            "این متن فقط در حالت خرید شیشه‌ای نمایش داده می‌شود.\n\n"
+            "می‌توانید از ایموجی پرمیوم، بولد، لینک و فرمت HTML تلگرام استفاده کنید.\n\n"
+            "اگر نمی‌خواهید توضیحات نمایش داده شود، گزینه زیر را بزنید.",
+            _aid_kb)
+        return
+
+    # ── admin:type:skipinvdesc — skip invoice description in add flow ──────────
+    if data == "admin:type:skipinvdesc":
+        sn2 = state_name(uid)
+        sd2 = state_data(uid)
+        if sn2 != "admin_add_type_invdesc":
+            bot.answer_callback_query(call.id)
+            return
+        name  = sd2.get("type_name", "")
+        emoji = sd2.get("type_emoji", "")
+        color = sd2.get("type_color", "glass")
+        pmode = sd2.get("type_purchase_mode", "step")
         try:
-            add_type(name, "", emoji, color)
+            add_type(name, "", emoji, color, pmode, "")
             log_admin_action(uid, f"نوع جدید '{name}' ثبت شد")
             state_clear(uid)
             bot.answer_callback_query(call.id, "✅ نوع جدید ثبت شد.")
@@ -10011,6 +10088,75 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id, "✅ توضیحات حذف شد.")
         log_admin_action(uid, f"توضیحات نوع #{type_id} حذف شد")
         _show_admin_types(call)
+        return
+
+    # ── admin:type:editpurchasemode:{id} ──────────────────────────────────────
+    if data.startswith("admin:type:editpurchasemode:"):
+        type_id = int(data.split(":")[-1])
+        row = get_type(type_id)
+        if not row:
+            bot.answer_callback_query(call.id, "نوع یافت نشد.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        import json as _json_epm
+        _epm_kb = _json_epm.dumps({"inline_keyboard": [
+            [
+                {"text": "🪜 خرید مرحله‌ای", "callback_data": f"admin:type:setpurchasemode:{type_id}:step"},
+                {"text": "🪟 خرید شیشه‌ای",  "callback_data": f"admin:type:setpurchasemode:{type_id}:glass"},
+            ],
+            [{"text": "بازگشت", "callback_data": f"admin:type:edit:{type_id}", "icon_custom_emoji_id": "5253997076169115797"}],
+        ]})
+        _cur_pmode = row["purchase_mode"] if "purchase_mode" in row.keys() else "step"
+        _cur_label = "🪜 مرحله‌ای" if (_cur_pmode or "step") == "step" else "🪟 شیشه‌ای"
+        send_or_edit(call,
+            f"🛒 <b>ویرایش روش خرید نوع: {esc(row['name'])}</b>\n\n"
+            f"روش فعلی: <b>{_cur_label}</b>\n\n"
+            "روش جدید را انتخاب کنید:", _epm_kb)
+        return
+
+    # ── admin:type:setpurchasemode:{id}:{mode} ────────────────────────────────
+    if data.startswith("admin:type:setpurchasemode:"):
+        parts_spm = data.split(":")
+        type_id   = int(parts_spm[3])
+        mode      = parts_spm[4] if len(parts_spm) > 4 else "step"
+        if mode not in ("step", "glass"):
+            bot.answer_callback_query(call.id)
+            return
+        update_type_purchase_mode(type_id, mode)
+        mode_label = "🪜 مرحله‌ای" if mode == "step" else "🪟 شیشه‌ای"
+        bot.answer_callback_query(call.id, f"✅ روش خرید به {mode_label} تغییر کرد.")
+        log_admin_action(uid, f"روش خرید نوع #{type_id} به {mode} تغییر یافت")
+        _fake_call(call, f"admin:type:edit:{type_id}")
+        return
+
+    # ── admin:type:editinvdesc:{id} ───────────────────────────────────────────
+    if data.startswith("admin:type:editinvdesc:"):
+        type_id = int(data.split(":")[-1])
+        row = get_type(type_id)
+        if not row:
+            bot.answer_callback_query(call.id, "نوع یافت نشد.", show_alert=True)
+            return
+        state_set(uid, "admin_edit_type_invdesc", type_id=type_id)
+        bot.answer_callback_query(call.id)
+        import json as _json_eid
+        _eid_kb = _json_eid.dumps({"inline_keyboard": [
+            [{"text": "⏭ فاکتور بدون توضیح", "callback_data": f"admin:type:clearinvdesc:{type_id}"}],
+            [{"text": "بازگشت", "callback_data": f"admin:type:edit:{type_id}", "icon_custom_emoji_id": "5253997076169115797"}],
+        ]})
+        send_or_edit(call,
+            f"📋 <b>توضیحات جدید فاکتور نوع {esc(row['name'])} را ارسال کنید.</b>\n\n"
+            "برای حذف توضیحات، گزینه «فاکتور بدون توضیح» را بزنید.",
+            _eid_kb)
+        return
+
+    # ── admin:type:clearinvdesc:{id} ──────────────────────────────────────────
+    if data.startswith("admin:type:clearinvdesc:"):
+        type_id = int(data.split(":")[-1])
+        update_type_invoice_description(type_id, "")
+        state_clear(uid)
+        bot.answer_callback_query(call.id, "✅ توضیحات فاکتور حذف شد.")
+        log_admin_action(uid, f"توضیحات فاکتور نوع #{type_id} حذف شد")
+        _fake_call(call, f"admin:type:edit:{type_id}")
         return
 
     if data.startswith("admin:type:toggleactive:"):
