@@ -197,18 +197,18 @@ def channel_lock_message(target):
                 except Exception:
                     label = channel_id
             kb.add(types.InlineKeyboardButton(
-                f"📢 {label}",
+                label,
                 url=url,
                 icon_custom_emoji_id="5348125643852758491",
             ))
     else:
         kb.add(types.InlineKeyboardButton(
-            "📢 عضویت در کانال",
+            "عضویت در کانال",
             url="https://t.me/",
             icon_custom_emoji_id="5348125643852758491",
         ))
     kb.add(types.InlineKeyboardButton(
-        "✅ عضو شدم",
+        "عضو شدم",
         callback_data="check_channel",
         icon_custom_emoji_id="5350659885010797372",
     ))
