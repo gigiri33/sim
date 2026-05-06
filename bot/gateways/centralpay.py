@@ -7,7 +7,7 @@ Payment: GET redirect to returnUrl after payment
 """
 
 import json
-import os
+import random
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -139,10 +139,11 @@ def create_centralpay_link(amount_toman: int, user_id: int, order_id, return_url
     if not return_url:
         return False, {"error": _ERR_MESSAGES["callback_not_set"], "raw": {}}
 
-    # Generate a unique CentralPay orderId to avoid duplicate_orderId rejections when
-    # the same payment record is retried or the database restarts its counter.
-    unique_suffix = os.urandom(3).hex()  # 6 hex chars
-    cp_order_id = f"{order_id}-{unique_suffix}"
+    # Generate a unique CentralPay orderId (purely numeric, no hyphens) to avoid
+    # duplicate_orderId rejections when the same payment_id is retried.
+    # Format: {payment_id}{5_random_digits}  e.g. 14283429
+    _unique_digits = random.randint(10000, 99999)
+    cp_order_id = f"{order_id}{_unique_digits}"
 
     link_type = _get_link_type()
     bot_username = _bot_username_from_return_url(return_url) or "unknown"
