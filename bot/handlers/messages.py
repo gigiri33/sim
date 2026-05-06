@@ -1457,8 +1457,14 @@ def universal_handler(message):
                 bot.send_message(uid, "⚠️ خطایی در ثبت رسید رخ داد. لطفاً دوباره تلاش کنید.", reply_markup=kb_main(uid))
                 return
             state_clear(uid)
-            bot.send_message(uid, "✅ رسید شما ارسال شد. لطفاً تا تأیید ادمین صبر کنید.",
-                             reply_markup=kb_main(uid))
+            bot.send_message(
+                uid,
+                '<tg-emoji emoji-id="5987671584469422871">✅</tg-emoji> کاربر گرامی ، رسید شما ارسال شد.\n'
+                'بزودی رسید شما ، توسط ادمین بررسی خواهد شد.\n\n'
+                'از صبر و شکیبایی شما سپاسگذاریم <tg-emoji emoji-id="5987790963085415158">🙏</tg-emoji>',
+                parse_mode="HTML",
+                reply_markup=kb_main(uid),
+            )
             try:
                 send_payment_to_admins(payment_id)
             except Exception as _e:
@@ -1490,8 +1496,14 @@ def universal_handler(message):
                 bot.send_message(uid, "⚠️ خطایی در ثبت رسید رخ داد. لطفاً دوباره تلاش کنید.", reply_markup=kb_main(uid))
                 return
             state_clear(uid)
-            bot.send_message(uid, "✅ رسید شما ارسال شد. لطفاً تا تأیید ادمین صبر کنید.",
-                             reply_markup=kb_main(uid))
+            bot.send_message(
+                uid,
+                '<tg-emoji emoji-id="5987671584469422871">✅</tg-emoji> کاربر گرامی ، رسید شما ارسال شد.\n'
+                'بزودی رسید شما ، توسط ادمین بررسی خواهد شد.\n\n'
+                'از صبر و شکیبایی شما سپاسگذاریم <tg-emoji emoji-id="5987790963085415158">🙏</tg-emoji>',
+                parse_mode="HTML",
+                reply_markup=kb_main(uid),
+            )
             try:
                 send_payment_to_admins(payment_id)
             except Exception as _e:

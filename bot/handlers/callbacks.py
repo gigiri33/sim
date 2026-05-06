@@ -2072,6 +2072,7 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
         panel_client_names = []
         panel_pending_ids = []
         failed_count = 0
+        failed_notified_user = False   # send only ONE queue message per bulk delivery
         for i in range(quantity):
             desired_name = (service_names[i] if service_names and i < len(service_names) else None)
             ok, result, pc_id, c_name = _create_panel_config(
@@ -2083,25 +2084,40 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
                 panel_client_names.append(c_name or "")
             else:
                 failed_count += 1
-                # Do NOT refund — create a pending order so admin can retry delivery
+                # Enqueue to the persistent delivery queue for automatic retry.
+                # Do NOT refund — do NOT send repeated waiting messages.
                 try:
-                    p_id = create_pending_order(uid, package_id, payment_id, unit_price, payment_method, quantity=1)
-                    panel_pending_ids.append(p_id)
-                    log.warning("[PANEL_DELIVERY] create_panel_config failed for uid=%s, created pending_order %s instead of refunding", uid, p_id)
-                except Exception as _po_exc:
-                    log.error("[PANEL_DELIVERY] failed to create pending_order for uid=%s: %s", uid, _po_exc)
-                # Notify user that order is pending (not an error, not a refund)
-                try:
-                    bot.send_message(
-                        chat_id,
-                        "⏳ <b>سرویس شما در صف انتظار قرار گرفت</b>\n\n"
-                        "در حال حاضر امکان ساخت سرویس وجود ندارد.\n"
-                        "سفارش شما ثبت شد و به محض آماده شدن تحویل داده خواهد شد.\n"
-                        "لطفاً کمی صبر کنید.",
-                        parse_mode="HTML",
+                    from ..db import enqueue_delivery
+                    q_id = enqueue_delivery(
+                        user_id=uid,
+                        chat_id=chat_id,
+                        package_id=package_id,
+                        payment_id=payment_id,
+                        desired_name=desired_name,
+                        unit_price=unit_price,
+                        payment_method=payment_method,
+                        is_test=is_test,
                     )
-                except Exception:
-                    pass
+                    panel_pending_ids.append(q_id)
+                    log.warning(
+                        "[PANEL_DELIVERY] queued uid=%s pkg=%s payment=%s dq_id=%s reason=%s",
+                        uid, package_id, payment_id, q_id, result,
+                    )
+                except Exception as _po_exc:
+                    log.error("[PANEL_DELIVERY] enqueue_delivery failed uid=%s: %s", uid, _po_exc)
+                # Send ONE calm message to the user — no repeated messages
+                if not failed_notified_user:
+                    try:
+                        bot.send_message(
+                            chat_id,
+                            "✅ <b>پرداخت شما ثبت شد</b>\n\n"
+                            "⏳ سرویس شما در صف تحویل قرار گرفت و به محض اتصال پنل، کانفیگ ارسال می‌شود.\n\n"
+                            "نیازی به کار دیگری ندارید.",
+                            parse_mode="HTML",
+                        )
+                        failed_notified_user = True
+                    except Exception:
+                        pass
                 # Notify admins with full technical details
                 try:
                     _pid = package_row["panel_id"] if "panel_id" in (package_row.keys() if hasattr(package_row, "keys") else {}) else None
@@ -2109,7 +2125,7 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
                     _pid = None
                 _notify_panel_error(
                     uid=uid, package_row=package_row,
-                    stage="ساخت کلاینت در پنل (سفارش معلق ایجاد شد)", detail=result,
+                    stage="ساخت کلاینت در پنل (اضافه به صف تحویل)", detail=result,
                     panel_id=_pid,
                 )
         # Register panel configs as purchases with is_test flag
@@ -2544,45 +2560,9 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
     MAX_WAIT           = 28800 # 8-hour absolute hard cap
 
     _t_start           = time.time()
-    _waiting_notified  = False
-    _last_periodic     = 0.0
-    PERIODIC_INTERVAL  = 300   # notify user every 5 minutes while waiting
-
-    def _maybe_notify_waiting():
-        nonlocal _waiting_notified, _last_periodic
-        if not chat_id:
-            return
-        now = time.time()
-        if not _waiting_notified:
-            try:
-                bot.send_message(
-                    chat_id,
-                    "⏳ <b>سرور پنل در حال حاضر در دسترس نیست</b>\n\n"
-                    "سفارش شما در صف انتظار قرار گرفت. "
-                    "به محض بازگشت اتصال، سرویس شما ساخته و تحویل داده می‌شود.",
-                    parse_mode="HTML",
-                )
-                _waiting_notified = True
-                _last_periodic = now
-            except Exception:
-                pass
-        elif now - _last_periodic >= PERIODIC_INTERVAL:
-            try:
-                bot.send_message(chat_id, "⏳ هنوز در حال تلاش برای اتصال به پنل...",
-                                 parse_mode="HTML")
-                _last_periodic = now
-            except Exception:
-                pass
-
-    def _notify_reconnected():
-        if _waiting_notified and chat_id:
-            try:
-                bot.send_message(chat_id, "✅ اتصال به پنل برقرار شد، در حال ساخت سرویس...",
-                                 parse_mode="HTML")
-            except Exception:
-                pass
 
     # ── Step 1: login ─────────────────────────────────────────────────────────
+    # Fail fast on connection errors — the delivery_worker will retry later.
     login_err = None
     _t0 = time.time()
     while True:
@@ -2592,14 +2572,12 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
         ok, login_err = client.login()
         if ok:
             login_err = None
-            _notify_reconnected()
             break
         elapsed = time.time() - _t0
         if _is_conn_err(login_err):
-            _maybe_notify_waiting()
-            log.warning("_create_panel_config: login CONN_ERR (%.0fs elapsed), retry in %ds: %s",
-                        elapsed, CONN_RETRY_DELAY, login_err)
-            time.sleep(CONN_RETRY_DELAY)
+            # Fail immediately — caller will enqueue for retry
+            log.warning("_create_panel_config: login CONN_ERR, failing fast: %s", login_err)
+            break
         else:
             log.warning("_create_panel_config: login failed (%.0fs elapsed): %s", elapsed, login_err)
             if elapsed + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:
@@ -2624,10 +2602,9 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
         # find_inbound doesn't return an error string — re-login to check connectivity
         _ok_chk, _chk_err = client.login()
         if not _ok_chk and _is_conn_err(_chk_err):
-            _maybe_notify_waiting()
-            log.warning("_create_panel_config: find_inbound CONN_ERR (%.0fs elapsed), retry in %ds",
-                        elapsed, CONN_RETRY_DELAY)
-            time.sleep(CONN_RETRY_DELAY)
+            # Fail immediately
+            log.warning("_create_panel_config: find_inbound CONN_ERR, failing fast")
+            break
         else:
             log.warning("_create_panel_config: find_inbound failed (%.0fs elapsed)", elapsed)
             if elapsed + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:
@@ -2686,10 +2663,9 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
         create_err = result if isinstance(result, str) else str(result)
         elapsed = time.time() - _t0
         if _is_conn_err(create_err):
-            _maybe_notify_waiting()
-            log.warning("_create_panel_config: create_client CONN_ERR (%.0fs elapsed), retry in %ds: %s",
-                        elapsed, CONN_RETRY_DELAY, create_err)
-            time.sleep(CONN_RETRY_DELAY)
+            # Fail immediately — delivery_worker will retry
+            log.warning("_create_panel_config: create_client CONN_ERR, failing fast: %s", create_err)
+            break
         else:
             log.warning("_create_panel_config: create_client failed (%.0fs elapsed): %s", elapsed, create_err)
             if elapsed + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:

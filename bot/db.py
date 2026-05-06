@@ -844,6 +844,27 @@ def _run_init_db_migrations():
             "ALTER TABLE packages ADD COLUMN button_color TEXT NOT NULL DEFAULT 'glass'",
             # ── Panel configs: inbound protocol (vmess/vless/trojan) ──────────
             "ALTER TABLE panel_configs ADD COLUMN inbound_protocol TEXT NOT NULL DEFAULT ''",
+            # ── Persistent panel-config delivery queue ─────────────────────────
+            """CREATE TABLE IF NOT EXISTS delivery_queue (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id         INTEGER NOT NULL,
+                chat_id         INTEGER NOT NULL,
+                package_id      INTEGER NOT NULL,
+                payment_id      INTEGER NOT NULL,
+                desired_name    TEXT,
+                unit_price      INTEGER NOT NULL DEFAULT 0,
+                payment_method  TEXT    NOT NULL DEFAULT '',
+                is_test         INTEGER NOT NULL DEFAULT 0,
+                status          TEXT    NOT NULL DEFAULT 'pending',
+                retry_count     INTEGER NOT NULL DEFAULT 0,
+                last_error      TEXT,
+                next_retry_at   TEXT,
+                created_at      TEXT    NOT NULL,
+                delivered_at    TEXT,
+                panel_config_id INTEGER,
+                client_uuid     TEXT,
+                client_name     TEXT
+            )""",
         ]
         for sql in migrations:
             try:
@@ -4272,3 +4293,82 @@ def get_gateway_bonus_amount(gw_name: str, base_amount: int) -> int:
 def apply_gateway_fee(gw_name: str, base_amount: int) -> int:
     """Return base_amount + fee for this gateway (fee-adjusted payable amount)."""
     return base_amount + get_gateway_fee_amount(gw_name, base_amount)
+
+
+# ── Delivery Queue ─────────────────────────────────────────────────────────────
+
+def enqueue_delivery(user_id, chat_id, package_id, payment_id,
+                     desired_name=None, unit_price=0, payment_method="", is_test=0):
+    """Add a failed panel-config delivery to the persistent retry queue.
+
+    Returns the new queue item id.
+    """
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO delivery_queue"
+            "(user_id,chat_id,package_id,payment_id,desired_name,unit_price,"
+            "payment_method,is_test,status,retry_count,created_at,next_retry_at)"
+            " VALUES(?,?,?,?,?,?,?,?,'pending',0,?,?)",
+            (user_id, chat_id, package_id, payment_id, desired_name, unit_price,
+             payment_method, is_test, now_str(), now_str()),
+        )
+        return conn.execute("SELECT last_insert_rowid() AS x").fetchone()["x"]
+
+
+def get_due_deliveries():
+    """Return all pending delivery_queue items whose next_retry_at <= now."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM delivery_queue WHERE status='pending' AND next_retry_at <= ?",
+            (now_str(),),
+        ).fetchall()
+
+
+def update_delivery_retry(queue_id, error, next_retry_at):
+    """Increment retry_count, store last_error, and schedule next attempt."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE delivery_queue"
+            " SET retry_count=retry_count+1, last_error=?, next_retry_at=?, status='pending'"
+            " WHERE id=?",
+            (str(error)[:1000], next_retry_at, queue_id),
+        )
+
+
+def mark_delivery_delivered(queue_id, panel_config_id=None):
+    """Mark a queue item as successfully delivered."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE delivery_queue"
+            " SET status='delivered', delivered_at=?, panel_config_id=COALESCE(?,panel_config_id)"
+            " WHERE id=?",
+            (now_str(), panel_config_id, queue_id),
+        )
+
+
+def mark_delivery_failed(queue_id, error):
+    """Mark a queue item as permanently failed (max retries exceeded)."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE delivery_queue SET status='failed', last_error=? WHERE id=?",
+            (str(error)[:1000], queue_id),
+        )
+
+
+def update_delivery_progress(queue_id, panel_config_id, client_uuid, client_name):
+    """Persist partial-success state so the worker can skip re-creation on next attempt."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE delivery_queue"
+            " SET panel_config_id=?, client_uuid=?, client_name=?"
+            " WHERE id=?",
+            (panel_config_id, client_uuid, client_name, queue_id),
+        )
+
+
+def get_delivery_queue_item(queue_id):
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM delivery_queue WHERE id=?", (queue_id,)
+        ).fetchone()
+
