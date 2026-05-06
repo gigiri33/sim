@@ -244,6 +244,7 @@ def process_centralpay_verified_payment(payment_id: int,
     from .payments import apply_gateway_bonus_if_needed
     from .bot_instance import bot
     from .gateways.centralpay import verify_centralpay_order
+    from .ui.premium_emoji import ce
 
     incoming_order_id = str(payment_id or "").strip()
     payment = get_payment_by_gateway_ref(incoming_order_id)
@@ -388,7 +389,11 @@ def process_centralpay_verified_payment(payment_id: int,
                     (now_str(), now_str(), payment_id)
                 )
             try:
-                bot.send_message(uid, "✅ پرداخت سنترال‌پی تأیید شد. کانفیگ‌های شما در حال آماده‌سازی هستند...", parse_mode="HTML")
+                bot.send_message(
+                    uid,
+                    f"{ce('✅', '5987885383646451415')} واریزی شما تأیید شد.\n\n"
+                    f"{ce('⏳', '5258079378159453410')} کانفیگ شما در حال ارسال است ...",
+                    parse_mode="HTML")
             except Exception:
                 pass
             snames = get_payment_service_names(payment_id)

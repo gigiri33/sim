@@ -4915,7 +4915,7 @@ def universal_handler(message):
         if sn == "admin_payment_approve_note" and is_admin(uid):
             payment_id = sd["payment_id"]
             raw_note   = (message.text or "").strip()
-            note = "واریزی شما تأیید شد." if (not raw_note or raw_note == "➖") else raw_note
+            note = "" if (not raw_note or raw_note == "➖") else raw_note
             finish_card_payment_approval(payment_id, note, approved=True)
             state_clear(uid)
             bot.send_message(uid, "✅ درخواست با موفقیت تأیید شد.", reply_markup=kb_admin_panel())

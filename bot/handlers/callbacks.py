@@ -3053,15 +3053,16 @@ def _send_bulk_delivery_result(chat_id, uid, package_row, purchase_ids, pending_
 
     if pending_ids:
         from ..ui.notifications import notify_pending_order_to_admins
+        from ..ui.premium_emoji import ce
         count_pending = len(pending_ids)
         try:
             bot.send_message(
                 chat_id,
-                f"⚠️ <b>بخشی از سفارش در انتظار تأمین موجودی</b>\n\n"
-                f"✅ {len(purchase_ids)} کانفیگ تحویل داده شد.\n"
-                f"⏳ {count_pending} کانفیگ دیگر در صف انتظار قرار گرفت.\n\n"
+                f"{ce('⚠️', '5987718004475958316')} <b>بخشی از سفارش در انتظار تأمین موجودی</b>\n\n"
+                f"{ce('✅', '5348135243104664976')} {len(purchase_ids)} کانفیگ تحویل داده شد.\n"
+                f"{ce('⏳', '5990007106080608968')} {count_pending} کانفیگ دیگر در صف انتظار قرار گرفت.\n\n"
                 "به‌محض تأمین موجودی، کانفیگ‌های باقیمانده به‌صورت خودکار ارسال می‌شوند.\n"
-                "🙏 از صبر شما متشکریم.",
+                f"از صبر شما متشکریم {ce('🙏', '5987803371245932733')}",
                 parse_mode="HTML",
                 reply_markup=back_button("main")
             )
