@@ -842,6 +842,8 @@ def _run_init_db_migrations():
             ),
             # ── Packages: per-package button color ────────────────────────────
             "ALTER TABLE packages ADD COLUMN button_color TEXT NOT NULL DEFAULT 'glass'",
+            # ── Panel configs: inbound protocol (vmess/vless/trojan) ──────────
+            "ALTER TABLE panel_configs ADD COLUMN inbound_protocol TEXT NOT NULL DEFAULT ''",
         ]
         for sql in migrations:
             try:
@@ -3562,17 +3564,20 @@ def update_panel_client_package_field(cpkg_id, field, value):
 def add_panel_config(user_id, package_id, panel_id, panel_type,
                      inbound_id, inbound_port, client_name, client_uuid,
                      client_sub_url, client_config_text, expire_at,
-                     inbound_remark="", purchase_id=None, payment_id=None, cpkg_id=None, is_test=0):
+                     inbound_remark="", purchase_id=None, payment_id=None, cpkg_id=None, is_test=0,
+                     inbound_protocol=""):
     with get_conn() as conn:
         cur = conn.execute(
             """INSERT INTO panel_configs
                (user_id, package_id, panel_id, panel_type, inbound_id, inbound_port,
                 client_name, client_uuid, client_sub_url, client_config_text,
-                inbound_remark, expire_at, created_at, purchase_id, payment_id, cpkg_id, is_test)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                inbound_remark, expire_at, created_at, purchase_id, payment_id, cpkg_id, is_test,
+                inbound_protocol)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (user_id, package_id, panel_id, panel_type, inbound_id, inbound_port,
              client_name, client_uuid, client_sub_url, client_config_text,
-             inbound_remark or "", expire_at, now_str(), purchase_id, payment_id, cpkg_id, int(is_test))
+             inbound_remark or "", expire_at, now_str(), purchase_id, payment_id, cpkg_id, int(is_test),
+             inbound_protocol or "")
         )
         return cur.lastrowid
 
@@ -3729,7 +3734,7 @@ def update_panel_config_field(config_id, field, value):
     _ALLOWED = {
         "client_uuid", "client_sub_url", "client_config_text",
         "expire_at", "is_expired", "auto_renew", "is_disabled",
-        "client_name", "package_id", "panel_id",
+        "client_name", "package_id", "panel_id", "inbound_protocol",
     }
     if field not in _ALLOWED:
         raise ValueError(f"update_panel_config_field: field {field!r} not allowed")

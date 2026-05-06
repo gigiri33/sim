@@ -553,23 +553,49 @@ def _show_panel_client_packages(call, panel_id):
 def _show_cpkg_edit_menu(call, cpkg_id):
     """Show edit sub-menu for a client package."""
     from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    from ..panels.client import PanelClient
     cp = get_panel_client_package(cpkg_id)
     if not cp:
         send_or_edit(call, "⚠️ کلاینت پکیج یافت نشد.", None)
         return
     _DM = {"config_only": "📄 فقط کانفیگ", "sub_only": "🔗 فقط ساب", "both": "📄+🔗 هر دو"}
+    _SUPPORTED_PROTOCOLS = {"vless", "vmess", "trojan"}
     # sample_client_name may not exist in older rows
     try:
         scn = cp["sample_client_name"] or ""
     except (KeyError, IndexError):
         scn = ""
+
+    # Detect inbound protocol from panel API for display
+    inbound_proto = ""
+    proto_warning = ""
+    try:
+        panel = get_panel(cp["panel_id"])
+        if panel:
+            pc_api = PanelClient(
+                protocol=panel["protocol"], host=panel["host"], port=panel["port"],
+                path=panel["path"] or "", username=panel["username"], password=panel["password"],
+                sub_url_base=panel.get("sub_url_base") or "",
+            )
+            ib = pc_api.find_inbound_by_id(cp["inbound_id"])
+            if ib:
+                inbound_proto = (ib.get("protocol") or "").lower().strip()
+            if inbound_proto and inbound_proto not in _SUPPORTED_PROTOCOLS:
+                proto_warning = f"\n⚠️ <b>پروتکل «{esc(inbound_proto)}» هنوز برای ساخت خودکار پشتیبانی نمی‌شود.</b>"
+    except Exception:
+        pass
+
+    proto_line = f"🔐 پروتکل اینباند: <b>{esc(inbound_proto.upper()) if inbound_proto else '—'}</b>\n" if inbound_proto else ""
+
     text = (
         f"✏️ <b>ویرایش کلاینت پکیج #{cpkg_id}</b>\n\n"
         f"🔌 اینباند ID: <code>{cp['inbound_id']}</code>\n"
+        f"{proto_line}"
         f"📤 تحویل: {_DM.get(cp['delivery_mode'], cp['delivery_mode'])}\n"
         f"📄 کانفیگ نمونه: <code>{esc(cp['sample_config'][:60]) if cp['sample_config'] else '—'}</code>\n"
         f"🔗 ساب نمونه: <code>{esc(cp['sample_sub_url'][:60]) if cp['sample_sub_url'] else '—'}</code>\n"
-        f"🏷 نام نمونه در فرگمنت: <code>{esc(scn) if scn else '— (تنظیم نشده)'}</code>\n\n"
+        f"🏷 نام نمونه در فرگمنت: <code>{esc(scn) if scn else '— (تنظیم نشده)'}</code>\n"
+        f"{proto_warning}\n"
         "فیلد مورد نظر را برای ویرایش انتخاب کنید:"
     )
     kb = InlineKeyboardMarkup()
@@ -602,18 +628,32 @@ def _show_cpkg_edit_menu(call, cpkg_id):
 def _show_panel_client_package_preview(call, cpkg_id):
     """Show sample config/sub of a client package to admin."""
     from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    from ..panels.client import is_vmess_link, decode_vmess_link
     cp = get_panel_client_package(cpkg_id)
     if not cp:
         send_or_edit(call, "⚠️ کلاینت پکیج یافت نشد.", None)
         return
     _DM = {"config_only": "📄 فقط کانفیگ", "sub_only": "🔗 فقط ساب", "both": "📄+🔗 هر دو"}
     dm_label = _DM.get(cp["delivery_mode"], cp["delivery_mode"])
+
+    # Detect protocol from sample config
+    _detected_proto = ""
+    if cp.get("sample_config"):
+        if is_vmess_link(cp["sample_config"]):
+            _detected_proto = "VMess"
+        elif cp["sample_config"].startswith("vless://"):
+            _detected_proto = "VLESS"
+        elif cp["sample_config"].startswith("trojan://"):
+            _detected_proto = "Trojan"
+
     parts = [
         f"📦 <b>کلاینت پکیج #{cp['id']}</b>",
         f"🔹 نام: <b>{esc(cp['name'] or '—')}</b>",
         f"🔌 اینباند ID: <code>{cp['inbound_id']}</code>",
         f"📤 تحویل: {dm_label}",
     ]
+    if _detected_proto:
+        parts.append(f"🔐 پروتکل: <b>{esc(_detected_proto)}</b>")
     if cp["sample_config"]:
         parts.append(f"\n📄 <b>نمونه کانفیگ:</b>\n<code>{esc(cp['sample_config'])}</code>")
     if cp["sample_sub_url"]:
@@ -920,6 +960,9 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
         buyer_name     = esc(str(cfg.get("full_name") or "—"))
         buyer_username = esc(str(cfg.get("username")  or "—"))
         buyer_id       = cfg.get("user_id", "—")
+        _proto_raw = (cfg.get("inbound_protocol") or "").lower().strip()
+        _PROTO_LABELS = {"vmess": "VMess", "vless": "VLESS", "trojan": "Trojan"}
+        _proto_label = _PROTO_LABELS.get(_proto_raw, _proto_raw.upper() if _proto_raw else "—")
         user_block = (
             f"\n\n🛒 <b>خریدار:</b>\n"
             f"نام: {buyer_name}\n"
@@ -930,6 +973,7 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
         text = (
             f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(cfg.get('client_name') or '—')}</b>\n"
             f"{ce('🧩', '5463224921935082813')} نوع سرویس: <b>{esc(cfg.get('type_name') or '—')}</b>\n"
+            f"🔐 پروتکل: <b>{_proto_label}</b>\n"
             f"{ce('🔋', '5924538142198600679')} حجم: <b>{vol_text}</b>\n"
             f"{ce('⏰', '5343724178547691280')} مدت: <b>{dur_text}</b>"
             f"{config_line}"

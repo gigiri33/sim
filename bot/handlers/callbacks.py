@@ -2183,19 +2183,20 @@ def _build_config_from_template(cpkg, client_uuid, client_name):
     """
     Build a VLESS/VMess/Trojan config URL from a saved sample template.
 
-    Only two dynamic parts are replaced:
-      1. The UUID in the URL body (regex, first occurrence).
-      2. The #fragment — if cpkg['sample_client_name'] is non-empty and is found
-         inside the decoded fragment, ONLY that substring is replaced with
-         client_name, preserving any prefix / suffix (e.g. ⚕️TUN_-NAME-main).
-         If sample_client_name is empty or not found, the entire fragment is
-         replaced with client_name (safe backward-compat fallback).
+    For VLESS/Trojan:
+      - Replaces UUID in URL body (first occurrence via regex)
+      - Replaces #fragment name (preserving prefix/suffix if sample_client_name set)
 
-    Everything else (domain, port, path, host header, query params order, …)
-    is taken verbatim from the template — the panel IP is never used.
+    For VMess (vmess://):
+      - Decodes base64 JSON, patches 'id' and 'ps', re-encodes.
+      - All other fields (add, port, net, path, host, tls, aid, scy…) are
+        taken verbatim from the template — never guessed.
+
+    Everything else is taken verbatim from the template.
     """
     import re as _re
     import urllib.parse as _up
+    from ..panels.client import is_vmess_link, decode_vmess_link, encode_vmess_link
 
     # sqlite3.Row doesn't support .get() — normalise to dict
     if not isinstance(cpkg, dict):
@@ -2205,6 +2206,18 @@ def _build_config_from_template(cpkg, client_uuid, client_name):
     if not tmpl:
         return None
 
+    # ── VMess path: patch id + ps in JSON, preserve everything else ──────────
+    if is_vmess_link(tmpl):
+        try:
+            obj = decode_vmess_link(tmpl)
+            obj["id"] = client_uuid
+            obj["ps"] = client_name
+            return encode_vmess_link(obj)
+        except Exception as _ve:
+            log.warning("_build_config_from_template VMess patch error: %s", _ve)
+            return None
+
+    # ── VLESS / Trojan path ───────────────────────────────────────────────────
     _UUID_RE = _re.compile(
         r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}',
         _re.IGNORECASE
@@ -2651,6 +2664,7 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
     # Prevents the panel from rejecting concurrent requests even when online.
     result = None
     create_err = None
+    inbound_protocol = (inbound.get("protocol") or "vless").lower().strip()
     _t0 = time.time()
     _dup_retries = 0          # counts non-connection-error retries with a desired name
     _MAX_DUP_RETRIES = 3      # after this many suffix attempts, fall back to full random
@@ -2662,11 +2676,14 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
             # Reset partial timer after waiting for lock (another thread may have
             # held the lock for a long time while the panel was busy).
             _t0 = time.time()
-            ok, result = client.create_client(inbound_id, client_name, traffic_bytes, expire_ms)
+            ok, result = client.create_client_for_inbound(
+                inbound_id, client_name, traffic_bytes, expire_ms,
+                protocol=inbound_protocol,
+            )
         if ok:
             create_err = None
             break
-        create_err = result
+        create_err = result if isinstance(result, str) else str(result)
         elapsed = time.time() - _t0
         if _is_conn_err(create_err):
             _maybe_notify_waiting()
@@ -2678,8 +2695,6 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
             if elapsed + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:
                 break
             # Rotate client name to avoid duplicate key conflicts on retry.
-            # If a desired name was provided, try up to _MAX_DUP_RETRIES times
-            # with a "name-xx" suffix; then fall back to a fully random name.
             _dup_retries += 1
             if desired_name and _dup_retries <= _MAX_DUP_RETRIES:
                 _suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=2))
@@ -2694,41 +2709,51 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
     if create_err is not None:
         return False, f"خطا در ساخت کلاینت: {create_err}", None, None
 
-    client_uuid, sub_id = result
+    # result is now a dict from create_client_for_inbound
+    client_uuid = result["uuid"]
+    sub_id      = result["sub_id"]
     # Default sub URL from panel — may be overridden by template below
     sub_url = client.get_sub_url(client_uuid)
 
     config_text = None
 
     # ── Step 4a: Build config from client package template (preferred path) ──
-    # Uses _build_config_from_template which:
-    #   • replaces ONLY the UUID in the URL body
-    #   • in the #fragment, replaces only cpkg['sample_client_name'] with
-    #     client_name — preserving emoji prefix / -main suffix etc.
-    #   • keeps domain, port, host header, path, query params from template
+    # For VMess: patches id+ps in JSON, preserves all other fields.
+    # For VLESS/Trojan: replaces UUID + fragment name.
     if cpkg and cpkg["sample_config"]:
         config_text = _build_config_from_template(cpkg, client_uuid, client_name)
-        log.info("_create_panel_config: built config from template for uid=%s", uid)
+        log.info("_create_panel_config: built config from template for uid=%s proto=%s", uid, inbound_protocol)
 
     # ── Step 4b: Build sub URL from template (always, when available) ────────
-    # NOT limited to sub_only/both — the sub URL is stored in DB regardless of
-    # delivery_mode and must be correct for future reference / re-renders.
-    # The panel's path prefix (e.g. /emadhb/) is NEVER injected here.
     if cpkg and cpkg["sample_sub_url"]:
         sub_url = _build_sub_from_template(cpkg, sub_id) or sub_url
 
-    # ── Step 4c: Fetch from panel API (fallback when no config template) ─────
+    # ── Step 4c: Fetch from panel API (preferred when no config template) ─────
+    # Uses retry (max 3 × 1.5s) for VMess propagation delay.
+    # If this succeeds, patch VMess config with correct UUID and name.
     if not config_text and delivery_mode in ("config_only", "both"):
-        fetch_ok, fetch_result = client.fetch_client_config(sub_id)
-        if fetch_ok and fetch_result:
-            for line in fetch_result:
-                if not line.startswith("http://") and not line.startswith("https://"):
-                    config_text = line
-                    break
-            if not config_text:
-                config_text = fetch_result[0]
+        fetch_ok, fetched_line = client.fetch_client_config_with_retry(
+            sub_id, protocol=inbound_protocol, max_attempts=3, delay_secs=1.5
+        )
+        if fetch_ok and fetched_line:
+            # For VMess: patch id+ps in the returned config (panel may have
+            # stored a different sub-ID or name — use ours for correctness).
+            from ..panels.client import is_vmess_link, patch_vmess_link, validate_vmess_link
+            if is_vmess_link(fetched_line):
+                try:
+                    patched = patch_vmess_link(fetched_line, client_uuid, client_name)
+                    valid, verr = validate_vmess_link(patched)
+                    if valid:
+                        config_text = patched
+                        log.info("_create_panel_config: VMess config fetched+patched for uid=%s", uid)
+                    else:
+                        log.warning("_create_panel_config: VMess validation after patch failed: %s", verr)
+                except Exception as _ve:
+                    log.warning("_create_panel_config: VMess patch error: %s", _ve)
+            else:
+                config_text = fetched_line
         else:
-            log.warning("_create_panel_config: sub fetch failed (%s), building from streamSettings", fetch_result)
+            log.warning("_create_panel_config: sub fetch failed (%s), building from streamSettings", fetched_line)
 
     # ── Step 4d: Build from streamSettings (last fallback) ───────────────────
     if not config_text:
@@ -2739,6 +2764,19 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
             panel=panel,
             real_port=real_port,
         ) or sub_url
+
+    # ── Step 4e: Final VMess validation ──────────────────────────────────────
+    if inbound_protocol == "vmess" and config_text:
+        from ..panels.client import is_vmess_link, validate_vmess_link
+        if is_vmess_link(config_text):
+            valid, verr = validate_vmess_link(config_text)
+            if not valid:
+                log.warning("_create_panel_config: final VMess config invalid (%s) — rolling back client uuid=%s", verr, client_uuid)
+                try:
+                    client.delete_client(inbound_id, client_uuid)
+                except Exception:
+                    pass
+                return False, f"کانفیگ VMess معتبر نیست: {verr}", None, None
 
     pc_id = add_panel_config(
         user_id=uid,
@@ -2754,8 +2792,9 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
         inbound_remark=inbound_remark,
         expire_at=expire_str,
         payment_id=payment_id,
-        cpkg_id=cpkg["id"] if cpkg else None,  # store which template was used
+        cpkg_id=cpkg["id"] if cpkg else None,
         is_test=is_test,
+        inbound_protocol=inbound_protocol,
     )
 
     return True, delivery_mode, pc_id, client_name
@@ -2840,7 +2879,17 @@ def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
     sub_url       = pc["client_sub_url"] or ""
 
     # Extract the actual service name from the config's #tag (panel may add prefix/suffix)
-    if config_text and "#" in config_text:
+    # For VMess: use ps field instead of #tag
+    from ..panels.client import is_vmess_link, decode_vmess_link
+    if is_vmess_link(config_text):
+        try:
+            _vmess_obj = decode_vmess_link(config_text)
+            _ps = (_vmess_obj.get("ps") or "").strip()
+            if _ps:
+                service_name = _ps
+        except Exception:
+            pass
+    elif config_text and "#" in config_text:
         try:
             raw_remark = config_text.rsplit("#", 1)[1].strip()
             if raw_remark:
@@ -2848,7 +2897,12 @@ def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
         except Exception:
             pass
 
-    inbound_remark = pc["inbound_remark"] if "inbound_remark" in (pc.keys() if hasattr(pc, "keys") else {}) else ""
+    inbound_remark   = pc["inbound_remark"] if "inbound_remark" in (pc.keys() if hasattr(pc, "keys") else {}) else ""
+    inbound_protocol = ""
+    try:
+        inbound_protocol = (pc["inbound_protocol"] or "").lower().strip()
+    except (KeyError, IndexError):
+        pass
     pkg_type_name = package_row["type_name"] if "type_name" in (package_row.keys() if hasattr(package_row, "keys") else {}) else ""
     # Prefer the service type defined in the package-type management section over the panel inbound's remark.
     type_label    = pkg_type_name or inbound_remark
@@ -2857,12 +2911,17 @@ def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
     _expire_at    = pc["expire_at"] if "expire_at" in pc.keys() else ""
     expire_line   = f"{ce('📅', '5379748062124056162')} انقضا: <b>{_expire_at[:10]}</b>\n" if _expire_at else ""
 
+    _PROTO_LABELS = {"vmess": "VMess", "vless": "VLESS", "trojan": "Trojan"}
+    proto_label_str = _PROTO_LABELS.get(inbound_protocol, "")
+    proto_line = f"🔐 پروتکل: <b>{esc(proto_label_str)}</b>\n" if proto_label_str else ""
+
     header = f"{ce('✅', '5260463209562776385')} <b>سرویس شما آماده است!</b>"
 
     info_block = (
         f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(service_name)}</b>\n"
         f"{ce('🧩', '5463224921935082813')} نوع سرویس: <b>{esc(type_label)}</b>\n"
         f"{pkg_line}"
+        f"{proto_line}"
         f"{ce('🔋', '5924538142198600679')} حجم: <b>{esc(vol_label)}</b>\n"
         f"{ce('⏰', '5343724178547691280')} مدت: <b>{esc(dur_label)}</b>\n"
         f"{ce('👥', '5372926953978341366')} تعداد کاربر: <b>{esc(users_label)}</b>\n"

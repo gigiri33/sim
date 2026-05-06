@@ -6,7 +6,10 @@ Handles login and health-check only.  No inbound or client management yet.
 Passwords are stored and transmitted as plain text; add encryption later if
 needed.
 """
+import base64 as _b64_module
+import json as _json_module
 import time
+import uuid as _uuid_module
 import warnings
 import logging
 
@@ -23,6 +26,85 @@ RETRY_DELAY     = 2    # seconds to wait between retries
 # Suppress InsecureRequestWarning raised by verify=False (self-signed certs are
 # common in self-hosted 3x-ui deployments).
 warnings.filterwarnings("ignore", message="Unverified HTTPS request")
+
+# ── VMess helpers ─────────────────────────────────────────────────────────────
+
+def is_vmess_link(text: str) -> bool:
+    """Return True if text looks like a vmess:// link."""
+    return isinstance(text, str) and text.strip().startswith("vmess://")
+
+
+def decode_vmess_link(vmess_url: str) -> dict:
+    """
+    Decode a vmess:// link into its JSON dict.
+    Raises ValueError on bad input.
+    """
+    if not is_vmess_link(vmess_url):
+        raise ValueError("Not a vmess:// link")
+    b64 = vmess_url.strip()[8:].split("#")[0]
+    # Fix missing base64 padding
+    b64 += "=" * (-len(b64) % 4)
+    try:
+        decoded = _b64_module.b64decode(b64).decode("utf-8")
+    except Exception as exc:
+        raise ValueError(f"VMess base64 decode error: {exc}") from exc
+    try:
+        obj = _json_module.loads(decoded)
+    except Exception as exc:
+        raise ValueError(f"VMess JSON parse error: {exc}") from exc
+    if not isinstance(obj, dict):
+        raise ValueError("VMess payload is not a JSON object")
+    return obj
+
+
+def encode_vmess_link(obj: dict) -> str:
+    """Encode a dict to a vmess:// link (compact JSON, UTF-8 safe)."""
+    raw = _json_module.dumps(obj, ensure_ascii=False, separators=(",", ":"))
+    return "vmess://" + _b64_module.b64encode(raw.encode("utf-8")).decode()
+
+
+def patch_vmess_link(vmess_url: str, new_uuid: str, new_name: str) -> str:
+    """
+    Return a new vmess:// link where only 'id' and 'ps' are replaced.
+    All other fields (add, port, net, path, host, tls, aid, scy, …) are preserved.
+    Raises ValueError on bad input.
+    """
+    obj = decode_vmess_link(vmess_url)
+    obj["id"] = new_uuid
+    obj["ps"] = new_name
+    return encode_vmess_link(obj)
+
+
+def validate_vmess_link(vmess_url: str) -> tuple:
+    """
+    Validate a vmess:// link.
+    Returns (True, None) or (False, error_str).
+    """
+    if not is_vmess_link(vmess_url):
+        return False, "Not a vmess:// link"
+    try:
+        obj = decode_vmess_link(vmess_url)
+    except ValueError as exc:
+        return False, str(exc)
+    # id must be a valid UUID
+    uid = obj.get("id", "")
+    try:
+        _uuid_module.UUID(str(uid))
+    except Exception:
+        return False, f"Invalid UUID in VMess id field: {uid!r}"
+    # ps (name) must not be empty
+    if not (obj.get("ps") or "").strip():
+        return False, "VMess ps (name) field is empty"
+    # add/host must exist if present
+    if "add" in obj and not str(obj["add"]).strip():
+        return False, "VMess add (host) field is empty"
+    # Re-encode round-trip check
+    try:
+        re_encoded = encode_vmess_link(obj)
+        decode_vmess_link(re_encoded)
+    except Exception as exc:
+        return False, f"VMess round-trip encode/decode failed: {exc}"
+    return True, None
 
 
 class PanelClient:
@@ -247,6 +329,103 @@ class PanelClient:
         except RequestException as exc:
             return False, str(exc)
 
+    def create_client_for_inbound(self, inbound_id: int, email: str,
+                                  traffic_bytes: int, expire_ms: int,
+                                  protocol: str = None) -> tuple:
+        """
+        Protocol-aware client creation.  Detects VMess vs VLESS from the inbound
+        if `protocol` is not supplied.  For VMess, copies alterId/security
+        defaults from an existing client in the same inbound if available.
+
+        Returns (True, {uuid, sub_id, protocol, client_email, inbound_id})
+             or (False, error_str).
+        """
+        # Detect protocol from inbound when not provided
+        if not protocol:
+            inbound = self.find_inbound_by_id(inbound_id)
+            if not inbound:
+                return False, f"اینباند {inbound_id} یافت نشد"
+            protocol = (inbound.get("protocol") or "vless").lower().strip()
+        else:
+            protocol = protocol.lower().strip()
+
+        client_uuid = str(_uuid_module.uuid4())
+        sub_id = client_uuid.replace("-", "")[:16]
+
+        if protocol == "vmess":
+            # Pull alterId/security from an existing client in this inbound
+            alter_id = 0
+            security = "auto"
+            try:
+                inbound_obj = self.find_inbound_by_id(inbound_id)
+                if inbound_obj:
+                    settings_raw = inbound_obj.get("settings") or "{}"
+                    if isinstance(settings_raw, str):
+                        settings_parsed = _json_module.loads(settings_raw)
+                    else:
+                        settings_parsed = settings_raw
+                    existing_clients = settings_parsed.get("clients", [])
+                    if existing_clients:
+                        sample = existing_clients[0]
+                        alter_id = int(sample.get("alterId", 0) or 0)
+                        security = str(sample.get("security", "auto") or "auto")
+            except Exception:
+                pass
+
+            client_obj = {
+                "id":         client_uuid,
+                "alterId":    alter_id,
+                "security":   security,
+                "email":      email,
+                "limitIp":    0,
+                "totalGB":    traffic_bytes,
+                "expiryTime": expire_ms,
+                "enable":     True,
+                "tgId":       "",
+                "subId":      sub_id,
+                "reset":      0,
+            }
+        else:
+            # VLESS / Trojan / default path
+            client_obj = {
+                "id":         client_uuid,
+                "flow":       "",
+                "email":      email,
+                "limitIp":    0,
+                "totalGB":    traffic_bytes,
+                "expiryTime": expire_ms,
+                "enable":     True,
+                "tgId":       "",
+                "subId":      sub_id,
+                "reset":      0,
+            }
+
+        settings_obj = {"clients": [client_obj]}
+        payload = {
+            "id":       inbound_id,
+            "settings": _json_module.dumps(settings_obj),
+        }
+        try:
+            resp = self._api_call(
+                "POST", f"{self.base_url}/panel/api/inbounds/addClient",
+                json=payload,
+                timeout=LONG_TIMEOUT, verify=False,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("success"):
+                    return True, {
+                        "uuid":         client_uuid,
+                        "sub_id":       sub_id,
+                        "protocol":     protocol,
+                        "client_email": email,
+                        "inbound_id":   inbound_id,
+                    }
+                return False, data.get("msg") or "ساخت کلاینت ناموفق"
+            return False, f"HTTP {resp.status_code}"
+        except RequestException as exc:
+            return False, str(exc)
+
     def get_client_traffics(self, email: str) -> tuple:
         """
         Get client traffic/status info by email.
@@ -458,7 +637,6 @@ class PanelClient:
         3x-ui returns a base64-encoded string of config link(s), one per line.
         Returns (True, [config_line, ...]) or (False, error_str).
         """
-        import base64 as _b64
         # Build the subscription URL directly (sub_id is already the 16-char token)
         if self.sub_url_base:
             base = self.sub_url_base
@@ -474,7 +652,7 @@ class PanelClient:
             raw = resp.content
             # Try base64 decoding (3x-ui returns base64-encoded config list)
             try:
-                decoded = _b64.b64decode(raw).decode("utf-8", errors="replace")
+                decoded = _b64_module.b64decode(raw).decode("utf-8", errors="replace")
             except Exception:
                 decoded = raw.decode("utf-8", errors="replace")
             lines = [l.strip() for l in decoded.splitlines() if l.strip()]
@@ -485,3 +663,38 @@ class PanelClient:
             return False, "اتصال منقضی شد"
         except RequestException as exc:
             return False, str(exc)
+
+    def fetch_client_config_with_retry(self, sub_id: str, protocol: str = "",
+                                       max_attempts: int = 3,
+                                       delay_secs: float = 1.5) -> tuple:
+        """
+        Fetch the subscription content with a few retries to handle the brief
+        propagation delay after addClient on busy panels.
+
+        Returns (True, config_line_str) for the first line matching `protocol`
+        (or first non-http line), or (False, error_str) if all attempts fail.
+        """
+        import time as _t
+        last_err = "محتوای ساب خالی است"
+        proto_prefix = f"{protocol.lower()}://" if protocol else ""
+        for attempt in range(max_attempts):
+            if attempt > 0:
+                _t.sleep(delay_secs)
+            ok, result = self.fetch_client_config(sub_id)
+            if not ok:
+                last_err = result
+                continue
+            lines = result  # list of config lines
+            # Prefer a line matching the requested protocol
+            if proto_prefix:
+                for line in lines:
+                    if line.lower().startswith(proto_prefix):
+                        return True, line
+            # Fallback: first non-http line
+            for line in lines:
+                if not line.startswith("http://") and not line.startswith("https://"):
+                    return True, line
+            # Fallback: any line
+            if lines:
+                return True, lines[0]
+        return False, last_err
