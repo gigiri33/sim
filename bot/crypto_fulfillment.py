@@ -274,8 +274,11 @@ def process_centralpay_verified_payment(payment_id: int,
         return {"status": "already_processed"}
 
     # ── Call verify API ───────────────────────────────────────────────────────
+    # Use the unique CentralPay orderId stored in gateway_ref (set at link creation).
+    # Fall back to payment_id for legacy rows that don't have gateway_ref yet.
+    _cp_verify_order_id = str(payment.get("gateway_ref") or payment_id)
     try:
-        ok_v, verify_result = verify_centralpay_order(payment_id)
+        ok_v, verify_result = verify_centralpay_order(_cp_verify_order_id)
     except Exception as _ve:
         _tb.print_exc()
         # Reset to pending so it can be retried

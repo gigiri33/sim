@@ -6432,8 +6432,9 @@ def _dispatch_callback(call, uid, data):
                 back_button(f"renew:{purchase_id}"))
             return
         pay_url_rcp = res_cp.get("redirect_url", "")
+        _cp_order_id_rcp = res_cp.get("cp_order_id", str(payment_id))
         with get_conn() as conn:
-            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (pay_url_rcp, payment_id))
+            conn.execute("UPDATE payments SET receipt_text=?, gateway_ref=? WHERE id=?", (pay_url_rcp, _cp_order_id_rcp, payment_id))
         expiry_line_rcp = format_payment_expire_text(get_payment(payment_id))
         expiry_line_rcp = f"\n\n{expiry_line_rcp}" if expiry_line_rcp else ""
         fee_line_rcp = ""
@@ -8258,8 +8259,9 @@ def _dispatch_callback(call, uid, data):
                 back_button(f"buy:p:{package_id}"))
             return
         pay_url_cp = res_cp.get("redirect_url", "")
+        _cp_order_id_cp = res_cp.get("cp_order_id", str(payment_id))
         with get_conn() as conn:
-            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (pay_url_cp, payment_id))
+            conn.execute("UPDATE payments SET receipt_text=?, gateway_ref=? WHERE id=?", (pay_url_cp, _cp_order_id_cp, payment_id))
         expiry_line_cp = format_payment_expire_text(get_payment(payment_id))
         expiry_line_cp = f"\n\n{expiry_line_cp}" if expiry_line_cp else ""
         fee_line_cp = ""
@@ -9333,8 +9335,9 @@ def _dispatch_callback(call, uid, data):
                 back_button("wallet:charge"))
             return
         pay_url_cpwc = res_cp.get("redirect_url", "")
+        _cp_order_id_cpwc = res_cp.get("cp_order_id", str(payment_id))
         with get_conn() as conn:
-            conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (pay_url_cpwc, payment_id))
+            conn.execute("UPDATE payments SET receipt_text=?, gateway_ref=? WHERE id=?", (pay_url_cpwc, _cp_order_id_cpwc, payment_id))
         expiry_line_cpwc = format_payment_expire_text(get_payment(payment_id))
         expiry_line_cpwc = f"\n\n{expiry_line_cpwc}" if expiry_line_cpwc else ""
         fee_line_cpwc = ""
@@ -12158,8 +12161,9 @@ def _dispatch_callback(call, uid, data):
                     f"⚠️ <b>خطا در ایجاد درگاه سنترال‌پی</b>\n\n<code>{esc(err_cp_pnl[:400])}</code>",
                     back_button(f"mypnlcfg:renewconfirm:{config_id}")); return
             pay_url_cpnl = res_cp_pnl.get("redirect_url", "")
+            _cp_order_id_cpnl = res_cp_pnl.get("cp_order_id", str(payment_id))
             with get_conn() as conn:
-                conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (pay_url_cpnl, payment_id))
+                conn.execute("UPDATE payments SET receipt_text=?, gateway_ref=? WHERE id=?", (pay_url_cpnl, _cp_order_id_cpnl, payment_id))
             expiry_line_cpnl = format_payment_expire_text(get_payment(payment_id))
             expiry_line_cpnl = f"\n\n{expiry_line_cpnl}" if expiry_line_cpnl else ""
             fee_line_cpnl = ""
@@ -12698,8 +12702,9 @@ def _dispatch_callback(call, uid, data):
                     f"⚠️ <b>خطا در ایجاد درگاه سنترال‌پی</b>\n\n<code>{esc(err_cp2[:400])}</code>",
                     back_button(f"mypnlcfg:renewconfirm:{config_id}")); return
             pay_url_cp2 = res_cp2.get("redirect_url", "")
+            _cp_order_id_cp2 = res_cp2.get("cp_order_id", str(payment_id))
             with get_conn() as conn:
-                conn.execute("UPDATE payments SET receipt_text=? WHERE id=?", (pay_url_cp2, payment_id))
+                conn.execute("UPDATE payments SET receipt_text=?, gateway_ref=? WHERE id=?", (pay_url_cp2, _cp_order_id_cp2, payment_id))
             expiry_line_cp2 = format_payment_expire_text(get_payment(payment_id))
             expiry_line_cp2 = f"\n\n{expiry_line_cp2}" if expiry_line_cp2 else ""
             fee_line_cp2 = ""

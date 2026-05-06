@@ -7,6 +7,7 @@ Payment: GET redirect to returnUrl after payment
 """
 
 import json
+import os
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -124,9 +125,12 @@ def create_centralpay_link(amount_toman: int, user_id: int, order_id, return_url
     """
     Call POST /getLink.php to create a CentralPay payment link.
 
+    A unique 6-hex suffix is appended to order_id before sending to CentralPay
+    so the same payment_id can never collide with a previous submission.
+
     Returns:
-        (True,  {"redirect_url": ..., "raw": ...})   on success
-        (False, {"error": ..., "raw": ...})           on failure
+        (True,  {"redirect_url": ..., "cp_order_id": ..., "raw": ...})   on success
+        (False, {"error": ..., "raw": ...})                               on failure
     """
     api_key = _get_api_key()
     if not api_key:
@@ -134,6 +138,11 @@ def create_centralpay_link(amount_toman: int, user_id: int, order_id, return_url
 
     if not return_url:
         return False, {"error": _ERR_MESSAGES["callback_not_set"], "raw": {}}
+
+    # Generate a unique CentralPay orderId to avoid duplicate_orderId rejections when
+    # the same payment record is retried or the database restarts its counter.
+    unique_suffix = os.urandom(3).hex()  # 6 hex chars
+    cp_order_id = f"{order_id}-{unique_suffix}"
 
     link_type = _get_link_type()
     bot_username = _bot_username_from_return_url(return_url) or "unknown"
@@ -144,7 +153,7 @@ def create_centralpay_link(amount_toman: int, user_id: int, order_id, return_url
         "type":      link_type,
         "amount":    int(amount_toman),
         "userId":    user_id,
-        "orderId":   str(order_id),
+        "orderId":   cp_order_id,
         "returnUrl": return_url,
         "description": description,
     }
@@ -162,7 +171,7 @@ def create_centralpay_link(amount_toman: int, user_id: int, order_id, return_url
         method="POST",
     )
     try:
-        print(f"[CentralPay] getLink request: type={link_type} amount={int(amount_toman)} userId={user_id} orderId={order_id} returnUrl={return_url} description={description}")
+        print(f"[CentralPay] getLink request: type={link_type} amount={int(amount_toman)} userId={user_id} orderId={cp_order_id} (payment_id={order_id}) returnUrl={return_url} description={description}")
         with urllib.request.urlopen(req, timeout=15) as resp:
             raw, parsed = _decode_response(resp)
         print(f"[CentralPay] getLink response: {raw[:500]}")
@@ -212,7 +221,7 @@ def create_centralpay_link(amount_toman: int, user_id: int, order_id, return_url
     if not redirect_url:
         return False, {"error": f"سنترال‌پی لینک پرداخت برنگرداند: {raw[:300]}", "raw": parsed}
 
-    return True, {"redirect_url": redirect_url, "type": link_type, "raw": parsed}
+    return True, {"redirect_url": redirect_url, "cp_order_id": cp_order_id, "type": link_type, "raw": parsed}
 
 
 def verify_centralpay_order(order_id):
