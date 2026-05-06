@@ -388,61 +388,89 @@ def _plisio_webhook_server():
             return jsonify({"ok": True}), 200
 
     # ── CentralPay routes ─────────────────────────────────────────────────────
+    def _centralpay_html(message: str, bot_username: str = "", order_id: str = ""):
+        import html as _html
+        slug = (bot_username or setting_get("bot_username", "") or "").lstrip("@").strip()
+        deep_link = f"https://t.me/{slug}?start=checkpay_{_html.escape(str(order_id or ''))}" if slug and order_id else ""
+        button = (
+            f'<a class="btn" href="{deep_link}">بازگشت به ربات</a>'
+            if deep_link else ""
+        )
+        body = f"""<!doctype html>
+<html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>نتیجه پرداخت سنترال‌پی</title>
+<style>body{{margin:0;font-family:tahoma,Arial,sans-serif;background:#0b1020;color:#fff;display:flex;min-height:100vh;align-items:center;justify-content:center}}.card{{max-width:520px;margin:24px;padding:28px;border-radius:20px;background:#151d33;box-shadow:0 12px 36px #0008;text-align:center;line-height:2}}.btn{{display:inline-block;margin-top:18px;padding:12px 22px;border-radius:12px;background:#22c55e;color:#06120a;text-decoration:none;font-weight:bold}}</style>
+</head><body><main class="card"><h2>{_html.escape(message)}</h2><p>لطفاً به ربات برگردید و در صورت نیاز روی «بررسی پرداخت» بزنید.</p>{button}</main></body></html>"""
+        return body, 200, {"Content-Type": "text/html; charset=utf-8"}
+
+    @_app.route("/centralpay/callback", methods=["GET", "POST"])
     @_app.route("/centralpay/<bot_username>/<int:payment_id>/callback", methods=["GET", "POST"])
-    def _centralpay_callback(bot_username, payment_id):
+    def _centralpay_callback(bot_username="", payment_id=None):
         """
         CentralPay returnUrl handler.
-        CentralPay redirects the user back here after payment (GET request).
-        We verify the order and fulfill, then show a simple HTML response.
+        CentralPay redirects the user back here after payment (GET request). The
+        query-string orderId is the gateway-side order id stored in gateway_ref.
         """
         import traceback as _tb2
-        print(f"[CentralPay Callback HIT] payment_id={payment_id} bot={bot_username} method={request.method} args={dict(request.args)} json={request.get_json(silent=True)} form={dict(request.form)}")
+        order_id = str(request.args.get("orderId") or request.form.get("orderId") or "").strip()
+        bot_slug = (request.args.get("bot") or bot_username or "").lstrip("@").strip()
+        print(f"[CentralPay Callback HIT] orderId={order_id} legacy_payment_id={payment_id} bot={bot_slug} method={request.method} args={dict(request.args)} json={request.get_json(silent=True)} form={dict(request.form)}")
         try:
             from bot.crypto_fulfillment import process_centralpay_verified_payment
+            from bot.db import get_payment_by_gateway_ref
 
             payload = {
                 "args": dict(request.args),
                 "form": dict(request.form),
                 "json": request.get_json(silent=True),
                 "method": request.method,
-                "bot_username": bot_username,
+                "bot_username": bot_slug,
             }
 
-            payment = get_payment(payment_id)
+            payment = get_payment_by_gateway_ref(order_id) if order_id else None
+            if payment:
+                print(f"[CentralPay] callback resolved by gateway_ref: orderId={order_id} -> payment_id={payment['id']}")
+            elif payment_id is not None:
+                payment = get_payment(payment_id)
+                print(f"[CentralPay] callback legacy fallback: orderId={order_id} path_payment_id={payment_id} found={bool(payment)}")
+
             if not payment:
-                print(f"[CentralPay] returnUrl: payment_id={payment_id} not found")
-                return "پرداختی با این شناسه یافت نشد. لطفاً به ربات برگردید.", 200
+                print(f"[CentralPay] returnUrl: orderId={order_id} payment_id={payment_id} not found")
+                return _centralpay_html("پرداختی با این شناسه یافت نشد.", bot_slug, order_id)
+
+            payment_id = payment["id"]
+            cp_order_id = str((payment["gateway_ref"] if "gateway_ref" in payment.keys() else "") or order_id or payment_id)
 
             if payment["payment_method"] != "centralpay":
                 print(f"[CentralPay] returnUrl: payment_id={payment_id} wrong method {payment['payment_method']}")
-                return "پرداخت شما قبلاً تأیید شده است. لطفاً به ربات برگردید.", 200
+                return _centralpay_html("پرداخت شما قبلاً تأیید شده است ✅", bot_slug, cp_order_id)
 
             if payment["status"] == "pending" and is_payment_expired(payment):
                 print(f"[EXPIRED PAYMENT IGNORED] payment_id={payment_id}")
-                return jsonify({"ok": True, "expired": True}), 200
+                return _centralpay_html("مهلت این پرداخت به پایان رسیده است.", bot_slug, cp_order_id)
 
             if payment["status"] not in ("pending",):
-                print(f"[CentralPay] returnUrl: payment_id={payment_id} already status={payment['status']}")
-                return "پرداخت شما قبلاً تأیید شده است. لطفاً به ربات برگردید.", 200
+                print(f"[CentralPay] duplicate callback ignored: payment_id={payment_id} orderId={cp_order_id} already status={payment['status']}")
+                return _centralpay_html("این پرداخت قبلاً تایید شده است ✅", bot_slug, cp_order_id)
 
-            result = process_centralpay_verified_payment(payment_id, source="return_url", raw_payload=payload)
+            result = process_centralpay_verified_payment(cp_order_id, source="return_url", raw_payload=payload)
             status = result.get("status", "")
             print(f"[CentralPay] returnUrl result payment_id={payment_id}: {result}")
 
             if status == "ok":
-                return "پرداخت شما با موفقیت تأیید شد. لطفاً به ربات برگردید.", 200
+                return _centralpay_html("پرداخت شما ثبت شد ✅ لطفاً به ربات برگردید.", bot_slug, cp_order_id)
             elif status == "already_processed":
-                return "پرداخت شما قبلاً تأیید شده است. لطفاً به ربات برگردید.", 200
+                return _centralpay_html("این پرداخت قبلاً تایید شده است ✅", bot_slug, cp_order_id)
             elif status == "amount_mismatch":
                 print(f"[CentralPay] returnUrl: amount mismatch payment={payment_id}")
-                return "مبلغ پرداختی با مبلغ سفارش مطابقت ندارد. لطفاً با پشتیبانی تماس بگیرید.", 200
+                return _centralpay_html("مبلغ پرداختی با مبلغ سفارش مطابقت ندارد.", bot_slug, cp_order_id)
             else:
-                return "پرداخت شما هنوز تأیید نشده یا ناموفق است. لطفاً به ربات برگردید و روی بررسی پرداخت بزنید.", 200
+                return _centralpay_html("پرداخت شما ثبت شد ✅ لطفاً به ربات برگردید و روی بررسی پرداخت بزنید.", bot_slug, cp_order_id)
 
         except Exception as exc:
             _tb2.print_exc()
             print("CENTRALPAY_CALLBACK_ERROR:", exc)
-            return "خطایی رخ داد. لطفاً به ربات برگردید و روی بررسی پرداخت بزنید.", 200
+            return _centralpay_html("خطایی رخ داد. لطفاً به ربات برگردید و روی بررسی پرداخت بزنید.", bot_slug, order_id)
 
     # ── RialPay routes ────────────────────────────────────────────────────────
     @_app.route("/rialpay/<bot_username>/debug", methods=["POST", "GET"])

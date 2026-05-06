@@ -49,6 +49,11 @@ def start_handler(message):
     is_new = ensure_user(message.from_user)
     notify_first_start_if_needed(message.from_user)
     uid = message.from_user.id
+    start_arg = ""
+    if message.text:
+        parts = message.text.split(maxsplit=1)
+        if len(parts) > 1:
+            start_arg = parts[1].strip()
     # Cancel any active panel connection thread before clearing state
     try:
         from .callbacks import _pnl_connect_events
@@ -151,6 +156,47 @@ def start_handler(message):
     if not is_admin(uid) and _phone_required_for_user(uid):
         _send_phone_request(message.chat.id, uid)
         return
+
+    # CentralPay return deep link: /start checkpay_<gateway_order_id>
+    if start_arg.startswith("checkpay_"):
+        cp_order_id = start_arg[len("checkpay_"):].strip()
+        try:
+            from ..db import get_payment, get_payment_by_gateway_ref
+            from ..crypto_fulfillment import process_centralpay_verified_payment
+            from ..helpers import fmt_price
+
+            payment = get_payment_by_gateway_ref(cp_order_id)
+            if not payment and cp_order_id.isdigit():
+                payment = get_payment(int(cp_order_id))
+            if not payment or payment["payment_method"] != "centralpay" or int(payment["user_id"]) != int(uid):
+                bot.send_message(message.chat.id,
+                    "پرداخت هنوز تایید نشده یا شناسه پرداخت نامعتبر است. اگر مبلغ از حساب شما کم شده، چند دقیقه بعد دوباره بررسی پرداخت را بزنید.",
+                    parse_mode="HTML")
+                return
+            if payment["status"] != "pending":
+                bot.send_message(message.chat.id, "این پرداخت قبلاً تایید شده است ✅", parse_mode="HTML")
+                return
+
+            verify_order_id = str((payment["gateway_ref"] if "gateway_ref" in payment.keys() else "") or cp_order_id or payment["id"])
+            result = process_centralpay_verified_payment(verify_order_id, source="deep_link", raw_payload={"start_arg": start_arg})
+            status = result.get("status", "")
+            if status == "ok":
+                bot.send_message(message.chat.id,
+                    f"✅ پرداخت سنترال‌پی تأیید شد.\n\n💰 مبلغ: {fmt_price(payment['amount'])} تومان",
+                    parse_mode="HTML")
+            elif status == "already_processed":
+                bot.send_message(message.chat.id, "این پرداخت قبلاً تایید شده است ✅", parse_mode="HTML")
+            elif status == "amount_mismatch":
+                bot.send_message(message.chat.id, "⚠️ مبلغ پرداختی با سفارش مطابقت ندارد. لطفاً با پشتیبانی تماس بگیرید.", parse_mode="HTML")
+            else:
+                bot.send_message(message.chat.id,
+                    "پرداخت هنوز تایید نشده یا شناسه پرداخت نامعتبر است. اگر مبلغ از حساب شما کم شده، چند دقیقه بعد دوباره بررسی پرداخت را بزنید.",
+                    parse_mode="HTML")
+            return
+        except Exception as exc:
+            print(f"[CentralPay] deep-link verify error orderId={cp_order_id}: {exc}")
+            bot.send_message(message.chat.id, "⚠️ خطا در بررسی پرداخت. لطفاً دوباره روی بررسی پرداخت بزنید.", parse_mode="HTML")
+            return
 
     show_main_menu(message)
 

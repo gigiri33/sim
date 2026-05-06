@@ -234,7 +234,7 @@ def process_centralpay_verified_payment(payment_id: int,
     import traceback as _tb
 
     from .db import (
-        get_payment, get_conn, update_balance,
+        get_payment, get_payment_by_gateway_ref, get_conn, update_balance,
         get_payment_service_names,
         get_package, get_purchase,
         lock_centralpay_payment,
@@ -245,17 +245,25 @@ def process_centralpay_verified_payment(payment_id: int,
     from .bot_instance import bot
     from .gateways.centralpay import verify_centralpay_order
 
-    payment = get_payment(payment_id)
+    incoming_order_id = str(payment_id or "").strip()
+    payment = get_payment_by_gateway_ref(incoming_order_id)
+    if payment:
+        print(f"[CentralPay] process_verified: resolved orderId={incoming_order_id} -> payment_id={payment['id']} by gateway_ref")
+    elif incoming_order_id.isdigit():
+        payment = get_payment(int(incoming_order_id))
+
     if not payment:
-        print(f"[CentralPay] process_verified: payment {payment_id} not found")
+        print(f"[CentralPay] process_verified: payment/orderId {incoming_order_id} not found")
         return {"status": "already_processed"}
+
+    payment_id = payment["id"]
 
     if payment["payment_method"] != "centralpay":
         print(f"[CentralPay] process_verified: payment {payment_id} is not centralpay ({payment['payment_method']})")
         return {"status": "already_processed"}
 
     if payment["status"] not in ("pending",):
-        print(f"[CentralPay] process_verified: payment {payment_id} already {payment['status']} (source={source})")
+        print(f"[CentralPay] duplicate verify ignored: payment {payment_id} orderId={payment['gateway_ref'] if 'gateway_ref' in payment.keys() else incoming_order_id} already {payment['status']} (source={source})")
         return {"status": "already_processed"}
 
     if is_payment_expired(payment):
@@ -276,7 +284,8 @@ def process_centralpay_verified_payment(payment_id: int,
     # ── Call verify API ───────────────────────────────────────────────────────
     # Use the unique CentralPay orderId stored in gateway_ref (set at link creation).
     # Fall back to payment_id for legacy rows that don't have gateway_ref yet.
-    _cp_verify_order_id = str(payment.get("gateway_ref") or payment_id)
+    _cp_verify_order_id = str((payment["gateway_ref"] if "gateway_ref" in payment.keys() else "") or payment_id)
+    print(f"[CentralPay] verify request: local_payment_id={payment_id} gateway_ref={payment['gateway_ref'] if 'gateway_ref' in payment.keys() else ''} incoming_orderId={incoming_order_id} verify_orderId={_cp_verify_order_id}")
     try:
         ok_v, verify_result = verify_centralpay_order(_cp_verify_order_id)
     except Exception as _ve:
@@ -297,7 +306,7 @@ def process_centralpay_verified_payment(payment_id: int,
         except Exception:
             pass
         err = verify_result.get("error", "") if isinstance(verify_result, dict) else str(verify_result)
-        print(f"[CentralPay] process_verified: payment {payment_id} not paid: {err}")
+        print(f"[CentralPay] verify failed: payment_id={payment_id} gateway_ref={_cp_verify_order_id} incoming_orderId={incoming_order_id} error={err}")
         return {"status": "not_paid", "msg": err}
 
     # ── Amount validation ─────────────────────────────────────────────────────
@@ -305,14 +314,23 @@ def process_centralpay_verified_payment(payment_id: int,
     if returned_amount:
         expected = payment["amount"]
         if abs(int(returned_amount) - expected) > expected * 0.05 + 100:
-            print(f"[CentralPay] process_verified: amount mismatch payment {payment_id}"
-                  f" expected={expected} got={returned_amount}")
+            print(f"[CentralPay] amount mismatch: payment_id={payment_id} gateway_ref={_cp_verify_order_id} expected={expected} got={returned_amount}")
             try:
                 with get_conn() as _c:
                     _c.execute("UPDATE payments SET status='pending' WHERE id=? AND status='processing'", (payment_id,))
             except Exception:
                 pass
             return {"status": "amount_mismatch", "expected": expected, "got": returned_amount}
+
+    returned_user_id = verify_result.get("user_id", 0) if isinstance(verify_result, dict) else 0
+    if returned_user_id and int(returned_user_id) != int(payment["user_id"]):
+        print(f"[CentralPay] user mismatch: payment_id={payment_id} gateway_ref={_cp_verify_order_id} expected_user={payment['user_id']} got_user={returned_user_id}")
+        try:
+            with get_conn() as _c:
+                _c.execute("UPDATE payments SET status='pending' WHERE id=? AND status='processing'", (payment_id,))
+        except Exception:
+            pass
+        return {"status": "user_mismatch", "expected": payment["user_id"], "got": returned_user_id}
 
     # ── Persist audit data ────────────────────────────────────────────────────
     reference_id = verify_result.get("reference_id", "") if isinstance(verify_result, dict) else ""
@@ -324,7 +342,7 @@ def process_centralpay_verified_payment(payment_id: int,
                 " gateway_ref=COALESCE(NULLIF(?, ''), gateway_ref),"
                 " external_txid=COALESCE(NULLIF(?, ''), external_txid)"
                 " WHERE id=?",
-                (raw_str, now_str(), str(payment_id), reference_id or "", payment_id)
+                (raw_str, now_str(), _cp_verify_order_id, reference_id or "", payment_id)
             )
     except Exception:
         pass
@@ -345,6 +363,7 @@ def process_centralpay_verified_payment(payment_id: int,
                     (now_str(), now_str(), payment_id)
                 )
             update_balance(uid, amount)
+            print(f"[CentralPay] balance added: payment_id={payment_id} orderId={_cp_verify_order_id} user_id={uid} amount={amount}")
             try:
                 apply_gateway_bonus_if_needed(uid, "centralpay", amount)
             except Exception:
@@ -382,6 +401,7 @@ def process_centralpay_verified_payment(payment_id: int,
             except Exception:
                 pass
             _send_bulk_delivery_result(uid, uid, pkg_row, purchase_ids, pending_ids, "سنترال‌پی")
+            print(f"[CentralPay] service processed: payment_id={payment_id} orderId={_cp_verify_order_id} user_id={uid} kind=config_purchase")
 
         elif kind == "renewal":
             from .ui.notifications import admin_renewal_notify

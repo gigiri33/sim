@@ -229,6 +229,8 @@ def _verify_centralpay_payment(payment_id: int) -> dict:
         return {"verify": "already_processed", "process_result": proc}
     if status == "amount_mismatch":
         return {"verify": "amount_mismatch", "process_result": proc}
+    if status == "user_mismatch":
+        return {"verify": "user_mismatch", "process_result": proc}
     if status == "not_paid":
         return {"verify": "not_paid", "process_result": proc}
     if status == "expired":
@@ -8064,7 +8066,7 @@ def _dispatch_callback(call, uid, data):
             return
         if payment["status"] != "pending":
             if payment["status"] == "completed":
-                bot.answer_callback_query(call.id, "✅ این پرداخت قبلاً تأیید و پردازش شده است.", show_alert=True)
+                bot.answer_callback_query(call.id, "این پرداخت قبلاً تایید شده است ✅", show_alert=True)
             else:
                 bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
             return
@@ -8190,11 +8192,13 @@ def _dispatch_callback(call, uid, data):
             bot.send_message(uid, "✅ پرداخت شما قبلاً تأیید و تحویل داده شده است.", parse_mode="HTML")
         elif _vpc["verify"] == "amount_mismatch":
             bot.send_message(uid, "⚠️ مبلغ پرداختی با سفارش مطابقت ندارد. لطفاً با پشتیبانی تماس بگیرید.", parse_mode="HTML")
+        elif _vpc["verify"] == "user_mismatch":
+            bot.send_message(uid, "⚠️ مشخصات پرداخت با حساب شما مطابقت ندارد. لطفاً با پشتیبانی تماس بگیرید.", parse_mode="HTML")
         elif _vpc["verify"] == "process_error":
             bot.send_message(uid, "⚠️ خطا در پردازش پرداخت. لطفاً با پشتیبانی تماس بگیرید.", parse_mode="HTML")
         else:
             bot.send_message(uid,
-                "⏳ پرداخت شما هنوز تأیید نشده است. چند دقیقه دیگر دوباره بررسی کنید.",
+                "پرداخت هنوز تایید نشده یا شناسه پرداخت نامعتبر است. اگر مبلغ از حساب شما کم شده، چند دقیقه بعد دوباره بررسی پرداخت را بزنید.",
                 parse_mode="HTML")
         return
 
@@ -9259,7 +9263,7 @@ def _dispatch_callback(call, uid, data):
             return
         if payment["status"] != "pending":
             if payment["status"] == "completed":
-                bot.answer_callback_query(call.id, "✅ پرداخت شما قبلاً تأیید و کیف پول شارژ شده است.", show_alert=True)
+                bot.answer_callback_query(call.id, "این پرداخت قبلاً تایید شده است ✅", show_alert=True)
             else:
                 bot.answer_callback_query(call.id, "این پرداخت قبلاً پردازش شده.", show_alert=True)
             return
@@ -9274,10 +9278,12 @@ def _dispatch_callback(call, uid, data):
             bot.send_message(uid, "✅ پرداخت شما قبلاً تأیید و کیف پول شارژ شده است.", parse_mode="HTML")
         elif _vwc_cp["verify"] == "amount_mismatch":
             bot.send_message(uid, "⚠️ مبلغ پرداختی با سفارش مطابقت ندارد. لطفاً با پشتیبانی تماس بگیرید.", parse_mode="HTML")
+        elif _vwc_cp["verify"] == "user_mismatch":
+            bot.send_message(uid, "⚠️ مشخصات پرداخت با حساب شما مطابقت ندارد. لطفاً با پشتیبانی تماس بگیرید.", parse_mode="HTML")
         elif _vwc_cp["verify"] == "process_error":
             bot.send_message(uid, "⚠️ خطا در پردازش پرداخت. لطفاً با پشتیبانی تماس بگیرید.", parse_mode="HTML")
         else:
-            bot.send_message(uid, "⏳ پرداخت هنوز تأیید نشده است. چند دقیقه بعد دوباره بررسی کنید.", parse_mode="HTML")
+            bot.send_message(uid, "پرداخت هنوز تایید نشده یا شناسه پرداخت نامعتبر است. اگر مبلغ از حساب شما کم شده، چند دقیقه بعد دوباره بررسی پرداخت را بزنید.", parse_mode="HTML")
         return
 
     if data == "wallet:charge:centralpay":

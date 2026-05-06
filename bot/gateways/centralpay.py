@@ -71,7 +71,27 @@ def build_centralpay_return_url(payment_id: int, bot_username: str) -> str:
     if not base:
         return ""
     slug = (bot_username or "").lstrip("@").strip().lower()
-    return f"{base}/centralpay/{slug}/{payment_id}/callback?orderId={payment_id}"
+    # create_centralpay_link() generates the final unique CentralPay orderId and
+    # rewrites this placeholder query param before sending the request.
+    return f"{base}/centralpay/callback?orderId={payment_id}&bot={urllib.parse.quote(slug)}"
+
+
+def _return_url_with_order_id(return_url: str, cp_order_id: str) -> str:
+    """Normalize callback URL and force query-string orderId to cp_order_id."""
+    parsed = urllib.parse.urlparse(return_url)
+    query = dict(urllib.parse.parse_qsl(parsed.query, keep_blank_values=True))
+    bot_slug = (query.get("bot") or _bot_username_from_return_url(return_url) or "").lstrip("@").strip().lower()
+    query["orderId"] = str(cp_order_id)
+    if bot_slug:
+        query["bot"] = bot_slug
+    return urllib.parse.urlunparse((
+        parsed.scheme,
+        parsed.netloc,
+        "/centralpay/callback",
+        "",
+        urllib.parse.urlencode(query),
+        "",
+    ))
 
 
 def _decode_response(resp) -> tuple:
@@ -104,7 +124,9 @@ def _bot_username_from_return_url(return_url: str) -> str:
         if "centralpay" in parts:
             idx = parts.index("centralpay")
             if len(parts) > idx + 1:
-                return parts[idx + 1].lstrip("@").strip()
+                candidate = parts[idx + 1].lstrip("@").strip()
+                if candidate and candidate != "callback":
+                    return candidate
     except Exception:
         pass
     return ""
@@ -145,8 +167,14 @@ def create_centralpay_link(amount_toman: int, user_id: int, order_id, return_url
     _unique_digits = random.randint(10000, 99999)
     cp_order_id = f"{order_id}{_unique_digits}"
 
+    final_return_url = _return_url_with_order_id(return_url, cp_order_id)
+
     link_type = _get_link_type()
-    bot_username = _bot_username_from_return_url(return_url) or "unknown"
+    bot_username = (
+        dict(urllib.parse.parse_qsl(urllib.parse.urlparse(final_return_url).query)).get("bot")
+        or _bot_username_from_return_url(final_return_url)
+        or "unknown"
+    )
     user_identifier = _user_identifier(user_id)
     description = f"Bot: @{bot_username} | User: @{user_identifier} | PaymentID: {order_id}"
     payload_dict = {
@@ -155,7 +183,7 @@ def create_centralpay_link(amount_toman: int, user_id: int, order_id, return_url
         "amount":    int(amount_toman),
         "userId":    user_id,
         "orderId":   cp_order_id,
-        "returnUrl": return_url,
+        "returnUrl": final_return_url,
         "description": description,
     }
     payload = json.dumps(payload_dict).encode("utf-8")
@@ -172,7 +200,7 @@ def create_centralpay_link(amount_toman: int, user_id: int, order_id, return_url
         method="POST",
     )
     try:
-        print(f"[CentralPay] getLink request: type={link_type} amount={int(amount_toman)} userId={user_id} orderId={cp_order_id} (payment_id={order_id}) returnUrl={return_url} description={description}")
+        print(f"[CentralPay] getLink request: type={link_type} amount={int(amount_toman)} userId={user_id} orderId={cp_order_id} (payment_id={order_id}) returnUrl={final_return_url} description={description}")
         with urllib.request.urlopen(req, timeout=15) as resp:
             raw, parsed = _decode_response(resp)
         print(f"[CentralPay] getLink response: {raw[:500]}")
@@ -222,7 +250,7 @@ def create_centralpay_link(amount_toman: int, user_id: int, order_id, return_url
     if not redirect_url:
         return False, {"error": f"سنترال‌پی لینک پرداخت برنگرداند: {raw[:300]}", "raw": parsed}
 
-    return True, {"redirect_url": redirect_url, "cp_order_id": cp_order_id, "type": link_type, "raw": parsed}
+    return True, {"redirect_url": redirect_url, "cp_order_id": cp_order_id, "return_url": final_return_url, "type": link_type, "raw": parsed}
 
 
 def verify_centralpay_order(order_id):

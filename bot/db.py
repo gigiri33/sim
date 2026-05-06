@@ -2291,6 +2291,18 @@ def get_payment(payment_id):
         ).fetchone()
 
 
+def get_payment_by_gateway_ref(gateway_ref: str, payment_method: str = "centralpay"):
+    """Find a payment by the gateway-side reference/order id."""
+    ref = str(gateway_ref or "").strip()
+    if not ref:
+        return None
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM payments WHERE gateway_ref=? AND payment_method=? ORDER BY id DESC LIMIT 1",
+            (ref, payment_method),
+        ).fetchone()
+
+
 def get_gateway_stats(payment_method: str) -> dict:
     """
     Return completed payment stats for a given payment_method.
