@@ -1533,11 +1533,12 @@ def add_package(type_id, name, volume_gb, duration_days, price, show_name=1, max
         max_pos = conn.execute(
             "SELECT COALESCE(MAX(position),0) FROM packages WHERE type_id=?", (type_id,)
         ).fetchone()[0]
-        conn.execute(
+        cur = conn.execute(
             "INSERT INTO packages(type_id,name,volume_gb,duration_days,price,active,position,show_name,max_users,buyer_role,button_color)"
             " VALUES(?,?,?,?,?,1,?,?,?,?,?)",
             (type_id, name.strip(), volume_gb, duration_days, price, max_pos + 1, show_name, max_users, buyer_role, button_color or 'glass')
         )
+        return cur.lastrowid
 
 
 def toggle_package_active(package_id):

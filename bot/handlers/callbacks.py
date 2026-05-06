@@ -23180,6 +23180,51 @@ def _dispatch_callback(call, uid, data):
             back_button(f"adm:pnl:cpkg:edit:{cpkg_id}"))
         return
 
+    if data.startswith("adm:pnl:cpkg:setdm:"):
+        # Show delivery mode picker for a client package
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+            return
+        cpkg_id = int(data.split(":")[-1])
+        cp = get_panel_client_package(cpkg_id)
+        if not cp:
+            bot.answer_callback_query(call.id, "کلاینت پکیج یافت نشد.", show_alert=True)
+            return
+        _DM_LABELS_CPKG = {"config_only": "📄 فقط کانفیگ", "sub_only": "🔗 فقط ساب", "both": "📄+🔗 هر دو"}
+        cur_dm = cp["delivery_mode"] or "config_only"
+        kb_dm = types.InlineKeyboardMarkup()
+        for dm_val, dm_label in _DM_LABELS_CPKG.items():
+            mark = "✅ " if dm_val == cur_dm else ""
+            kb_dm.add(types.InlineKeyboardButton(f"{mark}{dm_label}", callback_data=f"adm:pnl:cpkg:dm:{dm_val}:{cpkg_id}"))
+        kb_dm.add(types.InlineKeyboardButton("بازگشت", callback_data=f"adm:pnl:cpkg:edit:{cpkg_id}", icon_custom_emoji_id="5352759161945867747"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"📤 <b>حالت تحویل کلاینت پکیج #{cpkg_id}</b>\n\n"
+            f"حالت فعلی: {_DM_LABELS_CPKG.get(cur_dm, cur_dm)}\n\n"
+            "حالت جدید را انتخاب کنید:", kb_dm)
+        return
+
+    if data.startswith("adm:pnl:cpkg:dm:"):
+        # adm:pnl:cpkg:dm:{mode}:{cpkg_id}
+        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+            bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+            return
+        parts_dm = data.split(":")
+        dm_val   = parts_dm[4]
+        cpkg_id  = int(parts_dm[5])
+        if dm_val not in ("config_only", "sub_only", "both"):
+            bot.answer_callback_query(call.id, "مقدار نامعتبر.", show_alert=True)
+            return
+        cp = get_panel_client_package(cpkg_id)
+        if not cp:
+            bot.answer_callback_query(call.id, "کلاینت پکیج یافت نشد.", show_alert=True)
+            return
+        update_panel_client_package_field(cpkg_id, "delivery_mode", dm_val)
+        _DM_LABELS_CPKG2 = {"config_only": "📄 فقط کانفیگ", "sub_only": "🔗 فقط ساب", "both": "📄+🔗 هر دو"}
+        bot.answer_callback_query(call.id, f"✅ حالت تحویل به {_DM_LABELS_CPKG2[dm_val]} تغییر کرد.")
+        _show_cpkg_edit_menu(call, cpkg_id)
+        return
+
     if data.startswith("adm:pnl:editpanel:"):
         if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
             bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)

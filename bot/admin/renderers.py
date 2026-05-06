@@ -589,6 +589,11 @@ def _show_cpkg_edit_menu(call, cpkg_id):
         "🏷 ویرایش نام نمونه در فرگمنت",
         callback_data=f"adm:pnl:cpkg:ef:sample_client_name:{cpkg_id}"
     ))
+    _cur_dm = _DM.get(cp['delivery_mode'], cp['delivery_mode'])
+    kb.add(InlineKeyboardButton(
+        f"📤 حالت تحویل: {_cur_dm} — تغییر",
+        callback_data=f"adm:pnl:cpkg:setdm:{cpkg_id}"
+    ))
     kb.add(InlineKeyboardButton("بازگشت", callback_data=f"adm:pnl:cpkgs:{cp['panel_id']}",
                                 icon_custom_emoji_id="5352759161945867747"))
     send_or_edit(call, text, kb)
