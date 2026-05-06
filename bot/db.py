@@ -1530,15 +1530,15 @@ def get_package(package_id):
         ).fetchone()
 
 
-def add_package(type_id, name, volume_gb, duration_days, price, show_name=1, max_users=0, buyer_role='all', button_color='glass'):
+def add_package(type_id, name, volume_gb, duration_days, price, show_name=1, max_users=0, buyer_role='all', button_color='glass', delivery_mode='config_only'):
     with get_conn() as conn:
         max_pos = conn.execute(
             "SELECT COALESCE(MAX(position),0) FROM packages WHERE type_id=?", (type_id,)
         ).fetchone()[0]
         cur = conn.execute(
-            "INSERT INTO packages(type_id,name,volume_gb,duration_days,price,active,position,show_name,max_users,buyer_role,button_color)"
-            " VALUES(?,?,?,?,?,1,?,?,?,?,?)",
-            (type_id, name.strip(), volume_gb, duration_days, price, max_pos + 1, show_name, max_users, buyer_role, button_color or 'glass')
+            "INSERT INTO packages(type_id,name,volume_gb,duration_days,price,active,position,show_name,max_users,buyer_role,button_color,delivery_mode)"
+            " VALUES(?,?,?,?,?,1,?,?,?,?,?,?)",
+            (type_id, name.strip(), volume_gb, duration_days, price, max_pos + 1, show_name, max_users, buyer_role, button_color or 'glass', delivery_mode or 'config_only')
         )
         return cur.lastrowid
 

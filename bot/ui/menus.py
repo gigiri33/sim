@@ -136,6 +136,12 @@ def show_main_menu(target):
             _send_popup_main_menu(uid, chat_id, text, entities=entities, thread_id=thread_id)
             return
         kb = kb_main(uid)
+        if not hasattr(target, "message"):
+            try:
+                _t = bot.send_message(chat_id, "\u200c", reply_markup=types.ReplyKeyboardRemove())
+                bot.delete_message(chat_id, _t.message_id)
+            except Exception:
+                pass
         try:
             if hasattr(target, "message"):
                 bot.edit_message_text(
@@ -172,6 +178,12 @@ def show_main_menu(target):
     if popup_mode:
         _send_popup_main_menu(uid, chat_id, text, thread_id=thread_id)
     else:
+        if not hasattr(target, "message"):
+            try:
+                _t = bot.send_message(chat_id, "\u200c", reply_markup=types.ReplyKeyboardRemove())
+                bot.delete_message(chat_id, _t.message_id)
+            except Exception:
+                pass
         send_or_edit(target, text, kb_main(uid))
 
 
