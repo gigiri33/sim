@@ -2841,11 +2841,11 @@ def _deliver_panel_config_to_user(chat_id, panel_config_id, package_row):
         )
         # Emergency plain-text fallback — send the config to user without formatting
         try:
-            fallback_lines = ["🎉 <b>سرویس شما آماده است!</b>\n"]
+            fallback_lines = ["🎉 <b>سرویس شما آماده شد!</b>\n"]
             if raw_config_text.strip():
-                fallback_lines.append(f"📄 <b>Config:</b>\n<code>{esc(raw_config_text)}</code>")
+                fallback_lines.append(f"📄 <b>کانفیگ اتصال:</b>\n<code>{esc(raw_config_text)}</code>")
             if raw_sub_url.strip():
-                fallback_lines.append(f"🔗 <b>لینک ساب:</b>\n{esc(raw_sub_url)}")
+                fallback_lines.append(f"🔗 <b>لینک سابسکریپشن:</b>\n{esc(raw_sub_url)}")
             if raw_config_text.strip() or raw_sub_url.strip():
                 kb_back = types.InlineKeyboardMarkup()
                 kb_back.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
@@ -2907,7 +2907,7 @@ def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
     # Prefer the service type defined in the package-type management section over the panel inbound's remark.
     type_label    = pkg_type_name or inbound_remark
     show_pkg      = int(package_row["show_name"]) if "show_name" in package_row.keys() else 1
-    pkg_line      = f"{ce('📦', '5258134813302332906')} پکیج: <b>{esc(package_row['name'])}</b>\n" if show_pkg else ""
+    pkg_line      = f"{ce('📦', '5348451945403137943')} پکیج: <b>{esc(package_row['name'])}</b>\n" if show_pkg else ""
     _expire_at    = pc["expire_at"] if "expire_at" in pc.keys() else ""
     expire_line   = f"{ce('📅', '5379748062124056162')} انقضا: <b>{_expire_at[:10]}</b>\n" if _expire_at else ""
 
@@ -2915,16 +2915,16 @@ def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
     proto_label_str = _PROTO_LABELS.get(inbound_protocol, "")
     proto_line = f"🔐 پروتکل: <b>{esc(proto_label_str)}</b>\n" if proto_label_str else ""
 
-    header = f"{ce('✅', '5260463209562776385')} <b>سرویس شما آماده است!</b>"
+    header = f"{ce('✅', '5989949235691262922')} <b>سرویس شما آماده شد!</b>"
 
     info_block = (
-        f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(service_name)}</b>\n"
-        f"{ce('🧩', '5463224921935082813')} نوع سرویس: <b>{esc(type_label)}</b>\n"
+        f"{ce('🔮', '5987881105859024173')} نام سرویس: <b>{esc(service_name)}</b>\n"
+        f"{ce('🧩', '5350526388837301421')} نوع سرویس: <b>{esc(type_label)}</b>\n"
         f"{pkg_line}"
         f"{proto_line}"
-        f"{ce('🔋', '5924538142198600679')} حجم: <b>{esc(vol_label)}</b>\n"
-        f"{ce('⏰', '5343724178547691280')} مدت: <b>{esc(dur_label)}</b>\n"
-        f"{ce('👥', '5372926953978341366')} تعداد کاربر: <b>{esc(users_label)}</b>\n"
+        f"{ce('🔋', '5988017011509171250')} حجم: <b>{esc(vol_label)}</b>\n"
+        f"{ce('⏰', '5987901335154987757')} مدت زمان: <b>{esc(dur_label)}</b>\n"
+        f"{ce('👥', '5987790606603129919')} تعداد کاربر: <b>{esc(users_label)}</b>\n"
         f"{expire_line}"
     )
 
@@ -2965,7 +2965,7 @@ def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
         if has_cfg:
             text = (
                 f"{header}\n\n{info_block}\n"
-                f"{ce('💝', '5900197669178970457')} <b>Config:</b>\n<code>{esc(config_text)}</code>"
+                f"{ce('💝', '5454386656628991407')} <b>کانفیگ اتصال:</b>\n<code>{esc(config_text)}</code>"
             )
             _send_with_qr(config_text, text)
         else:
@@ -2975,7 +2975,7 @@ def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
         if has_sub:
             text = (
                 f"{header}\n\n{info_block}\n"
-                f"{ce('🔗', '5271604874419647061')} <b>لینک ساب:</b>\n{esc(sub_url)}"
+                f"{ce('🔗', '5258274739041883702')} <b>لینک سابسکریپشن:</b>\n{esc(sub_url)}"
             )
             _send_with_qr(sub_url, text)
         else:
@@ -2985,20 +2985,20 @@ def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
         if has_cfg and has_sub:
             text = (
                 f"{header}\n\n{info_block}\n"
-                f"{ce('💝', '5900197669178970457')} <b>Config:</b>\n<code>{esc(config_text)}</code>\n\n"
-                f"{ce('🔗', '5271604874419647061')} <b>لینک ساب:</b>\n{esc(sub_url)}"
+                f"{ce('💝', '5454386656628991407')} <b>کانفیگ اتصال:</b>\n<code>{esc(config_text)}</code>\n\n"
+                f"{ce('🔗', '5258274739041883702')} <b>لینک سابسکریپشن:</b>\n{esc(sub_url)}"
             )
             _send_with_qr(config_text, text)  # QR for config when both present
         elif has_cfg:
             text = (
                 f"{header}\n\n{info_block}\n"
-                f"{ce('💝', '5900197669178970457')} <b>Config:</b>\n<code>{esc(config_text)}</code>"
+                f"{ce('💝', '5454386656628991407')} <b>کانفیگ اتصال:</b>\n<code>{esc(config_text)}</code>"
             )
             _send_with_qr(config_text, text)
         elif has_sub:
             text = (
                 f"{header}\n\n{info_block}\n"
-                f"{ce('🔗', '5271604874419647061')} <b>لینک ساب:</b>\n{esc(sub_url)}"
+                f"{ce('🔗', '5258274739041883702')} <b>لینک سابسکریپشن:</b>\n{esc(sub_url)}"
             )
             _send_with_qr(sub_url, text)
         else:
