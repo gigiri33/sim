@@ -2076,6 +2076,11 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
         failed_count = 0
         failed_notified_user = False   # send only ONE queue message per bulk delivery
         for i in range(quantity):
+            # Brief cooldown between rapid API calls to the same panel.
+            # Prevents the panel from throttling/rejecting successive login
+            # requests during bulk delivery and helps avoid transient timeouts.
+            if i > 0:
+                time.sleep(1)
             desired_name = (service_names[i] if service_names and i < len(service_names) else None)
             ok, result, pc_id, c_name = _create_panel_config(
                 uid, package_id, payment_id, chat_id=chat_id, desired_name=desired_name,
@@ -2560,13 +2565,19 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
     FUNC_RETRY_TIMEOUT = 1800  # 30 min timeout for non-connection errors (safe: runs in background thread)
     FUNC_RETRY_DELAY   = 15
     MAX_WAIT           = 28800 # 8-hour absolute hard cap
+    # Quick retries for transient connection errors (e.g. panel busy during bulk creation)
+    _CONN_QUICK_RETRIES = 3    # number of fast retries before giving up
+    _CONN_QUICK_DELAY   = 3    # seconds between quick retries
 
     _t_start           = time.time()
 
     # ── Step 1: login ─────────────────────────────────────────────────────────
-    # Fail fast on connection errors — the delivery_worker will retry later.
+    # Allow a few quick retries for transient connection errors before failing
+    # fast — this prevents bulk-delivery loops from dropping all configs when
+    # the panel momentarily throttles rapid successive login requests.
     login_err = None
     _t0 = time.time()
+    _login_conn_retries = 0
     while True:
         if time.time() - _t_start > MAX_WAIT:
             login_err = "حداکثر زمان انتظار (8 ساعت) تمام شد"
@@ -2577,8 +2588,15 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
             break
         elapsed = time.time() - _t0
         if _is_conn_err(login_err):
-            # Fail immediately — caller will enqueue for retry
-            log.warning("_create_panel_config: login CONN_ERR, failing fast: %s", login_err)
+            if _login_conn_retries < _CONN_QUICK_RETRIES:
+                _login_conn_retries += 1
+                log.warning("_create_panel_config: login CONN_ERR (quick retry %d/%d in %ds): %s",
+                            _login_conn_retries, _CONN_QUICK_RETRIES, _CONN_QUICK_DELAY, login_err)
+                time.sleep(_CONN_QUICK_DELAY)
+                continue
+            # Quick retries exhausted — fail fast, delivery_worker will retry later
+            log.warning("_create_panel_config: login CONN_ERR, failing fast after %d retries: %s",
+                        _login_conn_retries, login_err)
             break
         else:
             log.warning("_create_panel_config: login failed (%.0fs elapsed): %s", elapsed, login_err)
@@ -2594,6 +2612,7 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
     inbound = None
     _last_inb_err = None
     _t0 = time.time()
+    _inbound_conn_retries = 0
     while True:
         if time.time() - _t_start > MAX_WAIT:
             break
@@ -2604,7 +2623,12 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
         # find_inbound doesn't return an error string — re-login to check connectivity
         _ok_chk, _chk_err = client.login()
         if not _ok_chk and _is_conn_err(_chk_err):
-            # Fail immediately
+            if _inbound_conn_retries < _CONN_QUICK_RETRIES:
+                _inbound_conn_retries += 1
+                log.warning("_create_panel_config: find_inbound CONN_ERR (quick retry %d/%d in %ds)",
+                            _inbound_conn_retries, _CONN_QUICK_RETRIES, _CONN_QUICK_DELAY)
+                time.sleep(_CONN_QUICK_DELAY)
+                continue
             log.warning("_create_panel_config: find_inbound CONN_ERR, failing fast")
             break
         else:
@@ -2647,6 +2671,7 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
     _t0 = time.time()
     _dup_retries = 0          # counts non-connection-error retries with a desired name
     _MAX_DUP_RETRIES = 3      # after this many suffix attempts, fall back to full random
+    _create_conn_retries = 0  # quick retries for transient connection errors
     while True:
         if time.time() - _t_start > MAX_WAIT:
             create_err = "حداکثر زمان انتظار (8 ساعت) تمام شد"
@@ -2665,7 +2690,13 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
         create_err = result if isinstance(result, str) else str(result)
         elapsed = time.time() - _t0
         if _is_conn_err(create_err):
-            # Fail immediately — delivery_worker will retry
+            if _create_conn_retries < _CONN_QUICK_RETRIES:
+                _create_conn_retries += 1
+                log.warning("_create_panel_config: create_client CONN_ERR (quick retry %d/%d in %ds): %s",
+                            _create_conn_retries, _CONN_QUICK_RETRIES, _CONN_QUICK_DELAY, create_err)
+                time.sleep(_CONN_QUICK_DELAY)
+                continue
+            # Quick retries exhausted — fail fast, delivery_worker will retry later
             log.warning("_create_panel_config: create_client CONN_ERR, failing fast: %s", create_err)
             break
         else:
