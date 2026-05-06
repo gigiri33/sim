@@ -149,58 +149,6 @@ def _own_notif_on(key: str) -> bool:
     return setting_get(f"notif_own_{key}", "1") == "1"
 
 
-# ── Delivery template engine ────────────────────────────────────────────────
-# Variables each template type exposes (shown in admin UI)
-_DELIVERY_TMPL_VARS = {
-    "v2ray": [
-        ("{{service_name}}",  "نام سرویس"),
-        ("{{type_name}}",     "نوع سرویس"),
-        ("{{package_name}}",  "نام پکیج (خالی اگر نمایش خاموش باشد)"),
-        ("{{volume}}",        "حجم (مثلاً: 10 گیگ یا نامحدود)"),
-        ("{{duration}}",      "مدت زمان (مثلاً: 30 روز یا نامحدود)"),
-        ("{{users}}",         "تعداد کاربر"),
-        ("{{config}}",        "متن کانفیگ اتصال (در <code> قرار دهید)"),
-        ("{{sub_url}}",       "لینک سابسکریپشن"),
-        ("{{expire_at}}",     "تاریخ انقضا (مثلاً: 2025-12-31)"),
-        ("{{proto}}",         "پروتکل (مثلاً: VMess، VLESS) — فقط پنل"),
-    ],
-    "ovpn": [
-        ("{{service_name}}",  "نام سرویس"),
-        ("{{type_name}}",     "نوع سرویس"),
-        ("{{package_name}}",  "نام پکیج"),
-        ("{{volume}}",        "حجم"),
-        ("{{duration}}",      "مدت زمان"),
-        ("{{users}}",         "تعداد کاربر"),
-        ("{{username}}",      "نام کاربری VPN"),
-        ("{{password}}",      "رمز عبور VPN"),
-    ],
-    "wg": [
-        ("{{service_name}}",  "نام سرویس"),
-        ("{{type_name}}",     "نوع سرویس"),
-        ("{{package_name}}",  "نام پکیج"),
-        ("{{volume}}",        "حجم"),
-        ("{{duration}}",      "مدت زمان"),
-        ("{{users}}",         "تعداد کاربر"),
-    ],
-}
-
-def _render_delivery_template(tmpl_key: str, **kw) -> "str | None":
-    """Render a stored delivery template, substituting {{var}} placeholders.
-    Returns None if no custom template is stored.
-    """
-    tmpl = setting_get(tmpl_key, "").strip()
-    if not tmpl:
-        return None
-    try:
-        from ..ui.premium_emoji import render_premium_text_html as _rph
-        html = _rph(tmpl)
-    except Exception:
-        html = tmpl
-    for k, v in kw.items():
-        html = html.replace("{{" + k + "}}", str(v) if v is not None else "")
-    return html
-
-
 # ── Purchase delivery ──────────────────────────────────────────────────────────
 def _fmt_users_label_d(max_users):
     if not max_users:
@@ -277,19 +225,12 @@ def deliver_purchase_message(chat_id, purchase_id):
         vol_text    = "نامحدود" if not item["volume_gb"] else f"{item['volume_gb']} گیگ"
         dur_text    = "نامحدود" if not item["duration_days"] else f"{item['duration_days']} روز"
         users_label = _fmt_users_label_d(item["max_users"] if "max_users" in item.keys() else 0)
-        _pkg_name_raw = esc(item.get('package_name') or '') if (show_pkg_name and item.get('package_name')) else ''
         inq_line    = f"\n� پنل استعلام حجم و زمان: {inquiry_link}" if inquiry_link else ""
 
         if cfg_type == "ovpn":
             username = cfg_data.get("username", "")
             password = cfg_data.get("password", "")
-            caption = _render_delivery_template(
-                "delivery_template_ovpn",
-                service_name=esc(service_name), type_name=esc(item['type_name']),
-                package_name=_pkg_name_raw,
-                volume=vol_text, duration=dur_text, users=users_label,
-                username=esc(username), password=esc(password),
-            ) or (
+            caption = (
                 f"{ce('🔮', '5987881105859024173')} نام سرویس: <b>{esc(service_name)}</b>\n"
                 f"{ce('🧩', '5350526388837301421')} نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
                 f"{package_line}"
@@ -301,15 +242,11 @@ def deliver_purchase_message(chat_id, purchase_id):
                 f"username: <code>{esc(username)}</code>\n"
                 f"password: <code>{esc(password)}</code>"
                 f"{inq_line}"
-            ) + expired_note
+                f"{expired_note}"
+            )
             _send_file_group_delivery(chat_id, file_ids, caption, kb)
         else:  # wg
-            caption = _render_delivery_template(
-                "delivery_template_wg",
-                service_name=esc(service_name), type_name=esc(item['type_name']),
-                package_name=_pkg_name_raw,
-                volume=vol_text, duration=dur_text, users=users_label,
-            ) or (
+            caption = (
                 f"{ce('🔮', '5987881105859024173')} نام سرویس: <b>{esc(service_name)}</b>\n"
                 f"{ce('🧩', '5350526388837301421')} نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
                 f"{package_line}"
@@ -317,7 +254,8 @@ def deliver_purchase_message(chat_id, purchase_id):
                 f"{ce('⏰', '5987901335154987757')} مدت زمان: <b>{esc(dur_text)}</b>\n"
                 f"{ce('👥', '5987790606603129919')} نوع کاربری: <b>{esc(users_label)}</b>"
                 f"{inq_line}"
-            ) + expired_note
+                f"{expired_note}"
+            )
             # Generate QR from stored config text or downloaded file content
             qr_content = cfg_data.get("config_text", "").strip()
             if not qr_content and file_ids:
@@ -349,22 +287,9 @@ def deliver_purchase_message(chat_id, purchase_id):
         has_config = bool(cfg and cfg.strip())
         has_sub    = bool(inquiry_link and inquiry_link.strip())
 
-        # Build common variables for V2Ray custom template
-        _v2_pkg_name_raw = esc(item.get('package_name') or '') if (show_pkg_name and item.get('package_name')) else ''
-        _expire_v2 = ''
-        _tmpl_v2 = _render_delivery_template(
-            "delivery_template_v2ray",
-            service_name=esc(service_name), type_name=esc(item['type_name']),
-            package_name=_v2_pkg_name_raw,
-            volume=_vol_text_v2, duration=_dur_text_v2, users=_users_v2,
-            config=esc(cfg) if has_config else '',
-            sub_url=inquiry_link if has_sub else '',
-            expire_at=_expire_v2, proto='',
-        )
-
         if has_config and has_sub:
             # Mode: config + sub
-            text = _tmpl_v2 if _tmpl_v2 is not None else (
+            text = (
                 f"{ce('🔮', '5987881105859024173')} نام سرویس: <b>{esc(service_name)}</b>\n"
                 f"{ce('🧩', '5350526388837301421')} نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
                 f"{package_line}"
@@ -373,11 +298,12 @@ def deliver_purchase_message(chat_id, purchase_id):
                 f"{ce('👥', '5987790606603129919')} تعداد کاربر: <b>{esc(_users_v2)}</b>\n\n"
                 f"{ce('💝', '5454386656628991407')} <b>کانفیگ اتصال:</b>\n<code>{esc(cfg)}</code>\n\n"
                 f"{ce('🔗', '5258274739041883702')} <b>لینک سابسکریپشن:</b>\n{esc(inquiry_link)}"
-            ) + expired_note
+                f"{expired_note}"
+            )
             qr_source = cfg
         elif has_config:
             # Mode: config only
-            text = _tmpl_v2 if _tmpl_v2 is not None else (
+            text = (
                 f"{ce('🔮', '5987881105859024173')} نام سرویس: <b>{esc(service_name)}</b>\n"
                 f"{ce('🧩', '5350526388837301421')} نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
                 f"{package_line}"
@@ -385,11 +311,12 @@ def deliver_purchase_message(chat_id, purchase_id):
                 f"{ce('⏰', '5987901335154987757')} مدت زمان: <b>{esc(_dur_text_v2)}</b>\n"
                 f"{ce('👥', '5987790606603129919')} تعداد کاربر: <b>{esc(_users_v2)}</b>\n\n"
                 f"{ce('💝', '5454386656628991407')} <b>کانفیگ اتصال:</b>\n<code>{esc(cfg)}</code>"
-            ) + expired_note
+                f"{expired_note}"
+            )
             qr_source = cfg
         elif has_sub:
             # Mode: sub only
-            text = _tmpl_v2 if _tmpl_v2 is not None else (
+            text = (
                 f"{ce('🔮', '5987881105859024173')} نام سرویس: <b>{esc(service_name)}</b>\n"
                 f"{ce('🧩', '5350526388837301421')} نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
                 f"{package_line}"
@@ -397,11 +324,12 @@ def deliver_purchase_message(chat_id, purchase_id):
                 f"{ce('⏰', '5987901335154987757')} مدت زمان: <b>{esc(_dur_text_v2)}</b>\n"
                 f"{ce('👥', '5987790606603129919')} تعداد کاربر: <b>{esc(_users_v2)}</b>\n\n"
                 f"{ce('🔗', '5258274739041883702')} <b>لینک سابسکریپشن:</b>\n{esc(inquiry_link)}"
-            ) + expired_note
+                f"{expired_note}"
+            )
             qr_source = inquiry_link
         else:
             # Fallback: legacy display
-            text = _tmpl_v2 if _tmpl_v2 is not None else (
+            text = (
                 f"{ce('🔮', '5987881105859024173')} نام سرویس: <b>{esc(service_name)}</b>\n"
                 f"{ce('🧩', '5350526388837301421')} نوع سرویس: <b>{esc(item['type_name'])}</b>\n"
                 f"{package_line}"
@@ -410,7 +338,8 @@ def deliver_purchase_message(chat_id, purchase_id):
                 f"{ce('👥', '5987790606603129919')} تعداد کاربر: <b>{esc(_users_v2)}</b>\n\n"
                 f"{ce('💝', '5454386656628991407')} <b>کانفیگ اتصال:</b>\n<code>{esc(cfg or '-')}</code>\n\n"
                 f"{ce('🔗', '5258274739041883702')} <b>لینک سابسکریپشن:</b>\n{esc(inquiry_link or '-')}"
-            ) + expired_note
+                f"{expired_note}"
+            )
             qr_source = cfg or inquiry_link or ""
 
         if qr_source:

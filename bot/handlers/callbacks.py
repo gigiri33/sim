@@ -10,10 +10,6 @@ from datetime import datetime, timedelta
 from telebot import types
 
 log = logging.getLogger(__name__)
-
-# Per-user lock: prevents duplicate wallet-pay from rapid double-tap / Telegram callback retry
-_wallet_pay_lock = threading.Lock()
-_wallet_pay_in_fly: set = set()  # user IDs currently in wallet payment flow
 from ..config import ADMIN_IDS, ADMIN_PERMS, PERM_FULL_SET, PERM_USER_FULL, PERM_EMOJI_IDS, CRYPTO_COINS, CRYPTO_API_SYMBOLS, CRYPTO_EMOJI_IDS, CONFIGS_PER_PAGE
 from ..bot_instance import bot
 from ..helpers import (
@@ -2921,20 +2917,6 @@ def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
 
     header = f"{ce('✅', '5989949235691262922')} <b>سرویس شما آماده شد!</b>"
 
-    def _render_delivery_template_panel(*, service_name, type_label, pkg_name,
-                                        vol_label, dur_label, users_label,
-                                        config_text, sub_url, expire_at, proto):
-        """Try the V2Ray delivery template; return rendered HTML or None."""
-        from ..ui.notifications import _render_delivery_template
-        return _render_delivery_template(
-            "delivery_template_v2ray",
-            service_name=esc(service_name), type_name=esc(type_label),
-            package_name=esc(pkg_name),
-            volume=vol_label, duration=dur_label, users=users_label,
-            config=esc(config_text), sub_url=sub_url,
-            expire_at=expire_at, proto=esc(proto),
-        )
-
     info_block = (
         f"{ce('🔮', '5987881105859024173')} نام سرویس: <b>{esc(service_name)}</b>\n"
         f"{ce('🧩', '5350526388837301421')} نوع سرویس: <b>{esc(type_label)}</b>\n"
@@ -2981,84 +2963,44 @@ def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
 
     if delivery_mode == "config_only":
         if has_cfg:
-            _tmpl_panel = _render_delivery_template_panel(
-                service_name=service_name, type_label=type_label,
-                pkg_name=package_row['name'] if show_pkg else '',
-                vol_label=vol_label, dur_label=dur_label, users_label=users_label,
-                config_text=config_text, sub_url='',
-                expire_at=_expire_at[:10] if _expire_at else '',
-                proto=proto_label_str,
+            text = (
+                f"{header}\n\n{info_block}\n"
+                f"{ce('💝', '5454386656628991407')} <b>کانفیگ اتصال:</b>\n<code>{esc(config_text)}</code>"
             )
-            if _tmpl_panel is not None:
-                _send_with_qr(config_text, _tmpl_panel)
-            else:
-                text = (
-                    f"{header}\n\n{info_block}\n"
-                    f"{ce('💝', '5454386656628991407')} <b>کانفیگ اتصال:</b>\n<code>{esc(config_text)}</code>"
-                )
-                _send_with_qr(config_text, text)
+            _send_with_qr(config_text, text)
         else:
             _fail_no_content("کانفیگ در دسترس نیست")
 
     elif delivery_mode == "sub_only":
         if has_sub:
-            _tmpl_panel = _render_delivery_template_panel(
-                service_name=service_name, type_label=type_label,
-                pkg_name=package_row['name'] if show_pkg else '',
-                vol_label=vol_label, dur_label=dur_label, users_label=users_label,
-                config_text='', sub_url=sub_url,
-                expire_at=_expire_at[:10] if _expire_at else '',
-                proto=proto_label_str,
+            text = (
+                f"{header}\n\n{info_block}\n"
+                f"{ce('🔗', '5258274739041883702')} <b>لینک سابسکریپشن:</b>\n{esc(sub_url)}"
             )
-            if _tmpl_panel is not None:
-                _send_with_qr(sub_url, _tmpl_panel)
-            else:
-                text = (
-                    f"{header}\n\n{info_block}\n"
-                    f"{ce('🔗', '5258274739041883702')} <b>لینک سابسکریپشن:</b>\n{esc(sub_url)}"
-                )
-                _send_with_qr(sub_url, text)
+            _send_with_qr(sub_url, text)
         else:
             _fail_no_content("لینک ساب در دسترس نیست")
 
     else:  # both
-        _tmpl_panel = _render_delivery_template_panel(
-            service_name=service_name, type_label=type_label,
-            pkg_name=package_row['name'] if show_pkg else '',
-            vol_label=vol_label, dur_label=dur_label, users_label=users_label,
-            config_text=config_text if has_cfg else '',
-            sub_url=sub_url if has_sub else '',
-            expire_at=_expire_at[:10] if _expire_at else '',
-            proto=proto_label_str,
-        )
         if has_cfg and has_sub:
-            if _tmpl_panel is not None:
-                _send_with_qr(config_text, _tmpl_panel)
-            else:
-                text = (
-                    f"{header}\n\n{info_block}\n"
-                    f"{ce('💝', '5454386656628991407')} <b>کانفیگ اتصال:</b>\n<code>{esc(config_text)}</code>\n\n"
-                    f"{ce('🔗', '5258274739041883702')} <b>لینک سابسکریپشن:</b>\n{esc(sub_url)}"
-                )
-                _send_with_qr(config_text, text)
+            text = (
+                f"{header}\n\n{info_block}\n"
+                f"{ce('💝', '5454386656628991407')} <b>کانفیگ اتصال:</b>\n<code>{esc(config_text)}</code>\n\n"
+                f"{ce('🔗', '5258274739041883702')} <b>لینک سابسکریپشن:</b>\n{esc(sub_url)}"
+            )
+            _send_with_qr(config_text, text)  # QR for config when both present
         elif has_cfg:
-            if _tmpl_panel is not None:
-                _send_with_qr(config_text, _tmpl_panel)
-            else:
-                text = (
-                    f"{header}\n\n{info_block}\n"
-                    f"{ce('💝', '5454386656628991407')} <b>کانفیگ اتصال:</b>\n<code>{esc(config_text)}</code>"
-                )
-                _send_with_qr(config_text, text)
+            text = (
+                f"{header}\n\n{info_block}\n"
+                f"{ce('💝', '5454386656628991407')} <b>کانفیگ اتصال:</b>\n<code>{esc(config_text)}</code>"
+            )
+            _send_with_qr(config_text, text)
         elif has_sub:
-            if _tmpl_panel is not None:
-                _send_with_qr(sub_url, _tmpl_panel)
-            else:
-                text = (
-                    f"{header}\n\n{info_block}\n"
-                    f"{ce('🔗', '5258274739041883702')} <b>لینک سابسکریپشن:</b>\n{esc(sub_url)}"
-                )
-                _send_with_qr(sub_url, text)
+            text = (
+                f"{header}\n\n{info_block}\n"
+                f"{ce('🔗', '5258274739041883702')} <b>لینک سابسکریپشن:</b>\n{esc(sub_url)}"
+            )
+            _send_with_qr(sub_url, text)
         else:
             _fail_no_content("کانفیگ و ساب هر دو در دسترس نیستند")
 
@@ -7378,54 +7320,44 @@ def _dispatch_callback(call, uid, data):
         if not _check_invoice_valid(uid):
             _show_invoice_expired(call)
             return
-        # Guard against duplicate callback (double-tap / Telegram retry)
-        with _wallet_pay_lock:
-            if uid in _wallet_pay_in_fly:
-                bot.answer_callback_query(call.id, "در حال پردازش پرداخت قبلی هستید.", show_alert=True)
+        package_id  = int(data.split(":")[2])
+        package_row = get_package(package_id)
+        user        = get_user(uid)
+        if not package_row:
+            bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
+            return
+        preorder_on = setting_get("preorder_mode", "0") == "1"
+        if not _pkg_has_stock(package_row, preorder_on):
+            bot.answer_callback_query(call.id, "موجودی این پکیج تمام شده است.", show_alert=True)
+            return
+        price    = _get_state_price(uid, package_row, "buy_select_method")
+        quantity = int(state_data(uid).get("quantity", 1) or 1)
+        if user["balance"] < price:
+            if not can_use_credit(uid, price):
+                bot.answer_callback_query(call.id, "موجودی کیف پول کافی نیست.", show_alert=True)
                 return
-            _wallet_pay_in_fly.add(uid)
-        try:
-            package_id  = int(data.split(":")[2])
-            package_row = get_package(package_id)
-            user        = get_user(uid)
-            if not package_row:
-                bot.answer_callback_query(call.id, "پکیج یافت نشد.", show_alert=True)
-                return
-            preorder_on = setting_get("preorder_mode", "0") == "1"
-            if not _pkg_has_stock(package_row, preorder_on):
-                bot.answer_callback_query(call.id, "موجودی این پکیج تمام شده است.", show_alert=True)
-                return
-            price    = _get_state_price(uid, package_row, "buy_select_method")
-            quantity = int(state_data(uid).get("quantity", 1) or 1)
-            if user["balance"] < price:
-                if not can_use_credit(uid, price):
-                    bot.answer_callback_query(call.id, "موجودی کیف پول کافی نیست.", show_alert=True)
-                    return
-            # Deduct total and create payment record first
-            update_balance(uid, -price)
-            payment_id = create_payment("config_purchase", uid, package_id, price, "wallet",
-                                        status="completed", quantity=quantity)
-            _snames_wallet = state_data(uid).get("service_names")
-            if _snames_wallet:
-                set_payment_service_names(payment_id, _snames_wallet)
-            complete_payment(payment_id)
-            bot.answer_callback_query(call.id, "خرید با موفقیت انجام شد.")
-            send_or_edit(call, "✅ پرداخت از کیف پول انجام شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
-                         back_button("main"))
-            _chat_id_wallet = call.message.chat.id
-            _snames_wallet_final = _snames_wallet
-            def _do_wallet_deliver():
-                purchase_ids, pending_ids = _deliver_bulk_configs(
-                    _chat_id_wallet, uid, package_id, price, "wallet", quantity, payment_id,
-                    service_names=_snames_wallet_final
-                )
-                _send_bulk_delivery_result(_chat_id_wallet, uid, package_row,
-                                           purchase_ids, pending_ids, "کیف پول")
-            threading.Thread(target=_do_wallet_deliver, daemon=True).start()
-            state_clear(uid)
-        finally:
-            with _wallet_pay_lock:
-                _wallet_pay_in_fly.discard(uid)
+        # Deduct total and create payment record first
+        update_balance(uid, -price)
+        payment_id = create_payment("config_purchase", uid, package_id, price, "wallet",
+                                    status="completed", quantity=quantity)
+        _snames_wallet = state_data(uid).get("service_names")
+        if _snames_wallet:
+            set_payment_service_names(payment_id, _snames_wallet)
+        complete_payment(payment_id)
+        bot.answer_callback_query(call.id, "خرید با موفقیت انجام شد.")
+        send_or_edit(call, "✅ پرداخت از کیف پول انجام شد. کانفیگ‌های شما در حال آماده‌سازی هستند...",
+                     back_button("main"))
+        _chat_id_wallet = call.message.chat.id
+        _snames_wallet_final = _snames_wallet
+        def _do_wallet_deliver():
+            purchase_ids, pending_ids = _deliver_bulk_configs(
+                _chat_id_wallet, uid, package_id, price, "wallet", quantity, payment_id,
+                service_names=_snames_wallet_final
+            )
+            _send_bulk_delivery_result(_chat_id_wallet, uid, package_row,
+                                       purchase_ids, pending_ids, "کیف پول")
+        threading.Thread(target=_do_wallet_deliver, daemon=True).start()
+        state_clear(uid)
         return
 
     if data.startswith("pay:card:"):
@@ -20648,7 +20580,6 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("🖼 پوستر منوی استارت", callback_data="adm:set:start_photo"))
         kb.add(types.InlineKeyboardButton("📜 قوانین خرید",        callback_data="adm:set:rules"))
         kb.add(types.InlineKeyboardButton("📋 تعرفه",              callback_data="adm:tariff:view"))
-        kb.add(types.InlineKeyboardButton("📤 قالب متن تحویل کانفیگ‌ها", callback_data="adm:delivery_tmpl"))
         kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5352759161945867747"))
         bot.answer_callback_query(call.id)
         send_or_edit(call, "📝 <b>متن‌های ربات</b>\n\nیکی از موارد زیر را انتخاب کنید:", kb)
@@ -20700,114 +20631,6 @@ def _dispatch_callback(call, uid, data):
             "می‌توانید از تگ‌های HTML استفاده کنید.\n"
             "برای پاک‌کردن متن، <code>-</code> بفرستید.",
             back_button("adm:tariff:view"))
-        return
-
-    # ── Admin: Delivery template editor ──────────────────────────────────────
-    if data == "adm:delivery_tmpl":
-        if not admin_has_perm(uid, "settings"):
-            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
-            return
-        kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("📡 V2Ray / پنل (vless, vmess, trojan)",
-                                          callback_data="adm:delivery_tmpl:v2ray"))
-        kb.add(types.InlineKeyboardButton("🔑 OpenVPN", callback_data="adm:delivery_tmpl:ovpn"))
-        kb.add(types.InlineKeyboardButton("🔒 WireGuard", callback_data="adm:delivery_tmpl:wg"))
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:bot_texts",
-                                          icon_custom_emoji_id="5352759161945867747"))
-        bot.answer_callback_query(call.id)
-        send_or_edit(call,
-            "📤 <b>قالب متن تحویل کانفیگ</b>\n\n"
-            "می‌توانید متن پیامی که هنگام تحویل کانفیگ به کاربر ارسال می‌شود را شخصی‌سازی کنید.\n"
-            "نوع کانفیگ را انتخاب کنید:", kb)
-        return
-
-    if data.startswith("adm:delivery_tmpl:") and not data.startswith("adm:delivery_tmpl:reset:"):
-        if not admin_has_perm(uid, "settings"):
-            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
-            return
-        tmpl_type = data.split(":")[-1]
-        _TMPL_SETTINGS = {"v2ray": "delivery_template_v2ray",
-                          "ovpn":  "delivery_template_ovpn",
-                          "wg":    "delivery_template_wg"}
-        _TMPL_LABELS   = {"v2ray": "📡 V2Ray / پنل", "ovpn": "🔑 OpenVPN", "wg": "🔒 WireGuard"}
-        if tmpl_type not in _TMPL_SETTINGS:
-            bot.answer_callback_query(call.id)
-            return
-        from ..ui.notifications import _DELIVERY_TMPL_VARS
-        from ..ui.premium_emoji import render_premium_text_html as _rph
-        setting_key = _TMPL_SETTINGS[tmpl_type]
-        label = _TMPL_LABELS[tmpl_type]
-        current = setting_get(setting_key, "").strip()
-        if current:
-            try:
-                _preview_raw = _rph(current)
-            except Exception:
-                _preview_raw = esc(current)
-            _preview_short = (_preview_raw[:400] + "\n...") if len(_preview_raw) > 400 else _preview_raw
-            tmpl_display = f"قالب فعلی:\n<blockquote>{_preview_short}</blockquote>"
-        else:
-            tmpl_display = "<i>قالب پیش‌فرض سیستمی (قالب سفارشی تنظیم نشده)</i>"
-        vars_text = "\n".join(f"  <code>{v}</code> — {desc}"
-                              for v, desc in _DELIVERY_TMPL_VARS.get(tmpl_type, []))
-        kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("✏️ ویرایش قالب",
-                                          callback_data=f"adm:delivery_tmpl:edit:{tmpl_type}"))
-        if current:
-            kb.add(types.InlineKeyboardButton("🗑 حذف قالب (برگشت به پیش‌فرض)",
-                                              callback_data=f"adm:delivery_tmpl:reset:{tmpl_type}"))
-        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:delivery_tmpl",
-                                          icon_custom_emoji_id="5352759161945867747"))
-        bot.answer_callback_query(call.id)
-        send_or_edit(call,
-            f"📤 <b>قالب تحویل — {label}</b>\n\n"
-            f"{tmpl_display}\n\n"
-            f"<b>متغیرهای قابل استفاده:</b>\n{vars_text}\n\n"
-            "مقادیر متغیرها را با دو آکولاد بنویسید، مثلاً:\n"
-            "<code>نام سرویس: <b>{{service_name}}</b></code>",
-            kb)
-        return
-
-    if data.startswith("adm:delivery_tmpl:edit:"):
-        if not admin_has_perm(uid, "settings"):
-            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
-            return
-        tmpl_type = data.split(":")[-1]
-        _TMPL_SETTINGS = {"v2ray": "delivery_template_v2ray",
-                          "ovpn":  "delivery_template_ovpn",
-                          "wg":    "delivery_template_wg"}
-        if tmpl_type not in _TMPL_SETTINGS:
-            bot.answer_callback_query(call.id)
-            return
-        setting_key = _TMPL_SETTINGS[tmpl_type]
-        state_set(uid, "admin_delivery_tmpl",
-                  tmpl_key=setting_key, back_cb=f"adm:delivery_tmpl:{tmpl_type}")
-        bot.answer_callback_query(call.id)
-        current = setting_get(setting_key, "").strip()
-        cur_note = "" if not current else "\n\nقالب فعلی:\n" + (
-            f"<blockquote>{esc(current[:300])}{'...' if len(current) > 300 else ''}</blockquote>")
-        send_or_edit(call,
-            "✏️ <b>ویرایش قالب متن تحویل</b>\n\n"
-            "قالب جدید را ارسال کنید.\n"
-            "می‌توانید از تگ‌های HTML و ایموجی پرمیوم استفاده کنید.\n"
-            "برای حذف قالب و برگشت به پیش‌فرض، <code>-</code> بفرستید."
-            f"{cur_note}",
-            back_button(f"adm:delivery_tmpl:{tmpl_type}"))
-        return
-
-    if data.startswith("adm:delivery_tmpl:reset:"):
-        if not admin_has_perm(uid, "settings"):
-            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
-            return
-        tmpl_type = data.split(":")[-1]
-        _TMPL_SETTINGS = {"v2ray": "delivery_template_v2ray",
-                          "ovpn":  "delivery_template_ovpn",
-                          "wg":    "delivery_template_wg"}
-        if tmpl_type not in _TMPL_SETTINGS:
-            bot.answer_callback_query(call.id)
-            return
-        setting_set(_TMPL_SETTINGS[tmpl_type], "")
-        bot.answer_callback_query(call.id, "✅ قالب حذف شد. پیش‌فرض سیستمی فعال است.")
-        _fake_call(call, f"adm:delivery_tmpl:{tmpl_type}")
         return
 
     if data == "adm:set:start_text":

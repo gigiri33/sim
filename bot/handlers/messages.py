@@ -1546,7 +1546,6 @@ def universal_handler(message):
                     "SELECT * FROM payments WHERE user_id=? AND status='pending'"
                     " AND payment_method IN ('card','crypto')"
                     " AND (receipt_file_id IS NULL OR receipt_file_id='')"
-                    " AND (receipt_text IS NULL OR receipt_text='')"
                     " ORDER BY id DESC LIMIT 1",
                     (uid,)
                 ).fetchone()
@@ -4319,33 +4318,8 @@ def universal_handler(message):
                 bot.send_message(uid, "⚠️ لطفاً یک عکس ارسال کنید یا <code>-</code> برای حذف پوستر.", parse_mode="HTML", reply_markup=back_button("adm:set:start_photo"))
             return
 
-        if sn == "admin_delivery_tmpl" and is_admin(uid):
-            from ..ui.premium_emoji import serialize_premium_text as _spt
-            raw_text = message.text if message.text is not None else (message.caption or "")
-            entities = message.entities or message.caption_entities or []
-            tmpl_key  = sd.get("tmpl_key", "")
-            back_cb   = sd.get("back_cb", "adm:delivery_tmpl")
-            state_clear(uid)
-            if not tmpl_key:
-                return
-            if raw_text.strip() == "-":
-                setting_set(tmpl_key, "")
-                log_admin_action(uid, f"قالب تحویل {tmpl_key} حذف شد")
-                bot.send_message(uid, "✅ قالب حذف شد. پیش‌فرض سیستمی فعال است.",
-                                 reply_markup=back_button(back_cb))
-            else:
-                _serialized = _spt(raw_text, entities)
-                setting_set(tmpl_key, _serialized)
-                log_admin_action(uid, f"قالب تحویل {tmpl_key} تغییر کرد")
-                _pe_count = sum(1 for e in (entities or []) if getattr(e, "type", "") == "custom_emoji")
-                _confirm = "✅ قالب تحویل ذخیره شد."
-                if _pe_count:
-                    _confirm += f"\n\n<code>ایموجی پرمیوم: {_pe_count} عدد</code>"
-                bot.send_message(uid, _confirm, parse_mode="HTML",
-                                 reply_markup=back_button(back_cb))
-            return
-
         if sn == "admin_edit_tariff_text" and is_admin(uid):
+            from ..ui.premium_emoji import serialize_premium_text as _spt
             raw_text = message.text if message.text is not None else (message.caption or "")
             entities = message.entities or message.caption_entities or []
             if raw_text.strip() == "-":
