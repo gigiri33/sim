@@ -10482,6 +10482,14 @@ def _dispatch_callback(call, uid, data):
             bot.answer_callback_query(call.id)
             return
         update_type_purchase_mode(type_id, mode)
+        # If switching away from glass, clear all in-progress glass buy sessions for this type
+        if mode != "glass":
+            from ..bot_instance import USER_STATE
+            _stale = [_u for _u, _s in list(USER_STATE.items())
+                      if _s.get("state_name") == "glass_buy"
+                      and _s.get("data", {}).get("type_id") == type_id]
+            for _u in _stale:
+                USER_STATE.pop(_u, None)
         mode_label = "🪜 مرحله‌ای" if mode == "step" else "🪟 شیشه‌ای"
         bot.answer_callback_query(call.id, f"✅ روش خرید به {mode_label} تغییر کرد.")
         log_admin_action(uid, f"روش خرید نوع #{type_id} به {mode} تغییر یافت")
