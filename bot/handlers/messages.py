@@ -2270,6 +2270,66 @@ def universal_handler(message):
                              reply_markup=back_button(f"adm:pnl:cpkgs:{panel_id}"))
             return
 
+        # ── Admin: Delivery mode wizard — sample config step (edit flow) ──────
+        if sn == "cpkg_dm_ef_sample_config" and is_admin(uid):
+            sample_config = (message.text or "").strip()
+            cpkg_id = sd.get("cpkg_id")
+            mode    = sd.get("mode", "config_only")
+            if not sample_config:
+                bot.send_message(uid, "⚠️ کانفیگ نمونه نمی‌تواند خالی باشد.",
+                                 reply_markup=back_button(f"adm:pnl:cpkg:edit:{cpkg_id}"))
+                return
+            update_panel_client_package_field(cpkg_id, "sample_config", sample_config)
+            try:
+                from .callbacks import _rebuild_panel_configs_for_cpkg
+                rebuilt = _rebuild_panel_configs_for_cpkg(cpkg_id)
+                rebuild_note = f"\n🔄 <b>{rebuilt}</b> کانفیگ فروخته‌شده بازسازی شد." if rebuilt else ""
+            except Exception as _rb_exc:
+                rebuild_note = f"\n⚠️ بازسازی کانفیگ‌های قدیمی ناموفق: {_rb_exc}"
+            if mode == "both":
+                state_set(uid, "cpkg_dm_ef_sample_sub", cpkg_id=cpkg_id, mode=mode)
+                bot.send_message(uid,
+                    f"✅ کانفیگ نمونه ذخیره شد.{rebuild_note}\n\n"
+                    "🔗 <b>لینک ساب نمونه</b> را ارسال کنید:\n\n"
+                    "یک URL ساب واقعی از این اینباند کپی کنید.\n"
+                    "مثال:\n"
+                    "<code>http://example.com:2096/sub/abc123xyz456</code>",
+                    parse_mode="HTML",
+                    reply_markup=back_button(f"adm:pnl:cpkg:edit:{cpkg_id}"))
+            else:  # config_only
+                state_clear(uid)
+                kb_done = types.InlineKeyboardMarkup()
+                kb_done.add(types.InlineKeyboardButton("✏️ ویرایش پکیج", callback_data=f"adm:pnl:cpkg:edit:{cpkg_id}"))
+                bot.send_message(uid,
+                    f"✅ <b>کانفیگ نمونه ذخیره شد.</b>{rebuild_note}\n\n"
+                    f"📄 <code>{esc(sample_config[:200])}</code>",
+                    parse_mode="HTML", reply_markup=kb_done)
+            return
+
+        # ── Admin: Delivery mode wizard — sample sub URL step (edit flow) ──────
+        if sn == "cpkg_dm_ef_sample_sub" and is_admin(uid):
+            sample_sub = (message.text or "").strip()
+            cpkg_id = sd.get("cpkg_id")
+            if not sample_sub:
+                bot.send_message(uid, "⚠️ لینک ساب نمی‌تواند خالی باشد.",
+                                 reply_markup=back_button(f"adm:pnl:cpkg:edit:{cpkg_id}"))
+                return
+            update_panel_client_package_field(cpkg_id, "sample_sub_url", sample_sub)
+            try:
+                from .callbacks import _rebuild_panel_configs_for_cpkg
+                rebuilt = _rebuild_panel_configs_for_cpkg(cpkg_id)
+                rebuild_note = f"\n🔄 <b>{rebuilt}</b> کانفیگ فروخته‌شده بازسازی شد." if rebuilt else ""
+            except Exception as _rb_exc:
+                rebuild_note = f"\n⚠️ بازسازی کانفیگ‌های قدیمی ناموفق: {_rb_exc}"
+            state_clear(uid)
+            kb_done = types.InlineKeyboardMarkup()
+            kb_done.add(types.InlineKeyboardButton("✏️ ویرایش پکیج", callback_data=f"adm:pnl:cpkg:edit:{cpkg_id}"))
+            bot.send_message(uid,
+                f"✅ <b>ساب نمونه ذخیره شد.</b>{rebuild_note}\n\n"
+                f"🔗 <code>{esc(sample_sub)}</code>",
+                parse_mode="HTML", reply_markup=kb_done)
+            return
+
         # ── Admin: Cpkg field edit ─────────────────────────────────────────────
         for _ef_field in ("inbound_id", "sample_config", "sample_sub_url", "sample_client_name"):
             if sn == f"cpkg_ef_{_ef_field}" and is_admin(uid):

@@ -23272,25 +23272,43 @@ def _dispatch_callback(call, uid, data):
         return
 
     if data.startswith("adm:pnl:cpkg:dm:"):
-        # adm:pnl:cpkg:dm:{mode}:{cpkg_id}
-        if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
-            bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
-            return
+        # adm:pnl:cpkg:dm:{mode}:{cpkg_id}  (edit flow — exactly 6 parts)
+        # adm:pnl:cpkg:dm:{mode}:{panel_id}:{inbound_id}  (create flow — 7 parts, handled below)
         parts_dm = data.split(":")
-        dm_val   = parts_dm[4]
-        cpkg_id  = int(parts_dm[5])
-        if dm_val not in ("config_only", "sub_only", "both"):
-            bot.answer_callback_query(call.id, "مقدار نامعتبر.", show_alert=True)
+        if len(parts_dm) == 6:
+            if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
+                bot.answer_callback_query(call.id, "دسترسی ندارید.", show_alert=True)
+                return
+            dm_val  = parts_dm[4]
+            cpkg_id = int(parts_dm[5])
+            if dm_val not in ("config_only", "sub_only", "both"):
+                bot.answer_callback_query(call.id, "مقدار نامعتبر.", show_alert=True)
+                return
+            cp = get_panel_client_package(cpkg_id)
+            if not cp:
+                bot.answer_callback_query(call.id, "کلاینت پکیج یافت نشد.", show_alert=True)
+                return
+            update_panel_client_package_field(cpkg_id, "delivery_mode", dm_val)
+            _DM_LABELS_CPKG2 = {"config_only": "📄 فقط کانفیگ", "sub_only": "🔗 فقط ساب", "both": "📄+🔗 هر دو"}
+            bot.answer_callback_query(call.id, f"✅ حالت تحویل به {_DM_LABELS_CPKG2[dm_val]} تغییر کرد.")
+            if dm_val in ("config_only", "both"):
+                state_set(uid, "cpkg_dm_ef_sample_config", cpkg_id=cpkg_id, mode=dm_val)
+                send_or_edit(call,
+                    "📄 <b>کانفیگ نمونه</b> را ارسال کنید:\n\n"
+                    "یک خط کانفیگ از این اینباند کپی کنید.\n"
+                    "مثال:\n"
+                    "<code>vless://abcd1234efgh5678@example.com:2096"
+                    "?security=tls&type=tcp&sni=example.com#example-config</code>",
+                    back_button(f"adm:pnl:cpkg:edit:{cpkg_id}"))
+            else:  # sub_only
+                state_set(uid, "cpkg_dm_ef_sample_sub", cpkg_id=cpkg_id, mode=dm_val)
+                send_or_edit(call,
+                    "🔗 <b>لینک ساب نمونه</b> را ارسال کنید:\n\n"
+                    "یک URL ساب واقعی از این اینباند کپی کنید.\n"
+                    "مثال:\n"
+                    "<code>http://example.com:2096/sub/abc123xyz456</code>",
+                    back_button(f"adm:pnl:cpkg:edit:{cpkg_id}"))
             return
-        cp = get_panel_client_package(cpkg_id)
-        if not cp:
-            bot.answer_callback_query(call.id, "کلاینت پکیج یافت نشد.", show_alert=True)
-            return
-        update_panel_client_package_field(cpkg_id, "delivery_mode", dm_val)
-        _DM_LABELS_CPKG2 = {"config_only": "📄 فقط کانفیگ", "sub_only": "🔗 فقط ساب", "both": "📄+🔗 هر دو"}
-        bot.answer_callback_query(call.id, f"✅ حالت تحویل به {_DM_LABELS_CPKG2[dm_val]} تغییر کرد.")
-        _show_cpkg_edit_menu(call, cpkg_id)
-        return
 
     if data.startswith("adm:pnl:editpanel:"):
         if not (uid in ADMIN_IDS or admin_has_perm(uid, "manage_panels")):
