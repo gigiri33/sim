@@ -98,8 +98,13 @@ def show_main_menu(target):
                 pass
 
     if photo_id:
-        # Send as photo with caption
-        kb = kb_main(uid)
+        # Send as photo with caption.
+        # In popup mode use the ReplyKeyboard so the bottom popup stays up;
+        # in inline mode use the regular inline keyboard attached to the photo.
+        if popup_mode:
+            kb = kb_main_popup(uid)
+        else:
+            kb = kb_main(uid)
         caption = text
         caption_entities = entities if entities else None
         try:

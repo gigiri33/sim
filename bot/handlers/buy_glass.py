@@ -548,6 +548,7 @@ def show_glass_buy(call, type_id: int):
         return
 
     _gs = ses.to_state()
+    _gs.pop("uid", None)  # uid is positional arg to state_set; _reload_session re-injects it
     state_set(uid, "glass_buy", **_gs)
 
     inv_desc = ""

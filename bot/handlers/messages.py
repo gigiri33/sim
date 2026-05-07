@@ -97,6 +97,16 @@ _popup_acq_orig = bot.answer_callback_query
 
 def _popup_patched_acq(cq_id, *a, **kw):
     if getattr(_popup_suppress_acq, 'active', False):
+        # If the call carries an alert text, forward it as a regular message
+        # so the user isn't left without feedback in popup mode.
+        _text = kw.get('text') or (a[0] if a else None)
+        if _text:
+            _cid = getattr(_popup_suppress_acq, 'chat_id', None)
+            if _cid:
+                try:
+                    bot.send_message(_cid, str(_text))
+                except Exception:
+                    pass
         return None
     return _popup_acq_orig(cq_id, *a, **kw)
 
@@ -494,30 +504,58 @@ def universal_handler(message):
     # When start_menu_mode == "popup", the start menu is a ReplyKeyboardMarkup.
     # Button presses arrive as text messages. Always route them as navigation —
     # clear any active state so they act as an "escape" from mid-flow operations.
+    # Exception: admin text-input states (admin_*) are never cleared by popup
+    # buttons so the admin can type their content without accidentally navigating.
     if (message.content_type == "text"
             and setting_get("start_menu_mode", "inline") == "popup"):
         from ..ui.start_menu import find_button_callback_by_text
         _popup_cb = find_button_callback_by_text(message.text or "")
         if _popup_cb:
-            # Cancel any in-progress operation before navigating
-            if sn:
-                state_clear(uid)
-            from .callbacks import _dispatch_callback as _dcb
-            _src_msg = message
-            _src_user = message.from_user
+            # If we're in an admin-panel text-input state, don't intercept;
+            # let the state handler below finish collecting the admin's input.
+            if sn and sn.startswith("admin_"):
+                pass  # fall through to the normal state handlers
+            else:
+                # Cancel any in-progress user operation before navigating
+                if sn:
+                    state_clear(uid)
+                from .callbacks import _dispatch_callback as _dcb
+                _src_user = message.from_user
 
-            class _FakeCQ:
-                id = "0"
-                from_user = _src_user
-                data = _popup_cb
-                message = _src_msg
+                # Before dispatching, send a ReplyKeyboardRemove so the popup
+                # bottom-keyboard is hidden for screens with inline buttons.
+                # The bot's own dismiss message is used as the edit target so
+                # send_or_edit can replace it cleanly instead of creating extra
+                # messages. For nav:main the popup keyboard comes back on its own.
+                _dismiss_msg = None
+                if _popup_cb != "nav:main":
+                    try:
+                        _dismiss_msg = bot.send_message(
+                            message.chat.id, "⏳",
+                            reply_markup=types.ReplyKeyboardRemove(),
+                            message_thread_id=getattr(message, "message_thread_id", None),
+                        )
+                    except Exception:
+                        _dismiss_msg = None
 
-            _popup_suppress_acq.active = True
-            try:
-                _dcb(_FakeCQ(), uid, _popup_cb)
-            finally:
-                _popup_suppress_acq.active = False
-            return
+                # Build a fake CallbackQuery; point .message at the dismiss msg
+                # so send_or_edit can edit it (bots can edit their own messages).
+                _target_msg = _dismiss_msg if _dismiss_msg else message
+
+                class _FakeCQ:
+                    id = "0"
+                    from_user = _src_user
+                    data = _popup_cb
+                    message = _target_msg
+
+                _popup_suppress_acq.active = True
+                _popup_suppress_acq.chat_id = message.chat.id
+                try:
+                    _dcb(_FakeCQ(), uid, _popup_cb)
+                finally:
+                    _popup_suppress_acq.active = False
+                    _popup_suppress_acq.chat_id = None
+                return
 
     try:
         # ── My Configs search ─────────────────────────────────────────────────
