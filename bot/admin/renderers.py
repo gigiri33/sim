@@ -933,9 +933,9 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
     config_line = ""
     if has_config:
         cfg_txt = str(cfg["client_config_text"])[:800]
-        config_line += f"\n\n{ce('💝', '5900197669178970457')} <b>Config:</b>\n<code>{esc(cfg_txt)}</code>"
+        config_line += f"\n\n{ce('💝', '5454386656628991407')} <b>کانفیگ اتصال:</b>\n<code>{esc(cfg_txt)}</code>"
     if has_sub:
-        config_line += f"\n\n{ce('🔗', '5271604874419647061')} <b>لینک ساب:</b>\n{esc(cfg['client_sub_url'])}"
+        config_line += f"\n\n{ce('🔗', '5258274739041883702')} <b>لینک سابسکریپشن:</b>\n{esc(cfg['client_sub_url'])}"
 
     # ── Usage stats block ─────────────────────────────────────────────────────
     usage_block = (
@@ -946,12 +946,24 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
     )
 
     if is_user_view:
+        _expire_raw = cfg.get("expire_at") or ""
+        if _expire_raw:
+            try:
+                import jdatetime as _jdt
+                _ed = _jdt.date.fromgregorian(date=__import__('datetime').date.fromisoformat(str(_expire_raw)[:10]))
+                _expire_jalali = f"{_ed.year}/{_ed.month:02d}/{_ed.day:02d}"
+            except Exception:
+                _expire_jalali = str(_expire_raw)[:10]
+            expire_line = f"\n{ce('❗', '5348557584418750233')} انقضا: <b>{_expire_jalali}</b>"
+        else:
+            expire_line = ""
         text = (
-            f"{ce('🔮', '5361837567463399422')} نام سرویس: <b>{esc(cfg.get('client_name') or '—')}</b>\n"
-            f"{ce('🧩', '5463224921935082813')} نوع سرویس: <b>{esc(cfg.get('type_name') or '—')}</b>\n"
-            f"{ce('🔋', '5924538142198600679')} حجم: <b>{vol_text}</b>\n"
-            f"{ce('⏰', '5343724178547691280')} مدت: <b>{dur_text}</b>\n"
-            f"{ce('👥', '5372926953978341366')} تعداد کاربر: <b>نامحدود</b>"
+            f"{ce('🔮', '5987881105859024173')} نام سرویس: <b>{esc(cfg.get('client_name') or '—')}</b>\n"
+            f"{ce('🧩', '5350526388837301421')} نوع سرویس: <b>{esc(cfg.get('type_name') or '—')}</b>\n"
+            f"{ce('🔋', '5988017011509171250')} حجم: <b>{vol_text}</b>\n"
+            f"{ce('⏰', '5987901335154987757')} مدت زمان: <b>{dur_text}</b>\n"
+            f"{ce('👥', '5987790606603129919')} تعداد کاربر: <b>نامحدود</b>"
+            f"{expire_line}"
             f"{config_line}"
             f"{usage_block}"
         )
@@ -1028,13 +1040,10 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
         _renewal_on = _sg("panel_renewal_enabled", "1") == "1"
         _user_ar_on = _sg("user_auto_renew_enabled", "1") == "1"
         if _renewal_on and _user_ar_on:
-            _ar_icon = ce('♻️', '5803057229909202251')
-            _tick_icon = ce('✅', '5350572310627632617')
-            _cross_icon = ce('❌', '5348514879558926674')
-            ar_label = f"{_ar_icon} تمدید خودکار: {_tick_icon}" if auto_renew else f"{_ar_icon} تمدید خودکار: {_cross_icon}"
+            ar_label = "تمدید خودکار: ✅" if auto_renew else "تمدید خودکار: ❌"
             kb.row(
-                InlineKeyboardButton("⚡ تمدید فوری",  callback_data=f"mypnlcfg:renewconfirm:{config_id}", icon_custom_emoji_id="5987688901777560604"),
-                InlineKeyboardButton(ar_label,          callback_data=f"mypnlcfg:autorenew:{config_id}", icon_custom_emoji_id="5803057229909202251"),
+                InlineKeyboardButton("تمدید فوری",  callback_data=f"mypnlcfg:renewconfirm:{config_id}", icon_custom_emoji_id="5987688901777560604"),
+                InlineKeyboardButton(ar_label,       callback_data=f"mypnlcfg:autorenew:{config_id}",   icon_custom_emoji_id="5803057229909202251"),
             )
         kb.add(InlineKeyboardButton("بازگشت", callback_data=back_data,
                                     icon_custom_emoji_id="5352759161945867747"))

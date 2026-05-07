@@ -4983,9 +4983,13 @@ def universal_handler(message):
 
         # ── Admin: Bulk agent price change ────────────────────────────────────
         if sn == "admin_agt_bulk_price_val" and is_admin(uid):
-            from ..db import set_agency_price_config as _sapc
+            from ..db import (set_agency_price_config as _sapc,
+                              set_agency_type_discount as _satd,
+                              set_agency_price as _sap,
+                              set_per_gb_price as _spgb)
             selected = sd.get("selected", [])
             dtype    = sd.get("dtype", "pct")
+            mode     = sd.get("mode", "global")
             val = parse_int(message.text or "")
             if val is None or val < 0:
                 bot.send_message(uid, "⚠️ عدد معتبر (0 یا بیشتر) وارد کنید.")
@@ -4994,18 +4998,75 @@ def universal_handler(message):
                 bot.send_message(uid, "⚠️ درصد نمی‌تواند بیشتر از 100 باشد.")
                 return
             applied = 0
-            for agt_id in selected:
-                try:
-                    _sapc(agt_id, "global",
-                          "pct" if dtype == "pct" else "toman", val)
-                    applied += 1
-                except Exception:
-                    pass
+
+            if mode == "global":
+                for agt_id in selected:
+                    try:
+                        _sapc(agt_id, "global",
+                              "pct" if dtype == "pct" else "toman", val)
+                        applied += 1
+                    except Exception:
+                        pass
+                label = f"{val}%" if dtype == "pct" else f"{fmt_price(val)} تومان"
+
+            elif mode == "type":
+                type_id = sd.get("type_id")
+                for agt_id in selected:
+                    try:
+                        _sapc(agt_id, "type",
+                              "pct" if dtype == "pct" else "toman", val)
+                        _satd(agt_id, type_id,
+                              "pct" if dtype == "pct" else "toman", val)
+                        applied += 1
+                    except Exception:
+                        pass
+                label = f"{val}%" if dtype == "pct" else f"{fmt_price(val)} تومان"
+
+            elif mode == "package":
+                package_id = sd.get("package_id")
+                for agt_id in selected:
+                    try:
+                        _sapc(agt_id, "package", "toman", val)
+                        if val == 0:
+                            # 0 means reset to default — remove the row
+                            with __import__('contextlib').suppress(Exception):
+                                from ..db import get_conn as _gc
+                                with _gc() as _cx:
+                                    _cx.execute(
+                                        "DELETE FROM agency_prices WHERE user_id=? AND package_id=?",
+                                        (agt_id, package_id))
+                        else:
+                            _sap(agt_id, package_id, val)
+                        applied += 1
+                    except Exception:
+                        pass
+                label = f"{fmt_price(val)} تومان" if val else "قیمت پیش‌فرض"
+
+            elif mode == "per_gb":
+                type_id = sd.get("type_id")
+                for agt_id in selected:
+                    try:
+                        _sapc(agt_id, "per_gb", "toman", val)
+                        _spgb(agt_id, type_id, val)
+                        applied += 1
+                    except Exception:
+                        pass
+                label = f"{fmt_price(val)} تومان/گیگ"
+
+            else:
+                for agt_id in selected:
+                    try:
+                        _sapc(agt_id, "global",
+                              "pct" if dtype == "pct" else "toman", val)
+                        applied += 1
+                    except Exception:
+                        pass
+                label = f"{val}%" if dtype == "pct" else f"{fmt_price(val)} تومان"
+
             state_clear(uid)
-            label = f"{val}%" if dtype == "pct" else f"{fmt_price(val)} تومان"
-            log_admin_action(uid, f"تخفیف همگانی نمایندگان ({applied} نفر): {label}")
+            log_admin_action(uid, f"تخفیف همگانی نمایندگان — حالت {mode} ({applied} نفر): {label}")
             bot.send_message(uid,
-                f"✅ تخفیف <b>{label}</b> برای <b>{applied}</b> نماینده اعمال شد.",
+                f"✅ قیمت <b>{label}</b> برای <b>{applied}</b> نماینده اعمال شد.",
                 parse_mode="HTML",
                 reply_markup=back_button("admin:agents"))
             return

@@ -350,7 +350,7 @@ def show_my_configs(target, user_id, page=0, search=None):
             types.InlineKeyboardButton("❌ پاک کردن جست‌وجو", callback_data="my_configs:csearch"),
         )
     else:
-        kb.add(types.InlineKeyboardButton(ce('🔍', '5258274739041883702') + " جست‌وجو در سرویس‌ها", callback_data="my_configs:search"))
+        kb.add(types.InlineKeyboardButton("جست‌وجو در سرویس‌ها", callback_data="my_configs:search", icon_custom_emoji_id="5258274739041883702"))
 
     # ── Config buttons (no inline renewal) ───────────────────────────────────
     for item in items:
@@ -391,7 +391,7 @@ def show_my_configs(target, user_id, page=0, search=None):
             nav.append(types.InlineKeyboardButton("▶️ بعدی", callback_data=f"my_configs:p:{page + 1}"))
         kb.row(*nav)
 
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
+    kb.add(types.InlineKeyboardButton("بازگشت", callback_data="nav:main", icon_custom_emoji_id="5352759161945867747"))
 
     # ── Header ────────────────────────────────────────────────────────────────
     header = f"{ce('📦', '5350763436672305153')} <b>کانفیگ‌های من</b>"
