@@ -210,3 +210,77 @@ def _backup_loop():
                 last_backup_at = now
         except Exception:
             pass
+
+
+def _send_backup_to_group_topic():
+    """Send a backup document to the group's backup topic only (no admin chat)."""
+    import io
+    from ..group_manager import get_group_id, _get_topic_id
+
+    group_id = get_group_id()
+    if not group_id:
+        return
+    thread_id = _get_topic_id("backup")
+    if not thread_id:
+        return
+
+    tmp_backup = DB_NAME + ".group_backup_tmp"
+    try:
+        ts      = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        caption = f"🗄 بکاپ خودکار گروه\n\n📦 ConfigFlow_backup_{ts}.db"
+        fname   = f"ConfigFlow_backup_{ts}.db"
+
+        src_conn = sqlite3.connect(DB_NAME, timeout=30)
+        src_conn.execute("PRAGMA busy_timeout = 30000")
+        dst_conn = sqlite3.connect(tmp_backup)
+        try:
+            src_conn.backup(dst_conn, pages=100, sleep=0.1)
+        finally:
+            src_conn.close()
+            dst_conn.close()
+
+        with open(tmp_backup, "rb") as f:
+            data = f.read()
+
+        buf = io.BytesIO(data)
+        buf.name = fname
+        bot.send_document(
+            group_id, buf,
+            message_thread_id=thread_id,
+            caption=caption,
+            parse_mode="HTML",
+            visible_file_name=fname,
+        )
+    except Exception:
+        pass
+    finally:
+        try:
+            if os.path.isfile(tmp_backup):
+                os.remove(tmp_backup)
+            for sidecar in (tmp_backup + "-wal", tmp_backup + "-shm"):
+                if os.path.isfile(sidecar):
+                    os.remove(sidecar)
+        except Exception:
+            pass
+
+
+def _group_backup_loop():
+    """
+    Independent loop: sends a backup to the group backup topic every 1 hour,
+    as long as a group_id and backup topic are configured.
+    Completely separate from the admin backup schedule.
+    """
+    GROUP_BACKUP_INTERVAL = 3600  # 1 hour in seconds
+    last_sent_at = 0.0
+    while True:
+        time.sleep(60)  # check every minute
+        try:
+            from ..group_manager import get_group_id, _get_topic_id
+            if not get_group_id() or not _get_topic_id("backup"):
+                continue
+            now = time.time()
+            if now - last_sent_at >= GROUP_BACKUP_INTERVAL:
+                _send_backup_to_group_topic()
+                last_sent_at = time.time()
+        except Exception:
+            pass

@@ -18,7 +18,7 @@ from bot.db import init_db
 from bot.db import cleanup_stale_reservations
 from bot.ui.helpers import set_bot_commands
 from bot.db import setting_get, setting_set, add_locked_channel, get_payment, complete_payment, update_balance, is_payment_expired
-from bot.admin.backup import _backup_loop
+from bot.admin.backup import _backup_loop, _group_backup_loop
 from bot.group_manager import _group_topic_loop
 from bot.panels.checker import start_panel_checker
 import bot.handlers  # noqa: F401 — registers all handlers
@@ -716,6 +716,10 @@ def main():
     # Start backup thread
     backup_thread = threading.Thread(target=_backup_loop, daemon=True)
     backup_thread.start()
+
+    # Auto-backup to group topic every 1 hour (independent of admin backup settings)
+    group_backup_thread = threading.Thread(target=_group_backup_loop, daemon=True)
+    group_backup_thread.start()
 
     # Start group topic maintenance loop
     group_thread = threading.Thread(target=_group_topic_loop, daemon=True)
