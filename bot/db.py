@@ -865,6 +865,8 @@ def _run_init_db_migrations():
                 client_uuid     TEXT,
                 client_name     TEXT
             )""",
+            # ── Locked channels: optional invite link for private channels ─────
+            "ALTER TABLE locked_channels ADD COLUMN join_url TEXT NOT NULL DEFAULT ''",
         ]
         for sql in migrations:
             try:
@@ -3962,13 +3964,13 @@ def get_locked_channels():
         ).fetchall()
 
 
-def add_locked_channel(channel_id: str) -> bool:
+def add_locked_channel(channel_id: str, join_url: str = "") -> bool:
     """Add a channel to the locked list. Returns True if added, False if already exists."""
     with get_conn() as conn:
         try:
             conn.execute(
-                "INSERT INTO locked_channels(channel_id, added_at) VALUES(?,?)",
-                (channel_id.strip(), now_str())
+                "INSERT INTO locked_channels(channel_id, join_url, added_at) VALUES(?,?,?)",
+                (channel_id.strip(), (join_url or "").strip(), now_str())
             )
             return True
         except Exception:

@@ -940,7 +940,7 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
     # ── Usage stats block ─────────────────────────────────────────────────────
     usage_block = (
         f"\n\n━━━━━━━━━━━━━\n"
-        f"📊 <b>وضعیت مصرف:</b>\n"
+        f"{ce('📊', '5224668582750735412')} <b>وضعیت مصرف:</b>\n"
         f"حجم مانده: {remaining_vol_str}\n"
         f"زمان مانده: {remaining_time_str}"
     )
@@ -1026,11 +1026,15 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
         # User view: send QR inline if possible, then show buttons
         from ..db import setting_get as _sg
         _renewal_on = _sg("panel_renewal_enabled", "1") == "1"
-        if _renewal_on:
-            ar_label = "♻️ تمدید خودکار: ✅" if auto_renew else "♻️ تمدید خودکار: ❌"
+        _user_ar_on = _sg("user_auto_renew_enabled", "1") == "1"
+        if _renewal_on and _user_ar_on:
+            _ar_icon = ce('♻️', '5803057229909202251')
+            _tick_icon = ce('✅', '5350572310627632617')
+            _cross_icon = ce('❌', '5348514879558926674')
+            ar_label = f"{_ar_icon} تمدید خودکار: {_tick_icon}" if auto_renew else f"{_ar_icon} تمدید خودکار: {_cross_icon}"
             kb.row(
-                InlineKeyboardButton("⚡ تمدید فوری",  callback_data=f"mypnlcfg:renewconfirm:{config_id}"),
-                InlineKeyboardButton(ar_label,          callback_data=f"mypnlcfg:autorenew:{config_id}"),
+                InlineKeyboardButton("⚡ تمدید فوری",  callback_data=f"mypnlcfg:renewconfirm:{config_id}", icon_custom_emoji_id="5987688901777560604"),
+                InlineKeyboardButton(ar_label,          callback_data=f"mypnlcfg:autorenew:{config_id}", icon_custom_emoji_id="5803057229909202251"),
             )
         kb.add(InlineKeyboardButton("بازگشت", callback_data=back_data,
                                     icon_custom_emoji_id="5352759161945867747"))
