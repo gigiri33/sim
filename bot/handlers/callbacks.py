@@ -2032,6 +2032,22 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
                         "[PANEL_DELIVERY] queued uid=%s pkg=%s payment=%s dq_id=%s reason=%s",
                         uid, package_id, payment_id, q_id, result,
                     )
+                    # Log the purchase immediately since payment was confirmed
+                    try:
+                        _pkg_name = package_row["name"] if package_row and "name" in (package_row.keys() if hasattr(package_row, "keys") else []) else str(package_id)
+                        _type_name = package_row["type_name"] if package_row and "type_name" in (package_row.keys() if hasattr(package_row, "keys") else []) else ""
+                        _svc = desired_name or "—"
+                        _notify_admin(
+                            f"💳 <b>خرید جدید — در صف تحویل</b>\n\n"
+                            f"👤 کاربر: <code>{uid}</code>\n"
+                            f"🧩 نوع: {esc(str(_type_name))}\n"
+                            f"📦 پکیج: {esc(str(_pkg_name))}\n"
+                            f"🏷️ نام سرویس: <code>{_svc}</code>\n"
+                            f"💳 شناسه پرداخت: <code>{payment_id}</code>\n"
+                            f"⏳ در صف تحویل (dq_id={q_id})"
+                        )
+                    except Exception:
+                        pass
                 except Exception as _po_exc:
                     log.error("[PANEL_DELIVERY] enqueue_delivery failed uid=%s: %s", uid, _po_exc)
                 # Send ONE calm message to the user — no repeated messages
@@ -5567,7 +5583,10 @@ def _dispatch_callback(call, uid, data):
         state_set(uid, "my_cfgs_search")
         bot.answer_callback_query(call.id)
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("❌ لغو", callback_data="my_configs"))
+        kb.add(types.InlineKeyboardButton(
+            _ce_srch('❌', '5348514879558926674') + " لغو",
+            callback_data="my_configs"
+        ))
         send_or_edit(call,
             f"{_ce_srch('🔍', '5258396243666681152')} <b>جست‌وجو در کانفیگ‌ها</b>\n\n"
             "متن مورد نظر را ارسال کنید:\n"

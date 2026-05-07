@@ -320,10 +320,12 @@ def _run_delivery_cycle():
                 from .db import get_panel, get_package
                 pkg  = get_package(pkg_id)
                 pkg_name = pkg["name"] if pkg else str(pkg_id)
+                svc_name = item.get("desired_name") or "—"
                 _notify_admin(
                     f"✅ <b>تحویل کانفیگ از صف انجام شد</b>\n\n"
                     f"👤 کاربر: <code>{uid}</code>\n"
                     f"📦 پکیج: {pkg_name}\n"
+                    f"🏷️ نام سرویس: <code>{svc_name}</code>\n"
                     f"🗂 panel_config_id: <code>{pc_id}</code>\n"
                     f"🔁 تلاش شماره: {item['retry_count'] + 1}"
                 )
