@@ -506,8 +506,41 @@ def universal_handler(message):
     # clear any active state so they act as an "escape" from mid-flow operations.
     # Exception: admin text-input states (admin_*) are never cleared by popup
     # buttons so the admin can type their content without accidentally navigating.
+
+    # Single back-to-menu button shown while the user is in a sub-screen.
+    _POPUP_BACK_TEXT     = "بازگشت به منو"
+    _POPUP_BACK_EMOJI_ID = "5352759161945867747"
+
+    def _popup_back_kbd():
+        kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        kb.row(types.KeyboardButton(_POPUP_BACK_TEXT,
+                                    icon_custom_emoji_id=_POPUP_BACK_EMOJI_ID))
+        return kb
+
     if (message.content_type == "text"
             and setting_get("start_menu_mode", "inline") == "popup"):
+
+        # ── "بازگشت به منو" single back-button → back to main menu ───────────
+        if (message.text or "").strip() == _POPUP_BACK_TEXT:
+            if sn:
+                state_clear(uid)
+            from .callbacks import _dispatch_callback as _dcb
+
+            class _FakeCQBack:
+                id = "0"
+                from_user = message.from_user
+                data = "nav:main"
+                message = message
+
+            _popup_suppress_acq.active = True
+            _popup_suppress_acq.chat_id = message.chat.id
+            try:
+                _dcb(_FakeCQBack(), uid, "nav:main")
+            finally:
+                _popup_suppress_acq.active = False
+                _popup_suppress_acq.chat_id = None
+            return
+
         from ..ui.start_menu import find_button_callback_by_text
         _popup_cb = find_button_callback_by_text(message.text or "")
         if _popup_cb:
@@ -522,17 +555,16 @@ def universal_handler(message):
                 from .callbacks import _dispatch_callback as _dcb
                 _src_user = message.from_user
 
-                # Before dispatching, send a ReplyKeyboardRemove so the popup
-                # bottom-keyboard is hidden for screens with inline buttons.
-                # The bot's own dismiss message is used as the edit target so
-                # send_or_edit can replace it cleanly instead of creating extra
-                # messages. For nav:main the popup keyboard comes back on its own.
+                # Replace the full popup keyboard with a single "بازگشت به منو"
+                # button so the user can return to the main menu. The bot-sent
+                # message acts as the edit target for send_or_edit.
+                # For nav:main the full popup keyboard comes back automatically.
                 _dismiss_msg = None
                 if _popup_cb != "nav:main":
                     try:
                         _dismiss_msg = bot.send_message(
                             message.chat.id, "⏳",
-                            reply_markup=types.ReplyKeyboardRemove(),
+                            reply_markup=_popup_back_kbd(),
                             message_thread_id=getattr(message, "message_thread_id", None),
                         )
                     except Exception:
