@@ -377,9 +377,13 @@ def show_my_configs(target, user_id, page=0, search=None):
         elif int(pc["is_disabled"] or 0):
             marker = " ⛔"
         else:
-            marker = " 🟢"
+            marker = ""
         name = esc(pc["client_name"] or pc["package_name"] or "—")
-        kb.add(types.InlineKeyboardButton(f"{name}{marker}", callback_data=f"mypnlcfg:d:{pc['id']}"))
+        _is_active = not pc["is_expired"] and not int(pc["is_disabled"] or 0)
+        if _is_active:
+            kb.add(types.InlineKeyboardButton(name, callback_data=f"mypnlcfg:d:{pc['id']}", icon_custom_emoji_id="5386521874089914548"))
+        else:
+            kb.add(types.InlineKeyboardButton(f"{name}{marker}", callback_data=f"mypnlcfg:d:{pc['id']}"))
 
     # ── Pagination row ────────────────────────────────────────────────────────
     if total_pages > 1:

@@ -932,8 +932,8 @@ def _show_naming_prompt(target, package_id: int, quantity: int):
     """Show the naming-type selection step (random vs custom) for panel packages."""
     kb = types.InlineKeyboardMarkup()
     kb.row(
-        types.InlineKeyboardButton("🎲 نام رندوم",   callback_data=f"buy:naming:random:{package_id}:{quantity}"),
-        types.InlineKeyboardButton("✏️ نام دلخواه",  callback_data=f"buy:naming:custom:{package_id}:{quantity}"),
+        types.InlineKeyboardButton("نام رندوم",   callback_data=f"buy:naming:random:{package_id}:{quantity}", icon_custom_emoji_id="5253464392850221514"),
+        types.InlineKeyboardButton("نام دلخواه",  callback_data=f"buy:naming:custom:{package_id}:{quantity}", icon_custom_emoji_id="5348136664738839786"),
     )
     # Back button: return to glass invoice if came from glass flow, otherwise to package page
     _sd_nm = state_data(target.from_user.id) if hasattr(target, 'from_user') else {}
@@ -941,7 +941,7 @@ def _show_naming_prompt(target, package_id: int, quantity: int):
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data=_back_cb,
                                       icon_custom_emoji_id="5352759161945867747"))
     send_or_edit(target,
-        "🏷 <b>انتخاب نام سرویس</b>\n\n"
+        f"{ce('🏷', '5235588635885054955')} <b>انتخاب نام سرویس</b>\n\n"
         "لطفاً مشخص کنید نام سرویس شما به چه صورت ثبت شود.",
         kb)
 

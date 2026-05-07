@@ -249,7 +249,7 @@ def show_crypto_selection(target, amount=None, back_cb="pm:back"):
             has_any = True
             symbol     = CRYPTO_API_SYMBOLS.get(coin_key, "")
             price_note = ""
-            if amount and symbol and symbol in prices and prices[symbol] > 0:
+            if False and amount and symbol and symbol in prices and prices[symbol] > 0:
                 coin_amount = amount / prices[symbol]
                 price_note  = f" | ≈ {coin_amount:.4f} {symbol}"
             eid = CRYPTO_EMOJI_IDS.get(coin_key)
