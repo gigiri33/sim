@@ -11492,6 +11492,7 @@ def _dispatch_callback(call, uid, data):
 
         # mypnlcfg:renewconfirm:{config_id}  — show package list for panel config renewal
         if data.startswith("mypnlcfg:renewconfirm:"):
+            from ..ui.premium_emoji import ce
             config_id = int(data.split(":")[-1])
             cfg = get_panel_config(config_id)
             if not cfg or cfg["user_id"] != uid:
