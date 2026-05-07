@@ -1162,71 +1162,22 @@ def _execute_pnlcfg_renewal(config_id, package_id, chat_id=None, uid=None):
             "econnreset", "broken pipe", "reset by peer",
         ])
 
-    CONN_RETRY_DELAY   = 30
-    FUNC_RETRY_TIMEOUT = 180
-    FUNC_RETRY_DELAY   = 15
-    MAX_WAIT           = 28800  # 8-hour hard cap
-    PERIODIC_INTERVAL  = 300
-
-    _t_start          = _time.time()
-    _waiting_notified = False
-    _last_periodic    = 0.0
-
-    def _maybe_notify_waiting():
-        nonlocal _waiting_notified, _last_periodic
-        if not chat_id:
-            return
-        now = _time.time()
-        if not _waiting_notified:
-            try:
-                bot.send_message(
-                    chat_id,
-                    "⏳ <b>سرور پنل در حال حاضر در دسترس نیست</b>\n\n"
-                    "تمدید سرویس در صف انتظار قرار گرفت. "
-                    "به محض بازگشت اتصال، سرویس شما تمدید خواهد شد.",
-                    parse_mode="HTML",
-                )
-                _waiting_notified = True
-                _last_periodic = now
-            except Exception:
-                pass
-        elif now - _last_periodic >= PERIODIC_INTERVAL:
-            try:
-                bot.send_message(chat_id, "⏳ هنوز در حال تلاش برای اتصال به پنل...", parse_mode="HTML")
-                _last_periodic = now
-            except Exception:
-                pass
-
-    def _notify_reconnected():
-        if _waiting_notified and chat_id:
-            try:
-                bot.send_message(chat_id, "✅ اتصال به پنل برقرار شد، در حال تمدید سرویس...", parse_mode="HTML")
-            except Exception:
-                pass
+    # Quick-retry mode: 3 attempts × 20 seconds. If all fail, return an error
+    # immediately — the caller handles user notification and queuing.
+    QUICK_MAX_ATTEMPTS = 3
+    QUICK_RETRY_DELAY  = 20   # seconds between attempts
 
     # ── Step 1: login ─────────────────────────────────────────────────────────
     login_err = None
-    _t0 = _time.time()
-    while True:
-        if _time.time() - _t_start > MAX_WAIT:
-            login_err = "حداکثر زمان انتظار (8 ساعت) تمام شد"
-            break
+    for _attempt in range(QUICK_MAX_ATTEMPTS):
+        if _attempt > 0:
+            _time.sleep(QUICK_RETRY_DELAY)
         ok, login_err = pc_api.login()
         if ok:
             login_err = None
-            _notify_reconnected()
             break
-        elapsed = _time.time() - _t0
-        if _is_conn_err(login_err):
-            _maybe_notify_waiting()
-            log.warning("_execute_pnlcfg_renewal: login CONN_ERR (%.0fs elapsed), retry in %ds: %s",
-                        elapsed, CONN_RETRY_DELAY, login_err)
-            _time.sleep(CONN_RETRY_DELAY)
-        else:
-            log.warning("_execute_pnlcfg_renewal: login failed (%.0fs elapsed): %s", elapsed, login_err)
-            if elapsed + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:
-                break
-            _time.sleep(FUNC_RETRY_DELAY)
+        log.warning("_execute_pnlcfg_renewal: login attempt %d/%d failed: %s",
+                    _attempt + 1, QUICK_MAX_ATTEMPTS, login_err)
     if login_err is not None:
         _notify_panel_error(_uid, pkg, "login (تمدید)", login_err, config_id, cfg["panel_id"])
         return False, "تمدید سرویس با خطا مواجه شد. لطفاً با پشتیبانی ارتباط بگیرید."
@@ -1242,14 +1193,10 @@ def _execute_pnlcfg_renewal(config_id, package_id, chat_id=None, uid=None):
     new_exp_str = None
 
     # ── Step 2: Volume ────────────────────────────────────────────────────────
-    # • New pkg unlimited  → set totalGB = 0 (unlimited) regardless of old value
-    # • New pkg limited    → add extra_gb on top of current totalGB
     vol_err = None
-    _t0 = _time.time()
-    while True:
-        if _time.time() - _t_start > MAX_WAIT:
-            vol_err = "حداکثر زمان انتظار تمام شد"
-            break
+    for _attempt in range(QUICK_MAX_ATTEMPTS):
+        if _attempt > 0:
+            _time.sleep(QUICK_RETRY_DELAY)
         if pkg_unlimited_vol:
             ok_v, res_v = pc_api._update_client(
                 cfg["inbound_id"], cfg["client_uuid"], {"totalGB": 0}
@@ -1262,30 +1209,17 @@ def _execute_pnlcfg_renewal(config_id, package_id, chat_id=None, uid=None):
             vol_err = None
             break
         vol_err = str(res_v)
-        elapsed = _time.time() - _t0
-        if _is_conn_err(vol_err):
-            _maybe_notify_waiting()
-            log.warning("_execute_pnlcfg_renewal: volume CONN_ERR (%.0fs elapsed), retry %ds: %s",
-                        elapsed, CONN_RETRY_DELAY, vol_err)
-            _time.sleep(CONN_RETRY_DELAY)
-        else:
-            log.warning("_execute_pnlcfg_renewal: volume failed (%.0fs elapsed): %s", elapsed, vol_err)
-            if elapsed + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:
-                break
-            _time.sleep(FUNC_RETRY_DELAY)
+        log.warning("_execute_pnlcfg_renewal: volume attempt %d/%d failed: %s",
+                    _attempt + 1, QUICK_MAX_ATTEMPTS, vol_err)
     if vol_err is not None:
         _notify_panel_error(_uid, pkg, "volume (تمدید)", vol_err, config_id, cfg["panel_id"])
         return False, "تمدید سرویس با خطا مواجه شد. لطفاً با پشتیبانی ارتباط بگیرید."
 
     # ── Step 3: Time ──────────────────────────────────────────────────────────
-    # • New pkg unlimited  → set expiryTime = 0 (unlimited) regardless of old value
-    # • New pkg limited    → add extra_days on top of current expiry
     time_err = None
-    _t0 = _time.time()
-    while True:
-        if _time.time() - _t_start > MAX_WAIT:
-            time_err = "حداکثر زمان انتظار تمام شد"
-            break
+    for _attempt in range(QUICK_MAX_ATTEMPTS):
+        if _attempt > 0:
+            _time.sleep(QUICK_RETRY_DELAY)
         if pkg_unlimited_time:
             ok_t, res_t = pc_api._update_client(
                 cfg["inbound_id"], cfg["client_uuid"], {"expiryTime": 0}
@@ -1302,17 +1236,8 @@ def _execute_pnlcfg_renewal(config_id, package_id, chat_id=None, uid=None):
             time_err = None
             break
         time_err = str(res_t)
-        elapsed = _time.time() - _t0
-        if _is_conn_err(time_err):
-            _maybe_notify_waiting()
-            log.warning("_execute_pnlcfg_renewal: time CONN_ERR (%.0fs elapsed), retry %ds: %s",
-                        elapsed, CONN_RETRY_DELAY, time_err)
-            _time.sleep(CONN_RETRY_DELAY)
-        else:
-            log.warning("_execute_pnlcfg_renewal: time failed (%.0fs elapsed): %s", elapsed, time_err)
-            if elapsed + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:
-                break
-            _time.sleep(FUNC_RETRY_DELAY)
+        log.warning("_execute_pnlcfg_renewal: time attempt %d/%d failed: %s",
+                    _attempt + 1, QUICK_MAX_ATTEMPTS, time_err)
     if time_err is not None:
         _notify_panel_error(_uid, pkg, "time (تمدید)", time_err, config_id, cfg["panel_id"])
         return False, "تمدید سرویس با خطا مواجه شد. لطفاً با پشتیبانی ارتباط بگیرید."
@@ -1323,11 +1248,9 @@ def _execute_pnlcfg_renewal(config_id, package_id, chat_id=None, uid=None):
 
     # ── Step 4: enable client (in case it was disabled/expired) ───────────────
     enable_err = None
-    _t0 = _time.time()
-    while True:
-        if _time.time() - _t_start > MAX_WAIT:
-            enable_err = "حداکثر زمان انتظار تمام شد"
-            break
+    for _attempt in range(QUICK_MAX_ATTEMPTS):
+        if _attempt > 0:
+            _time.sleep(QUICK_RETRY_DELAY)
         ok_e, res_e = pc_api.enable_client(
             inbound_id=cfg["inbound_id"], client_uuid=cfg["client_uuid"],
             email=cfg["client_name"] or "",
@@ -1336,17 +1259,8 @@ def _execute_pnlcfg_renewal(config_id, package_id, chat_id=None, uid=None):
             enable_err = None
             break
         enable_err = str(res_e)
-        elapsed = _time.time() - _t0
-        if _is_conn_err(enable_err):
-            _maybe_notify_waiting()
-            log.warning("_execute_pnlcfg_renewal: enable_client CONN_ERR (%.0fs elapsed), retry in %ds: %s",
-                        elapsed, CONN_RETRY_DELAY, enable_err)
-            _time.sleep(CONN_RETRY_DELAY)
-        else:
-            log.warning("_execute_pnlcfg_renewal: enable_client failed (%.0fs elapsed): %s", elapsed, enable_err)
-            if elapsed + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:
-                break
-            _time.sleep(FUNC_RETRY_DELAY)
+        log.warning("_execute_pnlcfg_renewal: enable_client attempt %d/%d failed: %s",
+                    _attempt + 1, QUICK_MAX_ATTEMPTS, enable_err)
     if enable_err is not None:
         _notify_panel_error(_uid, pkg, "enable_client (تمدید)", enable_err, config_id, cfg["panel_id"])
         return False, "تمدید سرویس با خطا مواجه شد. لطفاً با پشتیبانی ارتباط بگیرید."
@@ -2561,70 +2475,25 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
             "econnreset", "broken pipe", "reset by peer",
         ])
 
-    CONN_RETRY_DELAY   = 30    # seconds between retries when server is down
-    FUNC_RETRY_TIMEOUT = 1800  # 30 min timeout for non-connection errors (safe: runs in background thread)
-    FUNC_RETRY_DELAY   = 15
-    MAX_WAIT           = 28800 # 8-hour absolute hard cap
-    PERIODIC_INTERVAL  = 300   # seconds between periodic "still waiting" messages
-
-    _t_start          = time.time()
-    _waiting_notified = False
-    _last_periodic    = 0.0
-
-    def _maybe_notify_waiting():
-        nonlocal _waiting_notified, _last_periodic
-        if not chat_id:
-            return
-        now = time.time()
-        if not _waiting_notified:
-            try:
-                bot.send_message(
-                    chat_id,
-                    "⏳ <b>سرور پنل در حال حاضر در دسترس نیست</b>\n\n"
-                    "به محض بازگشت اتصال، سرویس شما ساخته و تحویل داده می‌شود.",
-                    parse_mode="HTML",
-                )
-                _waiting_notified = True
-                _last_periodic = now
-            except Exception:
-                pass
-        elif now - _last_periodic >= PERIODIC_INTERVAL:
-            try:
-                bot.send_message(chat_id, "⏳ هنوز در حال تلاش برای اتصال به پنل...", parse_mode="HTML")
-                _last_periodic = now
-            except Exception:
-                pass
-
-    def _notify_reconnected():
-        if _waiting_notified and chat_id:
-            try:
-                bot.send_message(chat_id, "✅ اتصال به پنل برقرار شد، در حال ساخت سرویس...", parse_mode="HTML")
-            except Exception:
-                pass
+    # Quick-retry mode: try up to QUICK_MAX_ATTEMPTS with QUICK_RETRY_DELAY between
+    # attempts, then return failure immediately. The caller (_deliver_bulk_configs)
+    # will enqueue the job and the delivery_worker retries every 5 minutes.
+    # This keeps the immediate buy flow fast (≤60s) without sending scary messages
+    # to the user prematurely.
+    QUICK_MAX_ATTEMPTS = 3    # total attempts per step
+    QUICK_RETRY_DELAY  = 20   # seconds between attempts
 
     # ── Step 1: login ─────────────────────────────────────────────────────────
     login_err = None
-    _t0 = time.time()
-    while True:
-        if time.time() - _t_start > MAX_WAIT:
-            login_err = "حداکثر زمان انتظار (8 ساعت) تمام شد"
-            break
+    for _attempt in range(QUICK_MAX_ATTEMPTS):
+        if _attempt > 0:
+            time.sleep(QUICK_RETRY_DELAY)
         ok, login_err = client.login()
         if ok:
             login_err = None
-            _notify_reconnected()
             break
-        elapsed = time.time() - _t0
-        if _is_conn_err(login_err):
-            _maybe_notify_waiting()
-            log.warning("_create_panel_config: login CONN_ERR (%.0fs elapsed), retry in %ds: %s",
-                        elapsed, CONN_RETRY_DELAY, login_err)
-            time.sleep(CONN_RETRY_DELAY)
-        else:
-            log.warning("_create_panel_config: login failed (%.0fs elapsed): %s", elapsed, login_err)
-            if elapsed + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:
-                break
-            time.sleep(FUNC_RETRY_DELAY)
+        log.warning("_create_panel_config: login attempt %d/%d failed: %s",
+                    _attempt + 1, QUICK_MAX_ATTEMPTS, login_err)
     if login_err is not None:
         return False, f"اتصال به پنل ناموفق: {login_err}", None, None
 
@@ -2632,27 +2501,14 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
     inbound_remark = ""
     real_port    = 0
     inbound = None
-    _last_inb_err = None
-    _t0 = time.time()
-    while True:
-        if time.time() - _t_start > MAX_WAIT:
-            break
+    for _attempt in range(QUICK_MAX_ATTEMPTS):
+        if _attempt > 0:
+            time.sleep(QUICK_RETRY_DELAY)
         inbound = client.find_inbound_by_id(panel_inbound)
         if inbound:
             break
-        elapsed = time.time() - _t0
-        # find_inbound doesn't return an error string — re-login to check connectivity
-        _ok_chk, _chk_err = client.login()
-        if not _ok_chk and _is_conn_err(_chk_err):
-            _maybe_notify_waiting()
-            log.warning("_create_panel_config: find_inbound CONN_ERR (%.0fs elapsed), retry in %ds",
-                        elapsed, CONN_RETRY_DELAY)
-            time.sleep(CONN_RETRY_DELAY)
-        else:
-            log.warning("_create_panel_config: find_inbound failed (%.0fs elapsed)", elapsed)
-            if elapsed + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:
-                break
-            time.sleep(FUNC_RETRY_DELAY)
+        log.warning("_create_panel_config: find_inbound attempt %d/%d failed",
+                    _attempt + 1, QUICK_MAX_ATTEMPTS)
     if not inbound:
         return False, f"اینباند با شماره {panel_inbound} در پنل یافت نشد", None, None
 
@@ -2685,17 +2541,13 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
     result = None
     create_err = None
     inbound_protocol = (inbound.get("protocol") or "vless").lower().strip()
-    _t0 = time.time()
-    _dup_retries = 0          # counts non-connection-error retries with a desired name
+    _dup_retries = 0          # counts name-conflict retries with a desired name
     _MAX_DUP_RETRIES = 3      # after this many suffix attempts, fall back to full random
-    while True:
-        if time.time() - _t_start > MAX_WAIT:
-            create_err = "حداکثر زمان انتظار (8 ساعت) تمام شد"
-            break
+    for _attempt in range(QUICK_MAX_ATTEMPTS):
+        if _attempt > 0:
+            _is_dup = create_err and ("duplicate" in create_err.lower() or "email" in create_err.lower())
+            time.sleep(1 if _is_dup else QUICK_RETRY_DELAY)
         with _panel_create_lock(panel_id):
-            # Reset partial timer after waiting for lock (another thread may have
-            # held the lock for a long time while the panel was busy).
-            _t0 = time.time()
             ok, result = client.create_client_for_inbound(
                 inbound_id, client_name, traffic_bytes, expire_ms,
                 protocol=inbound_protocol,
@@ -2704,31 +2556,15 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
             create_err = None
             break
         create_err = result if isinstance(result, str) else str(result)
-        elapsed = time.time() - _t0
-        if _is_conn_err(create_err):
-            _maybe_notify_waiting()
-            log.warning("_create_panel_config: create_client CONN_ERR (%.0fs elapsed), retry in %ds: %s",
-                        elapsed, CONN_RETRY_DELAY, create_err)
-            time.sleep(CONN_RETRY_DELAY)
+        log.warning("_create_panel_config: create_client attempt %d/%d failed: %s",
+                    _attempt + 1, QUICK_MAX_ATTEMPTS, create_err)
+        # Rotate client name to avoid duplicate key conflicts on retry.
+        _dup_retries += 1
+        if desired_name and _dup_retries <= _MAX_DUP_RETRIES:
+            _suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=2))
+            client_name = f"{desired_name}-{_suffix}"
         else:
-            log.warning("_create_panel_config: create_client failed (%.0fs elapsed): %s", elapsed, create_err)
-            if elapsed + FUNC_RETRY_DELAY >= FUNC_RETRY_TIMEOUT:
-                break
-            # Rotate client name to avoid duplicate key conflicts on retry.
-            _dup_retries += 1
-            if desired_name and _dup_retries <= _MAX_DUP_RETRIES:
-                _suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=2))
-                client_name = f"{desired_name}-{_suffix}"
-                log.info("_create_panel_config: duplicate retry %d/%d, new name=%s",
-                         _dup_retries, _MAX_DUP_RETRIES, client_name)
-            else:
-                client_name = generate_random_name()
-                log.info("_create_panel_config: falling back to random name=%s (dup_retries=%d)",
-                         client_name, _dup_retries)
-            # Duplicate email errors need a new name immediately — no long wait.
-            # For other panel errors, wait the normal retry delay.
-            _is_dup = "duplicate" in create_err.lower() or "email" in create_err.lower()
-            time.sleep(1 if _is_dup else FUNC_RETRY_DELAY)
+            client_name = generate_random_name()
     if create_err is not None:
         return False, f"خطا در ساخت کلاینت: {create_err}", None, None
 
