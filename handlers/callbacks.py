@@ -5274,7 +5274,7 @@ def _dispatch_callback(call, uid, data):
                 f"✅ سرعت فوق‌العاده\n"
                 f"✅ پایداری بالا\n"
                 f"✅ پشتیبانی ۲۴ ساعته\n\n"
-                f"تو هم از لینک من وارد شو و سرویست رو بخر 👇\n{ref_link}"
+                f"تو هم از لینک من وارد شو و سرویست رو بخر 👇\n\n{ref_link}"
             )
         bot.answer_callback_query(call.id)
         bot.send_photo(call.message.chat.id, banner_photo, caption=caption, parse_mode="HTML")
