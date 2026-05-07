@@ -2714,7 +2714,10 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
                 client_name = generate_random_name()
                 log.info("_create_panel_config: falling back to random name=%s (dup_retries=%d)",
                          client_name, _dup_retries)
-            time.sleep(FUNC_RETRY_DELAY)
+            # Duplicate email errors need a new name immediately — no long wait.
+            # For other panel errors, wait the normal retry delay.
+            _is_dup = "duplicate" in create_err.lower() or "email" in create_err.lower()
+            time.sleep(1 if _is_dup else FUNC_RETRY_DELAY)
     if create_err is not None:
         return False, f"خطا در ساخت کلاینت: {create_err}", None, None
 

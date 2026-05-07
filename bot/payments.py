@@ -37,7 +37,7 @@ from .bot_instance import bot
 from .ui.helpers import send_or_edit
 from .ui.keyboards import _btn, _raw_markup
 from .ui.premium_emoji import ce
-from .group_manager import send_to_topic, send_photo_to_topic
+from .group_manager import send_to_topic, send_photo_to_topic, get_group_id
 
 # ── Gateway label display for bonus text ──────────────────────────────────────
 _GW_DISPLAY_NAMES = {
