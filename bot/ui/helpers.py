@@ -71,9 +71,7 @@ def send_or_edit(call_or_msg, text, reply_markup=None, disable_preview=True):
     except Exception as _e1:
         _e1_str = str(_e1)
         # Silence known harmless edit errors — fallback to send_message handles them.
-        _silent_edit_errors = ("no text in the message", "message is not modified",
-                               "there is no text in the message to edit",
-                               "message can't be edited", "message to edit not found")
+        _silent_edit_errors = ("no text in the message", "message is not modified")
         if not any(s in _e1_str.lower() for s in _silent_edit_errors):
             _log.warning("send_or_edit primary failed: %s", _e1)
         try:
@@ -179,25 +177,23 @@ def check_channel_membership(user_id):
 
 
 def channel_lock_message(target):
-    rows = get_locked_channels()
+    channels = _get_all_locked_channels()
     kb = types.InlineKeyboardMarkup()
     _bot_username = ""
     try:
         _bot_username = bot.get_me().username or ""
     except Exception:
         pass
-    if rows:
-        for row in rows:
-            channel_id = str(row["channel_id"])
-            stored_url = str(row["join_url"]).strip() if row["join_url"] else ""
-            url = stored_url if stored_url else _channel_url(channel_id)
+    if channels:
+        for channel_id in channels:
+            url = _channel_url(channel_id)
             if channel_id.startswith("@"):
-                label = channel_id
+                label = channel_id  # e.g. @MyChannel
             else:
-                # Try to get name from Telegram (works if bot is a member)
+                # Numeric ID — try to resolve username from Telegram
                 try:
                     chat = bot.get_chat(channel_id)
-                    label = f"@{chat.username}" if chat.username else (chat.title or channel_id)
+                    label = f"@{chat.username}" if chat.username else channel_id
                 except Exception:
                     label = channel_id
             kb.add(types.InlineKeyboardButton(

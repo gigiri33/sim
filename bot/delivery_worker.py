@@ -228,33 +228,6 @@ def _deliver_one(item) -> tuple:
 
 # ── Main worker cycle ─────────────────────────────────────────────────────────
 
-def _is_permanent_error(err: str) -> bool:
-    """Return True for errors that will never resolve with more retries."""
-    _permanent = (
-        "پکیج یافت نشد",
-        "پنل مرتبط یافت نشد",
-        "اطلاعات پنل پکیج ناقص است",
-        "پنل یا شماره اینباند پکیج تنظیم نشده",
-    )
-    return any(p in err for p in _permanent)
-
-
-def _notify_user_failed(chat_id, payment_id):
-    """Send a polite failure message to the user asking them to contact support."""
-    try:
-        from .bot_instance import bot
-        bot.send_message(
-            chat_id,
-            "⚠️ <b>مشکل در تحویل سرویس</b>\n\n"
-            "متأسفانه در تحویل سرویس شما مشکلی پیش آمد و پس از چندین تلاش موفق نشدیم.\n\n"
-            "🧾 پرداخت شما ثبت شده و مبلغ از دست نرفته است.\n"
-            "📞 لطفاً با پشتیبانی تماس بگیرید تا سرویس شما به‌صورت دستی تنظیم شود.",
-            parse_mode="HTML",
-        )
-    except Exception:
-        pass
-
-
 def _run_delivery_cycle():
     from .db import get_due_deliveries, update_delivery_retry, mark_delivery_delivered, mark_delivery_failed
 
@@ -274,7 +247,6 @@ def _run_delivery_cycle():
         item   = dict(item)
         qid    = item["id"]
         uid    = item["user_id"]
-        chat_id = item["chat_id"]
         pkg_id = item["package_id"]
 
         # ── Connectivity pre-check ────────────────────────────────────────────
@@ -331,34 +303,13 @@ def _run_delivery_cycle():
                 pass
         else:
             retry_count = item["retry_count"] + 1
-
-            # ── Permanent errors: never retry regardless of max_retries limit ─
-            if _is_permanent_error(err):
-                mark_delivery_failed(qid, err)
-                log.error(
-                    "[DeliveryWorker] item %s PERMANENTLY FAILED (un-retryable error) uid=%s: %s",
-                    qid, uid, err,
-                )
-                _notify_user_failed(chat_id, item["payment_id"])
-                _notify_admin(
-                    f"🚨 <b>تحویل کانفیگ به‌طور دائمی شکست خورد</b>\n\n"
-                    f"👤 کاربر: <code>{uid}</code>\n"
-                    f"📦 پکیج: <code>{pkg_id}</code>\n"
-                    f"💳 شناسه پرداخت: <code>{item['payment_id']}</code>\n"
-                    f"🔁 تعداد تلاش: {retry_count}\n"
-                    f"⚠️ خطا:\n<code>{err[:500]}</code>\n\n"
-                    "⛔️ این سفارش نیاز به بررسی دستی دارد — مبلغ پرداخت‌شده باید برگردانده شود."
-                )
-                continue
-
-            # ── Exhausted retries ─────────────────────────────────────────────
+            # Permanent failure check
             if max_retries > 0 and retry_count >= max_retries:
                 mark_delivery_failed(qid, err)
                 log.error(
                     "[DeliveryWorker] item %s PERMANENTLY FAILED after %d retries uid=%s: %s",
                     qid, retry_count, uid, err,
                 )
-                _notify_user_failed(chat_id, item["payment_id"])
                 _notify_admin(
                     f"🚨 <b>تحویل کانفیگ به‌طور دائمی شکست خورد</b>\n\n"
                     f"👤 کاربر: <code>{uid}</code>\n"
@@ -374,16 +325,14 @@ def _run_delivery_cycle():
                     "[DeliveryWorker] item %s failed (attempt %d), next retry in %ds uid=%s: %s",
                     qid, retry_count, retry_interval, uid, err,
                 )
-                # Notify admins on each retry failure — but not too often.
-                # Only report on attempt 1, 5, 10, 20, then every 10.
-                if retry_count in (1, 5, 10, 20) or retry_count % 10 == 0:
-                    _notify_admin(
-                        f"⚠️ <b>تلاش تحویل کانفیگ از صف ناموفق بود</b>\n\n"
-                        f"👤 کاربر: <code>{uid}</code>\n"
-                        f"📦 پکیج: <code>{pkg_id}</code>\n"
-                        f"🔁 تلاش شماره: {retry_count}\n"
-                        f"⚠️ خطا:\n<code>{err[:400]}</code>"
-                    )
+                # Notify admins on each retry failure (condensed)
+                _notify_admin(
+                    f"⚠️ <b>تلاش تحویل کانفیگ از صف ناموفق بود</b>\n\n"
+                    f"👤 کاربر: <code>{uid}</code>\n"
+                    f"📦 پکیج: <code>{pkg_id}</code>\n"
+                    f"🔁 تلاش شماره: {retry_count}\n"
+                    f"⚠️ خطا:\n<code>{err[:400]}</code>"
+                )
 
 
 # ── Worker thread ──────────────────────────────────────────────────────────────
