@@ -1,0 +1,600 @@
+# -*- coding: utf-8 -*-
+"""
+Tronado payment gateway — create orders and receive payment confirmations via webhook.
+API docs: https://documenter.getpostman.com/view/48018954/2sB3HksMLT
+Auth: x-api-key header
+Payment URL: https://t.me/tronado_robot/customerpayment?startapp={TOKEN}
+"""
+
+import json
+import urllib.request
+import urllib.error
+import urllib.parse
+import re
+
+from ..db import setting_get
+from .crypto import fetch_crypto_prices
+
+TRONADO_DEFAULT_BASE_URL = "https://bot.tronado.cloud/api/v3"
+TRONADO_PAYMENT_URL_TEMPLATE = "https://t.me/tronado_robot/customerpayment?startapp={token}"
+
+
+def _decode_response_body(resp) -> tuple:
+    raw = resp.read().decode("utf-8", errors="replace").strip()
+    if not raw:
+        return "", {}
+    try:
+        return raw, json.loads(raw)
+    except Exception:
+        return raw, raw
+
+
+def _extract_error(data) -> str:
+    if isinstance(data, dict):
+        for key in ("Message", "message", "error", "Error", "msg", "detail"):
+            if data.get(key):
+                return str(data[key])[:500]
+        return json.dumps(data, ensure_ascii=False)[:500]
+    return str(data)[:500]
+
+
+def get_tronado_base_url() -> str:
+    url = (setting_get("tronado_api_base_url", "") or "").strip().rstrip("/")
+    return url or TRONADO_DEFAULT_BASE_URL
+
+
+def build_tronado_payment_url(token: str) -> str:
+    """Build the Tronado Mini App payment URL from a token."""
+    return TRONADO_PAYMENT_URL_TEMPLATE.format(token=token)
+
+
+def get_tronado_token_from_payment(payment) -> str:
+    """
+    Extract the Tronado order token for the exact payment row.
+
+    Supported storage locations:
+      - payments.gateway_ref
+      - payments.receipt_text as TRONADO_TOKEN=<token>
+      - payments.receipt_text as a raw token
+      - JSON-ish receipt/raw_callback containing Token/OrderToken
+    """
+    if not payment:
+        return ""
+
+    def _get(row, key, default=""):
+        try:
+            if hasattr(row, "keys") and key in row.keys():
+                return row[key] or default
+            if isinstance(row, dict):
+                return row.get(key) or default
+        except Exception:
+            pass
+        return default
+
+    for col in ("gateway_ref", "receipt_text", "raw_callback"):
+        value = str(_get(payment, col, "") or "").strip()
+        if not value:
+            continue
+
+        # Explicit marker written by new code.
+        m = re.search(r"TRONADO_TOKEN\s*=\s*([^\s;|,]+)", value, flags=re.I)
+        if m:
+            return m.group(1).strip()
+
+        # JSON response or callback data.
+        try:
+            parsed = json.loads(value)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, dict):
+            stack = [parsed]
+            while stack:
+                obj = stack.pop()
+                if not isinstance(obj, dict):
+                    continue
+                token = (
+                    obj.get("Token") or obj.get("token") or
+                    obj.get("OrderToken") or obj.get("orderToken")
+                )
+                if token:
+                    return str(token).strip()
+                for child in obj.values():
+                    if isinstance(child, dict):
+                        stack.append(child)
+
+        # Legacy rows stored only the token in receipt_text/gateway_ref.
+        if col in ("gateway_ref", "receipt_text") and len(value) <= 300 and "{" not in value and "\n" not in value:
+            return value
+
+    return ""
+
+
+def fetch_tronado_tron_amount(amount_toman: int, wallet_address: str) -> tuple:
+    """
+    Call POST /Toman/ConvertToTronWageSubtracted on Tronado API.
+    Returns the TronAmount that already includes wage deduction.
+
+    Returns:
+        (tron_amount: float, rate_irt: float)  on success — rate_irt may be 0 if not returned
+        raises ValueError with Persian message on failure
+    """
+    api_key = (setting_get("tronado_api_key", "") or "").strip()
+    if not api_key:
+        raise ValueError("کلید API ترونادو ثبت نشده است.")
+
+    # This endpoint lives under the root base, not /api/v3
+    base = "https://bot.tronado.cloud"
+    url = f"{base}/Toman/ConvertToTronWageSubtracted"
+
+    # Send as multipart/form-data (as documented)
+    form_data = urllib.parse.urlencode({
+        "Toman":  str(int(amount_toman)),
+        "Wallet": wallet_address,
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        url,
+        data=form_data,
+        headers={
+            "x-api-key":    api_key,
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept":       "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            raw, parsed = _decode_response_body(resp)
+    except urllib.error.HTTPError as e:
+        raw, parsed = _decode_response_body(e)
+        raise ValueError(f"خطای API ترونادو (ConvertToTron): {_extract_error(parsed) or raw[:300]}")
+    except Exception as e:
+        raise ValueError(f"خطا در اتصال به ترونادو: {e}")
+
+    # Parse response — field may be at top level or inside Data
+    data = parsed if isinstance(parsed, dict) else {}
+    inner = data.get("Data") or data.get("data") or data
+    if not isinstance(inner, dict):
+        inner = data
+
+    tron_amount = (
+        inner.get("TronAmount") or inner.get("tronAmount") or
+        data.get("TronAmount") or data.get("tronAmount")
+    )
+    if not tron_amount:
+        raise ValueError(f"ترونادو مقدار TronAmount را برنگرداند: {raw[:300]}")
+
+    tron_amount = float(tron_amount)
+    # Rate is informational — may or may not be returned
+    rate_irt = float(inner.get("TronPriceInToman") or inner.get("Rate") or 0)
+    print(f"[Tronado] ConvertToTron: {amount_toman} toman → {tron_amount} TRX (rate fallback={rate_irt})")
+    return tron_amount, rate_irt
+
+
+def get_tronado_order_token(amount_toman: int, order_id: str, user_id: int,
+                             description: str = "", callback_url: str = ""):
+    """
+    Call POST /GetOrderToken on Tronado API.
+
+    Returns:
+        (True,  {"token": ..., "payment_url": ...})  on success
+        (False, {"error": ..., "raw": ...})           on failure
+    """
+    api_key = (setting_get("tronado_api_key", "") or "").strip()
+    if not api_key:
+        return False, {"error": "کلید API ترونادو ثبت نشده است. از پنل مدیریت ← تنظیمات ← درگاه‌ها اقدام کنید."}
+
+    base_url = get_tronado_base_url()
+    wallet_address = (setting_get("tronado_wallet_address", "") or "").strip()
+    if not wallet_address:
+        return False, {"error": "آدرس کیف پول ترون در درگاه ترونادو ثبت نشده است. از پنل مدیریت ← تنظیمات ← درگاه‌ها تنظیم کنید."}
+
+    # Convert toman → TRX using Tronado's own ConvertToTronWageSubtracted endpoint
+    try:
+        tron_amount, trx_irt = fetch_tronado_tron_amount(amount_toman, wallet_address)
+        tron_amount = round(tron_amount, 6)
+    except ValueError as e:
+        return False, {"error": str(e)}
+
+    # wageFromBusinessPercentage: 0 = customer pays Tronado's fee on top
+    # (merchant absorbs nothing — customer sees the surcharge)
+    # Default is 0; configurable via tronado_wage_from_business setting.
+    try:
+        wage_pct = int(setting_get("tronado_wage_from_business", "0") or "0")
+        wage_pct = max(0, min(100, wage_pct))
+    except ValueError:
+        wage_pct = 0
+    payload = {
+        "TronAmount":              tron_amount,
+        "PaymentID":               str(order_id),
+        "UserTelegramId":          int(user_id),
+        "WalletAddress":           wallet_address,
+        "Description":             (description or "")[:200],
+        "wageFromBusinessPercentage": wage_pct,
+        "apiVersion":              1,
+    }
+    if callback_url and (callback_url.startswith("https://") or callback_url.startswith("http://")):
+        payload["CallbackUrl"] = callback_url
+    elif callback_url:
+        print(f"[Tronado] Skipping CallbackUrl — unexpected scheme (got: {callback_url[:50]})")
+
+    print(f"[Tronado] Sending payload: {payload}")
+
+    # GetOrderToken accepts JSON body
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"{base_url}/GetOrderToken",
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "Accept":       "application/json",
+            "x-api-key":    api_key,
+            "User-Agent":   "ConfigFlow/1.0",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            raw, parsed = _decode_response_body(resp)
+        print("[Tronado] GetOrderToken response:", raw[:500])
+    except urllib.error.HTTPError as e:
+        try:
+            raw_body = e.read().decode("utf-8", errors="replace").strip()
+            try:
+                parsed_err = json.loads(raw_body) if raw_body else {}
+            except Exception:
+                parsed_err = raw_body or f"HTTP {e.code}: {e.reason}"
+        except Exception:
+            parsed_err = f"HTTP {e.code}: {e.reason}"
+        err_msg = _extract_error(parsed_err)
+        print(f"[Tronado] GetOrderToken HTTP {e.code}: {err_msg}")
+        return False, {"error": f"خطای درگاه ترونادو (HTTP {e.code}):\n{err_msg}", "raw": parsed_err}
+    except Exception as exc:
+        print(f"[Tronado] GetOrderToken error: {exc}")
+        return False, {"error": str(exc)}
+
+    if not isinstance(parsed, dict):
+        return False, {"error": f"پاسخ ناشناخته از API ترونادو: {str(parsed)[:300]}", "raw": parsed}
+
+    # Normalize token field — API returns Data.Token and Data.FullPaymentUrl
+    data_inner = parsed.get("Data") or parsed.get("data")
+    if isinstance(data_inner, dict):
+        token = (
+            data_inner.get("Token") or data_inner.get("token")
+            or data_inner.get("OrderToken") or data_inner.get("orderToken")
+        )
+        full_pay_url = (
+            data_inner.get("FullPaymentUrl") or data_inner.get("fullPaymentUrl") or ""
+        )
+    else:
+        token = None
+        full_pay_url = ""
+
+    if not token:
+        token = (
+            parsed.get("Token") or parsed.get("token")
+            or parsed.get("OrderToken") or parsed.get("orderToken")
+        )
+
+    if not token:
+        err_msg = _extract_error(parsed)
+        return False, {"error": f"خطا در دریافت توکن از ترونادو:\n{err_msg}", "raw": parsed}
+
+    # Prefer FullPaymentUrl from API; fall back to building from token
+    payment_url = full_pay_url if full_pay_url else build_tronado_payment_url(str(token))
+    return True, {
+        "token":       str(token),
+        "payment_url": payment_url,
+        "tron_amount": tron_amount,
+        "trx_rate":    trx_irt,
+        "raw":         parsed,
+    }
+
+
+def is_tronado_callback_valid(payload: dict) -> bool:
+    """
+    Return True if the incoming POST payload looks like a valid Tronado payment callback.
+    Tronado only sends a callback on SUCCESSFUL payment, so any valid callback = paid.
+    Observed formats:
+      - {PaymentID, TronAmount, ActualTronAmount, Wallet, CallbackUrl}
+      - {UniqueCode, Hash, Wallet, PaymentID, UserTelegramId}  (same as GetStatus paid response)
+    """
+    if not isinstance(payload, dict):
+        return False
+    # Format 1: has UniqueCode + Hash (confirmed paid response format)
+    if payload.get("UniqueCode") and payload.get("Hash"):
+        return True
+    # Format 2: classic callback fields
+    has_id = bool(
+        payload.get("PaymentID") or payload.get("paymentId")
+        or payload.get("payment_id") or payload.get("OrderId") or payload.get("orderId")
+        or payload.get("TronAmount") or payload.get("tronAmount")
+    )
+    return has_id
+
+
+def extract_tronado_callback_payload(payload: dict) -> dict:
+    """Flatten Flask wrapper payloads ({json, form, args, method}) into callback fields."""
+    if not isinstance(payload, dict):
+        return {}
+    merged = {}
+    for key in ("args", "form", "json"):
+        part = payload.get(key)
+        if isinstance(part, dict):
+            merged.update(part)
+    # If this is already a flat Tronado payload, keep it too.
+    for k, v in payload.items():
+        if k not in ("args", "form", "json", "method"):
+            merged.setdefault(k, v)
+    return merged
+
+
+def is_tronado_success_callback_payload(payload: dict) -> bool:
+    """
+    Strictly validate a successful Tronado IPN payload.
+
+    Do NOT treat PaymentID-only test curls as paid. Per Tronado docs, a real
+    successful callback contains either UniqueCode+Hash or PaymentID plus
+    UserTelegramId/Wallet/TronAmount fields.
+    """
+    data = extract_tronado_callback_payload(payload)
+    if not data:
+        return False
+    if data.get("UniqueCode") and data.get("Hash"):
+        return True
+    payment_id = data.get("PaymentID") or data.get("paymentId") or data.get("payment_id")
+    user_id = data.get("UserTelegramId") or data.get("userTelegramId") or data.get("user_id")
+    wallet = data.get("Wallet") or data.get("wallet") or data.get("WalletAddress")
+    tron_amount = (
+        data.get("TronAmount") or data.get("tronAmount") or
+        data.get("ActualTronAmount") or data.get("actualTronAmount") or
+        data.get("ََActualTronAmount")
+    )
+    return bool(payment_id and user_id and wallet and tron_amount)
+
+
+TRONADO_STATUS_BASE_URL = "https://bot.tronado.cloud"
+
+
+def _tronado_order_status_url() -> str:
+    """The GetStatus endpoint lives outside the versioned API path."""
+    base = (setting_get("tronado_api_base_url", "") or "").strip().rstrip("/")
+    # Strip /api/vN suffix if present — GetStatus uses /Order/GetStatus without versioning
+    import re as _re
+    root = _re.sub(r"/api/v\d+$", "", base) if base else TRONADO_STATUS_BASE_URL
+    return f"{root}/Order/GetStatus"
+
+
+def _tronado_status_not_found(resp: dict) -> bool:
+    if not isinstance(resp, dict):
+        return False
+    data = resp.get("Data") or resp.get("data") or {}
+    if not isinstance(data, dict):
+        data = {}
+    txt = str(
+        resp.get("Error") or resp.get("Message") or resp.get("message") or
+        data.get("Error") or data.get("Message") or data.get("message") or
+        resp.get("__body") or ""
+    ).lower()
+    return "no order found" in txt or "order not found" in txt or "not found with this txid" in txt
+
+
+def _post_tronado_status_payload(payload: dict, label: str, transport: str = "json") -> dict:
+    api_key = (setting_get("tronado_api_key", "") or "").strip()
+    if not api_key or not payload:
+        return {}
+    url = _tronado_order_status_url()
+    headers = {
+        "Accept":       "application/json",
+        "x-api-key":    api_key,
+        "User-Agent":   "ConfigFlow/1.0",
+    }
+    method = "POST"
+    payload_data = None
+    if transport == "form":
+        payload_data = urllib.parse.urlencode(payload).encode("utf-8")
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+    elif transport == "get":
+        url = f"{url}?{urllib.parse.urlencode(payload)}"
+        method = "GET"
+    else:
+        payload_data = json.dumps(payload).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(
+        url,
+        data=payload_data,
+        headers=headers,
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            raw, parsed = _decode_response_body(resp)
+        print(f"[Tronado] GetStatus {label}/{transport} payload={payload} HTTP200 raw={raw[:400]}")
+        return parsed if isinstance(parsed, dict) else {}
+    except urllib.error.HTTPError as e:
+        try:
+            raw_body = e.read().decode("utf-8", errors="replace").strip()
+        except Exception:
+            raw_body = ""
+        print(f"[Tronado] GetStatus {label}/{transport} payload={payload} HTTP {e.code}: {raw_body[:300]}")
+        return {"__http_error": e.code, "__body": raw_body}
+    except Exception as exc:
+        print(f"[Tronado] GetStatus {label}/{transport} payload={payload} network error: {exc}")
+        return {}
+
+
+def get_tronado_payment_status(order_id_or_token: str) -> dict:
+    """
+    Call POST /Order/GetStatus with the order token (or Tronado order ID).
+    Per docs: Id can be the Tronado order token, or trndorderid_{our_payment_id}, or TXID.
+    Returns parsed response dict, or {} on failure.
+    """
+    if not order_id_or_token:
+        return {}
+    ident = str(order_id_or_token).strip()
+    candidates = []
+
+    def _add(label, payload, transport="json"):
+        item = (label, payload, transport)
+        if item not in candidates:
+            candidates.append(item)
+
+    # The Tronado endpoint has behaved inconsistently between accounts/docs.
+    # Try all known key names and transports. `Id` is the documented key, so it
+    # gets JSON, x-www-form-urlencoded and GET probes; other keys are low-cost
+    # JSON fallbacks for API deployments that use different model binding.
+    _add("Id", {"Id": ident})
+    if ident and not ident.startswith("s_"):
+        _add("Id:s_token", {"Id": f"s_{ident}"})
+    _add("Id", {"Id": ident}, "form")
+    _add("Id", {"Id": ident}, "get")
+    if ident and not ident.startswith("s_"):
+        _add("Id:s_token", {"Id": f"s_{ident}"}, "form")
+        _add("Id:s_token", {"Id": f"s_{ident}"}, "get")
+        full_url = build_tronado_payment_url(ident)
+        _add("Id:full_url", {"Id": full_url})
+        _add("Id:full_url", {"Id": full_url}, "form")
+    _add("Token", {"Token": ident})
+    _add("OrderToken", {"OrderToken": ident})
+    _add("PaymentID", {"PaymentID": ident})
+    _add("PaymentId", {"PaymentId": ident})
+    _add("paymentId", {"paymentId": ident})
+    _add("id", {"id": ident})
+
+    first_resp = {}
+    for label, payload, transport in candidates:
+        resp = _post_tronado_status_payload(payload, label, transport)
+        if not first_resp:
+            first_resp = resp
+        # Stop as soon as the API returns a meaningful non-not-found response.
+        if resp and not resp.get("__http_error") and not _tronado_status_not_found(resp):
+            return resp
+    return first_resp
+
+
+def get_tronado_status_by_payment_id(payment_id_str: str) -> dict:
+    """
+    Call POST /Order/GetStatus using our exact PaymentID.
+
+    Tronado orders are created with payload PaymentID=str(payment_id). Some
+    deployments used trndorderid_{payment_id}, but Tronado commonly returns
+    HTTP 500 for that value. Keep the prefixed variant only as a fallback in
+    higher-level verification code.
+    """
+    if not payment_id_str:
+        return {}
+    return get_tronado_payment_status(str(payment_id_str))
+
+
+def get_tronado_status_by_prefixed_payment_id(payment_id_str: str) -> dict:
+    """Legacy fallback: POST /Order/GetStatus with trndorderid_{payment_id}."""
+    if not payment_id_str:
+        return {}
+    return get_tronado_payment_status(f"trndorderid_{payment_id_str}")
+
+
+def is_tronado_response_paid(resp: dict) -> bool:
+    """
+    Return True if a GetStatus response indicates a paid/confirmed payment.
+    Handles every known Tronado response variant.
+    """
+    if not resp or not isinstance(resp, dict):
+        return False
+    # Skip internal error markers
+    if resp.get("__http_error"):
+        return False
+    # Use normalize_tronado_status for consistency — avoids duplicating the
+    # UniqueCode/Hash ambiguity fix in two places.
+    return normalize_tronado_status(resp) == "paid"
+
+
+_PAID_STATUSES     = frozenset({"paid", "success", "successful", "confirmed", "completed",
+                                "done", "finish", "finished", "approved", "تایید شده",
+                                "پرداخت موفق", "موفق"})
+_PENDING_STATUSES  = frozenset({"pending", "waiting", "created", "processing", "in_progress",
+                                 "new", "در انتظار", "در حال بررسی"})
+_REJECTED_STATUSES = frozenset({"rejected", "failed", "canceled", "cancelled", "expired",
+                                  "failed_to_pay", "رد شده", "لغو شده", "منقضی"})
+
+
+def normalize_tronado_status(resp: dict) -> str:
+    """
+    Normalise a GetStatus response to one of:
+      "paid" | "pending" | "rejected" | "unknown" | "error"
+    """
+    if not resp or not isinstance(resp, dict):
+        return "unknown"
+    if resp.get("__http_error"):
+        return "error"
+    data = resp.get("Data") or resp.get("data")
+    if not isinstance(data, dict):
+        data = resp
+
+    # IsPaid boolean is the most reliable paid indicator.
+    if data.get("IsPaid") is True or data.get("isPaid") is True:
+        return "paid"
+
+    # UniqueCode + Hash indicates a confirmed Tronado payment, but ONLY when
+    # accompanied by a paid status string or IsPaid=True.
+    # Tronado can return UniqueCode/Hash for newly-created (unpaid) orders;
+    # relying on their mere presence caused false fulfillments.
+    _has_uc_hash = bool(
+        (data.get("UniqueCode") or resp.get("UniqueCode")) and
+        (data.get("Hash") or resp.get("Hash")) and
+        "Error" not in data and "Error" not in resp
+    )
+
+    for key in ("OrderStatusTitle", "Status", "status", "PaymentStatus",
+                "paymentStatus", "State", "state"):
+        val = str(data.get(key) or resp.get(key) or "").strip().lower()
+        if val in _PAID_STATUSES:
+            return "paid"
+        if val in _PENDING_STATUSES:
+            # Even if UniqueCode+Hash present, a "pending" status wins.
+            return "pending"
+        if val in _REJECTED_STATUSES:
+            return "rejected"
+
+    # Only accept UniqueCode+Hash as "paid" if no status contradicts it
+    # (i.e. no status key was found at all — legacy IPN-only payloads).
+    if _has_uc_hash:
+        return "paid"
+
+    # "No order found with this txid" is returned when the wrong lookup key is
+    # used (e.g. token/trndorderid before Tronado has indexed it). Treat it as
+    # unknown/pending, not as a final rejection, otherwise paid orders can be
+    # falsely rejected and never fulfilled.
+    err_txt = str(
+        resp.get("Error") or resp.get("Message") or resp.get("message") or
+        data.get("Error") or data.get("Message") or ""
+    ).lower()
+    if "no order found" in err_txt or "order not found" in err_txt:
+        return "unknown"
+    if err_txt:
+        return "unknown"
+    return "unknown"
+
+
+def get_tronado_callback_base_url() -> str:
+    """
+    Return the base URL for Tronado callback registration.
+    Accepts both https:// and http:// — use dedicated tronado_callback_url first,
+    then fall back to server_public_url.
+    """
+    dedicated = (setting_get("tronado_callback_url", "") or "").strip().rstrip("/")
+    if dedicated and (dedicated.startswith("https://") or dedicated.startswith("http://")):
+        return dedicated
+    base = (setting_get("server_public_url", "") or "").strip().rstrip("/")
+    if base and (base.startswith("https://") or base.startswith("http://")):
+        return base
+    return ""
+
+
+def build_tronado_callback_url(payment_id: int, bot_username: str) -> str:
+    """Build the callback URL for a specific payment."""
+    base = get_tronado_callback_base_url()
+    if not base:
+        return ""
+    slug = (bot_username or "").lstrip("@").strip().lower()
+    return f"{base}/tronado/{slug}/{payment_id}/callback"
