@@ -11551,13 +11551,20 @@ def _dispatch_callback(call, uid, data):
                    icon_custom_emoji_id="5352759161945867747"))
             bot.answer_callback_query(call.id)
             agent_note = "\n\n🤝 <i>این قیمت‌ها مخصوص همکاری شماست</i>" if user and user["is_agent"] else ""
-            if not packages:
-                send_or_edit(call, "📭 در حال حاضر پکیجی برای تمدید موجود نیست.", kb)
-            else:
-                send_or_edit(call,
-                    f"{ce('⚡', '5987688901777560604')} <b>تمدید سرویس</b>\n\n"
-                    "پکیج مورد نظر برای تمدید را انتخاب کنید:"
-                    f"{agent_note}", kb)
+            _renew_text = "📭 در حال حاضر پکیجی برای تمدید موجود نیست." if not packages else (
+                f"{ce('⚡', '5987688901777560604')} <b>تمدید سرویس</b>\n\n"
+                "پکیج مورد نظر برای تمدید را انتخاب کنید:"
+                f"{agent_note}"
+            )
+            _chat_id = call.message.chat.id
+            _thread_id = getattr(call.message, "message_thread_id", None)
+            try:
+                bot.edit_message_text(_renew_text, _chat_id, call.message.message_id,
+                                      parse_mode="HTML", reply_markup=kb, disable_web_page_preview=True)
+            except Exception:
+                bot.send_message(_chat_id, _renew_text, parse_mode="HTML",
+                                 reply_markup=kb, disable_web_page_preview=True,
+                                 message_thread_id=_thread_id)
             return
 
         # mypnlcfg:renewp:{config_id}:{package_id}  — show payment gateways for selected package

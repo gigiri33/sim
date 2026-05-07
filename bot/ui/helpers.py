@@ -71,7 +71,9 @@ def send_or_edit(call_or_msg, text, reply_markup=None, disable_preview=True):
     except Exception as _e1:
         _e1_str = str(_e1)
         # Silence known harmless edit errors — fallback to send_message handles them.
-        _silent_edit_errors = ("no text in the message", "message is not modified")
+        _silent_edit_errors = ("no text in the message", "message is not modified",
+                               "there is no text in the message to edit",
+                               "message can't be edited", "message to edit not found")
         if not any(s in _e1_str.lower() for s in _silent_edit_errors):
             _log.warning("send_or_edit primary failed: %s", _e1)
         try:

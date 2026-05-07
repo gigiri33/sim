@@ -1043,10 +1043,9 @@ def _show_panel_config_detail(call, config_id, back_data="admin:panel_configs",
             _ar_confirm_id = "5350572310627632617"
             _ar_deny_id    = "5348514879558926674"
             ar_icon = _ar_confirm_id if auto_renew else _ar_deny_id
-            ar_label = "تمدید خودکار: ✅" if auto_renew else "تمدید خودکار: ❌"
             kb.row(
-                InlineKeyboardButton("تمدید فوری",  callback_data=f"mypnlcfg:renewconfirm:{config_id}", icon_custom_emoji_id="5987688901777560604"),
-                InlineKeyboardButton(ar_label,       callback_data=f"mypnlcfg:autorenew:{config_id}",   icon_custom_emoji_id=ar_icon),
+                InlineKeyboardButton("تمدید فوری",    callback_data=f"mypnlcfg:renewconfirm:{config_id}", icon_custom_emoji_id="5987688901777560604"),
+                InlineKeyboardButton("تمدید خودکار:", callback_data=f"mypnlcfg:autorenew:{config_id}",   icon_custom_emoji_id=ar_icon),
             )
         kb.add(InlineKeyboardButton("بازگشت", callback_data=back_data,
                                     icon_custom_emoji_id="5352759161945867747"))
