@@ -1000,10 +1000,11 @@ def _show_purchase_gateways(target, uid, package_id, price, package_row):
     _range_guide = build_gateway_range_guide(_gw_labels)
     _pkg_sn = package_row['show_name'] if 'show_name' in package_row.keys() else 1
     sd = state_data(uid)
-    disc_amount = sd.get("discount_amount", 0)
-    orig_amount = sd.get("original_amount", price)
-    quantity    = int(sd.get("quantity", 1) or 1)
-    unit_price  = int(sd.get("unit_price", 0) or 0) or (orig_amount // quantity if quantity > 1 else orig_amount)
+    disc_amount       = sd.get("discount_amount", 0)
+    orig_amount       = sd.get("original_amount", price)
+    agency_orig       = sd.get("agency_orig_amount", 0)   # raw base price saved by glass flow
+    quantity          = int(sd.get("quantity", 1) or 1)
+    unit_price        = int(sd.get("unit_price", 0) or 0) or (orig_amount // quantity if quantity > 1 else orig_amount)
 
     # Build price / quantity lines
     _qty_line = f"تعداد: <b>{quantity}</b> عدد\n" if quantity > 1 else ""
@@ -1013,11 +1014,21 @@ def _show_purchase_gateways(target, uid, package_id, price, package_row):
         _unit_line = ""
 
     from ..ui.premium_emoji import ce as _ce
+    _agency_saved = max(0, int(agency_orig or 0) - int(orig_amount or price))
     if disc_amount:
+        # Discount code applied on top (possibly agency price)
         _price_line = (
-            f"{_ce('💰', '5348418461838098123')} مبلغ اصلی: {fmt_price(orig_amount)} تومان\n"
+            f"{_ce('💰', '5348418461838098123')} مبلغ: {fmt_price(orig_amount)} تومان\n"
             f"تخفیف: {fmt_price(disc_amount)} تومان\n"
-            f"مبلغ نهایی: {fmt_price(price)} تومان"
+            f"مبلغ نهایی: <b>{fmt_price(price)}</b> تومان"
+        )
+        if _agency_saved > 0:
+            _price_line += f"\n<i>💼 قیمت نمایندگی ({fmt_price(_agency_saved)} تومان صرفه‌جویی)</i>"
+    elif _agency_saved > 0:
+        # Agency price without extra discount code
+        _price_line = (
+            f"{_ce('💰', '5348418461838098123')} قیمت نمایندگی: <b>{fmt_price(price)}</b> تومان"
+            f"\n<i>💼 قیمت عادی: {fmt_price(int(agency_orig))} تومان — شما {fmt_price(_agency_saved)} تومان صرفه‌جویی کردید</i>"
         )
     else:
         if quantity > 1:

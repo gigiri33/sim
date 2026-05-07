@@ -3528,7 +3528,7 @@ def update_package_panel_settings(package_id, config_source,
         conn.execute(
             """UPDATE packages SET config_source=?, panel_id=?, panel_type=?,
                panel_port=?, delivery_mode=?, client_package_id=? WHERE id=?""",
-            (config_source, panel_id, panel_type, panel_port, delivery_mode,
+            (config_source, panel_id, panel_type, panel_port, delivery_mode or 'config_only',
              client_package_id, package_id)
         )
 

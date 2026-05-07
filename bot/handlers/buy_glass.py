@@ -547,7 +547,7 @@ def show_glass_buy(call, type_id: int):
         bot.answer_callback_query(call.id, _ALERTS["empty"], show_alert=True)
         return
 
-    _gs = ses.to_state(); _gs.pop("uid", None)
+    _gs = ses.to_state()
     state_set(uid, "glass_buy", **_gs)
 
     inv_desc = ""
@@ -576,6 +576,7 @@ def _reload_session(uid: int, type_id: int) -> Optional[GlassSession]:
     except Exception:
         max_qty = 10
     sd["max_qty"] = max_qty
+    sd["uid"] = uid  # ensure uid is always current
 
     user_row = None
     try:
@@ -705,23 +706,25 @@ def handle_glass_callback(call, data: str):
 
         package_id  = ses.matched_pkg["id"]
         quantity    = ses.sel_quantity
-        unit_price  = ses.unit_price
+        unit_price  = ses.unit_price          # agency price (or base price for normal users)
         price       = unit_price * quantity
         package_row = ses.matched_pkg
         raw_unit    = int(package_row["price"])
-        orig_amount = raw_unit * quantity
-        disc_amount = max(0, orig_amount - price)
+        orig_amount = raw_unit * quantity     # base price (for display only)
 
-        # Save into buy_select_method so existing payment flow works unchanged
+        # Save into buy_select_method so existing payment flow works unchanged.
+        # original_amount = agency price so discount codes apply on top of agency price.
+        # agency_original_amount = raw base price for display ("شما X تومان صرفه‌جویی کردید").
         from ..helpers import state_set as _ss
         _ss(uid, "buy_select_method",
             package_id=package_id,
             amount=price,
-            original_amount=orig_amount,
-            discount_amount=disc_amount,
+            original_amount=price,           # discount codes apply on agency price
+            discount_amount=0,
             kind="config_purchase",
             unit_price=unit_price,
-            quantity=quantity)
+            quantity=quantity,
+            agency_orig_amount=orig_amount)  # raw base price kept for reference
 
         bot.answer_callback_query(call.id)
 
