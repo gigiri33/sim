@@ -537,18 +537,11 @@ def universal_handler(message):
             and (message.text or "").strip() == _POPUP_BACK_TEXT):
         if sn:
             state_clear(uid)
-        from .callbacks import _dispatch_callback as _dcb
-
-        class _FakeCQBack:
-            id = "0"
-            from_user = message.from_user
-            data = "nav:main"
-            message = message
-
+        from ..ui.menus import show_main_menu as _smm
         _popup_suppress_acq.active = True
         _popup_suppress_acq.chat_id = message.chat.id
         try:
-            _dcb(_FakeCQBack(), uid, "nav:main")
+            _smm(message)
         finally:
             _popup_suppress_acq.active = False
             _popup_suppress_acq.chat_id = None
@@ -576,19 +569,10 @@ def universal_handler(message):
                 # message acts as the edit target for send_or_edit.
                 # For nav:main the full popup keyboard comes back automatically.
                 _dismiss_msg = None
-                if _popup_cb != "nav:main":
-                    try:
-                        _dismiss_msg = bot.send_message(
-                            message.chat.id, "·",
-                            reply_markup=_popup_back_kbd(),
-                            message_thread_id=getattr(message, "message_thread_id", None),
-                        )
-                    except Exception:
-                        _dismiss_msg = None
 
-                # Build a fake CallbackQuery; point .message at the dismiss msg
-                # so send_or_edit can edit it (bots can edit their own messages).
-                _target_msg = _dismiss_msg if _dismiss_msg else message
+                # Build a fake CallbackQuery pointing at the user's own message.
+                # send_or_edit will send a new message rather than edit.
+                _target_msg = message
 
                 class _FakeCQ:
                     id = "0"

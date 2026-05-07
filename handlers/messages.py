@@ -506,6 +506,22 @@ def universal_handler(message):
     # clear any active state so they act as an "escape" from mid-flow operations.
     # Exception: admin text-input states (admin_*) are never cleared by popup
     # buttons so the admin can type their content without accidentally navigating.
+    _POPUP_BACK_TEXT = "بازگشت به منو"
+    # این دکمه در هر حالتی (پاپ آپ یا اینلاین) باید کار کند
+    if (message.content_type == "text"
+            and (message.text or "").strip() == _POPUP_BACK_TEXT):
+        if sn:
+            state_clear(uid)
+        from ..ui.menus import show_main_menu as _smm
+        _popup_suppress_acq.active = True
+        _popup_suppress_acq.chat_id = message.chat.id
+        try:
+            _smm(message)
+        finally:
+            _popup_suppress_acq.active = False
+            _popup_suppress_acq.chat_id = None
+        return
+
     if (message.content_type == "text"
             and setting_get("start_menu_mode", "inline") == "popup"):
         from ..ui.start_menu import find_button_callback_by_text
@@ -524,23 +540,12 @@ def universal_handler(message):
 
                 # Before dispatching, send a ReplyKeyboardRemove so the popup
                 # bottom-keyboard is hidden for screens with inline buttons.
-                # The bot's own dismiss message is used as the edit target so
-                # send_or_edit can replace it cleanly instead of creating extra
-                # messages. For nav:main the popup keyboard comes back on its own.
+                # For nav:main the popup keyboard comes back automatically.
                 _dismiss_msg = None
-                if _popup_cb != "nav:main":
-                    try:
-                        _dismiss_msg = bot.send_message(
-                            message.chat.id, "·",
-                            reply_markup=types.ReplyKeyboardRemove(),
-                            message_thread_id=getattr(message, "message_thread_id", None),
-                        )
-                    except Exception:
-                        _dismiss_msg = None
 
-                # Build a fake CallbackQuery; point .message at the dismiss msg
-                # so send_or_edit can edit it (bots can edit their own messages).
-                _target_msg = _dismiss_msg if _dismiss_msg else message
+                # Build a fake CallbackQuery pointing at the user's own message.
+                # send_or_edit will send a new message rather than edit.
+                _target_msg = message
 
                 class _FakeCQ:
                     id = "0"
