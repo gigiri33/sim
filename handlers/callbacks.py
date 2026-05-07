@@ -1011,10 +1011,10 @@ def _show_purchase_gateways(target, uid, package_id, price, package_row):
 
     # Build price / quantity lines
     _qty_line  = f"{_ce('🔢', '5221928131622883525')} تعداد: <b>{quantity}</b> عدد\n"
-    _unit_line = f"قیمت هر عدد: <b>{fmt_price(unit_price)}</b> تومان\n" if quantity > 1 else ""
+    _unit_line = f"{_ce('💰', '5956324890213619515')} قیمت هر عدد: <b>{fmt_price(unit_price)}</b> تومان\n" if quantity > 1 else ""
 
     _agency_saved = max(0, int(agency_orig or 0) - int(orig_amount or price))
-    _total_emoji  = _ce('💰', '5956324890213619515')
+    _total_emoji  = _ce('💰', '5987758377168540855')
     if disc_amount:
         # Discount code applied on top (possibly agency price)
         _price_line = (
