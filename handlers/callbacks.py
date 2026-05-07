@@ -930,10 +930,11 @@ def _is_panel_package(package_row) -> bool:
 
 def _show_naming_prompt(target, package_id: int, quantity: int):
     """Show the naming-type selection step (random vs custom) for panel packages."""
+    from ..ui.premium_emoji import ce as _ce
     kb = types.InlineKeyboardMarkup()
     kb.row(
-        types.InlineKeyboardButton("🎲 نام رندوم",   callback_data=f"buy:naming:random:{package_id}:{quantity}"),
-        types.InlineKeyboardButton("✏️ نام دلخواه",  callback_data=f"buy:naming:custom:{package_id}:{quantity}"),
+        types.InlineKeyboardButton("نام رندوم",   callback_data=f"buy:naming:random:{package_id}:{quantity}", icon_custom_emoji_id="5253464392850221514"),
+        types.InlineKeyboardButton("نام دلخواه",  callback_data=f"buy:naming:custom:{package_id}:{quantity}", icon_custom_emoji_id="5348136664738839786"),
     )
     # Back button: return to glass invoice if came from glass flow, otherwise to package page
     _sd_nm = state_data(target.from_user.id) if hasattr(target, 'from_user') else {}
@@ -941,7 +942,7 @@ def _show_naming_prompt(target, package_id: int, quantity: int):
     kb.add(types.InlineKeyboardButton("بازگشت", callback_data=_back_cb,
                                       icon_custom_emoji_id="5352759161945867747"))
     send_or_edit(target,
-        "🏷 <b>انتخاب نام سرویس</b>\n\n"
+        f"{_ce('🏷', '5235588635885054955')} <b>انتخاب نام سرویس</b>\n\n"
         "لطفاً مشخص کنید نام سرویس شما به چه صورت ثبت شود.",
         kb)
 
@@ -1006,35 +1007,31 @@ def _show_purchase_gateways(target, uid, package_id, price, package_row):
     quantity          = int(sd.get("quantity", 1) or 1)
     unit_price        = int(sd.get("unit_price", 0) or 0) or (orig_amount // quantity if quantity > 1 else orig_amount)
 
-    # Build price / quantity lines
-    _qty_line = f"تعداد: <b>{quantity}</b> عدد\n" if quantity > 1 else ""
-    if quantity > 1:
-        _unit_line = f"قیمت هر عدد: <b>{fmt_price(unit_price)}</b> تومان\n"
-    else:
-        _unit_line = ""
-
     from ..ui.premium_emoji import ce as _ce
+
+    # Build price / quantity lines
+    _qty_line  = f"{_ce('🔢', '5221928131622883525')} تعداد: <b>{quantity}</b> عدد\n"
+    _unit_line = f"قیمت هر عدد: <b>{fmt_price(unit_price)}</b> تومان\n" if quantity > 1 else ""
+
     _agency_saved = max(0, int(agency_orig or 0) - int(orig_amount or price))
+    _total_emoji  = _ce('💰', '5956324890213619515')
     if disc_amount:
         # Discount code applied on top (possibly agency price)
         _price_line = (
             f"{_ce('💰', '5348418461838098123')} مبلغ: {fmt_price(orig_amount)} تومان\n"
             f"تخفیف: {fmt_price(disc_amount)} تومان\n"
-            f"مبلغ نهایی: <b>{fmt_price(price)}</b> تومان"
+            f"{_total_emoji} مجموع کل: <b>{fmt_price(price)}</b> تومان"
         )
         if _agency_saved > 0:
             _price_line += f"\n<i>💼 قیمت نمایندگی ({fmt_price(_agency_saved)} تومان صرفه‌جویی)</i>"
     elif _agency_saved > 0:
         # Agency price without extra discount code
         _price_line = (
-            f"{_ce('💰', '5348418461838098123')} قیمت نمایندگی: <b>{fmt_price(price)}</b> تومان"
+            f"{_total_emoji} مجموع کل (قیمت نمایندگی): <b>{fmt_price(price)}</b> تومان"
             f"\n<i>💼 قیمت عادی: {fmt_price(int(agency_orig))} تومان — شما {fmt_price(_agency_saved)} تومان صرفه‌جویی کردید</i>"
         )
     else:
-        if quantity > 1:
-            _price_line = f"{_ce('💰', '5348418461838098123')} مبلغ کل: <b>{fmt_price(price)}</b> تومان"
-        else:
-            _price_line = f"{_ce('💰', '5348418461838098123')} قیمت: {fmt_price(price)} تومان"
+        _price_line = f"{_total_emoji} مجموع کل: <b>{fmt_price(price)}</b> تومان"
     _stamp_invoice(uid)
     text = (
         f"{_ce('💳', '5350729313157135529')} <b>انتخاب روش پرداخت</b>\n\n"

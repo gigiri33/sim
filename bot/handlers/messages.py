@@ -1294,8 +1294,6 @@ def universal_handler(message):
             state_set(uid, "buy_select_method",
                       package_id=package_id, amount=total, original_amount=total,
                       unit_price=unit_price, quantity=qty, kind="config_purchase")
-            summary = _qty_order_summary_text(package_row, unit_price, qty)
-            bot.send_message(uid, summary, parse_mode="HTML")
             # Naming step for panel packages
             if _is_panel_package(package_row):
                 if setting_get("panel_config_name_mode", "ask") == "random":
