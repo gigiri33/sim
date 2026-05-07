@@ -352,11 +352,13 @@ def show_my_configs(target, user_id, page=0, search=None):
     else:
         kb.add(types.InlineKeyboardButton("جست‌وجو در سرویس‌ها", callback_data="my_configs:search", icon_custom_emoji_id="5258274739041883702"))
 
-    # ── Config buttons (no inline renewal) ───────────────────────────────────
+    # -- Config buttons (no inline renewal) ---
+    _ICON_ACTIVE  = "5219943216781995020"
+    _ICON_EXPIRED = "5258121851091043775"
+    _ICON_NEAR    = "5348455299772596273"
     for item in items:
-        expired_mark = " ❌" if item["is_expired"] else ""
-        svc_name     = move_leading_emoji(urllib.parse.unquote(item["service_name"] or ""))
-        test_label   = ""
+        svc_name  = move_leading_emoji(urllib.parse.unquote(item["service_name"] or ""))
+        test_label = ""
         if item["is_test"]:
             hours_left = item["test_hours_left"] if "test_hours_left" in item.keys() else None
             if item["is_expired"]:
@@ -367,19 +369,20 @@ def show_my_configs(target, user_id, page=0, search=None):
                 test_label = f" 🎁⏰{time_str}"
             else:
                 test_label = " 🎁"
-        title = f"{svc_name}{test_label}{expired_mark}"
-        kb.add(types.InlineKeyboardButton(title, callback_data=f"mycfg:{item['id']}"))
+        _icon = _ICON_EXPIRED if item["is_expired"] else _ICON_ACTIVE
+        title = f"{svc_name}{test_label}"
+        kb.add(types.InlineKeyboardButton(title, callback_data=f"mycfg:{item['id']}", icon_custom_emoji_id=_icon))
 
-    # ── Panel configs ─────────────────────────────────────────────────────────
+    # -- Panel configs ---
     for pc in panel_items:
         if pc["is_expired"]:
-            marker = " ⌛"
+            _icon = _ICON_EXPIRED
         elif int(pc["is_disabled"] or 0):
-            marker = " ⛔"
+            _icon = _ICON_NEAR
         else:
-            marker = " 🟢"
+            _icon = _ICON_ACTIVE
         name = esc(pc["client_name"] or pc["package_name"] or "—")
-        kb.add(types.InlineKeyboardButton(f"{name}{marker}", callback_data=f"mypnlcfg:d:{pc['id']}"))
+        kb.add(types.InlineKeyboardButton(name, callback_data=f"mypnlcfg:d:{pc['id']}", icon_custom_emoji_id=_icon))
 
     # ── Pagination row ────────────────────────────────────────────────────────
     if total_pages > 1:

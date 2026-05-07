@@ -5563,16 +5563,17 @@ def _dispatch_callback(call, uid, data):
 
     if data == "my_configs:search":
         # Enter search mode — ask user to type a query
+        from ..ui.premium_emoji import ce as _ce_srch
         state_set(uid, "my_cfgs_search")
         bot.answer_callback_query(call.id)
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("❌ لغو", callback_data="my_configs"))
         send_or_edit(call,
-            f"{ce('🔍', '5258396243666681152')} <b>جست‌وجو در کانفیگ‌ها</b>\n\n"
+            f"{_ce_srch('🔍', '5258396243666681152')} <b>جست‌وجو در کانفیگ‌ها</b>\n\n"
             "متن مورد نظر را ارسال کنید:\n"
-            f"{ce('🔸', '5987617871608420127')} نام کانفیگ\n"
-            f"{ce('🔸', '5987617871608420127')} متن کانفیگ (config link)\n"
-            f"{ce('🔸', '5987617871608420127')} لینک سابسکریپشن\n\n"
+            f"{_ce_srch('🔸', '5987617871608420127')} نام کانفیگ\n"
+            f"{_ce_srch('🔸', '5987617871608420127')} متن کانفیگ (config link)\n"
+            f"{_ce_srch('🔸', '5987617871608420127')} لینک سابسکریپشن\n\n"
             "برای لغو دکمه لغو را بزنید.",
             kb)
         return
