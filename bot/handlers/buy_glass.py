@@ -499,7 +499,7 @@ def _pkg_has_stock(p, stock_only: bool) -> bool:
 # Public API imported into callbacks.py
 # ─────────────────────────────────────────────────────────────────────────────
 
-def show_glass_buy(call, type_id: int):
+def show_glass_buy(call, type_id: int, purchase_id: int = None):
     """Entry point — called from buy:t: handler when purchase_mode='glass'."""
     from ..bot_instance import bot
     from ..db import get_packages, get_type, setting_get
@@ -549,6 +549,8 @@ def show_glass_buy(call, type_id: int):
 
     _gs = ses.to_state()
     _gs.pop("uid", None)  # uid is positional arg to state_set; _reload_session re-injects it
+    if purchase_id is not None:
+        _gs["renewal_purchase_id"] = purchase_id
     state_set(uid, "glass_buy", **_gs)
 
     inv_desc = ""
@@ -716,7 +718,33 @@ def handle_glass_callback(call, data: str):
         # Save into buy_select_method so existing payment flow works unchanged.
         # original_amount = agency price so discount codes apply on top of agency price.
         # agency_original_amount = raw base price for display ("شما X تومان صرفه‌جویی کردید").
-        from ..helpers import state_set as _ss
+        from ..helpers import state_set as _ss, state_data as _sd2
+
+        # Check if this is a renewal (glass buy launched from renew: handler)
+        _renewal_pid = _sd2(uid).get("renewal_purchase_id")
+
+        bot.answer_callback_query(call.id)
+
+        if _renewal_pid:
+            # Renewal via glass UI: set renewal state and show renewal gateways
+            _ss(uid, "renew_select_method",
+                package_id=package_id,
+                amount=price,
+                original_amount=price,
+                kind="renewal",
+                purchase_id=_renewal_pid)
+            from .callbacks import _show_renewal_gateways, _show_discount_prompt
+            from ..db import get_purchase as _gp, setting_get as _sg
+            _item = _gp(_renewal_pid)
+            if not _item:
+                bot.answer_callback_query(call.id, "خطا: سرویس پیدا نشد.", show_alert=True)
+                return True
+            if _sg("discount_codes_enabled", "0") == "1":
+                if _show_discount_prompt(call, price):
+                    return True
+            _show_renewal_gateways(call, uid, _renewal_pid, package_id, price, package_row, _item)
+            return True
+
         _ss(uid, "buy_select_method",
             package_id=package_id,
             amount=price,
@@ -726,8 +754,6 @@ def handle_glass_callback(call, data: str):
             unit_price=unit_price,
             quantity=quantity,
             agency_orig_amount=orig_amount)  # raw base price kept for reference
-
-        bot.answer_callback_query(call.id)
 
         # Re-use existing helpers from callbacks (same package — lazy import avoids circular)
         from .callbacks import (

@@ -350,7 +350,7 @@ def show_my_configs(target, user_id, page=0, search=None):
             types.InlineKeyboardButton("❌ پاک کردن جست‌وجو", callback_data="my_configs:csearch"),
         )
     else:
-        kb.add(types.InlineKeyboardButton("🔍 جست‌وجو در کانفیگ‌ها", callback_data="my_configs:search"))
+        kb.add(types.InlineKeyboardButton(ce('🔍', '5258274739041883702') + " جست‌وجو در سرویس‌ها", callback_data="my_configs:search"))
 
     # ── Config buttons (no inline renewal) ───────────────────────────────────
     for item in items:
@@ -394,13 +394,13 @@ def show_my_configs(target, user_id, page=0, search=None):
     kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="nav:main"))
 
     # ── Header ────────────────────────────────────────────────────────────────
-    header = f"{ce('📦', '5332618260703624145')} <b>کانفیگ‌های من</b>"
+    header = f"{ce('📦', '5350763436672305153')} <b>کانفیگ‌های من</b>"
     if active_search:
         header += f"\n🔍 جست‌وجو: <code>{esc(active_search)}</code>"
     if total == 0:
         header += "\n\n📭 نتیجه‌ای یافت نشد."
     else:
-        header += "\n\nیکی از سرویس‌ها را انتخاب کنید:"
+        header += "\n\nیکی از سرویس‌های زیر را جهت بررسی وضعیت انتخاب کنید:"
     send_or_edit(target, header, kb)
 
 

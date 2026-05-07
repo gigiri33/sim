@@ -2778,12 +2778,17 @@ def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
     type_label    = pkg_type_name or inbound_remark
     show_pkg      = int(package_row["show_name"]) if "show_name" in package_row.keys() else 1
     pkg_line      = f"{ce('📦', '5348451945403137943')} پکیج: <b>{esc(package_row['name'])}</b>\n" if show_pkg else ""
-    _expire_at    = pc["expire_at"] if "expire_at" in pc.keys() else ""
-    expire_line   = f"{ce('📅', '5379748062124056162')} انقضا: <b>{_expire_at[:10]}</b>\n" if _expire_at else ""
-
-    _PROTO_LABELS = {"vmess": "VMess", "vless": "VLESS", "trojan": "Trojan"}
-    proto_label_str = _PROTO_LABELS.get(inbound_protocol, "")
-    proto_line = f"🔐 پروتکل: <b>{esc(proto_label_str)}</b>\n" if proto_label_str else ""
+    _expire_at = pc["expire_at"] if "expire_at" in pc.keys() else ""
+    if _expire_at:
+        try:
+            import jdatetime as _jdt
+            _d = _jdt.date.fromgregorian(date=__import__('datetime').date.fromisoformat(_expire_at[:10]))
+            _expire_jalali = f"{_d.year}/{_d.month:02d}/{_d.day:02d}"
+        except Exception:
+            _expire_jalali = _expire_at[:10]
+        expire_line = f"{ce('❗', '5348557584418750233')} انقضا: <b>{_expire_jalali}</b>\n"
+    else:
+        expire_line = ""
 
     header = f"{ce('✅', '5989949235691262922')} <b>سرویس شما آماده شد!</b>"
 
@@ -2791,7 +2796,6 @@ def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
         f"{ce('🔮', '5987881105859024173')} نام سرویس: <b>{esc(service_name)}</b>\n"
         f"{ce('🧩', '5350526388837301421')} نوع سرویس: <b>{esc(type_label)}</b>\n"
         f"{pkg_line}"
-        f"{proto_line}"
         f"{ce('🔋', '5988017011509171250')} حجم: <b>{esc(vol_label)}</b>\n"
         f"{ce('⏰', '5987901335154987757')} مدت زمان: <b>{esc(dur_label)}</b>\n"
         f"{ce('👥', '5987790606603129919')} تعداد کاربر: <b>{esc(users_label)}</b>\n"
@@ -5608,6 +5612,15 @@ def _dispatch_callback(call, uid, data):
         # Show packages of same type for renewal
         with get_conn() as conn:
             type_id = conn.execute("SELECT type_id FROM packages WHERE id=?", (item["package_id"],)).fetchone()["type_id"]
+        # Glass mode check: redirect to glass buy flow for renewal
+        _rtype_row = get_type(type_id)
+        if _rtype_row:
+            _rpmode = _rtype_row["purchase_mode"] if "purchase_mode" in _rtype_row.keys() else "step"
+            if (_rpmode or "step") == "glass":
+                from .buy_glass import show_glass_buy
+                bot.answer_callback_query(call.id)
+                show_glass_buy(call, type_id, purchase_id=purchase_id)
+                return
         user = get_user(uid)
         _is_agent = bool(user and user["is_agent"])
         packages = [p for p in get_packages(type_id=type_id) if p["price"] > 0 and _br_ok(p, _is_agent)]
@@ -17547,6 +17560,12 @@ def _dispatch_callback(call, uid, data):
             types.InlineKeyboardButton(_pcnm_label, callback_data="adm:ops:panel_name_mode"),
             types.InlineKeyboardButton("🏷 نام کانفیگ های پنل", callback_data="adm:ops:noop"),
         )
+        _ar_enabled = setting_get("user_auto_renew_enabled", "1")
+        _ar_label   = "✅ فعال" if _ar_enabled == "1" else "❌ غیرفعال"
+        ops_kb.row(
+            types.InlineKeyboardButton(_ar_label, callback_data="adm:ops:auto_renew_toggle"),
+            types.InlineKeyboardButton("🔁 تمدید خودکار کاربران", callback_data="adm:ops:noop"),
+        )
         ops_kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5352759161945867747"))
         return ops_kb
 
@@ -17637,6 +17656,19 @@ def _dispatch_callback(call, uid, data):
         log_admin_action(uid, f"تمدیدی‌های پنل {'فعال' if new_val == '1' else 'غیرفعال'} شد")
         label = "فعال" if new_val == "1" else "غیرفعال"
         bot.answer_callback_query(call.id, f"تمدیدی‌های پنل: {label}")
+        send_or_edit(call, _ops_menu_text(), _build_ops_kb())
+        return
+
+    if data == "adm:ops:auto_renew_toggle":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        cur = setting_get("user_auto_renew_enabled", "1")
+        new_val = "0" if cur == "1" else "1"
+        setting_set("user_auto_renew_enabled", new_val)
+        log_admin_action(uid, f"تمدید خودکار کاربران {'فعال' if new_val == '1' else 'غیرفعال'} شد")
+        label = "فعال" if new_val == "1" else "غیرفعال"
+        bot.answer_callback_query(call.id, f"تمدید خودکار کاربران: {label}")
         send_or_edit(call, _ops_menu_text(), _build_ops_kb())
         return
 
