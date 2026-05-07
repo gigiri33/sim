@@ -4384,3 +4384,25 @@ def get_delivery_queue_item(queue_id):
             "SELECT * FROM delivery_queue WHERE id=?", (queue_id,)
         ).fetchone()
 
+
+def fix_delivery_queue_gregorian_dates():
+    """
+    One-time migration: reset next_retry_at to now() for any delivery_queue
+    items whose next_retry_at is in Gregorian format (starts with '20').
+    These were written by the buggy delivery_worker that used UTC Gregorian
+    instead of Jalali Tehran, causing them to never be picked up.
+    """
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id FROM delivery_queue WHERE status='pending' AND next_retry_at LIKE '20%'"
+        ).fetchall()
+        if rows:
+            ids = [r["id"] for r in rows]
+            conn.execute(
+                "UPDATE delivery_queue SET next_retry_at=? WHERE id IN ({})".format(
+                    ",".join("?" * len(ids))
+                ),
+                [now_str()] + ids,
+            )
+    return len(rows) if rows else 0
+

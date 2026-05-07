@@ -24,6 +24,8 @@ import threading
 import time
 from datetime import datetime, timedelta
 
+import jdatetime
+
 log = logging.getLogger(__name__)
 
 # ── Defaults (can be overridden via DB settings) ──────────────────────────────
@@ -48,13 +50,39 @@ def _cfg_int(key, default):
         return default
 
 
-def _now_str():
-    return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+def _now_str() -> str:
+    """Return current Tehran time as Jalali string — MUST match db.now_str() format."""
+    try:
+        from .helpers import now_str as _db_now_str
+        return _db_now_str()
+    except Exception:
+        # Fallback: build Jalali string manually
+        try:
+            import pytz as _pytz
+            _tz = _pytz.timezone("Asia/Tehran")
+            _dt = datetime.now(_tz)
+        except Exception:
+            _dt = datetime.utcnow() + timedelta(hours=3, minutes=30)
+        _jdt = jdatetime.datetime.fromgregorian(datetime=_dt)
+        return _jdt.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _next_retry_str(delay_seconds: int) -> str:
-    dt = datetime.utcnow() + timedelta(seconds=delay_seconds)
-    return dt.strftime("%Y-%m-%d %H:%M:%S")
+    """Return (now + delay) as Jalali Tehran string — same format as db.now_str()."""
+    try:
+        from .helpers import _TZ_TEHRAN
+        _dt = datetime.now(_TZ_TEHRAN) + timedelta(seconds=delay_seconds)
+        _jdt = jdatetime.datetime.fromgregorian(datetime=_dt)
+        return _jdt.strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        try:
+            import pytz as _pytz
+            _tz = _pytz.timezone("Asia/Tehran")
+            _dt = datetime.now(_tz) + timedelta(seconds=delay_seconds)
+        except Exception:
+            _dt = datetime.utcnow() + timedelta(hours=3, minutes=30, seconds=delay_seconds)
+        _jdt = jdatetime.datetime.fromgregorian(datetime=_dt)
+        return _jdt.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _notify_admin(text: str):
@@ -310,6 +338,15 @@ def _run_delivery_cycle():
 # ── Worker thread ──────────────────────────────────────────────────────────────
 
 def _delivery_worker_loop():
+    # One-time migration: fix any queue items stuck with Gregorian next_retry_at dates
+    # (written by the old buggy worker that used UTC instead of Jalali Tehran).
+    try:
+        from .db import fix_delivery_queue_gregorian_dates
+        fixed = fix_delivery_queue_gregorian_dates()
+        if fixed:
+            log.warning("[DeliveryWorker] fixed %d delivery_queue item(s) with wrong Gregorian dates", fixed)
+    except Exception as _mig_exc:
+        log.error("[DeliveryWorker] gregorian-date migration failed: %s", _mig_exc)
     # Wait one full interval before first run so the bot finishes starting up
     interval = _cfg_int("delivery_retry_interval", DELIVERY_RETRY_INTERVAL_SECONDS)
     time.sleep(interval)
