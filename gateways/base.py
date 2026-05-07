@@ -1,0 +1,200 @@
+# -*- coding: utf-8 -*-
+"""
+Gateway availability checks shared across all payment gateways.
+"""
+from ..db import (
+    setting_get, get_user,
+    pick_card_for_payment,
+    get_gateway_fee_amount, get_gateway_bonus_amount, apply_gateway_fee,
+)
+
+_ALL_GATEWAYS = ("card", "crypto", "tetrapay", "swapwallet_crypto", "tronpays_rial", "pazzlenet", "plisio", "nowpayments", "tronado", "centralpay", "rialpay")
+
+
+def is_gateway_available(gw_name, user_id, amount=None):
+    """Return True if the named gateway is enabled and visible to this user."""
+    enabled = setting_get(f"gw_{gw_name}_enabled", "0")
+    if enabled != "1":
+        return False
+    visibility = setting_get(f"gw_{gw_name}_visibility", "public")
+    if visibility == "secure":
+        user = get_user(user_id)
+        if not (user and user["status"] == "safe"):
+            return False
+    if amount is not None:
+        range_enabled = setting_get(f"gw_{gw_name}_range_enabled", "0")
+        if range_enabled == "1":
+            range_min = setting_get(f"gw_{gw_name}_range_min", "")
+            range_max = setting_get(f"gw_{gw_name}_range_max", "")
+            if range_min and int(range_min) > amount:
+                return False
+            if range_max and int(range_max) < amount:
+                return False
+    return True
+
+
+def get_global_amount_range(user_id):
+    """Return (global_min, global_max) across all enabled+visible gateways that have a range.
+    Returns (None, None) if no gateway has any range constraint."""
+    global_min = None
+    global_max = None
+    for gw in _ALL_GATEWAYS:
+        if setting_get(f"gw_{gw}_enabled", "0") != "1":
+            continue
+        vis = setting_get(f"gw_{gw}_visibility", "public")
+        if vis == "secure":
+            user = get_user(user_id)
+            if not (user and user["status"] == "safe"):
+                continue
+        if gw == "card" and not is_card_info_complete():
+            continue
+        range_on = setting_get(f"gw_{gw}_range_enabled", "0") == "1"
+        if range_on:
+            r_min = setting_get(f"gw_{gw}_range_min", "")
+            r_max = setting_get(f"gw_{gw}_range_max", "")
+            gw_min = int(r_min) if r_min else None
+            gw_max = int(r_max) if r_max else None
+        else:
+            gw_min = None
+            gw_max = None
+        # global_min = lowest min (or None if any gateway has no min)
+        if gw_min is None:
+            global_min = None  # at least one gateway accepts any low amount
+        elif global_min is not None:
+            global_min = min(global_min, gw_min)
+        else:
+            global_min = gw_min
+        # global_max = highest max (or None if any gateway has no max)
+        if gw_max is None:
+            global_max = None  # at least one gateway accepts any high amount
+        elif global_max is not None:
+            global_max = max(global_max, gw_max)
+        else:
+            global_max = gw_max
+    return (global_min, global_max)
+
+
+def get_gateway_range_text(gw_name):
+    """Return a short range description for a gateway, e.g. '۵۰۰,۰۰۰ تا ۱,۸۰۰,۰۰۰'.
+    Returns '' if range is not enabled."""
+    # Plisio: show live 5-USDT minimum
+    if gw_name == "plisio":
+        dyn_min = _plisio_dynamic_min_toman()
+        if dyn_min:
+            base = f"حداقل {dyn_min:,} تومان (معادل ۵ USDT)"
+            if setting_get("gw_plisio_range_enabled", "0") == "1":
+                r_max = setting_get("gw_plisio_range_max", "")
+                if r_max:
+                    return base + f" — حداکثر {int(r_max):,} تومان"
+            return base
+    # NowPayments: no forced minimum — show user-configured range only
+    if gw_name == "nowpayments":
+        if setting_get("gw_nowpayments_range_enabled", "0") == "1":
+            r_min = setting_get("gw_nowpayments_range_min", "")
+            r_max = setting_get("gw_nowpayments_range_max", "")
+            if r_min and r_max:
+                return f"{int(r_min):,} تا {int(r_max):,} تومان"
+            elif r_min:
+                return f"حداقل {int(r_min):,} تومان — حداکثر ندارد"
+            elif r_max:
+                return f"حداقل ندارد — حداکثر {int(r_max):,} تومان"
+        return "بدون محدودیت مبلغی"
+    if setting_get(f"gw_{gw_name}_range_enabled", "0") != "1":
+        return "بدون محدودیت مبلغی"
+    r_min = setting_get(f"gw_{gw_name}_range_min", "")
+    r_max = setting_get(f"gw_{gw_name}_range_max", "")
+    if r_min and r_max:
+        return f"{int(r_min):,} تا {int(r_max):,} تومان"
+    elif r_min:
+        return f"حداقل {int(r_min):,} تومان — حداکثر ندارد"
+    elif r_max:
+        return f"حداقل ندارد — حداکثر {int(r_max):,} تومان"
+    else:
+        return "بدون محدودیت مبلغی"
+
+
+def is_card_info_complete():
+    """Return True if at least one active card is configured (new table or legacy settings)."""
+    from ..db import get_payment_cards
+    if get_payment_cards(active_only=True):
+        return True
+    return all([
+        setting_get("payment_card", ""),
+        setting_get("payment_bank", ""),
+        setting_get("payment_owner", ""),
+    ])
+
+
+def _plisio_dynamic_min_toman():
+    """Return the live 5-USDT minimum in toman using SwapWallet rates. Returns 0 on failure."""
+    try:
+        from .crypto import fetch_crypto_prices
+        prices = fetch_crypto_prices()
+        usdt_irt = prices.get("USDT", 0)
+        if usdt_irt and usdt_irt > 0:
+            return int(5 * usdt_irt)
+    except Exception:
+        pass
+    return 0
+
+
+def _nowpayments_dynamic_min_toman():
+    """Return the live NowPayments min-amount (in toman) for USD→USDT-TRC20. Returns 0 on failure."""
+    try:
+        from .crypto import fetch_crypto_prices
+        from .nowpayments import get_nowpayments_min_usdt
+        prices = fetch_crypto_prices()
+        usdt_irt = prices.get("USDT", 0)
+        if not (usdt_irt and usdt_irt > 0):
+            return 0
+        min_usdt = get_nowpayments_min_usdt()
+        if min_usdt and min_usdt > 0:
+            return int(min_usdt * usdt_irt)
+    except Exception:
+        pass
+    return 0
+
+
+def is_gateway_in_range(gw_name, amount):
+    """Return True if amount is within the gateway's allowed range (or range is disabled)."""
+    # Plisio: always enforce live 5-USDT minimum regardless of range settings
+    if gw_name == "plisio":
+        dyn_min = _plisio_dynamic_min_toman()
+        if dyn_min and amount < dyn_min:
+            return False
+    # NowPayments: no forced minimum — only check user-configured range
+    if setting_get(f"gw_{gw_name}_range_enabled", "0") != "1":
+        return True
+    r_min = setting_get(f"gw_{gw_name}_range_min", "")
+    r_max = setting_get(f"gw_{gw_name}_range_max", "")
+    if r_min and int(r_min) > amount:
+        return False
+    if r_max and int(r_max) < amount:
+        return False
+    return True
+
+
+_CRYPTO_GWS = frozenset({"crypto", "nowpayments", "plisio"})
+
+
+def build_gateway_range_guide(gw_label_pairs):
+    """Build a guide text listing each gateway's range.
+    gw_label_pairs: list of (gw_name, display_label) tuples.
+    Returns a string like:
+      📋 راهنمای انتخاب درگاه پرداخت:
+      💳 کارت به کارت: ۵۰۰٬۰۰۰ تا ۱٬۸۰۰٬۰۰۰ تومان
+      💎 ارز دیجیتال: بدون محدودیت مبلغی
+    """
+    from ..ui.premium_emoji import ce as _ce
+    lines = []
+    for gw_name, label in gw_label_pairs:
+        rng = get_gateway_range_text(gw_name)
+        if gw_name in _CRYPTO_GWS:
+            icon = _ce("💎", "5237761614458933049")
+        else:
+            icon = _ce("💳", "5985796637971191405")
+        lines.append(f"  {icon} {label}: {rng}")
+    if not lines:
+        return ""
+    header = _ce("📋", "5269381442864963988")
+    return f"{header} <b>راهنمای انتخاب درگاه پرداخت:</b>\n" + "\n".join(lines)
