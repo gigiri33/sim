@@ -15792,24 +15792,144 @@ def _dispatch_callback(call, uid, data):
         if not admin_has_perm(uid, "agency"):
             bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
             return
-        _mode_labels = {
-            "adm:agt:bp:mode:type":    ("🧩", "تخفیف روی هر دسته"),
-            "adm:agt:bp:mode:package": ("📦", "قیمت جداگانه هر پکیج"),
-            "adm:agt:bp:mode:per_gb":  ("💵", "قیمت به ازای هر گیگ"),
-        }
-        _icon, _label = _mode_labels[data]
         sd = state_data(uid)
         selected = list(sd.get("selected", []))
+        if not selected:
+            bot.answer_callback_query(call.id, "⚠️ انتخابی یافت نشد. دوباره شروع کنید.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+
+        if data == "adm:agt:bp:mode:type":
+            # Show types list — user picks a type, then pct/tmn, then value
+            types_list = get_all_types()
+            if not types_list:
+                bot.answer_callback_query(call.id, "هیچ دسته‌ای تعریف نشده.", show_alert=True)
+                return
+            state_set(uid, "admin_agt_bulk_select", selected=selected, mode="type")
+            kb2 = types.InlineKeyboardMarkup()
+            for t in types_list:
+                kb2.add(types.InlineKeyboardButton(
+                    f"🧩 {t['name']}",
+                    callback_data=f"adm:agt:bpt:type:{t['id']}"))
+            kb2.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:agt:bp:confirm",
+                                               icon_custom_emoji_id="5352759161945867747"))
+            send_or_edit(call,
+                f"🧩 <b>تخفیف روی هر دسته — {len(selected)} نماینده</b>\n\n"
+                "دسته مورد نظر را انتخاب کنید:", kb2)
+
+        elif data == "adm:agt:bp:mode:package":
+            # Show packages list — user picks a package, then enters price
+            packs = get_packages()
+            if not packs:
+                bot.answer_callback_query(call.id, "پکیجی موجود نیست.", show_alert=True)
+                return
+            state_set(uid, "admin_agt_bulk_select", selected=selected, mode="package")
+            kb2 = types.InlineKeyboardMarkup()
+            for p in packs:
+                kb2.add(types.InlineKeyboardButton(
+                    f"📦 {p['name']} | {fmt_price(p['price'])} ت",
+                    callback_data=f"adm:agt:bpt:pkg:{p['id']}"))
+            kb2.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:agt:bp:confirm",
+                                               icon_custom_emoji_id="5352759161945867747"))
+            send_or_edit(call,
+                f"📦 <b>قیمت جداگانه هر پکیج — {len(selected)} نماینده</b>\n\n"
+                "پکیج مورد نظر را انتخاب کنید:", kb2)
+
+        elif data == "adm:agt:bp:mode:per_gb":
+            # Show types list — user picks a type, then enters price per GB
+            types_list = get_all_types()
+            if not types_list:
+                bot.answer_callback_query(call.id, "هیچ دسته‌ای تعریف نشده.", show_alert=True)
+                return
+            state_set(uid, "admin_agt_bulk_select", selected=selected, mode="per_gb")
+            kb2 = types.InlineKeyboardMarkup()
+            for t in types_list:
+                kb2.add(types.InlineKeyboardButton(
+                    f"💵 {t['name']}",
+                    callback_data=f"adm:agt:bpt:pgb:{t['id']}"))
+            kb2.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:agt:bp:confirm",
+                                               icon_custom_emoji_id="5352759161945867747"))
+            send_or_edit(call,
+                f"💵 <b>قیمت به ازای هر گیگ — {len(selected)} نماینده</b>\n\n"
+                "دسته مورد نظر را انتخاب کنید:", kb2)
+        return
+
+    # ── Bulk price: type selected → ask pct/tmn ───────────────────────────────
+    if data.startswith("adm:agt:bpt:type:"):
+        if not admin_has_perm(uid, "agency"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        type_id = int(data.split(":")[4])
+        sd = state_data(uid)
+        selected = list(sd.get("selected", []))
+        state_set(uid, "admin_agt_bulk_select", selected=selected, mode="type", type_id=type_id)
         kb2 = types.InlineKeyboardMarkup()
-        kb2.add(types.InlineKeyboardButton(
-            "بازگشت", callback_data="adm:agt:bp:confirm",
-            icon_custom_emoji_id="5352759161945867747"))
+        kb2.row(
+            types.InlineKeyboardButton("📊 درصد", callback_data=f"adm:agt:bpt:typdt:pct:{type_id}"),
+            types.InlineKeyboardButton("💵 تومان ثابت", callback_data=f"adm:agt:bpt:typdt:tmn:{type_id}"),
+        )
+        kb2.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:agt:bp:mode:type",
+                                           icon_custom_emoji_id="5352759161945867747"))
         bot.answer_callback_query(call.id)
         send_or_edit(call,
-            f"{_icon} <b>{_label}</b>\n\n"
-            f"این حالت برای پیکربندی همگانی ({len(selected)} نماینده) پشتیبانی نمی‌شود.\n\n"
-            "برای تنظیم قیمت هر دسته یا پکیج، هر نماینده را از منوی نمایندگان به صورت جداگانه ویرایش کنید.",
-            kb2)
+            f"🧩 <b>تخفیف دسته — {len(selected)} نماینده</b>\n\n"
+            "نوع تخفیف را انتخاب کنید:", kb2)
+        return
+
+    if data.startswith("adm:agt:bpt:typdt:"):
+        if not admin_has_perm(uid, "agency"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        parts   = data.split(":")
+        dtype   = parts[4]   # pct or tmn
+        type_id = int(parts[5])
+        sd = state_data(uid)
+        selected = list(sd.get("selected", []))
+        state_set(uid, "admin_agt_bulk_price_val", selected=selected, dtype=dtype,
+                  mode="type", type_id=type_id)
+        bot.answer_callback_query(call.id)
+        label = "درصد تخفیف (مثال: 20)" if dtype == "pct" else "مبلغ تخفیف به تومان (مثال: 50000)"
+        send_or_edit(call,
+            f"🧩 <b>تخفیف دسته — {len(selected)} نماینده</b>\n\n"
+            f"{'📊' if dtype == 'pct' else '💵'} {label} را وارد کنید:",
+            back_button(f"adm:agt:bpt:type:{type_id}"))
+        return
+
+    # ── Bulk price: package selected → ask price ──────────────────────────────
+    if data.startswith("adm:agt:bpt:pkg:"):
+        if not admin_has_perm(uid, "agency"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        package_id = int(data.split(":")[4])
+        sd = state_data(uid)
+        selected = list(sd.get("selected", []))
+        state_set(uid, "admin_agt_bulk_price_val", selected=selected,
+                  mode="package", package_id=package_id, dtype="tmn")
+        bot.answer_callback_query(call.id)
+        pkg_row = get_package(package_id)
+        pkg_name = esc(pkg_row["name"]) if pkg_row else str(package_id)
+        send_or_edit(call,
+            f"📦 <b>قیمت پکیج «{pkg_name}» — {len(selected)} نماینده</b>\n\n"
+            "💰 قیمت اختصاصی (تومان) را وارد کنید.\n"
+            "برای بازگشت به قیمت عادی عدد <b>0</b> بفرستید:",
+            back_button("adm:agt:bp:mode:package"))
+        return
+
+    # ── Bulk price: per-gb type selected → ask price ──────────────────────────
+    if data.startswith("adm:agt:bpt:pgb:"):
+        if not admin_has_perm(uid, "agency"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        type_id = int(data.split(":")[4])
+        sd = state_data(uid)
+        selected = list(sd.get("selected", []))
+        state_set(uid, "admin_agt_bulk_price_val", selected=selected,
+                  mode="per_gb", type_id=type_id, dtype="tmn")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"💵 <b>قیمت به ازای هر گیگ — {len(selected)} نماینده</b>\n\n"
+            "قیمت به ازای هر گیگ را به تومان وارد کنید (مثال: 5000):",
+            back_button(f"adm:agt:bpt:pgb:{type_id}"))
         return
 
     if data.startswith("adm:agt:bp:mode:"):
