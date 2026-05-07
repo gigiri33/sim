@@ -5571,12 +5571,12 @@ def _dispatch_callback(call, uid, data):
         kb = types.InlineKeyboardMarkup()
         kb.add(types.InlineKeyboardButton("❌ لغو", callback_data="my_configs"))
         send_or_edit(call,
-            "🔍 <b>جست‌وجو در کانفیگ‌ها</b>\n\n"
+            f"{ce('🔍', '5258396243666681152')} <b>جست‌وجو در کانفیگ‌ها</b>\n\n"
             "متن مورد نظر را ارسال کنید:\n"
-            "• نام کانفیگ\n"
-            "• متن کانفیگ (config link)\n"
-            "• لینک ساب‌اسکرایب\n\n"
-            "<i>برای لغو دکمه لغو را بزنید.</i>",
+            f"{ce('🔸', '5987617871608420127')} نام کانفیگ\n"
+            f"{ce('🔸', '5987617871608420127')} متن کانفیگ (config link)\n"
+            f"{ce('🔸', '5987617871608420127')} لینک سابسکریپشن\n\n"
+            "برای لغو دکمه لغو را بزنید.",
             kb)
         return
 
@@ -11547,7 +11547,7 @@ def _dispatch_callback(call, uid, data):
                 _name_part = f"{p['name']} | " if _sn else ""
                 title = f"{_name_part}{fmt_vol(p['volume_gb'])} | {fmt_dur(p['duration_days'])} | {fmt_price(price)} ت"
                 kb.add(types.InlineKeyboardButton(title, callback_data=f"mypnlcfg:renewp:{config_id}:{p['id']}"))
-            kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data=f"mypnlcfg:d:{config_id}",
+            kb.add(types.InlineKeyboardButton("بازگشت", callback_data=f"mypnlcfg:d:{config_id}",
                    icon_custom_emoji_id="5352759161945867747"))
             bot.answer_callback_query(call.id)
             agent_note = "\n\n🤝 <i>این قیمت‌ها مخصوص همکاری شماست</i>" if user and user["is_agent"] else ""
@@ -11555,7 +11555,7 @@ def _dispatch_callback(call, uid, data):
                 send_or_edit(call, "📭 در حال حاضر پکیجی برای تمدید موجود نیست.", kb)
             else:
                 send_or_edit(call,
-                    "⚡ <b>تمدید سرویس</b>\n\n"
+                    f"{ce('⚡', '5987688901777560604')} <b>تمدید سرویس</b>\n\n"
                     "پکیج مورد نظر برای تمدید را انتخاب کنید:"
                     f"{agent_note}", kb)
             return
