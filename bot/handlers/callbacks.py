@@ -3169,7 +3169,15 @@ def _build_locked_channels_menu():
     # Two-column rows: channel name (right) | delete (left)
     for row in rows:
         ch = row["channel_id"]
-        label = ch if ch.startswith("@") else f"🔢 {ch}"
+        join_url = str(row["join_url"]).strip() if row["join_url"] else ""
+        if ch.startswith("@"):
+            label = ch
+        elif ch.startswith("http") or ch.startswith("t.me"):
+            label = "🔗 لینک دعوت"
+        else:
+            label = f"🔢 {ch}"
+        if join_url:
+            label += " 🔗"
         kb.row(
             types.InlineKeyboardButton(f"📢 {label}", callback_data="noop"),
             types.InlineKeyboardButton("🗑 حذف", callback_data=f"adm:lch:del:{row['id']}"),
@@ -7114,8 +7122,18 @@ def _dispatch_callback(call, uid, data):
             return
         # Naming step for panel packages (single purchase, qty=1)
         if _is_panel_package(package_row):
-            _show_naming_prompt(call, package_id, 1)
-            return
+            if setting_get("panel_config_name_mode", "ask") == "random":
+                # Auto-generate random name; skip the naming screen
+                _rname = generate_random_name(uid)
+                state_set(uid, "buy_select_method",
+                          package_id=package_id, amount=price,
+                          original_amount=_price_info["original_unit_price"],
+                          discount_amount=_price_info["discount_amount"],
+                          kind="config_purchase", unit_price=price,
+                          quantity=1, service_names=[_rname])
+            else:
+                _show_naming_prompt(call, package_id, 1)
+                return
         if setting_get("discount_codes_enabled", "0") == "1":
             if _show_discount_prompt(call, price):
                 return
@@ -7130,7 +7148,23 @@ def _dispatch_callback(call, uid, data):
         quantity   = int(parts[4])
         bot.answer_callback_query(call.id)
         state_clear(uid)
-        _show_naming_prompt(call, package_id, quantity)
+        if setting_get("panel_config_name_mode", "ask") == "random":
+            package_row = get_package(package_id)
+            if package_row:
+                _price_info2 = calculate_effective_order_price(uid, package_row)
+                _price2      = get_effective_price(uid, package_row)
+                _rnames      = [generate_random_name(uid) for _ in range(quantity)]
+                state_set(uid, "buy_select_method",
+                          package_id=package_id, amount=_price2 * quantity,
+                          original_amount=_price_info2["original_unit_price"],
+                          discount_amount=_price_info2["discount_amount"],
+                          kind="config_purchase", unit_price=_price2,
+                          quantity=quantity, service_names=_rnames)
+                if _show_discount_prompt(call, _price2 * quantity):
+                    return
+                _show_purchase_gateways(call, uid, package_id, _price2 * quantity, package_row)
+        else:
+            _show_naming_prompt(call, package_id, quantity)
         return
 
     # buy:naming:{random|custom}:{package_id}:{quantity}
@@ -15566,6 +15600,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("📋 درخواست‌های بررسی نشده", callback_data="adm:resreq:list:0"))
         kb.add(types.InlineKeyboardButton("💰 حداقل موجودی درخواست", callback_data="adm:resreq:minwallet"))
         kb.add(types.InlineKeyboardButton("➕ اضافه کردن نماینده", callback_data="adm:agt:add"))
+        kb.add(types.InlineKeyboardButton("💰 تغییر قیمت همگانی", callback_data="adm:agt:bulkprice"))
         # Inline list: each agent on one row with remove button
         for ag in agents:
             name = esc(ag["full_name"]) if ag["full_name"] else str(ag["user_id"])
@@ -15597,6 +15632,145 @@ def _dispatch_callback(call, uid, data):
             back_button("admin:agents"))
         return
 
+    if data == "adm:agt:add":
+        if not admin_has_perm(uid, "agency"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        state_set(uid, "admin_agent_add_search")
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "🔍 <b>جستجوی کاربر برای افزودن به نمایندگی</b>\n\n"
+            "آیدی عددی یا یوزرنیم کاربر را ارسال کنید:",
+            back_button("admin:agents"))
+        return
+
+    # ── Agent bulk price change ────────────────────────────────────────────────
+    def _agt_bulk_kb(agents_list, selected_ids):
+        """Build checkbox selection keyboard for bulk agent price change."""
+        _kb = types.InlineKeyboardMarkup()
+        all_ids = {ag["user_id"] for ag in agents_list}
+        all_sel = bool(all_ids) and all_ids.issubset(selected_ids)
+        _kb.add(types.InlineKeyboardButton(
+            "☑️ لغو انتخاب همه" if all_sel else "☑️ انتخاب همه",
+            callback_data="adm:agt:bp:all"))
+        for ag in agents_list:
+            tick = "✅" if ag["user_id"] in selected_ids else "⬜️"
+            name = (ag["full_name"] or str(ag["user_id"]))[:30]
+            _kb.add(types.InlineKeyboardButton(
+                f"{tick} {name}",
+                callback_data=f"adm:agt:bp:sel:{ag['user_id']}"))
+        if selected_ids:
+            _kb.add(types.InlineKeyboardButton(
+                f"✔️ تایید — {len(selected_ids)} نماینده انتخاب شد",
+                callback_data="adm:agt:bp:confirm"))
+        _kb.add(types.InlineKeyboardButton(
+            "بازگشت", callback_data="admin:agents",
+            icon_custom_emoji_id="5352759161945867747"))
+        return _kb
+
+    if data == "adm:agt:bulkprice":
+        if not admin_has_perm(uid, "agency"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        agents_list = get_agencies()
+        if not agents_list:
+            bot.answer_callback_query(call.id, "هیچ نماینده‌ای وجود ندارد.", show_alert=True)
+            return
+        state_set(uid, "admin_agt_bulk_select", selected=[])
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "💰 <b>تغییر قیمت همگانی نمایندگان</b>\n\n"
+            "نمایندگان مورد نظر را انتخاب کنید:",
+            _agt_bulk_kb(agents_list, set()))
+        return
+
+    if data == "adm:agt:bp:all":
+        if not admin_has_perm(uid, "agency"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        agents_list = get_agencies()
+        sd = state_data(uid)
+        selected = set(sd.get("selected", []))
+        all_ids = {ag["user_id"] for ag in agents_list}
+        # Toggle: if all selected → deselect all, else select all
+        if all_ids and all_ids.issubset(selected):
+            new_sel = set()
+        else:
+            new_sel = all_ids
+        state_set(uid, "admin_agt_bulk_select", selected=list(new_sel))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "💰 <b>تغییر قیمت همگانی نمایندگان</b>\n\n"
+            "نمایندگان مورد نظر را انتخاب کنید:",
+            _agt_bulk_kb(agents_list, new_sel))
+        return
+
+    if data.startswith("adm:agt:bp:sel:"):
+        if not admin_has_perm(uid, "agency"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        tgt = int(data.split(":")[4])
+        agents_list = get_agencies()
+        sd = state_data(uid)
+        selected = set(sd.get("selected", []))
+        if tgt in selected:
+            selected.discard(tgt)
+        else:
+            selected.add(tgt)
+        state_set(uid, "admin_agt_bulk_select", selected=list(selected))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            "💰 <b>تغییر قیمت همگانی نمایندگان</b>\n\n"
+            "نمایندگان مورد نظر را انتخاب کنید:",
+            _agt_bulk_kb(agents_list, selected))
+        return
+
+    if data == "adm:agt:bp:confirm":
+        if not admin_has_perm(uid, "agency"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        sd = state_data(uid)
+        selected = list(sd.get("selected", []))
+        if not selected:
+            bot.answer_callback_query(call.id, "⚠️ ابتدا حداقل یک نماینده انتخاب کنید.", show_alert=True)
+            return
+        # Save selected into confirm state, keep as admin_agt_bulk_select
+        state_set(uid, "admin_agt_bulk_select", selected=selected, step="mode")
+        kb2 = types.InlineKeyboardMarkup()
+        kb2.row(
+            types.InlineKeyboardButton("📊 درصد", callback_data="adm:agt:bp:mode:pct"),
+            types.InlineKeyboardButton("💵 تومان ثابت", callback_data="adm:agt:bp:mode:tmn"),
+        )
+        kb2.add(types.InlineKeyboardButton(
+            "بازگشت", callback_data="adm:agt:bulkprice",
+            icon_custom_emoji_id="5352759161945867747"))
+        bot.answer_callback_query(call.id)
+        send_or_edit(call,
+            f"💰 <b>تغییر قیمت همگانی — {len(selected)} نماینده</b>\n\n"
+            "نوع تخفیف را انتخاب کنید:",
+            kb2)
+        return
+
+    if data.startswith("adm:agt:bp:mode:"):
+        if not admin_has_perm(uid, "agency"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        dtype = data.split(":")[4]   # pct or tmn
+        sd = state_data(uid)
+        selected = list(sd.get("selected", []))
+        if not selected:
+            bot.answer_callback_query(call.id, "⚠️ انتخابی یافت نشد. دوباره شروع کنید.", show_alert=True)
+            return
+        state_set(uid, "admin_agt_bulk_price_val", selected=selected, dtype=dtype)
+        bot.answer_callback_query(call.id)
+        label = "درصد تخفیف (مثال: 20)" if dtype == "pct" else "مبلغ تخفیف به تومان (مثال: 50000)"
+        send_or_edit(call,
+            f"💰 <b>تغییر قیمت همگانی — {len(selected)} نماینده</b>\n\n"
+            f"{'📊' if dtype == 'pct' else '💵'} {label} را وارد کنید:",
+            back_button("adm:agt:bp:confirm"))
+        return
+    # ── End bulk price change ─────────────────────────────────────────────────
+
     if data.startswith("adm:agt:u:"):
         target_uid = int(data.split(":")[3])
         bot.answer_callback_query(call.id)
@@ -15623,6 +15797,7 @@ def _dispatch_callback(call, uid, data):
         kb.add(types.InlineKeyboardButton("📋 درخواست‌های بررسی نشده", callback_data="adm:resreq:list:0"))
         kb.add(types.InlineKeyboardButton("💰 حداقل موجودی درخواست", callback_data="adm:resreq:minwallet"))
         kb.add(types.InlineKeyboardButton("➕ اضافه کردن نماینده", callback_data="adm:agt:add"))
+        kb.add(types.InlineKeyboardButton("💰 تغییر قیمت همگانی", callback_data="adm:agt:bulkprice"))
         for ag in agents:
             name = esc(ag["full_name"]) if ag["full_name"] else str(ag["user_id"])
             kb.row(
@@ -17366,6 +17541,12 @@ def _dispatch_callback(call, uid, data):
             types.InlineKeyboardButton(_wp_label, callback_data="adm:ops:wallet_pay_toggle"),
             types.InlineKeyboardButton("💰 پرداخت با موجودی  ⚙️ استثناها", callback_data="adm:ops:wallet_pay_exc"),
         )
+        _pcnm_val   = setting_get("panel_config_name_mode", "ask")
+        _pcnm_label = "✅ پرسیدن از کاربر" if _pcnm_val == "ask" else "🎲 همیشه رندوم"
+        ops_kb.row(
+            types.InlineKeyboardButton(_pcnm_label, callback_data="adm:ops:panel_name_mode"),
+            types.InlineKeyboardButton("🏷 نام کانفیگ های پنل", callback_data="adm:ops:noop"),
+        )
         ops_kb.add(types.InlineKeyboardButton("بازگشت", callback_data="admin:settings", icon_custom_emoji_id="5352759161945867747"))
         return ops_kb
 
@@ -17391,6 +17572,8 @@ def _dispatch_callback(call, uid, data):
         )
         _wp_enabled = setting_get("wallet_pay_enabled", "1")
         _wp_fa = "✅ فعال" if _wp_enabled == "1" else "❌ غیرفعال"
+        _pcnm_val = setting_get("panel_config_name_mode", "ask")
+        _pcnm_fa  = "✅ پرسیدن از کاربر" if _pcnm_val == "ask" else "🎲 همیشه رندوم"
         return (
             "🤖 <b>مدیریت عملیات ربات</b>\n\n"
             f"🔹 <b>وضعیت ربات:</b> {status_fa}\n"
@@ -17400,7 +17583,8 @@ def _dispatch_callback(call, uid, data):
             f"🔹 <b>فروش عمده:</b> {bulk_fa}\n"
             f"   ↳ حداقل تعداد: <b>{min_qty}</b> | حداکثر تعداد: <b>{max_label}</b>\n"
             f"🔹 <b>اعتبار فاکتور پرداخت:</b> {_inv_fa}\n"
-            f"🔹 <b>پرداخت با موجودی:</b> {_wp_fa}\n\n"
+            f"🔹 <b>پرداخت با موجودی:</b> {_wp_fa}\n"
+            f"🔹 <b>نام کانفیگ های پنل:</b> {_pcnm_fa}\n\n"
             "برای تغییر هر مورد، دکمه وضعیت فعلی آن را لمس کنید."
         )
 
@@ -17647,7 +17831,51 @@ def _dispatch_callback(call, uid, data):
         send_or_edit(call, _ops_menu_text(), _build_ops_kb())
         return
 
-    # ── Wallet Pay Exceptions Sub-menu ────────────────────────────────────────
+    # ── Panel Config Name Mode ────────────────────────────────────────────────
+    if data == "adm:ops:panel_name_mode":
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        cur = setting_get("panel_config_name_mode", "ask")
+        kb = types.InlineKeyboardMarkup()
+        kb.row(
+            types.InlineKeyboardButton(
+                ("✅ " if cur == "random" else "") + "🎲 همیشه رندوم",
+                callback_data="adm:ops:pcnm:random",
+            ),
+            types.InlineKeyboardButton(
+                ("✅ " if cur == "ask" else "") + "✏️ پرسیدن از کاربر",
+                callback_data="adm:ops:pcnm:ask",
+            ),
+        )
+        kb.add(types.InlineKeyboardButton("بازگشت", callback_data="adm:ops",
+                                          icon_custom_emoji_id="5352759161945867747"))
+        _cur_label = "🎲 همیشه رندوم" if cur == "random" else "✅ پرسیدن از کاربر"
+        send_or_edit(call,
+            "🏷 <b>نام کانفیگ های پنل</b>\n\n"
+            f"وضعیت فعلی: <b>{_cur_label}</b>\n\n"
+            "🎲 <b>همیشه رندوم:</b> مرحله انتخاب نام کاملاً حذف می‌شود و نام به‌صورت خودکار تولید می‌گردد.\n\n"
+            "✏️ <b>پرسیدن از کاربر:</b> مثل حالت فعلی — دو گزینه «نام رندوم» یا «نام دلخواه» به کاربر نمایش داده می‌شود.",
+            kb)
+        return
+
+    if data.startswith("adm:ops:pcnm:"):
+        if not admin_has_perm(uid, "settings"):
+            bot.answer_callback_query(call.id, "دسترسی مجاز نیست.", show_alert=True)
+            return
+        mode = data.split(":")[-1]  # "ask" or "random"
+        if mode not in ("ask", "random"):
+            bot.answer_callback_query(call.id)
+            return
+        setting_set("panel_config_name_mode", mode)
+        label = "🎲 همیشه رندوم" if mode == "random" else "✅ پرسیدن از کاربر"
+        log_admin_action(uid, f"نام کانفیگ های پنل: {label}")
+        bot.answer_callback_query(call.id, f"ذخیره شد: {label}")
+        send_or_edit(call, _ops_menu_text(), _build_ops_kb())
+        return
+
+
     def _wpe_page_from_data(d):
         """Extract page number from adm:wpe:list:{page}"""
         parts = d.split(":")
@@ -20613,9 +20841,19 @@ def _dispatch_callback(call, uid, data):
         bot.answer_callback_query(call.id)
         send_or_edit(call,
             "📢 <b>افزودن کانال قفل</b>\n\n"
-            "آیدی کانال یا گروه را وارد کنید.\n"
-            "مثال: <code>@channelname</code> یا <code>-100123456789</code>\n\n"
-            "⚠️ ربات باید عضو/ادمین کانال باشد.",
+            "یکی از روش‌های زیر را وارد کنید:\n\n"
+            "🔹 <b>کانال عمومی:</b>\n"
+            "<code>@channelname</code>\n\n"
+            "🔹 <b>کانال خصوصی — فقط آیدی عددی:</b>\n"
+            "<code>-100123456789</code>\n"
+            "<i>(دکمه عضویت به صفحه پروفایل کانال می‌رود)</i>\n\n"
+            "🔹 <b>کانال خصوصی — آیدی عددی + لینک دعوت:</b>\n"
+            "<code>-100123456789 https://t.me/+HASH</code>\n"
+            "<i>(کاربران با لینک دعوت عضو می‌شوند، بررسی عضویت با آیدی انجام می‌شود)</i>\n\n"
+            "🔹 <b>لینک دعوت تنها:</b>\n"
+            "<code>https://t.me/+HASH</code>\n"
+            "<i>(اگر ربات عضو کانال باشد، آیدی به صورت خودکار دریافت می‌شود)</i>\n\n"
+            "⚠️ در همه حالات ربات باید ادمین کانال باشد.",
             back_button("adm:locked_channels"))
         return
 

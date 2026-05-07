@@ -191,22 +191,37 @@ def _do_broadcast(user_ids: list, title: str, mode: str,
     # If the source is a channel message, use forward_message to preserve channel header/view counts
     _is_channel_src = isinstance(from_chat_id, int) and from_chat_id < 0
 
+    import re as _re_bc
     for tgt_uid in user_ids:
-        try:
-            if _is_channel_src:
-                sent_msg = bot.forward_message(tgt_uid, from_chat_id, msg_id)
-            else:
-                sent_msg = bot.copy_message(
-                    tgt_uid, from_chat_id, msg_id, reply_markup=reply_markup)
-            if mode == "pin" and sent_msg:
-                try:
-                    bot.pin_chat_message(
-                        tgt_uid, sent_msg.message_id, disable_notification=True)
-                except Exception:
-                    pass
-            ok += 1
-        except Exception:
-            fail += 1
+        _retries = 0
+        while True:
+            try:
+                if _is_channel_src:
+                    sent_msg = bot.forward_message(tgt_uid, from_chat_id, msg_id)
+                else:
+                    sent_msg = bot.copy_message(
+                        tgt_uid, from_chat_id, msg_id, reply_markup=reply_markup)
+                if mode == "pin" and sent_msg:
+                    try:
+                        bot.pin_chat_message(
+                            tgt_uid, sent_msg.message_id, disable_notification=True)
+                    except Exception:
+                        pass
+                ok += 1
+                break
+            except Exception as _exc:
+                _emsg = str(_exc).lower()
+                # Rate-limit: Telegram says wait N seconds — respect it and retry
+                if "retry after" in _emsg or "too many requests" in _emsg:
+                    _m = _re_bc.search(r"retry after (\d+)", _emsg)
+                    _wait = int(_m.group(1)) if _m else 10
+                    time.sleep(_wait + 1)
+                    _retries += 1
+                    if _retries <= 5:
+                        continue  # retry same user
+                # Permanent failures (blocked, deactivated, not found) → skip
+                fail += 1
+                break
         done += 1
         time.sleep(0.05)
         if done % 50 == 0 or (time.time() - last_edit) >= 5:
@@ -1283,8 +1298,15 @@ def universal_handler(message):
             bot.send_message(uid, summary, parse_mode="HTML")
             # Naming step for panel packages
             if _is_panel_package(package_row):
-                _show_naming_prompt(message, package_id, qty)
-                return
+                if setting_get("panel_config_name_mode", "ask") == "random":
+                    _rnames = [generate_random_name(uid) for _ in range(qty)]
+                    state_set(uid, "buy_select_method",
+                              package_id=package_id, amount=total, original_amount=total,
+                              unit_price=unit_price, quantity=qty, kind="config_purchase",
+                              service_names=_rnames)
+                else:
+                    _show_naming_prompt(message, package_id, qty)
+                    return
             if setting_get("discount_codes_enabled", "0") == "1":
                 if _show_discount_prompt(message, total):
                     return
@@ -4324,20 +4346,86 @@ def universal_handler(message):
         if sn == "admin_add_locked_channel" and is_admin(uid):
             from ..db import add_locked_channel
             from ..ui.helpers import _invalidate_channel_cache
+            import re as _re
+
             val = (message.text or "").strip()
             if not val or val == "-":
                 state_clear(uid)
                 bot.send_message(uid, "❌ لغو شد.", reply_markup=back_button("adm:locked_channels"))
                 return
-            ok = add_locked_channel(val)
+
+            # ── Parse input ──────────────────────────────────────────────────
+            # Supported formats:
+            #   @username
+            #   -100123456789
+            #   -100123456789 https://t.me/+HASH   (ID + invite link)
+            #   https://t.me/+HASH  or  t.me/+HASH (invite link only → try to resolve)
+            _INVITE_RE = _re.compile(r"(https?://t\.me/\S+|t\.me/\S+)", _re.IGNORECASE)
+            _NUM_RE    = _re.compile(r"^-?\d{5,}$")
+
+            tokens     = val.split()
+            numeric_id = None
+            invite_url = None
+
+            for tok in tokens:
+                if _NUM_RE.match(tok):
+                    numeric_id = tok
+                elif _INVITE_RE.match(tok):
+                    invite_url = tok if tok.startswith("http") else "https://" + tok
+
+            if numeric_id and invite_url:
+                # Combined: use numeric ID for membership check + invite link for button
+                channel_id_to_store = numeric_id
+                join_url_to_store   = invite_url
+            elif numeric_id:
+                # Numeric only: membership check works; button uses t.me/c/xxx
+                channel_id_to_store = numeric_id
+                join_url_to_store   = ""
+            elif invite_url:
+                # Invite link only: try to resolve to numeric ID via bot.get_chat()
+                try:
+                    from ..bot_instance import bot as _bot
+                    _chat = _bot.get_chat(invite_url)
+                    channel_id_to_store = str(_chat.id)
+                    join_url_to_store   = invite_url
+                except Exception:
+                    # Could not resolve — store link as channel_id (fail-open for membership)
+                    channel_id_to_store = invite_url
+                    join_url_to_store   = invite_url
+                    bot.send_message(uid,
+                        "⚠️ <b>نتوانستیم آیدی کانال را به‌صورت خودکار دریافت کنیم.</b>\n\n"
+                        "لینک دعوت ذخیره شد ولی بررسی عضویت کار نخواهد کرد.\n"
+                        "برای بررسی عضویت، آیدی عددی کانال را همراه لینک دعوت وارد کنید:\n"
+                        "<code>-100XXXXXXXXX https://t.me/+HASH</code>",
+                        parse_mode="HTML")
+            elif val.startswith("@"):
+                channel_id_to_store = val
+                join_url_to_store   = ""
+            else:
+                # Unrecognized format
+                bot.send_message(uid,
+                    "⚠️ فرمت وارد‌شده شناسایی نشد.\n\n"
+                    "مثال‌های معتبر:\n"
+                    "<code>@channelname</code>\n"
+                    "<code>-100123456789</code>\n"
+                    "<code>-100123456789 https://t.me/+HASH</code>\n"
+                    "<code>https://t.me/+HASH</code>",
+                    parse_mode="HTML",
+                    reply_markup=back_button("adm:locked_channels"))
+                return
+
+            ok = add_locked_channel(channel_id_to_store, join_url_to_store)
             _invalidate_channel_cache()
             state_clear(uid)
             if ok:
-                log_admin_action(uid, f"کانال قفل {val} افزوده شد")
-                bot.send_message(uid, f"✅ کانال <code>{esc(val)}</code> افزوده شد.",
+                _saved_label = channel_id_to_store
+                if join_url_to_store:
+                    _saved_label += f" + 🔗 {join_url_to_store}"
+                log_admin_action(uid, f"کانال قفل {channel_id_to_store} افزوده شد")
+                bot.send_message(uid, f"✅ کانال <code>{esc(_saved_label)}</code> افزوده شد.",
                                  parse_mode="HTML", reply_markup=back_button("adm:locked_channels"))
             else:
-                bot.send_message(uid, f"⚠️ کانال <code>{esc(val)}</code> قبلاً ثبت شده بود.",
+                bot.send_message(uid, f"⚠️ کانال <code>{esc(channel_id_to_store)}</code> قبلاً ثبت شده بود.",
                                  parse_mode="HTML", reply_markup=back_button("adm:locked_channels"))
             return
 
@@ -4891,6 +4979,35 @@ def universal_handler(message):
             state_clear(uid)
             bot.send_message(uid, f"✅ تخفیف پیش‌فرض نمایندگی به <b>{val}%</b> تغییر یافت.",
                              reply_markup=back_button("admin:settings"))
+            return
+
+        # ── Admin: Bulk agent price change ────────────────────────────────────
+        if sn == "admin_agt_bulk_price_val" and is_admin(uid):
+            from ..db import set_agency_price_config as _sapc
+            selected = sd.get("selected", [])
+            dtype    = sd.get("dtype", "pct")
+            val = parse_int(message.text or "")
+            if val is None or val < 0:
+                bot.send_message(uid, "⚠️ عدد معتبر (0 یا بیشتر) وارد کنید.")
+                return
+            if dtype == "pct" and val > 100:
+                bot.send_message(uid, "⚠️ درصد نمی‌تواند بیشتر از 100 باشد.")
+                return
+            applied = 0
+            for agt_id in selected:
+                try:
+                    _sapc(agt_id, "global",
+                          "pct" if dtype == "pct" else "toman", val)
+                    applied += 1
+                except Exception:
+                    pass
+            state_clear(uid)
+            label = f"{val}%" if dtype == "pct" else f"{fmt_price(val)} تومان"
+            log_admin_action(uid, f"تخفیف همگانی نمایندگان ({applied} نفر): {label}")
+            bot.send_message(uid,
+                f"✅ تخفیف <b>{label}</b> برای <b>{applied}</b> نماینده اعمال شد.",
+                parse_mode="HTML",
+                reply_markup=back_button("admin:agents"))
             return
 
         # ── Admin: Add agent (search) ─────────────────────────────────────────

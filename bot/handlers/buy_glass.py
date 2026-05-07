@@ -736,7 +736,25 @@ def handle_glass_callback(call, data: str):
         )
         # Order: 1) service name (if panel package)  2) discount code  3) gateway
         if _is_panel_package(package_row):
-            _show_naming_prompt(call, package_id, quantity)
+            from ..db import setting_get as _sg
+            if _sg("panel_config_name_mode", "ask") == "random":
+                from ..service_naming import generate_random_name as _grn
+                _rname = _grn(uid)
+                _ss(uid, "buy_select_method",
+                    package_id=package_id,
+                    amount=price,
+                    original_amount=price,
+                    discount_amount=0,
+                    kind="config_purchase",
+                    unit_price=unit_price,
+                    quantity=quantity,
+                    agency_orig_amount=orig_amount,
+                    service_names=[_rname])
+                if _show_discount_prompt(call, price):
+                    return True
+                _show_purchase_gateways(call, uid, package_id, price, package_row)
+            else:
+                _show_naming_prompt(call, package_id, quantity)
             return True
         if _show_discount_prompt(call, price):
             return True

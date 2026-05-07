@@ -177,23 +177,25 @@ def check_channel_membership(user_id):
 
 
 def channel_lock_message(target):
-    channels = _get_all_locked_channels()
+    rows = get_locked_channels()
     kb = types.InlineKeyboardMarkup()
     _bot_username = ""
     try:
         _bot_username = bot.get_me().username or ""
     except Exception:
         pass
-    if channels:
-        for channel_id in channels:
-            url = _channel_url(channel_id)
+    if rows:
+        for row in rows:
+            channel_id = str(row["channel_id"])
+            stored_url = str(row["join_url"]).strip() if row["join_url"] else ""
+            url = stored_url if stored_url else _channel_url(channel_id)
             if channel_id.startswith("@"):
-                label = channel_id  # e.g. @MyChannel
+                label = channel_id
             else:
-                # Numeric ID — try to resolve username from Telegram
+                # Try to get name from Telegram (works if bot is a member)
                 try:
                     chat = bot.get_chat(channel_id)
-                    label = f"@{chat.username}" if chat.username else channel_id
+                    label = f"@{chat.username}" if chat.username else (chat.title or channel_id)
                 except Exception:
                     label = channel_id
             kb.add(types.InlineKeyboardButton(
