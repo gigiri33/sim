@@ -531,7 +531,7 @@ def universal_handler(message):
                 if _popup_cb != "nav:main":
                     try:
                         _dismiss_msg = bot.send_message(
-                            message.chat.id, "⏳",
+                            message.chat.id, "·",
                             reply_markup=types.ReplyKeyboardRemove(),
                             message_thread_id=getattr(message, "message_thread_id", None),
                         )

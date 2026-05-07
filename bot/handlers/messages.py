@@ -532,29 +532,30 @@ def universal_handler(message):
                                     icon_custom_emoji_id=_POPUP_BACK_EMOJI_ID))
         return kb
 
+    # این دکمه در هر حالتی (پاپ آپ یا اینلاین) باید کار کند
+    if (message.content_type == "text"
+            and (message.text or "").strip() == _POPUP_BACK_TEXT):
+        if sn:
+            state_clear(uid)
+        from .callbacks import _dispatch_callback as _dcb
+
+        class _FakeCQBack:
+            id = "0"
+            from_user = message.from_user
+            data = "nav:main"
+            message = message
+
+        _popup_suppress_acq.active = True
+        _popup_suppress_acq.chat_id = message.chat.id
+        try:
+            _dcb(_FakeCQBack(), uid, "nav:main")
+        finally:
+            _popup_suppress_acq.active = False
+            _popup_suppress_acq.chat_id = None
+        return
+
     if (message.content_type == "text"
             and setting_get("start_menu_mode", "inline") == "popup"):
-
-        # ── "بازگشت به منو" single back-button → back to main menu ───────────
-        if (message.text or "").strip() == _POPUP_BACK_TEXT:
-            if sn:
-                state_clear(uid)
-            from .callbacks import _dispatch_callback as _dcb
-
-            class _FakeCQBack:
-                id = "0"
-                from_user = message.from_user
-                data = "nav:main"
-                message = message
-
-            _popup_suppress_acq.active = True
-            _popup_suppress_acq.chat_id = message.chat.id
-            try:
-                _dcb(_FakeCQBack(), uid, "nav:main")
-            finally:
-                _popup_suppress_acq.active = False
-                _popup_suppress_acq.chat_id = None
-            return
 
         from ..ui.start_menu import find_button_callback_by_text
         _popup_cb = find_button_callback_by_text(message.text or "")
@@ -578,7 +579,7 @@ def universal_handler(message):
                 if _popup_cb != "nav:main":
                     try:
                         _dismiss_msg = bot.send_message(
-                            message.chat.id, "⏳",
+                            message.chat.id, "·",
                             reply_markup=_popup_back_kbd(),
                             message_thread_id=getattr(message, "message_thread_id", None),
                         )
