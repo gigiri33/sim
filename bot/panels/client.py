@@ -147,13 +147,19 @@ class PanelClient:
     def _api_call(self, method: str, url: str, **kwargs) -> tuple:
         """
         Execute an API call with automatic login + retry on failure.
-        Retries up to MAX_RETRIES times; re-logs in before each retry.
+        On the first attempt, reuses the existing session if already logged in.
+        On retries, forces a fresh login to recover from expired sessions.
         Returns the raw requests.Response or raises RequestException.
         """
         last_err = None
         for attempt in range(MAX_RETRIES):
-            # Force fresh login on every retry (re-auth)
-            self._logged_in = False
+            # Only force re-login on retries — not on the first attempt.
+            # Forcing re-login on every call (including attempt 0) causes a
+            # login storm when creating multiple configs in a loop: each
+            # get_inbounds + addClient call re-authenticates, producing 3+
+            # logins per config and triggering panel rate-limiting.
+            if attempt > 0:
+                self._logged_in = False
             ok, err = self._ensure_logged_in()
             if not ok:
                 last_err = err
