@@ -7,6 +7,7 @@ Each test uses an in-memory SQLite DB and patches out external calls
 """
 
 import sys, os, threading, time, sqlite3, types, importlib, importlib.util
+from datetime import datetime, timedelta
 from unittest.mock import patch, MagicMock, call
 import pytest
 
@@ -155,10 +156,12 @@ CREATE TABLE IF NOT EXISTS panel_configs (
     user_id INTEGER,
     package_id INTEGER,
     delivery_slot_index INTEGER,
+    delivery_index INTEGER,
     client_name TEXT,
     panel_id INTEGER,
     status TEXT NOT NULL DEFAULT 'active',
-    UNIQUE(payment_id, delivery_slot_index)
+    UNIQUE(payment_id, delivery_slot_index),
+    UNIQUE(payment_id, delivery_index)
 );
 CREATE TABLE IF NOT EXISTS delivery_queue (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -297,8 +300,8 @@ def _exec_delivery(conn, payment_id, *, panel_online=True, create_side_effect=No
             # Insert into panel_configs so count_panel_configs works
             try:
                 conn.execute(
-                    "INSERT OR IGNORE INTO panel_configs(payment_id,user_id,package_id,delivery_slot_index,client_name) VALUES(?,?,?,?,?)",
-                    (payment_id, uid, package_id, slot_index, f"cfg-{slot_index}")
+                    "INSERT OR IGNORE INTO panel_configs(payment_id,user_id,package_id,delivery_slot_index,delivery_index,client_name) VALUES(?,?,?,?,?,?)",
+                    (payment_id, uid, package_id, slot_index, slot_index, f"cfg-{slot_index}")
                 )
                 conn.commit()
             except Exception:
@@ -407,8 +410,8 @@ class TestDirectDeliveryPartial:
         def _create(uid, package_id, payment_id, desired_name, slot_index, is_test):
             if slot_index < 6:
                 conn.execute(
-                    "INSERT OR IGNORE INTO panel_configs(payment_id,user_id,package_id,delivery_slot_index,client_name) VALUES(?,?,?,?,?)",
-                    (payment_id, uid, package_id, slot_index, f"cfg-{slot_index}")
+                    "INSERT OR IGNORE INTO panel_configs(payment_id,user_id,package_id,delivery_slot_index,delivery_index,client_name) VALUES(?,?,?,?,?,?)",
+                    (payment_id, uid, package_id, slot_index, slot_index, f"cfg-{slot_index}")
                 )
                 conn.commit()
                 return True, slot_index + 1, f"cfg-{slot_index}", ""
@@ -442,7 +445,7 @@ class TestDuplicateEmailHandling:
 
         # Pre-insert a config at slot 0 to simulate a name conflict
         conn.execute(
-            "INSERT OR IGNORE INTO panel_configs(payment_id,user_id,package_id,delivery_slot_index,client_name) VALUES(?,1,1,0,'pre-existing')",
+            "INSERT OR IGNORE INTO panel_configs(payment_id,user_id,package_id,delivery_slot_index,delivery_index,client_name) VALUES(?,1,1,0,0,'pre-existing')",
             (pay_id,)
         )
         conn.commit()
@@ -580,6 +583,96 @@ class TestWalletRefundIdempotency:
         assert user["balance"] == amount, f"Balance should be {amount}, got {user['balance']}"
 
 
+class TestLegacyQueueRowsIgnored:
+    """K6 extra: old delivery_queue rows must not create configs on startup."""
+
+    def test_old_queue_rows_not_processed(self):
+        import bot.delivery_worker as dw
+
+        conn = _make_db()
+        uid, pkg_id, pay_id = _seed(conn, quantity=1, amount=100_000)
+        conn.execute("INSERT INTO delivery_queue(payment_id,status) VALUES(?, 'pending')", (pay_id,))
+        conn.commit()
+
+        dw._run_delivery_cycle()
+
+        configs = conn.execute("SELECT * FROM panel_configs WHERE payment_id=?", (pay_id,)).fetchall()
+        queue_rows = conn.execute("SELECT * FROM delivery_queue WHERE payment_id=?", (pay_id,)).fetchall()
+        assert len(configs) == 0
+        assert len(queue_rows) == 1
+        assert queue_rows[0]["status"] == "pending"
+
+
+class TestRestartRecovery:
+    """K7/K8: restart recovery only handles direct-delivery in-flight payments."""
+
+    def test_recovery_old_delivering_payment_refunds(self):
+        conn = _make_db()
+        uid, pkg_id, pay_id = _seed(conn, quantity=10, amount=1_000_000, balance=0)
+        old_started = "2000-01-01 00:00:00"
+        conn.execute(
+            "UPDATE payments SET delivery_status='delivering', delivery_started_at=? WHERE id=?",
+            (old_started, pay_id),
+        )
+        conn.commit()
+
+        _exec_recovery(conn, panel_online=True, max_total=300)
+
+        pay = conn.execute("SELECT * FROM payments WHERE id=?", (pay_id,)).fetchone()
+        user = conn.execute("SELECT balance FROM users WHERE user_id=?", (uid,)).fetchone()
+        configs = conn.execute("SELECT * FROM panel_configs WHERE payment_id=?", (pay_id,)).fetchall()
+
+        assert len(configs) == 0
+        assert pay["delivery_status"] == "delivery_failed_refunded"
+        assert pay["refunded_count"] == 10
+        assert user["balance"] == 1_000_000
+
+    def test_recovery_within_window_resumes_missing_only(self):
+        conn = _make_db()
+        uid, pkg_id, pay_id = _seed(conn, quantity=10, amount=1_000_000, balance=0)
+        started = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute(
+            "UPDATE payments SET delivery_status='delivering', delivery_started_at=? WHERE id=?",
+            (started, pay_id),
+        )
+        for slot_i in range(3):
+            conn.execute(
+                "INSERT OR IGNORE INTO panel_configs(payment_id,user_id,package_id,delivery_slot_index,delivery_index,client_name) VALUES(?,?,?,?,?,?)",
+                (pay_id, uid, pkg_id, slot_i, slot_i, f"existing-{slot_i}"),
+            )
+        conn.commit()
+
+        _exec_recovery(conn, panel_online=True, max_total=300)
+
+        pay = conn.execute("SELECT * FROM payments WHERE id=?", (pay_id,)).fetchone()
+        configs = conn.execute("SELECT * FROM panel_configs WHERE payment_id=? ORDER BY delivery_index", (pay_id,)).fetchall()
+        indices = [r["delivery_index"] for r in configs]
+
+        assert len(configs) == 10
+        assert sorted(indices) == list(range(10))
+        assert pay["delivery_status"] == "delivered"
+        assert pay["delivered_count"] == 10
+
+
+class TestSourceSafety:
+    """K10: legacy worker shim must not call old queue/reconcile functions."""
+
+    def test_worker_source_has_no_active_queue_calls(self):
+        worker_path = os.path.join(ROOT, "bot", "delivery_worker.py")
+        with open(worker_path, "r", encoding="utf-8") as f:
+            source = f.read()
+        forbidden = [
+            "get_due_deliveries",
+            "_reconcile_completed_panel_payments",
+            "get_completed_panel_payments_for_delivery_reconcile",
+            "enqueue_delivery",
+            "enqueue_delivery_once",
+            "mark_delivery_slot_queued",
+        ]
+        for symbol in forbidden:
+            assert symbol not in source, f"legacy worker still references {symbol}"
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # SHARED HELPER for multi-attempt delivery tests
 # ══════════════════════════════════════════════════════════════════════════════
@@ -622,8 +715,8 @@ def _exec_delivery_multi(conn, payment_id, *, quantity, panel_online=True,
             pc_id = _create_counter["n"]
             try:
                 conn.execute(
-                    "INSERT OR IGNORE INTO panel_configs(payment_id,user_id,package_id,delivery_slot_index,client_name) VALUES(?,?,?,?,?)",
-                    (payment_id, uid, package_id, slot_index, f"cfg-{slot_index}")
+                    "INSERT OR IGNORE INTO panel_configs(payment_id,user_id,package_id,delivery_slot_index,delivery_index,client_name) VALUES(?,?,?,?,?,?)",
+                    (payment_id, uid, package_id, slot_index, slot_index, f"cfg-{slot_index}")
                 )
                 conn.commit()
             except Exception:
@@ -663,3 +756,60 @@ def _exec_delivery_multi(conn, payment_id, *, quantity, panel_online=True,
         dd.RETRY_INTERVAL_SECS = orig_interval
         dd.MAX_TOTAL_SECS      = orig_max
         dd.MAX_ATTEMPTS        = orig_attempts
+
+
+def _exec_recovery(conn, *, panel_online=True, custom_create=None,
+                   max_attempts=11, max_total=300):
+    """Run startup recovery synchronously with external calls patched."""
+    import bot.direct_delivery as dd
+    import bot.db as db_mod
+
+    panel_row = conn.execute("SELECT * FROM panels WHERE id=1").fetchone()
+    online_seq = iter([panel_online] * (max_attempts + 10)) if isinstance(panel_online, bool) else iter(panel_online)
+
+    def fake_get_conn():
+        return FakeConn(conn)
+
+    def fake_get_panel(panel_id):
+        return panel_row
+
+    def fake_get_payment_service_names(payment_id):
+        return []
+
+    def fake_get_user(uid):
+        return conn.execute("SELECT * FROM users WHERE user_id=?", (uid,)).fetchone()
+
+    if custom_create is not None:
+        fake_create = custom_create
+    else:
+        def fake_create(uid, package_id, payment_id, desired_name, slot_index, is_test):
+            conn.execute(
+                "INSERT OR IGNORE INTO panel_configs(payment_id,user_id,package_id,delivery_slot_index,delivery_index,client_name) VALUES(?,?,?,?,?,?)",
+                (payment_id, uid, package_id, slot_index, slot_index, f"cfg-{slot_index}"),
+            )
+            conn.commit()
+            return True, slot_index + 1, f"cfg-{slot_index}", ""
+
+    orig_interval = dd.RETRY_INTERVAL_SECS
+    orig_max = dd.MAX_TOTAL_SECS
+    orig_attempts = dd.MAX_ATTEMPTS
+    dd.RETRY_INTERVAL_SECS = 0
+    dd.MAX_TOTAL_SECS = max_total
+    dd.MAX_ATTEMPTS = max_attempts
+
+    try:
+        with patch.object(db_mod, "get_conn", fake_get_conn), \
+             patch.object(dd, "_check_panel_online", lambda p: next(online_seq, False)), \
+             patch.object(dd, "_attempt_create_one", fake_create), \
+             patch.object(dd, "_deliver_config_to_user", lambda uid, pc_id, pkg: None), \
+             patch.object(dd, "_notify_admin", lambda t: None), \
+             patch.object(dd, "_send_user", lambda uid, t: None), \
+             patch.object(db_mod, "get_panel", fake_get_panel), \
+             patch.object(db_mod, "get_user", fake_get_user), \
+             patch.object(db_mod, "get_payment_service_names", fake_get_payment_service_names), \
+             patch("time.sleep", lambda s: None):
+            dd.recover_incomplete_direct_deliveries(run_sync=True)
+    finally:
+        dd.RETRY_INTERVAL_SECS = orig_interval
+        dd.MAX_TOTAL_SECS = orig_max
+        dd.MAX_ATTEMPTS = orig_attempts

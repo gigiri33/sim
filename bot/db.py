@@ -846,6 +846,8 @@ def _run_init_db_migrations():
             "ALTER TABLE panel_configs ADD COLUMN inbound_protocol TEXT NOT NULL DEFAULT ''",
             # ── Panel configs: canonical delivery slot for idempotent bulk delivery ─
             "ALTER TABLE panel_configs ADD COLUMN delivery_slot_index INTEGER",
+            # ── Direct delivery canonical idempotency index (new name) ───────
+            "ALTER TABLE panel_configs ADD COLUMN delivery_index INTEGER",
             # ── Persistent panel-config delivery queue ─────────────────────────
             """CREATE TABLE IF NOT EXISTS delivery_queue (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -917,6 +919,7 @@ def _run_init_db_migrations():
             "CREATE INDEX IF NOT EXISTS idx_users_status         ON users(status)",
             "CREATE INDEX IF NOT EXISTS idx_delivery_slots_payment ON delivery_slots(payment_id, status)",
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_panel_configs_payment_slot ON panel_configs(payment_id, delivery_slot_index) WHERE payment_id IS NOT NULL AND delivery_slot_index IS NOT NULL",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_panel_configs_payment_delivery_index ON panel_configs(payment_id, delivery_index) WHERE payment_id IS NOT NULL AND delivery_index IS NOT NULL",
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_delivery_queue_payment_slot_pending ON delivery_queue(payment_id, slot_index) WHERE payment_id IS NOT NULL AND slot_index IS NOT NULL AND status='pending'",
 
         ]
@@ -966,13 +969,24 @@ def _run_init_db_migrations():
                     )
         except Exception:
             pass
-        # ── Delivery reconcile cutoff/watermark (one-shot seed) ──────────────
-        # Protects existing databases from the worker resurrecting old, already
-        # delivered orders after deploy.  For fresh installs MAX(payments.id)
-        # is NULL → 0, which is correct (every future payment id will be > 0).
+        # ── Legacy panel delivery queue deactivation ─────────────────────────
+        # delivery_queue / delivery_slots are historical tables only.  They are
+        # kept for production compatibility, but active rows must never be
+        # processed or resurrected by runtime settings.
         try:
             conn.execute(
-                "INSERT OR IGNORE INTO settings(key,value) VALUES('delivery_reconcile_enabled','1')"
+                "INSERT OR IGNORE INTO settings(key,value) VALUES('delivery_reconcile_enabled','0')"
+            )
+            conn.execute("UPDATE settings SET value='0' WHERE key IN ('delivery_queue_system_enabled','delivery_reconcile_enabled')")
+            conn.execute("UPDATE panel_configs SET delivery_index=delivery_slot_index WHERE delivery_index IS NULL AND delivery_slot_index IS NOT NULL")
+            conn.execute(
+                "UPDATE delivery_queue SET status='deprecated_queue_disabled', last_error=COALESCE(last_error, 'legacy panel delivery queue disabled'), next_retry_at=NULL "
+                "WHERE status IN ('pending','queued','retry','processing','creating','failed')"
+            )
+            conn.execute(
+                "UPDATE delivery_slots SET status='deprecated_queue_disabled', last_error=COALESCE(last_error, 'legacy panel delivery queue disabled'), updated_at=? "
+                "WHERE status IN ('pending','queued','retry','processing','creating','failed')",
+                (now_str(),)
             )
             _has_cutoff = conn.execute(
                 "SELECT 1 FROM settings WHERE key='delivery_reconcile_after_payment_id'"
@@ -3668,19 +3682,21 @@ def add_panel_config(user_id, package_id, panel_id, panel_type,
                      inbound_id, inbound_port, client_name, client_uuid,
                      client_sub_url, client_config_text, expire_at,
                      inbound_remark="", purchase_id=None, payment_id=None, cpkg_id=None, is_test=0,
-                     inbound_protocol="", delivery_slot_index=None):
+                     inbound_protocol="", delivery_slot_index=None, delivery_index=None):
+    if delivery_index is None:
+        delivery_index = delivery_slot_index
     with get_conn() as conn:
         cur = conn.execute(
             """INSERT INTO panel_configs
                (user_id, package_id, panel_id, panel_type, inbound_id, inbound_port,
                 client_name, client_uuid, client_sub_url, client_config_text,
                 inbound_remark, expire_at, created_at, purchase_id, payment_id, cpkg_id, is_test,
-                inbound_protocol, delivery_slot_index)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                inbound_protocol, delivery_slot_index, delivery_index)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (user_id, package_id, panel_id, panel_type, inbound_id, inbound_port,
              client_name, client_uuid, client_sub_url, client_config_text,
              inbound_remark or "", expire_at, now_str(), purchase_id, payment_id, cpkg_id, int(is_test),
-             inbound_protocol or "", delivery_slot_index)
+             inbound_protocol or "", delivery_slot_index, delivery_index)
         )
         return cur.lastrowid
 
@@ -4533,50 +4549,30 @@ def get_missing_delivery_slots(payment_id, expected_qty):
 
 
 def get_completed_panel_payments_for_delivery_reconcile(limit=100, after_payment_id=0):
-    """Return completed panel purchases that may still have missing delivery slots.
+    """Deprecated no-op.
 
-    This is used by the delivery worker after restarts.  A payment can be marked
-    completed before immediate fulfillment creates/enqueues every slot; this
-    query makes payments.quantity recoverable as the source of truth.
-
-    ``after_payment_id`` is a hard watermark cutoff: only payments with
-    ``id > after_payment_id`` are considered.  This prevents the worker from
-    resurrecting old, already-delivered orders after a deploy.
+    Direct delivery recovery only queries payments with
+    delivery_status IN ('delivering','partially_delivered').  Completed payment
+    scans are forbidden because they can replay old delivered orders.
     """
-    try:
-        cutoff = int(after_payment_id or 0)
-    except Exception:
-        cutoff = 0
-    with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT p.* FROM payments p "
-            "JOIN packages pk ON pk.id=p.package_id "
-            "WHERE p.status='completed' "
-            "AND p.kind='config_purchase' "
-            "AND COALESCE(pk.config_source, 'manual')='panel' "
-            "AND COALESCE(p.quantity, 1) > 0 "
-            "AND p.id > ? "
-            "ORDER BY COALESCE(p.fulfilled_at, p.approved_at, p.created_at) DESC "
-            "LIMIT ?",
-            (cutoff, int(limit or 100)),
-        ).fetchall()
-    return rows
+    return []
 
 
 def reset_delivery_cutoff_to_max_payment_id():
-    """Cancel pending delivery work and move the reconcile cutoff to MAX(payments.id).
+    """Deprecated admin cleanup for old queue rows.
 
-    Returns a dict with counts: queue_cancelled, slots_cancelled, new_cutoff.
+    It does not re-enable reconcile.  Legacy queue rows are only marked disabled
+    for history/compatibility.
     """
     with get_conn() as conn:
         conn.execute("BEGIN IMMEDIATE")
         conn.execute(
-            "UPDATE delivery_queue SET status='cancelled', last_error='reset by admin' "
+            "UPDATE delivery_queue SET status='deprecated_queue_disabled', last_error='legacy queue disabled by admin' "
             "WHERE status IN ('pending','retry','processing','creating','queued','failed')"
         )
         queue_cancelled = conn.execute("SELECT changes() AS c").fetchone()["c"]
         conn.execute(
-            "UPDATE delivery_slots SET status='cancelled', last_error='reset by admin', updated_at=? "
+            "UPDATE delivery_slots SET status='deprecated_queue_disabled', last_error='legacy queue disabled by admin', updated_at=? "
             "WHERE status != 'delivered'",
             (now_str(),),
         )
@@ -4589,7 +4585,7 @@ def reset_delivery_cutoff_to_max_payment_id():
             (str(new_cutoff),),
         )
         conn.execute(
-            "INSERT INTO settings(key,value) VALUES('delivery_reconcile_enabled','1') "
+            "INSERT INTO settings(key,value) VALUES('delivery_reconcile_enabled','0') "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value"
         )
         conn.commit()
@@ -4625,66 +4621,20 @@ def is_delivery_slot_stale(slot, stale_minutes=15):
 def enqueue_delivery(user_id, chat_id, package_id, payment_id,
                      desired_name=None, unit_price=0, payment_method="", is_test=0,
                      slot_index=None):
-    """Add a failed panel-config delivery to the persistent retry queue.
-
-    Returns the new queue item id.
-    """
-    if payment_id is not None and slot_index is not None:
-        return enqueue_delivery_once(
-            user_id, chat_id, package_id, payment_id,
-            desired_name=desired_name, unit_price=unit_price,
-            payment_method=payment_method, is_test=is_test,
-            slot_index=slot_index,
-        )
-    with get_conn() as conn:
-        conn.execute(
-            "INSERT INTO delivery_queue"
-            "(user_id,chat_id,package_id,payment_id,slot_index,desired_name,unit_price,"
-            "payment_method,is_test,status,retry_count,created_at,next_retry_at)"
-            " VALUES(?,?,?,?,?,?,?,?,?,'pending',0,?,?)",
-            (user_id, chat_id, package_id, payment_id, slot_index, desired_name, unit_price,
-             payment_method, is_test, now_str(), now_str()),
-        )
-        return conn.execute("SELECT last_insert_rowid() AS x").fetchone()["x"]
+    """Deprecated no-op. Direct delivery never writes delivery_queue."""
+    return None
 
 
 def enqueue_delivery_once(user_id, chat_id, package_id, payment_id,
                           desired_name=None, unit_price=0, payment_method="", is_test=0,
                           slot_index=None):
-    """Enqueue one exact delivery slot, reusing an existing pending row if present."""
-    if slot_index is None:
-        return enqueue_delivery(user_id, chat_id, package_id, payment_id, desired_name, unit_price, payment_method, is_test)
-    ts = now_str()
-    with get_conn() as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        existing = conn.execute(
-            "SELECT id FROM delivery_queue WHERE payment_id=? AND slot_index=? AND status='pending' ORDER BY id DESC LIMIT 1",
-            (payment_id, slot_index),
-        ).fetchone()
-        if existing:
-            qid = existing["id"]
-            conn.commit()
-            return qid
-        conn.execute(
-            "INSERT INTO delivery_queue"
-            "(user_id,chat_id,package_id,payment_id,slot_index,desired_name,unit_price,"
-            "payment_method,is_test,status,retry_count,created_at,next_retry_at)"
-            " VALUES(?,?,?,?,?,?,?,?,?,'pending',0,?,?)",
-            (user_id, chat_id, package_id, payment_id, slot_index, desired_name, unit_price,
-             payment_method, is_test, ts, ts),
-        )
-        qid = conn.execute("SELECT last_insert_rowid() AS x").fetchone()["x"]
-        conn.commit()
-        return qid
+    """Deprecated no-op. Direct delivery never writes delivery_queue."""
+    return None
 
 
 def get_due_deliveries():
-    """Return all pending delivery_queue items whose next_retry_at <= now."""
-    with get_conn() as conn:
-        return conn.execute(
-            "SELECT * FROM delivery_queue WHERE status='pending' AND next_retry_at <= ?",
-            (now_str(),),
-        ).fetchall()
+    """Deprecated no-op. Legacy delivery_queue is never processed."""
+    return []
 
 
 def update_delivery_retry(queue_id, error, next_retry_at):
@@ -4761,10 +4711,10 @@ def fix_delivery_queue_gregorian_dates():
 # ── Direct delivery system helpers ────────────────────────────────────────────
 
 def get_panel_configs_for_payment(payment_id: int):
-    """Return all panel_configs created for a given payment_id, ordered by delivery_slot_index."""
+    """Return all panel_configs created for a given payment_id, ordered by delivery_index."""
     with get_conn() as conn:
         return conn.execute(
-            "SELECT * FROM panel_configs WHERE payment_id=? ORDER BY delivery_slot_index ASC, id ASC",
+            "SELECT * FROM panel_configs WHERE payment_id=? ORDER BY COALESCE(delivery_index, delivery_slot_index) ASC, id ASC",
             (payment_id,)
         ).fetchall()
 
@@ -4817,9 +4767,27 @@ def mark_delivery_started(payment_id: int):
     """Record that direct delivery has begun for this payment."""
     with get_conn() as conn:
         conn.execute(
-            "UPDATE payments SET delivery_status='delivering', delivery_started_at=? WHERE id=?",
+            "UPDATE payments SET delivery_status='delivering', delivery_started_at=COALESCE(delivery_started_at, ?) WHERE id=?",
             (now_str(), payment_id)
         )
+
+
+def get_direct_delivery_recovery_payments(limit: int = 100):
+    """Return only payments explicitly left mid-flight by direct delivery.
+
+    This intentionally does not scan completed/paid payments. It is the only
+    startup recovery source for panel config delivery.
+    """
+    with get_conn() as conn:
+        return conn.execute(
+            """
+            SELECT * FROM payments
+            WHERE delivery_status IN ('delivering','partially_delivered')
+            ORDER BY id ASC
+            LIMIT ?
+            """,
+            (int(limit),)
+        ).fetchall()
 
 
 def refund_undelivered_to_wallet(payment_id: int, user_id: int,
@@ -4834,19 +4802,21 @@ def refund_undelivered_to_wallet(payment_id: int, user_id: int,
     if undelivered <= 0:
         return 0
 
-    unit_price = max(0, total_amount // quantity) if quantity else total_amount
-    refund_amt = unit_price * undelivered
+    if undelivered >= quantity:
+        refund_amt = total_amount
+    else:
+        refund_amt = (total_amount * undelivered) // quantity if quantity else total_amount
 
     if refund_amt <= 0:
         return 0
 
     with get_conn() as conn:
-        # Atomic guard: only proceed if status is still 'delivering'
+        # Atomic guard: only proceed while direct delivery is still unfinished.
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             "SELECT delivery_status, refunded_count FROM payments WHERE id=?", (payment_id,)
         ).fetchone()
-        if not row or row["delivery_status"] not in ("delivering",):
+        if not row or row["delivery_status"] not in ("delivering", "partially_delivered"):
             conn.execute("ROLLBACK")
             return 0  # already refunded or wrong status
         final_status = "partially_refunded" if delivered_count > 0 else "delivery_failed_refunded"

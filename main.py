@@ -739,9 +739,10 @@ def main():
     from bot.gateways.rialpay import start_rialpay_auto_check_loop
     start_rialpay_auto_check_loop(interval_seconds=30)
 
-    # Start panel-config delivery queue worker (retries failed deliveries every 5 min)
-    from bot.delivery_worker import start_delivery_worker
-    start_delivery_worker()
+    # Resume/finalize only payments explicitly marked by the direct delivery system.
+    # The legacy delivery_queue worker is intentionally not started anymore.
+    from bot.direct_delivery import recover_incomplete_direct_deliveries
+    recover_incomplete_direct_deliveries()
 
     # Remove any active webhook before starting long-polling (prevents 409 conflict)
     try:

@@ -85,10 +85,6 @@ from ..db import (
     update_panel_config_field, delete_panel_config,
     # Service naming
     set_payment_service_names, get_payment_service_names,
-    ensure_delivery_slots, get_delivery_slots, get_delivery_slot,
-    mark_delivery_slot_creating, mark_delivery_slot_delivered,
-    mark_delivery_slot_queued, mark_delivery_slot_failed,
-    count_delivery_slots, get_missing_delivery_slots,
     # Gateway stats
     get_gateway_stats,
     get_card_payment_stats,
@@ -2434,10 +2430,8 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
         ])
 
     # Quick-retry mode: try up to QUICK_MAX_ATTEMPTS with QUICK_RETRY_DELAY between
-    # attempts, then return failure immediately. The caller (_deliver_bulk_configs)
-    # will enqueue the job and the delivery_worker retries every 5 minutes.
-    # This keeps the immediate buy flow fast (≤60s) without sending scary messages
-    # to the user prematurely.
+    # attempts, then return failure immediately. direct_delivery owns the 5-minute
+    # retry window and final refund; no legacy queue fallback is used.
     QUICK_MAX_ATTEMPTS = 3    # total attempts per step
     QUICK_RETRY_DELAY  = 20   # seconds between attempts
 

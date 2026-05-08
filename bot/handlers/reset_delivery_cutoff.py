@@ -2,9 +2,9 @@
 """
 Admin command:  /reset_delivery_cutoff
 
-Cancels every pending/queued/retry/processing/creating/failed delivery_queue
-row, cancels every undelivered delivery_slot, advances the reconcile
-watermark to MAX(payments.id), and re-enables reconcile.
+Deprecated admin cleanup. Cancels every pending/queued/retry/processing/creating/failed
+delivery_queue row and every undelivered delivery_slot. It does not re-enable
+the old reconcile worker.
 
 Two-step confirmation:
     /reset_delivery_cutoff           → shows summary + CONFIRM token
@@ -42,7 +42,7 @@ def _is_authorized(uid: int) -> bool:
 
 
 def _summary_lines() -> list:
-    enabled = str(setting_get("delivery_reconcile_enabled", "1") or "1").strip()
+    enabled = str(setting_get("delivery_reconcile_enabled", "0") or "0").strip()
     cutoff = str(setting_get("delivery_reconcile_after_payment_id", "0") or "0").strip()
     try:
         with get_conn() as conn:
@@ -123,7 +123,7 @@ def cmd_reset_delivery_cutoff(message):
             f"• ردیف‌های صف کنسل‌شده: <code>{result['queue_cancelled']}</code>",
             f"• اسلات‌های کنسل‌شده: <code>{result['slots_cancelled']}</code>",
             f"• cutoff جدید: <code>{result['new_cutoff']}</code>",
-            "• reconcile دوباره فعال شد.",
+            "• reconcile قدیمی غیرفعال باقی ماند.",
         ]),
         parse_mode="HTML",
     )

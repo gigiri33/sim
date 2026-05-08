@@ -21,6 +21,7 @@ compatibility but NO new rows are inserted into them by this module.
 import logging
 import threading
 import time
+from datetime import datetime
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +33,47 @@ MAX_ATTEMPTS        = 11        # t=0,30,60,...,300  (11 attempts with 30s gaps)
 # ── Per-payment in-flight guard ────────────────────────────────────────────────
 _inflight_lock = threading.Lock()
 _inflight: set = set()          # payment IDs currently being delivered
+
+FINAL_DELIVERY_STATUSES = {"delivered", "delivery_failed_refunded", "partially_refunded"}
+IN_PROGRESS_DELIVERY_STATUSES = {"delivering", "partially_delivered"}
+SUCCESS_PAYMENT_STATUSES = {"completed", "paid", "success", "successful", "approved"}
+
+
+def _row_get(row, key: str, default=None):
+    try:
+        if hasattr(row, "keys") and key in row.keys():
+            return row[key]
+    except Exception:
+        pass
+    try:
+        return row[key]
+    except Exception:
+        return default
+
+
+def _panel_config_delivery_index(row):
+    value = _row_get(row, "delivery_index", None)
+    if value is None:
+        value = _row_get(row, "delivery_slot_index", None)
+    return value
+
+
+def _parse_delivery_started_epoch(value):
+    """Parse Jalali now_str() value, falling back to Gregorian test values."""
+    if not value:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        import jdatetime
+        return jdatetime.datetime.strptime(text, "%Y-%m-%d %H:%M:%S").togregorian().timestamp()
+    except Exception:
+        pass
+    try:
+        return datetime.strptime(text, "%Y-%m-%d %H:%M:%S").timestamp()
+    except Exception:
+        return None
 
 
 def _is_conn_err(e_str: str) -> bool:
@@ -151,6 +193,16 @@ def _run_delivery(payment_id: int):
             log.error("[DirectDelivery] payment %s not found", payment_id)
             return
 
+        payment_status = str(_row_get(payment, "status", "") or "").lower().strip()
+        if payment_status not in SUCCESS_PAYMENT_STATUSES:
+            log.warning("[DirectDelivery] payment %s is not successful (status=%s) — skipping", payment_id, payment_status)
+            return
+
+        delivery_status = str(_row_get(payment, "delivery_status", "not_required") or "not_required").strip()
+        if delivery_status in FINAL_DELIVERY_STATUSES:
+            log.info("[DirectDelivery] payment_id=%s already finalized (%s), skipping", payment_id, delivery_status)
+            return
+
         uid         = payment["user_id"]
         package_id  = payment["package_id"]
         amount      = int(payment["amount"] or 0)
@@ -183,27 +235,34 @@ def _run_delivery(payment_id: int):
 
         panel = get_panel(panel_id) if panel_id else None
 
-        unit_price = max(0, amount // quantity) if quantity else amount
-
         log.info(
             "[DirectDelivery] START payment_id=%s uid=%s package=%s qty=%s amount=%s",
             payment_id, uid, package_id, quantity, amount
         )
 
-        mark_delivery_started(payment_id)
-        set_payment_delivery_status(payment_id, "delivering")
+        started_epoch = _parse_delivery_started_epoch(_row_get(payment, "delivery_started_at", None))
+        is_resume = delivery_status in IN_PROGRESS_DELIVERY_STATUSES and started_epoch is not None
+        if is_resume:
+            t_start = started_epoch
+            log.info("[DirectDelivery] resuming payment_id=%s elapsed=%.0fs", payment_id, time.time() - t_start)
+        else:
+            mark_delivery_started(payment_id)
+            set_payment_delivery_status(payment_id, "delivering")
+            t_start = time.time()
+            _send_user(uid, "⏳ پرداخت شما تأیید شد و ارسال کانفیگ‌ها شروع شد. لطفاً چند لحظه صبر کنید.")
 
-        t_start = time.time()
         attempt = 0
         delivered_pc_ids   = []
         delivered_names    = []
 
         while attempt < MAX_ATTEMPTS:
             elapsed = time.time() - t_start
+            if elapsed >= MAX_TOTAL_SECS:
+                break
 
             # Check how many are already delivered
             existing = get_panel_configs_for_payment(payment_id)
-            existing_indices = {int(r["delivery_slot_index"]) for r in existing if r["delivery_slot_index"] is not None}
+            existing_indices = {int(_panel_config_delivery_index(r)) for r in existing if _panel_config_delivery_index(r) is not None}
             existing_count   = len(existing)
 
             if existing_count >= quantity:
@@ -217,6 +276,7 @@ def _run_delivery(payment_id: int):
                     delivered=existing_count,
                     finished=True
                 )
+                _send_user(uid, f"✅ پرداخت شما تأیید شد و {existing_count} کانفیگ ارسال شد.")
                 try:
                     from .ui.notifications import check_and_give_referral_purchase_reward
                     check_and_give_referral_purchase_reward(uid)
@@ -285,8 +345,9 @@ def _run_delivery(payment_id: int):
 
             # Re-check total
             current_count = count_panel_configs_for_payment(payment_id)
+            progress_status = "partially_delivered" if current_count > 0 else "delivering"
             set_payment_delivery_status(
-                payment_id, "delivering",
+                payment_id, progress_status,
                 delivered=current_count,
                 error=last_error if last_error else None
             )
@@ -302,6 +363,7 @@ def _run_delivery(payment_id: int):
                     delivered=current_count,
                     finished=True
                 )
+                _send_user(uid, f"✅ پرداخت شما تأیید شد و {current_count} کانفیگ ارسال شد.")
                 # Notify referral reward
                 try:
                     from .ui.notifications import check_and_give_referral_purchase_reward
@@ -334,6 +396,11 @@ def _run_delivery(payment_id: int):
         # ── Timeout reached ────────────────────────────────────────────────────
         final_count = count_panel_configs_for_payment(payment_id)
         undelivered = max(0, quantity - final_count)
+
+        if undelivered <= 0:
+            set_payment_delivery_status(payment_id, "delivered", delivered=final_count, finished=True)
+            _send_user(uid, f"✅ پرداخت شما تأیید شد و {final_count} کانفیگ ارسال شد.")
+            return
 
         log.warning(
             "[DirectDelivery] TIMEOUT payment_id=%s uid=%s delivered=%s/%s",
@@ -397,7 +464,7 @@ def _run_delivery(payment_id: int):
             _inflight.discard(payment_id)
 
 
-def fulfill_panel_payment_direct(payment_id: int):
+def fulfill_panel_payment_direct(payment_id: int, run_sync: bool = False):
     """
     Entry point: called from every payment success path for panel config purchases.
 
@@ -412,6 +479,14 @@ def fulfill_panel_payment_direct(payment_id: int):
         payment = get_payment(payment_id)
         if not payment:
             log.warning("[DirectDelivery] fulfill called for unknown payment_id=%s", payment_id)
+            return
+
+        payment_status = str(_row_get(payment, "status", "") or "").lower().strip()
+        if payment_status not in SUCCESS_PAYMENT_STATUSES:
+            return
+
+        delivery_status = str(_row_get(payment, "delivery_status", "not_required") or "not_required").strip()
+        if delivery_status in FINAL_DELIVERY_STATUSES:
             return
 
         # Only handle panel config purchases
@@ -439,6 +514,10 @@ def fulfill_panel_payment_direct(payment_id: int):
         log.error("[DirectDelivery] fulfill setup error payment_id=%s: %s", payment_id, exc)
         return
 
+    if run_sync:
+        _run_delivery(payment_id)
+        return
+
     t = threading.Thread(
         target=_run_delivery,
         args=(payment_id,),
@@ -447,3 +526,28 @@ def fulfill_panel_payment_direct(payment_id: int):
     )
     t.start()
     log.info("[DirectDelivery] launched thread for payment_id=%s", payment_id)
+
+
+def recover_incomplete_direct_deliveries(limit: int = 100, run_sync: bool = False):
+    """Resume/finalize only direct-delivery payments left mid-flight.
+
+    This intentionally does not inspect completed historical payments and never
+    reads delivery_queue/delivery_slots. It is safe to run on every startup.
+    """
+    try:
+        from .db import get_direct_delivery_recovery_payments
+        rows = get_direct_delivery_recovery_payments(limit=limit)
+    except Exception as exc:
+        log.error("[DirectDelivery] recovery query failed: %s", exc)
+        return 0
+
+    started = 0
+    for row in rows:
+        try:
+            fulfill_panel_payment_direct(int(row["id"]), run_sync=run_sync)
+            started += 1
+        except Exception as exc:
+            log.error("[DirectDelivery] recovery launch failed payment=%s: %s", _row_get(row, "id", "?"), exc)
+    if started:
+        log.warning("[DirectDelivery] recovery launched for %s in-flight payment(s)", started)
+    return started
