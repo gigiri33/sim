@@ -87,7 +87,7 @@ def run_crypto_fulfillment(gateway: str, payment_id: int):
                 apply_gateway_bonus_if_needed(uid, gateway, amount)
             except Exception:
                 pass
-            _send_bulk_delivery_result(uid, uid, pkg_row, purchase_ids, pending_ids, gw_label)
+            _send_bulk_delivery_result(uid, uid, pkg_row, purchase_ids, pending_ids, gw_label, payment_id=payment_id)
 
         elif kind == "renewal":
             from .ui.notifications import admin_renewal_notify
@@ -405,7 +405,7 @@ def process_centralpay_verified_payment(payment_id: int,
                 apply_gateway_bonus_if_needed(uid, "centralpay", amount)
             except Exception:
                 pass
-            _send_bulk_delivery_result(uid, uid, pkg_row, purchase_ids, pending_ids, "سنترال‌پی")
+            _send_bulk_delivery_result(uid, uid, pkg_row, purchase_ids, pending_ids, "سنترال‌پی", payment_id=payment_id)
             print(f"[CentralPay] service processed: payment_id={payment_id} orderId={_cp_verify_order_id} user_id={uid} kind=config_purchase")
 
         elif kind == "renewal":
@@ -826,7 +826,7 @@ def _fulfill_tronado_non_wallet(payment_id: int, kind: str, uid: int, amount: in
             apply_gateway_bonus_if_needed(uid, "tronado", amount)
         except Exception:
             pass
-        _send_bulk_delivery_result(uid, uid, pkg_row, purchase_ids, pending_ids, "ترونادو")
+        _send_bulk_delivery_result(uid, uid, pkg_row, purchase_ids, pending_ids, "ترونادو", payment_id=payment_id)
 
     elif kind == "renewal":
         from .ui.notifications import admin_renewal_notify

@@ -844,6 +844,8 @@ def _run_init_db_migrations():
             "ALTER TABLE packages ADD COLUMN button_color TEXT NOT NULL DEFAULT 'glass'",
             # ── Panel configs: inbound protocol (vmess/vless/trojan) ──────────
             "ALTER TABLE panel_configs ADD COLUMN inbound_protocol TEXT NOT NULL DEFAULT ''",
+            # ── Panel configs: canonical delivery slot for idempotent bulk delivery ─
+            "ALTER TABLE panel_configs ADD COLUMN delivery_slot_index INTEGER",
             # ── Persistent panel-config delivery queue ─────────────────────────
             """CREATE TABLE IF NOT EXISTS delivery_queue (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -851,6 +853,7 @@ def _run_init_db_migrations():
                 chat_id         INTEGER NOT NULL,
                 package_id      INTEGER NOT NULL,
                 payment_id      INTEGER NOT NULL,
+                slot_index      INTEGER,
                 desired_name    TEXT,
                 unit_price      INTEGER NOT NULL DEFAULT 0,
                 payment_method  TEXT    NOT NULL DEFAULT '',
@@ -864,6 +867,23 @@ def _run_init_db_migrations():
                 panel_config_id INTEGER,
                 client_uuid     TEXT,
                 client_name     TEXT
+            )""",
+            "ALTER TABLE delivery_queue ADD COLUMN slot_index INTEGER",
+            # ── Canonical panel delivery slots ────────────────────────────────
+            """CREATE TABLE IF NOT EXISTS delivery_slots (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                payment_id      INTEGER NOT NULL,
+                user_id         INTEGER NOT NULL,
+                package_id      INTEGER NOT NULL,
+                slot_index      INTEGER NOT NULL,
+                desired_name    TEXT,
+                status          TEXT    NOT NULL DEFAULT 'pending',
+                panel_config_id INTEGER,
+                queue_id        INTEGER,
+                last_error      TEXT,
+                created_at      TEXT,
+                updated_at      TEXT,
+                UNIQUE(payment_id, slot_index)
             )""",
             # ── Locked channels: optional invite link for private channels ─────
             "ALTER TABLE locked_channels ADD COLUMN join_url TEXT NOT NULL DEFAULT ''",
@@ -883,6 +903,9 @@ def _run_init_db_migrations():
             "CREATE INDEX IF NOT EXISTS idx_purchases_user       ON purchases(user_id)",
             "CREATE INDEX IF NOT EXISTS idx_referrals_referrer   ON referrals(referrer_id)",
             "CREATE INDEX IF NOT EXISTS idx_users_status         ON users(status)",
+            "CREATE INDEX IF NOT EXISTS idx_delivery_slots_payment ON delivery_slots(payment_id, status)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_panel_configs_payment_slot ON panel_configs(payment_id, delivery_slot_index) WHERE payment_id IS NOT NULL AND delivery_slot_index IS NOT NULL",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_delivery_queue_payment_slot_pending ON delivery_queue(payment_id, slot_index) WHERE payment_id IS NOT NULL AND slot_index IS NOT NULL AND status='pending'",
 
         ]
         for sql in indexes:
@@ -3600,21 +3623,27 @@ def add_panel_config(user_id, package_id, panel_id, panel_type,
                      inbound_id, inbound_port, client_name, client_uuid,
                      client_sub_url, client_config_text, expire_at,
                      inbound_remark="", purchase_id=None, payment_id=None, cpkg_id=None, is_test=0,
-                     inbound_protocol=""):
+                     inbound_protocol="", delivery_slot_index=None):
     with get_conn() as conn:
         cur = conn.execute(
             """INSERT INTO panel_configs
                (user_id, package_id, panel_id, panel_type, inbound_id, inbound_port,
                 client_name, client_uuid, client_sub_url, client_config_text,
                 inbound_remark, expire_at, created_at, purchase_id, payment_id, cpkg_id, is_test,
-                inbound_protocol)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                inbound_protocol, delivery_slot_index)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (user_id, package_id, panel_id, panel_type, inbound_id, inbound_port,
              client_name, client_uuid, client_sub_url, client_config_text,
              inbound_remark or "", expire_at, now_str(), purchase_id, payment_id, cpkg_id, int(is_test),
-             inbound_protocol or "")
+             inbound_protocol or "", delivery_slot_index)
         )
         return cur.lastrowid
+
+
+def assign_panel_config_is_test(config_id, is_test=0):
+    """Set the is_test flag for a panel config (kept for older call sites)."""
+    with get_conn() as conn:
+        conn.execute("UPDATE panel_configs SET is_test=? WHERE id=?", (int(is_test), config_id))
 
 
 def get_panel_config(config_id):
@@ -4311,22 +4340,230 @@ def apply_gateway_fee(gw_name: str, base_amount: int) -> int:
 
 # ── Delivery Queue ─────────────────────────────────────────────────────────────
 
+def ensure_delivery_slots(payment_id, user_id, package_id, quantity, service_names=None):
+    """Ensure canonical per-item delivery slots exist for a panel payment."""
+    if payment_id is None:
+        return []
+    qty = max(1, int(quantity or 1))
+    names = service_names or []
+    ts = now_str()
+    with get_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        for i in range(qty):
+            desired = names[i] if i < len(names) else None
+            conn.execute(
+                "INSERT OR IGNORE INTO delivery_slots"
+                "(payment_id,user_id,package_id,slot_index,desired_name,status,created_at,updated_at)"
+                " VALUES(?,?,?,?,?,'pending',?,?)",
+                (payment_id, user_id, package_id, i, desired, ts, ts),
+            )
+            if desired:
+                conn.execute(
+                    "UPDATE delivery_slots SET desired_name=COALESCE(NULLIF(desired_name,''), ?), updated_at=? "
+                    "WHERE payment_id=? AND slot_index=?",
+                    (desired, ts, payment_id, i),
+                )
+        conn.commit()
+    return get_delivery_slots(payment_id)
+
+
+def get_delivery_slots(payment_id):
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM delivery_slots WHERE payment_id=? ORDER BY slot_index ASC",
+            (payment_id,),
+        ).fetchall()
+
+
+def get_delivery_slot(payment_id, slot_index):
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM delivery_slots WHERE payment_id=? AND slot_index=?",
+            (payment_id, slot_index),
+        ).fetchone()
+
+
+def mark_delivery_slot_creating(payment_id, slot_index, allow_queued=False):
+    """Atomically claim a slot for creation. Returns True only for the winner."""
+    ts = now_str()
+    stale = datetime.now(_TZ_TEHRAN) - timedelta(minutes=15)
+    stale_j = jdatetime.datetime.fromgregorian(datetime=stale).strftime("%Y-%m-%d %H:%M:%S")
+    with get_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if allow_queued:
+            conn.execute(
+                "UPDATE delivery_slots SET status='creating', updated_at=? "
+                "WHERE payment_id=? AND slot_index=? AND "
+                "(status IN ('pending','failed','queued') OR (status='creating' AND updated_at < ?))",
+                (ts, payment_id, slot_index, stale_j),
+            )
+        else:
+            conn.execute(
+                "UPDATE delivery_slots SET status='creating', updated_at=? "
+                "WHERE payment_id=? AND slot_index=? AND "
+                "(status IN ('pending','failed') OR (status='creating' AND updated_at < ?))",
+                (ts, payment_id, slot_index, stale_j),
+            )
+        changed = conn.execute("SELECT changes() AS c").fetchone()["c"]
+        conn.commit()
+    return changed > 0
+
+
+def mark_delivery_slot_delivered(payment_id, slot_index, panel_config_id):
+    ts = now_str()
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE delivery_slots SET status='delivered', panel_config_id=?, last_error=NULL, updated_at=? "
+            "WHERE payment_id=? AND slot_index=?",
+            (panel_config_id, ts, payment_id, slot_index),
+        )
+
+
+def mark_delivery_slot_queued(payment_id, slot_index, queue_id, error=None):
+    ts = now_str()
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE delivery_slots SET status='queued', queue_id=?, last_error=?, updated_at=? "
+            "WHERE payment_id=? AND slot_index=? AND status!='delivered'",
+            (queue_id, str(error)[:1000] if error else None, ts, payment_id, slot_index),
+        )
+
+
+def mark_delivery_slot_failed(payment_id, slot_index, error=None):
+    ts = now_str()
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE delivery_slots SET status='failed', last_error=?, updated_at=? "
+            "WHERE payment_id=? AND slot_index=? AND status!='delivered'",
+            (str(error)[:1000] if error else None, ts, payment_id, slot_index),
+        )
+
+
+def count_delivery_slots(payment_id):
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT status, COUNT(*) AS n FROM delivery_slots WHERE payment_id=? GROUP BY status",
+            (payment_id,),
+        ).fetchall()
+    result = {"total": 0, "delivered": 0, "pending": 0, "creating": 0, "queued": 0, "failed": 0}
+    for r in rows:
+        st = r["status"] or "pending"
+        n = int(r["n"] or 0)
+        result[st] = n
+        result["total"] += n
+    return result
+
+
+def get_missing_delivery_slots(payment_id, expected_qty):
+    """Return slot indexes that do not exist or are neither delivered nor already queued/creating."""
+    expected = max(1, int(expected_qty or 1))
+    rows = get_delivery_slots(payment_id)
+    by_idx = {int(r["slot_index"]): r for r in rows}
+    missing = []
+    for i in range(expected):
+        r = by_idx.get(i)
+        if not r or (r["status"] not in ("delivered", "queued", "creating")):
+            missing.append(i)
+    return missing
+
+
+def get_completed_panel_payments_for_delivery_reconcile(limit=100):
+    """Return completed panel purchases that may still have missing delivery slots.
+
+    This is used by the delivery worker after restarts.  A payment can be marked
+    completed before immediate fulfillment creates/enqueues every slot; this
+    query makes payments.quantity recoverable as the source of truth.
+    """
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT p.* FROM payments p "
+            "JOIN packages pk ON pk.id=p.package_id "
+            "WHERE p.status='completed' "
+            "AND p.kind='config_purchase' "
+            "AND COALESCE(pk.config_source, 'manual')='panel' "
+            "AND COALESCE(p.quantity, 1) > 0 "
+            "ORDER BY COALESCE(p.fulfilled_at, p.approved_at, p.created_at) DESC "
+            "LIMIT ?",
+            (int(limit or 100),),
+        ).fetchall()
+    return rows
+
+
+def is_delivery_slot_stale(slot, stale_minutes=15):
+    """Return True when a creating slot is old enough to be safely reclaimed."""
+    if not slot:
+        return True
+    try:
+        status = slot["status"]
+    except Exception:
+        status = None
+    if status != "creating":
+        return True
+    try:
+        updated = slot["updated_at"]
+    except Exception:
+        updated = None
+    if not updated:
+        return True
+    stale = datetime.now(_TZ_TEHRAN) - timedelta(minutes=int(stale_minutes or 15))
+    stale_j = jdatetime.datetime.fromgregorian(datetime=stale).strftime("%Y-%m-%d %H:%M:%S")
+    return str(updated) < stale_j
+
+
 def enqueue_delivery(user_id, chat_id, package_id, payment_id,
-                     desired_name=None, unit_price=0, payment_method="", is_test=0):
+                     desired_name=None, unit_price=0, payment_method="", is_test=0,
+                     slot_index=None):
     """Add a failed panel-config delivery to the persistent retry queue.
 
     Returns the new queue item id.
     """
+    if payment_id is not None and slot_index is not None:
+        return enqueue_delivery_once(
+            user_id, chat_id, package_id, payment_id,
+            desired_name=desired_name, unit_price=unit_price,
+            payment_method=payment_method, is_test=is_test,
+            slot_index=slot_index,
+        )
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO delivery_queue"
-            "(user_id,chat_id,package_id,payment_id,desired_name,unit_price,"
+            "(user_id,chat_id,package_id,payment_id,slot_index,desired_name,unit_price,"
             "payment_method,is_test,status,retry_count,created_at,next_retry_at)"
-            " VALUES(?,?,?,?,?,?,?,?,'pending',0,?,?)",
-            (user_id, chat_id, package_id, payment_id, desired_name, unit_price,
+            " VALUES(?,?,?,?,?,?,?,?,?,'pending',0,?,?)",
+            (user_id, chat_id, package_id, payment_id, slot_index, desired_name, unit_price,
              payment_method, is_test, now_str(), now_str()),
         )
         return conn.execute("SELECT last_insert_rowid() AS x").fetchone()["x"]
+
+
+def enqueue_delivery_once(user_id, chat_id, package_id, payment_id,
+                          desired_name=None, unit_price=0, payment_method="", is_test=0,
+                          slot_index=None):
+    """Enqueue one exact delivery slot, reusing an existing pending row if present."""
+    if slot_index is None:
+        return enqueue_delivery(user_id, chat_id, package_id, payment_id, desired_name, unit_price, payment_method, is_test)
+    ts = now_str()
+    with get_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        existing = conn.execute(
+            "SELECT id FROM delivery_queue WHERE payment_id=? AND slot_index=? AND status='pending' ORDER BY id DESC LIMIT 1",
+            (payment_id, slot_index),
+        ).fetchone()
+        if existing:
+            qid = existing["id"]
+            conn.commit()
+            return qid
+        conn.execute(
+            "INSERT INTO delivery_queue"
+            "(user_id,chat_id,package_id,payment_id,slot_index,desired_name,unit_price,"
+            "payment_method,is_test,status,retry_count,created_at,next_retry_at)"
+            " VALUES(?,?,?,?,?,?,?,?,?,'pending',0,?,?)",
+            (user_id, chat_id, package_id, payment_id, slot_index, desired_name, unit_price,
+             payment_method, is_test, ts, ts),
+        )
+        qid = conn.execute("SELECT last_insert_rowid() AS x").fetchone()["x"]
+        conn.commit()
+        return qid
 
 
 def get_due_deliveries():

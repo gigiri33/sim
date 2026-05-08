@@ -393,7 +393,7 @@ def process_rialpay_verified_payment(payment_id: int,
         gateway_ref   = str(raw_payload.get("token")      or raw_payload.get("order_id") or "")[:255]
         external_txid = str(raw_payload.get("invoice_id") or "")[:255]
     if not external_txid and isinstance(verify_resp, dict):
-        external_txid = str(verify_resp.get("invoice_id") or verify_raw.get("invoice_id") or "")[:255]
+        external_txid = str(verify_resp.get("invoice_id") or "")[:255]
     raw_payload = {"incoming": raw_payload or {}, "verify_response": verify_resp, "final_decision": "paid"}
     raw_payload_str = _json.dumps(raw_payload, ensure_ascii=False)[:4000] if raw_payload else ""
 
@@ -612,7 +612,7 @@ def _fulfill_rialpay_non_wallet(payment_id: int, kind: str, uid: int, amount: in
             apply_gateway_bonus_if_needed(uid, "rialpay", amount)
         except Exception:
             pass
-        _send_bulk_delivery_result(uid, uid, pkg_row, purchase_ids, pending_ids, "ریال‌پی")
+        _send_bulk_delivery_result(uid, uid, pkg_row, purchase_ids, pending_ids, "ریال‌پی", payment_id=payment_id)
 
     elif kind == "renewal":
         from ..db import get_conn as _gc

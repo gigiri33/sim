@@ -6,6 +6,7 @@ import time
 import threading
 import traceback
 import urllib.parse
+import string
 from datetime import datetime, timedelta
 from telebot import types
 
@@ -84,6 +85,10 @@ from ..db import (
     update_panel_config_field, delete_panel_config,
     # Service naming
     set_payment_service_names, get_payment_service_names,
+    ensure_delivery_slots, get_delivery_slots, get_delivery_slot,
+    mark_delivery_slot_creating, mark_delivery_slot_delivered,
+    mark_delivery_slot_queued, mark_delivery_slot_failed,
+    count_delivery_slots, get_missing_delivery_slots,
     # Gateway stats
     get_gateway_stats,
     get_card_payment_stats,
@@ -1827,6 +1832,7 @@ def _execute_addon_update(config_id, addon_type, sd, uid):
     return True, None
 
 
+def _notify_panel_error(uid, package_row=None, stage="", detail="", panel_config_id=None, panel_id=None):
 
     """
     Alert owner admins (ADMIN_IDS) and the error_log group topic
@@ -1880,6 +1886,19 @@ def _execute_addon_update(config_id, addon_type, sd, uid):
             pass
     except Exception as _ne:
         log.error("_notify_panel_error itself failed: %s", _ne)
+
+
+def _notify_admin(text: str):
+    """Best-effort admin/error-log notification used by delivery code."""
+    for admin_id in ADMIN_IDS:
+        try:
+            bot.send_message(admin_id, text, parse_mode="HTML")
+        except Exception:
+            pass
+    try:
+        send_to_topic("error_log", text)
+    except Exception:
+        pass
 
 
 def _panel_connect_with_retry(uid, protocol, host, port, path, username, password,
@@ -1995,42 +2014,96 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
         panel_config_ids = []
         panel_client_names = []
         panel_pending_ids = []
-        failed_count = 0
-        failed_notified_user = False   # send only ONE queue message per bulk delivery
-        for i in range(quantity):
+        payment_row = get_payment(payment_id) if payment_id else None
+        try:
+            expected_qty = int(payment_row["quantity"] or quantity or 1) if payment_row else int(quantity or 1)
+        except Exception:
+            expected_qty = int(quantity or 1)
+        expected_qty = max(1, expected_qty)
+        unit_price = max(0, total_amount // expected_qty) if expected_qty > 0 else total_amount
+        if payment_id:
+            if service_names is None:
+                service_names = get_payment_service_names(payment_id)
+            ensure_delivery_slots(payment_id, uid, package_id, expected_qty, service_names=service_names)
+            slots = list(get_delivery_slots(payment_id))
+        else:
+            slots = [{"slot_index": i, "desired_name": (service_names[i] if service_names and i < len(service_names) else None), "status": "pending", "panel_config_id": None} for i in range(expected_qty)]
+
+        log.info(
+            "[PANEL_DELIVERY] start payment_id=%s expected_qty=%s delivered_count=%s queued_count=%s",
+            payment_id, expected_qty,
+            count_delivery_slots(payment_id).get("delivered", 0) if payment_id else 0,
+            count_delivery_slots(payment_id).get("queued", 0) if payment_id else 0,
+        )
+
+        for slot in slots:
+            i = int(slot["slot_index"])
+            status = slot["status"]
+            pc_existing = slot["panel_config_id"]
+            if status == "delivered" and pc_existing:
+                panel_config_ids.append(pc_existing)
+                try:
+                    _pc = get_panel_config(pc_existing)
+                    panel_client_names.append(_pc["client_name"] if _pc else "")
+                except Exception:
+                    panel_client_names.append("")
+                log.info("[PANEL_DELIVERY] skip delivered payment_id=%s slot_index=%s panel_config_id=%s", payment_id, i, pc_existing)
+                continue
+            if payment_id and status in ("queued", "creating"):
+                if status == "queued" and slot["queue_id"]:
+                    panel_pending_ids.append(slot["queue_id"])
+                log.info("[PANEL_DELIVERY] skip %s payment_id=%s slot_index=%s queue_id=%s", status, payment_id, i, slot["queue_id"])
+                continue
+            if payment_id and not mark_delivery_slot_creating(payment_id, i):
+                log.info("[PANEL_DELIVERY] slot claim skipped payment_id=%s slot_index=%s", payment_id, i)
+                continue
             # Brief cooldown between rapid API calls to the same panel.
             # Prevents the panel from throttling/rejecting successive login
             # requests during bulk delivery and helps avoid transient timeouts.
             if i > 0:
                 time.sleep(1)
-            desired_name = (service_names[i] if service_names and i < len(service_names) else None)
+            desired_name = slot["desired_name"] or (service_names[i] if service_names and i < len(service_names) else None)
             ok, result, pc_id, c_name = _create_panel_config(
                 uid, package_id, payment_id, chat_id=chat_id, desired_name=desired_name,
-                is_test=is_test,
+                is_test=is_test, slot_index=i,
             )
             if ok:
                 panel_config_ids.append(pc_id)
                 panel_client_names.append(c_name or "")
+                if payment_id:
+                    mark_delivery_slot_delivered(payment_id, i, pc_id)
+                log.info("[PANEL_DELIVERY] delivered payment_id=%s expected_qty=%s slot_index=%s panel_config_id=%s", payment_id, expected_qty, i, pc_id)
+                try:
+                    _deliver_panel_config_to_user(chat_id, pc_id, package_row)
+                except Exception as e:
+                    log.error("[PANEL_DELIVERY] Error delivering panel_config %s slot=%s: %s", pc_id, i, e)
+                    _notify_panel_error(
+                        uid=uid, package_row=package_row,
+                        stage="تحویل کانفیگ به کاربر",
+                        detail=str(e), panel_config_id=pc_id
+                    )
             else:
-                failed_count += 1
                 # Enqueue to the persistent delivery queue for automatic retry.
                 # Do NOT refund — do NOT send repeated waiting messages.
                 try:
-                    from ..db import enqueue_delivery
-                    q_id = enqueue_delivery(
+                    from ..db import enqueue_delivery_once
+                    q_id = enqueue_delivery_once(
                         user_id=uid,
                         chat_id=chat_id,
                         package_id=package_id,
                         payment_id=payment_id,
+                        slot_index=i,
                         desired_name=desired_name,
                         unit_price=unit_price,
                         payment_method=payment_method,
                         is_test=is_test,
                     )
                     panel_pending_ids.append(q_id)
+                    if payment_id:
+                        mark_delivery_slot_queued(payment_id, i, q_id, result)
                     log.warning(
-                        "[PANEL_DELIVERY] queued uid=%s pkg=%s payment=%s dq_id=%s reason=%s",
-                        uid, package_id, payment_id, q_id, result,
+                        "[PANEL_DELIVERY] queued uid=%s pkg=%s payment=%s slot_index=%s dq_id=%s reason=%s",
+                        uid, package_id, payment_id, i, q_id, result,
                     )
                     # Log the purchase immediately since payment was confirmed
                     try:
@@ -2050,19 +2123,6 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
                         pass
                 except Exception as _po_exc:
                     log.error("[PANEL_DELIVERY] enqueue_delivery failed uid=%s: %s", uid, _po_exc)
-                # Send ONE calm message to the user — no repeated messages
-                if not failed_notified_user:
-                    try:
-                        bot.send_message(
-                            chat_id,
-                            "✅ <b>پرداخت شما ثبت شد</b>\n\n"
-                            "⏳ سرویس شما در صف تحویل قرار گرفت و به محض اتصال پنل، کانفیگ ارسال می‌شود.\n\n"
-                            "نیازی به کار دیگری ندارید.",
-                            parse_mode="HTML",
-                        )
-                        failed_notified_user = True
-                    except Exception:
-                        pass
                 # Notify admins with full technical details
                 try:
                     _pid = package_row["panel_id"] if "panel_id" in (package_row.keys() if hasattr(package_row, "keys") else {}) else None
@@ -2080,17 +2140,28 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
                 _set_is_test(pc_id, is_test)
             except Exception:
                 pass
-        # Deliver each panel config
-        for pc_id in panel_config_ids:
-            try:
-                _deliver_panel_config_to_user(chat_id, pc_id, package_row)
-            except Exception as e:
-                log.error("[PANEL_DELIVERY] Error delivering panel_config %s: %s", pc_id, e)
-                _notify_panel_error(
-                    uid=uid, package_row=package_row,
-                    stage="تحویل کانفیگ به کاربر",
-                    detail=str(e), panel_config_id=pc_id
-                )
+
+        if payment_id:
+            # Final reconciliation: ensure every missing slot has a pending queue row.
+            for missing_i in get_missing_delivery_slots(payment_id, expected_qty):
+                slot = get_delivery_slot(payment_id, missing_i)
+                desired_name = (slot["desired_name"] if slot else None) or (service_names[missing_i] if service_names and missing_i < len(service_names) else None)
+                try:
+                    from ..db import enqueue_delivery_once
+                    q_id = enqueue_delivery_once(
+                        uid, chat_id, package_id, payment_id,
+                        desired_name=desired_name, unit_price=unit_price,
+                        payment_method=payment_method, is_test=is_test,
+                        slot_index=missing_i,
+                    )
+                    mark_delivery_slot_queued(payment_id, missing_i, q_id, "reconciled missing delivery slot")
+                    if q_id not in panel_pending_ids:
+                        panel_pending_ids.append(q_id)
+                    log.warning("[PANEL_DELIVERY] reconciled missing payment_id=%s slot_index=%s queue_id=%s", payment_id, missing_i, q_id)
+                except Exception as exc:
+                    mark_delivery_slot_failed(payment_id, missing_i, exc)
+                    log.error("[PANEL_DELIVERY] reconcile failed payment_id=%s slot_index=%s error=%s", payment_id, missing_i, exc)
+
         # Check referral purchase reward for panel deliveries
         if panel_config_ids:
             try:
@@ -2105,6 +2176,13 @@ def _deliver_bulk_configs(chat_id, uid, package_id, total_amount, payment_method
                                           service_name=panel_client_names[_i] if _i < len(panel_client_names) else None)
                 except Exception:
                     pass
+        if payment_id:
+            counts = count_delivery_slots(payment_id)
+            log.info(
+                "[PANEL_DELIVERY] done payment_id=%s expected_qty=%s delivered_count=%s queued_count=%s pending_count=%s creating_count=%s failed_count=%s",
+                payment_id, expected_qty, counts.get("delivered", 0), counts.get("queued", 0),
+                counts.get("pending", 0), counts.get("creating", 0), counts.get("failed", 0),
+            )
         return panel_config_ids, panel_pending_ids
 
     # ── Manual / stock-based packages (original logic) ────────────────────────
@@ -2437,7 +2515,7 @@ def _panel_create_lock(panel_id):
         return _panel_locks[panel_id]
 
 
-def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name=None, is_test=0):
+def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name=None, is_test=0, slot_index=None):
     """
     Create a config in the panel for uid/package_id.
     If the package has a client_package_id, the sample config/sub URL from that
@@ -2678,6 +2756,7 @@ def _create_panel_config(uid, package_id, payment_id, chat_id=None, desired_name
         cpkg_id=cpkg["id"] if cpkg else None,
         is_test=is_test,
         inbound_protocol=inbound_protocol,
+        delivery_slot_index=slot_index,
     )
 
     return True, delivery_mode, pc_id, client_name
@@ -2894,7 +2973,7 @@ def _deliver_panel_config_inner(chat_id, panel_config_id, package_row, pc):
 
 
 def _send_bulk_delivery_result(chat_id, uid, package_row, purchase_ids, pending_ids,
-                               method_label):
+                               method_label, payment_id=None):
     """
     Send delivery messages to user after bulk purchase.
     For panel packages, delivery is already done inside _deliver_bulk_configs.
@@ -2909,7 +2988,20 @@ def _send_bulk_delivery_result(chat_id, uid, package_row, purchase_ids, pending_
         config_source = "manual"
 
     if config_source == "panel":
-        if not purchase_ids and not pending_ids:
+        delivered_count = len({int(x) for x in purchase_ids if x})
+        queued_count = len({int(x) for x in pending_ids if x})
+        expected_count = delivered_count + queued_count
+        if payment_id:
+            try:
+                _pmt = get_payment(payment_id)
+                expected_count = max(1, int(_pmt["quantity"] or expected_count or 1)) if _pmt else expected_count
+                _counts = count_delivery_slots(payment_id)
+                delivered_count = int(_counts.get("delivered", delivered_count) or 0)
+                queued_count = max(0, expected_count - delivered_count)
+            except Exception as _cnt_exc:
+                log.warning("[PANEL_DELIVERY] summary count failed payment_id=%s error=%s", payment_id, _cnt_exc)
+        total_count = max(expected_count, delivered_count + queued_count)
+        if delivered_count <= 0 and queued_count <= 0:
             try:
                 bot.send_message(
                     chat_id,
@@ -2920,22 +3012,28 @@ def _send_bulk_delivery_result(chat_id, uid, package_row, purchase_ids, pending_
                 )
             except Exception:
                 pass
-        elif pending_ids and not purchase_ids:
-            # All deliveries failed and became pending orders — already notified user in _deliver_bulk_configs
-            from ..ui.notifications import notify_pending_order_to_admins
-            for p_id in pending_ids:
-                try:
-                    notify_pending_order_to_admins(p_id, uid, package_row, package_row["price"], method_label)
-                except Exception:
-                    pass
-        elif pending_ids:
-            # Partial delivery failure — some became pending orders
-            from ..ui.notifications import notify_pending_order_to_admins
-            for p_id in pending_ids:
-                try:
-                    notify_pending_order_to_admins(p_id, uid, package_row, package_row["price"], method_label)
-                except Exception:
-                    pass
+        elif delivered_count < total_count:
+            remaining_count = max(0, total_count - delivered_count)
+            try:
+                bot.send_message(
+                    chat_id,
+                    f"✅ پرداخت شما ثبت شد. {delivered_count} از {total_count} کانفیگ ارسال شد و "
+                    f"{remaining_count} مورد باقی‌مانده در صف تحویل قرار گرفت.",
+                    parse_mode="HTML",
+                    reply_markup=back_button("main"),
+                )
+            except Exception:
+                pass
+        else:
+            try:
+                bot.send_message(
+                    chat_id,
+                    f"✅ پرداخت تأیید شد و {delivered_count} کانفیگ شما ارسال شد.",
+                    parse_mode="HTML",
+                    reply_markup=back_button("main"),
+                )
+            except Exception:
+                pass
         return
 
     total = len(purchase_ids) + len(pending_ids)
@@ -3997,7 +4095,7 @@ def _tetrapay_auto_verify(payment_id, authority, uid, chat_id, message_id, kind,
                 except Exception:
                     pass
                 _send_bulk_delivery_result(chat_id, uid, pkg_row,
-                                           purchase_ids, pending_ids, "TetraPay")
+                                           purchase_ids, pending_ids, "TetraPay", payment_id=payment_id)
 
             elif kind == "renewal":
                 pkg_row = get_package(package_id)
@@ -4038,12 +4136,17 @@ def _tetrapay_auto_verify(payment_id, authority, uid, chat_id, message_id, kind,
                     try:
                         from ..admin.renderers import _show_panel_config_detail as _spcd_tp
                         class _FakeCall_tp:
-                            class message:
-                                chat_id = chat_id
-                                message_id = message_id
-                                class chat:
-                                    id = chat_id
-                                    type = "private"
+                            pass
+                        class _FakeMsg_tp:
+                            pass
+                        class _FakeChat_tp:
+                            pass
+                        _FakeChat_tp.id = chat_id
+                        _FakeChat_tp.type = "private"
+                        _FakeMsg_tp.chat_id = chat_id
+                        _FakeMsg_tp.message_id = message_id
+                        _FakeMsg_tp.chat = _FakeChat_tp
+                        _FakeCall_tp.message = _FakeMsg_tp
                         try:
                             bot.edit_message_text("✅ پرداخت تأیید و سرویس تمدید شد.", chat_id, message_id,
                                                   parse_mode="HTML", reply_markup=back_button("my_configs"))
@@ -4162,7 +4265,7 @@ def _tronpays_rial_auto_verify(payment_id, invoice_id, uid, chat_id, message_id,
                 except Exception:
                     pass
                 _send_bulk_delivery_result(chat_id, uid, pkg_row,
-                                           purchase_ids, pending_ids, "TronPays")
+                                           purchase_ids, pending_ids, "TronPays", payment_id=payment_id)
 
             elif kind == "renewal":
                 pkg_row = get_package(package_id)
@@ -4315,7 +4418,7 @@ def _pazzlenet_auto_verify(payment_id, pazzlenet_pid, uid, chat_id, message_id, 
                 except Exception:
                     pass
                 _send_bulk_delivery_result(chat_id, uid, pkg_row,
-                                           purchase_ids, pending_ids, "PazzleNet")
+                                           purchase_ids, pending_ids, "PazzleNet", payment_id=payment_id)
 
             elif kind == "renewal":
                 pkg_row = get_package(package_id)
@@ -4470,7 +4573,7 @@ def _plisio_auto_verify(payment_id, txn_id, uid, chat_id, message_id, kind, pack
                 except Exception:
                     pass
                 _send_bulk_delivery_result(chat_id, uid, pkg_row,
-                                           purchase_ids, pending_ids, "Plisio")
+                                           purchase_ids, pending_ids, "Plisio", payment_id=payment_id)
 
             elif kind == "renewal":
                 pkg_row = get_package(package_id)
@@ -4576,7 +4679,7 @@ def _plisio_auto_verify(payment_id, txn_id, uid, chat_id, message_id, kind, pack
                     except Exception:
                         pass
                     _send_bulk_delivery_result(chat_id, uid, pkg_row,
-                                               purchase_ids, pending_ids, "Plisio")
+                                               purchase_ids, pending_ids, "Plisio", payment_id=payment_id)
                 elif kind == "renewal":
                     pkg_row = get_package(package_id)
                     cfg_id = payment["config_id"]
@@ -4727,7 +4830,7 @@ def _nowpayments_auto_verify(payment_id, invoice_id, uid, chat_id, message_id, k
                 except Exception:
                     pass
                 _send_bulk_delivery_result(chat_id, uid, pkg_row,
-                                           purchase_ids, pending_ids, "NowPayments")
+                                           purchase_ids, pending_ids, "NowPayments", payment_id=payment_id)
 
             elif kind == "renewal":
                 pkg_row = get_package(package_id)
@@ -4833,7 +4936,7 @@ def _nowpayments_auto_verify(payment_id, invoice_id, uid, chat_id, message_id, k
                     except Exception:
                         pass
                     _send_bulk_delivery_result(chat_id, uid, pkg_row,
-                                               purchase_ids, pending_ids, "NowPayments")
+                                               purchase_ids, pending_ids, "NowPayments", payment_id=payment_id)
                 elif kind == "renewal":
                     pkg_row = get_package(package_id)
                     cfg_id = payment["config_id"]
@@ -7291,7 +7394,7 @@ def _dispatch_callback(call, uid, data):
                 service_names=_snames_wallet_final
             )
             _send_bulk_delivery_result(_chat_id_wallet, uid, package_row,
-                                       purchase_ids, pending_ids, "کیف پول")
+                                       purchase_ids, pending_ids, "کیف پول", payment_id=payment_id)
         threading.Thread(target=_do_wallet_deliver, daemon=True).start()
         state_clear(uid)
         return
@@ -7310,6 +7413,13 @@ def _dispatch_callback(call, uid, data):
             from telebot.types import ReplyKeyboardMarkup, KeyboardButton
             _cur_sd = state_data(uid)
             state_set(uid, "waiting_for_phone_card", pending_callback=data,
+                      package_id=_cur_sd.get("package_id", package_id),
+                      amount=_cur_sd.get("amount"),
+                      original_amount=_cur_sd.get("original_amount", _cur_sd.get("amount")),
+                      unit_price=_cur_sd.get("unit_price"),
+                      discount_amount=_cur_sd.get("discount_amount", 0),
+                      kind=_cur_sd.get("kind", "config_purchase"),
+                      invoice_created_at=_cur_sd.get("invoice_created_at"),
                       quantity=_cur_sd.get("quantity", 1),
                       service_names=_cur_sd.get("service_names"))
             bot.answer_callback_query(call.id)
@@ -7672,7 +7782,7 @@ def _dispatch_callback(call, uid, data):
                     except Exception:
                         pass
                     _send_bulk_delivery_result(_chat_id_tp, uid, package_row,
-                                               purchase_ids, pending_ids, "TetraPay")
+                                               purchase_ids, pending_ids, "TetraPay", payment_id=payment_id)
                 threading.Thread(target=_do_tetrapay_deliver, daemon=True).start()
                 state_clear(uid)
         else:
@@ -7801,7 +7911,7 @@ def _dispatch_callback(call, uid, data):
                     except Exception:
                         pass
                     _send_bulk_delivery_result(_chat_id_tron, uid, package_row,
-                                               purchase_ids, pending_ids, "TronPays")
+                                               purchase_ids, pending_ids, "TronPays", payment_id=payment_id)
                 threading.Thread(target=_do_tronpays_deliver, daemon=True).start()
                 state_clear(uid)
         else:
@@ -7936,7 +8046,7 @@ def _dispatch_callback(call, uid, data):
                     except Exception:
                         pass
                     _send_bulk_delivery_result(_chat_id_pz, uid, package_row,
-                                               purchase_ids, pending_ids, "PazzleNet")
+                                               purchase_ids, pending_ids, "PazzleNet", payment_id=payment_id)
                 threading.Thread(target=_do_pazzlenet_deliver, daemon=True).start()
                 state_clear(uid)
         else:
@@ -8357,7 +8467,7 @@ def _dispatch_callback(call, uid, data):
                     except Exception:
                         pass
                     _send_bulk_delivery_result(_chat_id_pl, uid, package_row,
-                                               purchase_ids, pending_ids, "Plisio")
+                                               purchase_ids, pending_ids, "Plisio", payment_id=payment_id)
                 threading.Thread(target=_do_plisio_deliver, daemon=True).start()
                 state_clear(uid)
         else:
@@ -8494,7 +8604,7 @@ def _dispatch_callback(call, uid, data):
                 except Exception:
                     pass
                 _send_bulk_delivery_result(_chat_id_np, uid, package_row_v,
-                                           purchase_ids_v, pending_ids_v, "NowPayments")
+                                           purchase_ids_v, pending_ids_v, "NowPayments", payment_id=payment_id)
             threading.Thread(target=_do_nowpayments_deliver, daemon=True).start()
             state_clear(uid)
         else:
@@ -9421,7 +9531,7 @@ def _dispatch_callback(call, uid, data):
                     except Exception:
                         pass
                     _send_bulk_delivery_result(_chat_id_sw, uid, package_row,
-                                               purchase_ids, pending_ids, "SwapWallet Crypto")
+                                               purchase_ids, pending_ids, "SwapWallet Crypto", payment_id=payment_id)
                 threading.Thread(target=_do_swapwallet_deliver, daemon=True).start()
                 state_clear(uid)
         else:

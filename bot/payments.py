@@ -742,7 +742,7 @@ def _finish_card_payment_approval_core(payment_id, admin_note, approved):
                     )
                     _send_bulk_delivery_result(user_id, user_id, package_row,
                                                purchase_ids, pending_ids,
-                                               _pay_method)
+                                               _pay_method, payment_id=payment_id)
                 except Exception as _de:
                     _log.error("background delivery failed for payment %s: %s", payment_id, _de)
             _threading.Thread(target=_do_deliver, daemon=True).start()
