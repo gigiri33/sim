@@ -802,5 +802,11 @@ def _finish_card_payment_approval_core(payment_id, admin_note, approved):
         reject_payment(payment_id, admin_note)
         if payment["config_id"] and payment["kind"] != "pnlcfg_renewal":
             release_reserved_config(payment["config_id"])
-        notified = _safe_send(user_id, f"{ce('❌', '5215539470849288572')} رسید شما رد شد.\n\n{esc(admin_note)}")
+        _reject_text = (
+            "کاربر گرامی\n\n"
+            f"{ce('❌', '5987718004475958316')} رسید شما توسط ادمین رد شد."
+        )
+        if admin_note:
+            _reject_text += f"\n\n📝 دلیل: {esc(admin_note)}"
+        notified = _safe_send(user_id, _reject_text)
         return True, notified
