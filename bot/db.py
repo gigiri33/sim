@@ -954,6 +954,28 @@ def _run_init_db_migrations():
                     )
         except Exception:
             pass
+        # ── Delivery reconcile cutoff/watermark (one-shot seed) ──────────────
+        # Protects existing databases from the worker resurrecting old, already
+        # delivered orders after deploy.  For fresh installs MAX(payments.id)
+        # is NULL → 0, which is correct (every future payment id will be > 0).
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO settings(key,value) VALUES('delivery_reconcile_enabled','1')"
+            )
+            _has_cutoff = conn.execute(
+                "SELECT 1 FROM settings WHERE key='delivery_reconcile_after_payment_id'"
+            ).fetchone()
+            if not _has_cutoff:
+                _max_pid_row = conn.execute(
+                    "SELECT COALESCE(MAX(id), 0) AS m FROM payments"
+                ).fetchone()
+                _max_pid = int(_max_pid_row[0] if _max_pid_row else 0)
+                conn.execute(
+                    "INSERT INTO settings(key,value) VALUES('delivery_reconcile_after_payment_id', ?)",
+                    (str(_max_pid),),
+                )
+        except Exception:
+            pass
         conn.commit()
     finally:
         _init_conn.close()
@@ -4467,13 +4489,21 @@ def get_missing_delivery_slots(payment_id, expected_qty):
     return missing
 
 
-def get_completed_panel_payments_for_delivery_reconcile(limit=100):
+def get_completed_panel_payments_for_delivery_reconcile(limit=100, after_payment_id=0):
     """Return completed panel purchases that may still have missing delivery slots.
 
     This is used by the delivery worker after restarts.  A payment can be marked
     completed before immediate fulfillment creates/enqueues every slot; this
     query makes payments.quantity recoverable as the source of truth.
+
+    ``after_payment_id`` is a hard watermark cutoff: only payments with
+    ``id > after_payment_id`` are considered.  This prevents the worker from
+    resurrecting old, already-delivered orders after a deploy.
     """
+    try:
+        cutoff = int(after_payment_id or 0)
+    except Exception:
+        cutoff = 0
     with get_conn() as conn:
         rows = conn.execute(
             "SELECT p.* FROM payments p "
@@ -4482,11 +4512,50 @@ def get_completed_panel_payments_for_delivery_reconcile(limit=100):
             "AND p.kind='config_purchase' "
             "AND COALESCE(pk.config_source, 'manual')='panel' "
             "AND COALESCE(p.quantity, 1) > 0 "
+            "AND p.id > ? "
             "ORDER BY COALESCE(p.fulfilled_at, p.approved_at, p.created_at) DESC "
             "LIMIT ?",
-            (int(limit or 100),),
+            (cutoff, int(limit or 100)),
         ).fetchall()
     return rows
+
+
+def reset_delivery_cutoff_to_max_payment_id():
+    """Cancel pending delivery work and move the reconcile cutoff to MAX(payments.id).
+
+    Returns a dict with counts: queue_cancelled, slots_cancelled, new_cutoff.
+    """
+    with get_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            "UPDATE delivery_queue SET status='cancelled', last_error='reset by admin' "
+            "WHERE status IN ('pending','retry','processing','creating','queued','failed')"
+        )
+        queue_cancelled = conn.execute("SELECT changes() AS c").fetchone()["c"]
+        conn.execute(
+            "UPDATE delivery_slots SET status='cancelled', last_error='reset by admin', updated_at=? "
+            "WHERE status != 'delivered'",
+            (now_str(),),
+        )
+        slots_cancelled = conn.execute("SELECT changes() AS c").fetchone()["c"]
+        max_pid_row = conn.execute("SELECT COALESCE(MAX(id), 0) AS m FROM payments").fetchone()
+        new_cutoff = int(max_pid_row[0] if max_pid_row else 0)
+        conn.execute(
+            "INSERT INTO settings(key,value) VALUES('delivery_reconcile_after_payment_id', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (str(new_cutoff),),
+        )
+        conn.execute(
+            "INSERT INTO settings(key,value) VALUES('delivery_reconcile_enabled','1') "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+        )
+        conn.commit()
+    _invalidate_settings_cache()
+    return {
+        "queue_cancelled": int(queue_cancelled or 0),
+        "slots_cancelled": int(slots_cancelled or 0),
+        "new_cutoff": new_cutoff,
+    }
 
 
 def is_delivery_slot_stale(slot, stale_minutes=15):

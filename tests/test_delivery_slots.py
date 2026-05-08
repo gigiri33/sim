@@ -42,9 +42,11 @@ class DeliverySlotBulkTests(unittest.TestCase):
         self._orig_notify_panel_error = callbacks._notify_panel_error
         self._orig_admin_purchase_notify = notifications.admin_purchase_notify
         self._orig_referral_reward = notifications.check_and_give_referral_purchase_reward
+        self._orig_notify_admin = callbacks._notify_admin
         callbacks._deliver_panel_config_to_user = lambda chat_id, pc_id, pkg: self.sent.append((chat_id, pc_id))
         callbacks.time.sleep = lambda *_a, **_kw: None
         callbacks._notify_panel_error = lambda *a, **kw: None
+        callbacks._notify_admin = lambda *a, **kw: None
         notifications.admin_purchase_notify = lambda *a, **kw: None
         notifications.check_and_give_referral_purchase_reward = lambda *a, **kw: None
 
@@ -53,6 +55,7 @@ class DeliverySlotBulkTests(unittest.TestCase):
         callbacks._deliver_panel_config_to_user = self._orig_deliver
         callbacks.time.sleep = self._orig_sleep
         callbacks._notify_panel_error = self._orig_notify_panel_error
+        callbacks._notify_admin = self._orig_notify_admin
         notifications.admin_purchase_notify = self._orig_admin_purchase_notify
         notifications.check_and_give_referral_purchase_reward = self._orig_referral_reward
         old_conn = getattr(db._tls, "conn", None)

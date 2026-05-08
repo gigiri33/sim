@@ -282,12 +282,16 @@ def _notify_user_failed(chat_id, payment_id):
         pass
 
 
-def _reconcile_completed_panel_payments(limit: int = 100) -> None:
+def _reconcile_completed_panel_payments(limit: int = 100, after_payment_id: int = 0) -> None:
     """Ensure every completed panel purchase has one queue-backed slot per quantity.
 
     This is the crash/restart safety net: if a gateway marked a payment completed
     and the process died before immediate fulfillment finished, payments.quantity
     is used to recreate delivery_slots and enqueue each non-delivered slot once.
+
+    ``after_payment_id`` is a permanent watermark cutoff: only payments with
+    ``id > after_payment_id`` are inspected.  Old, already-delivered orders are
+    never resurrected by the worker.
     """
     try:
         from .db import (
@@ -305,7 +309,9 @@ def _reconcile_completed_panel_payments(limit: int = 100) -> None:
         return
 
     try:
-        payments = get_completed_panel_payments_for_delivery_reconcile(limit=limit)
+        payments = get_completed_panel_payments_for_delivery_reconcile(
+            limit=limit, after_payment_id=after_payment_id,
+        )
     except Exception as exc:
         log.error("[DeliveryWorker] reconcile payment scan failed: %s", exc)
         return
@@ -369,12 +375,23 @@ def _run_delivery_cycle():
     from .db import (
         get_due_deliveries, update_delivery_retry, mark_delivery_delivered, mark_delivery_failed,
         mark_delivery_slot_queued, mark_delivery_slot_failed,
+        setting_get,
     )
 
     retry_interval = _cfg_int("delivery_retry_interval", DELIVERY_RETRY_INTERVAL_SECONDS)
     max_retries    = _cfg_int("delivery_max_retries",    DELIVERY_MAX_RETRIES)
 
-    _reconcile_completed_panel_payments()
+    # ── Reconcile is gated by an enable flag and a watermark cutoff so that
+    # old, already-delivered payments are never resurrected after a deploy.
+    reconcile_enabled = str(setting_get("delivery_reconcile_enabled", "1") or "1").strip() == "1"
+    if reconcile_enabled:
+        try:
+            cutoff = int(str(setting_get("delivery_reconcile_after_payment_id", "0") or "0").strip() or 0)
+        except Exception:
+            cutoff = 0
+        _reconcile_completed_panel_payments(after_payment_id=cutoff)
+    else:
+        log.info("[DeliveryWorker] reconcile disabled by setting; processing pending queue only")
 
     items = get_due_deliveries()
     if not items:
