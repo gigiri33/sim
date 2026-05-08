@@ -8801,7 +8801,7 @@ def _dispatch_callback(call, uid, data):
             call,
             f"<tg-emoji emoji-id=\"5224648456533984542\">💰</tg-emoji> <b>موجودی کیف پول شما:</b>\n\n"
             f"<blockquote>{fmt_price(balance)} تومان</blockquote>\n\n"
-            "برای افزایش موجودی از روی دکمه زیر بزنید.",
+            "برای افزایش موجودی روی دکمه زیر بزنید.",
             kb,
         )
         return
