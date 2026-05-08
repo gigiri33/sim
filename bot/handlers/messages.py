@@ -985,6 +985,21 @@ def universal_handler(message):
                 final_phone = normalized if normalized else phone_raw
                 set_phone_number(uid, final_phone)
                 state_clear(uid)
+                # Now that the phone gate is satisfied, re-check referral
+                # rewards: this user may have been the missing eligible referee
+                # for their inviter (when phone is required for reward).
+                try:
+                    from ..db import get_referral_by_referee as _gref
+                    from ..ui.notifications import (
+                        check_and_give_referral_start_reward as _chk_start,
+                        check_and_give_referral_purchase_reward as _chk_purchase,
+                    )
+                    _ref_row = _gref(uid)
+                    if _ref_row:
+                        _chk_start(_ref_row["referrer_id"])
+                        _chk_purchase(uid)
+                except Exception:
+                    pass
                 from telebot.types import ReplyKeyboardRemove
                 bot.send_message(
                     message.chat.id,

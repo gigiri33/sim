@@ -367,8 +367,12 @@ def deliver_purchase_message(chat_id, purchase_id):
         rendered_desc = _rph_desc(type_desc, escape_plain_parts=True)
         bot.send_message(chat_id, f"📌 <b>توضیحات سرویس:</b>\n\n{rendered_desc}", parse_mode="HTML")
 
-    # Check referral purchase reward (only for non-test purchases)
-    if not item["is_test"]:
+    # Check referral purchase reward (only for non-test, non-gift purchases).
+    # Gift configs (referral_gift / invitee_gift) must NOT cascade up the
+    # referral tree as if the recipient had paid for a config.
+    _pay_method = (item["payment_method"] or "").strip().lower() if "payment_method" in item.keys() else ""
+    _is_gift = _pay_method in ("referral_gift", "invitee_gift", "referral_reward", "gift")
+    if not item["is_test"] and not _is_gift:
         try:
             check_and_give_referral_purchase_reward(chat_id)
         except Exception:
@@ -1075,6 +1079,13 @@ def _channel_reward_required() -> bool:
         return False
 
 
+def _phone_required_for_referral() -> bool:
+    """Return True if the bot's phone gate is enabled for any user class.
+    Used to require a registered phone before counting a referee toward rewards.
+    """
+    return (setting_get("phone_mode", "disabled") or "disabled").strip().lower() != "disabled"
+
+
 def check_and_give_referral_start_reward(referrer_id):
     """
     Check if referrer qualifies for start reward(s) and give one per complete batch.
@@ -1092,8 +1103,11 @@ def check_and_give_referral_start_reward(referrer_id):
         return
     channel_required = _channel_reward_required()
     captcha_required = setting_get("referral_captcha_enabled", "1") == "1"
+    phone_required   = _phone_required_for_referral()
     # Loop: give one reward per complete batch claimed atomically
-    while try_claim_start_reward_batch(referrer_id, required_count, channel_required, captcha_required):
+    while try_claim_start_reward_batch(referrer_id, required_count,
+                                        channel_required, captcha_required,
+                                        phone_required):
         _give_referral_reward(referrer_id, "referral_start_reward")
 
 
@@ -1172,8 +1186,9 @@ def check_and_give_referral_purchase_reward(buyer_user_id):
     required_count = int(setting_get("referral_purchase_reward_count", "1") or "1")
     if required_count <= 0:
         return
+    phone_required = _phone_required_for_referral()
     # Loop: give one reward per complete batch claimed atomically
-    while try_claim_purchase_reward_batch(referrer_id, required_count):
+    while try_claim_purchase_reward_batch(referrer_id, required_count, phone_required):
         _give_referral_reward(referrer_id, "referral_purchase_reward")
 
 
@@ -1220,7 +1235,14 @@ def give_invitee_reward(referee_id: int, referrer_id: int) -> None:
         configs = get_available_configs_for_package(pkg_id, 1)
         if configs:
             cfg = configs[0]
-            assign_config_to_user(cfg["id"], referee_id)
+            try:
+                assign_config_to_user(
+                    cfg["id"], referee_id, pkg_id, 0, "invitee_gift", is_test=0
+                )
+            except Exception:
+                # Could not assign (already sold, race) — fall back to pending
+                add_pending_reward(referee_id, "config", 0, int(pkg_id), "invitee")
+                return
             try:
                 bot.send_message(
                     referee_id,
@@ -1233,7 +1255,7 @@ def give_invitee_reward(referee_id: int, referrer_id: int) -> None:
                 pass
         else:
             # No config available right now – add to pending
-            add_pending_reward(referee_id, pkg_id)
+            add_pending_reward(referee_id, "config", 0, int(pkg_id), "invitee")
             try:
                 bot.send_message(
                     referee_id,

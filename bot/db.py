@@ -3349,19 +3349,30 @@ def claim_invitee_reward(referee_id: int) -> bool:
 
 def try_claim_start_reward_batch(referrer_id: int, required_count: int,
                                   channel_required: bool,
-                                  captcha_required: bool = False) -> bool:
+                                  captcha_required: bool = False,
+                                  phone_required: bool = False) -> bool:
     """
     Atomically claim `required_count` eligible unrewarded start-referrals.
     First checks if enough eligible rows exist; only then performs the UPDATE.
     Returns True if the batch was fully claimed (caller should now give the reward).
     Thread-safe against race conditions.
     captcha_required: if True, only count referees who have passed captcha verification.
+    phone_required: if True, only count referees who have provided a phone number
+        (used when phone gate is enabled to exclude users who never finished signup,
+        e.g. those rejected because of an unaccepted phone number).
     """
     ch = "AND channel_joined=1" if channel_required else ""
     cp = "AND captcha_verified=1" if captcha_required else ""
+    ph = (
+        "AND EXISTS (SELECT 1 FROM users u "
+        "WHERE u.user_id=referrals.referee_id "
+        "AND u.phone_number IS NOT NULL AND TRIM(u.phone_number) <> '' "
+        "AND (u.status IS NULL OR u.status <> 'restricted'))"
+    ) if phone_required else ""
     with get_conn() as conn:
         count = conn.execute(
-            f"SELECT COUNT(*) AS n FROM referrals WHERE referrer_id=? AND start_reward_given=0 {ch} {cp}",
+            f"SELECT COUNT(*) AS n FROM referrals "
+            f"WHERE referrer_id=? AND start_reward_given=0 {ch} {cp} {ph}",
             (referrer_id,)
         ).fetchone()["n"]
         if count < required_count:
@@ -3369,10 +3380,10 @@ def try_claim_start_reward_batch(referrer_id: int, required_count: int,
         cur = conn.execute(
             f"""UPDATE referrals
                    SET start_reward_given=1, rewarded_at=?
-                 WHERE referrer_id=? AND start_reward_given=0 {ch} {cp}
+                 WHERE referrer_id=? AND start_reward_given=0 {ch} {cp} {ph}
                    AND referee_id IN (
                          SELECT referee_id FROM referrals
-                          WHERE referrer_id=? AND start_reward_given=0 {ch} {cp}
+                          WHERE referrer_id=? AND start_reward_given=0 {ch} {cp} {ph}
                           LIMIT ?
                        )""",
             (now_str(), referrer_id, referrer_id, required_count)
@@ -3965,40 +3976,60 @@ def get_pending_rewards_summary(user_id: int) -> dict:
     return {"wallet_total": wallet_total, "config_count": config_count}
 
 
-def try_claim_purchase_reward_batch(referrer_id: int, required_count: int) -> bool:
+def try_claim_purchase_reward_batch(referrer_id: int, required_count: int,
+                                     phone_required: bool = False) -> bool:
     """
     Atomically claim `required_count` eligible unrewarded purchase-referrals.
     First checks if enough eligible rows exist; only then performs the UPDATE.
     Returns True if the batch was fully claimed (caller should now give the reward).
     Thread-safe against race conditions.
+
+    Eligibility rules (a referee counts as "having made a purchase" only if):
+      - they have a real (non-test) purchase whose payment_method is NOT a gift
+        (referral_gift / invitee_gift) and amount > 0, OR
+      - they have a panel_config that was created from a real payment
+        (payment_id IS NOT NULL — gift panel configs are created with payment_id=NULL)
+
+    phone_required: if True, also require that the referee has a registered
+        phone number and is not restricted (excludes accounts the bot rejected).
     """
+    ph = (
+        "AND EXISTS (SELECT 1 FROM users u "
+        "WHERE u.user_id=r.referee_id "
+        "AND u.phone_number IS NOT NULL AND TRIM(u.phone_number) <> '' "
+        "AND (u.status IS NULL OR u.status <> 'restricted'))"
+    ) if phone_required else ""
+    real_purchase_clause = (
+        "EXISTS (SELECT 1 FROM purchases p "
+        "        WHERE p.user_id = r.referee_id "
+        "          AND p.is_test = 0 "
+        "          AND COALESCE(p.amount, 0) > 0 "
+        "          AND COALESCE(p.payment_method, '') NOT IN "
+        "              ('referral_gift','invitee_gift','referral_reward','gift'))"
+        " OR EXISTS (SELECT 1 FROM panel_configs pc "
+        "            WHERE pc.user_id = r.referee_id "
+        "              AND COALESCE(pc.is_test, 0) = 0 "
+        "              AND pc.payment_id IS NOT NULL)"
+    )
     with get_conn() as conn:
         count = conn.execute(
-            """SELECT COUNT(*) AS n FROM referrals r
+            f"""SELECT COUNT(*) AS n FROM referrals r
                 WHERE r.referrer_id=? AND r.purchase_reward_given=0
-                  AND (
-                      EXISTS (SELECT 1 FROM purchases p
-                              WHERE p.user_id = r.referee_id AND p.is_test = 0)
-                      OR EXISTS (SELECT 1 FROM panel_configs pc
-                                 WHERE pc.user_id = r.referee_id)
-                  )""",
+                  AND ({real_purchase_clause})
+                  {ph}""",
             (referrer_id,)
         ).fetchone()["n"]
         if count < required_count:
             return False
         cur = conn.execute(
-            """UPDATE referrals
+            f"""UPDATE referrals
                    SET purchase_reward_given=1
                  WHERE referrer_id=? AND purchase_reward_given=0
                    AND referee_id IN (
                          SELECT r.referee_id FROM referrals r
                           WHERE r.referrer_id=? AND r.purchase_reward_given=0
-                            AND (
-                                EXISTS (SELECT 1 FROM purchases p
-                                        WHERE p.user_id = r.referee_id AND p.is_test = 0)
-                                OR EXISTS (SELECT 1 FROM panel_configs pc
-                                           WHERE pc.user_id = r.referee_id)
-                            )
+                            AND ({real_purchase_clause})
+                            {ph}
                           LIMIT ?
                        )""",
             (referrer_id, referrer_id, required_count)
