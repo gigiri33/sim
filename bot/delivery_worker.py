@@ -381,9 +381,17 @@ def _run_delivery_cycle():
     retry_interval = _cfg_int("delivery_retry_interval", DELIVERY_RETRY_INTERVAL_SECONDS)
     max_retries    = _cfg_int("delivery_max_retries",    DELIVERY_MAX_RETRIES)
 
-    # ── Reconcile is gated by an enable flag and a watermark cutoff so that
-    # old, already-delivered payments are never resurrected after a deploy.
-    reconcile_enabled = str(setting_get("delivery_reconcile_enabled", "1") or "1").strip() == "1"
+    # ── Delivery queue system is disabled in favour of direct delivery ────────
+    # The delivery_queue_system_enabled setting defaults to 0 (disabled).
+    # The reconcile is also always disabled now; completed-payment scanning
+    # caused repeated duplicate delivery bugs in production.
+    queue_enabled = str(setting_get("delivery_queue_system_enabled", "0") or "0").strip() == "1"
+    if not queue_enabled:
+        log.debug("[DeliveryWorker] delivery queue system disabled — skipping cycle")
+        return
+
+    # Legacy reconcile (only runs when queue system is explicitly re-enabled)
+    reconcile_enabled = str(setting_get("delivery_reconcile_enabled", "0") or "0").strip() == "1"
     if reconcile_enabled:
         try:
             cutoff = int(str(setting_get("delivery_reconcile_after_payment_id", "0") or "0").strip() or 0)
@@ -391,7 +399,7 @@ def _run_delivery_cycle():
             cutoff = 0
         _reconcile_completed_panel_payments(after_payment_id=cutoff)
     else:
-        log.info("[DeliveryWorker] reconcile disabled by setting; processing pending queue only")
+        log.debug("[DeliveryWorker] reconcile disabled; skipping")
 
     items = get_due_deliveries()
     if not items:
@@ -455,13 +463,21 @@ def _run_delivery_cycle():
             log.info("[DeliveryWorker] item %s delivered successfully (pc=%s uid=%s)", qid, pc_id, uid)
             # Notify admins of success
             try:
-                from .db import get_panel, get_package
+                from .db import get_panel, get_package, get_user
                 pkg  = get_package(pkg_id)
                 pkg_name = pkg["name"] if pkg else str(pkg_id)
                 svc_name = item.get("desired_name") or "—"
+                _user = get_user(uid)
+                _uname = ""
+                _fname = ""
+                if _user:
+                    _uname = f"@{_user['username']}" if _user.get("username") else "—"
+                    _fname = _user.get("full_name") or "—"
                 _notify_admin(
                     f"✅ <b>تحویل کانفیگ از صف انجام شد</b>\n\n"
                     f"👤 کاربر: <code>{uid}</code>\n"
+                    f"📛 نام: {_fname}\n"
+                    f"🆔 یوزرنیم: {_uname}\n"
                     f"📦 پکیج: {pkg_name}\n"
                     f"🏷️ نام سرویس: <code>{svc_name}</code>\n"
                     f"🗂 panel_config_id: <code>{pc_id}</code>\n"

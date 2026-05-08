@@ -887,6 +887,18 @@ def _run_init_db_migrations():
             )""",
             # ── Locked channels: optional invite link for private channels ─────
             "ALTER TABLE locked_channels ADD COLUMN join_url TEXT NOT NULL DEFAULT ''",
+            # ── Direct delivery system (replaces delivery_queue/worker) ────────
+            # delivery_status tracks the lifecycle of panel config fulfilment
+            "ALTER TABLE payments ADD COLUMN delivery_status TEXT NOT NULL DEFAULT 'not_required'",
+            "ALTER TABLE payments ADD COLUMN delivered_count INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE payments ADD COLUMN refunded_count  INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE payments ADD COLUMN delivery_attempts INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE payments ADD COLUMN delivery_started_at TEXT",
+            "ALTER TABLE payments ADD COLUMN delivery_finished_at TEXT",
+            "ALTER TABLE payments ADD COLUMN delivery_last_error TEXT",
+            # Gate: disable old delivery queue worker & reconcile by default
+            "INSERT OR IGNORE INTO settings(key,value) VALUES('delivery_queue_system_enabled','0')",
+            "INSERT OR IGNORE INTO settings(key,value) VALUES('delivery_reconcile_enabled','0')",
         ]
         for sql in migrations:
             try:
@@ -4744,4 +4756,109 @@ def fix_delivery_queue_gregorian_dates():
                 [now_str()] + ids,
             )
     return len(rows) if rows else 0
+
+
+# ── Direct delivery system helpers ────────────────────────────────────────────
+
+def get_panel_configs_for_payment(payment_id: int):
+    """Return all panel_configs created for a given payment_id, ordered by delivery_slot_index."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM panel_configs WHERE payment_id=? ORDER BY delivery_slot_index ASC, id ASC",
+            (payment_id,)
+        ).fetchall()
+
+
+def count_panel_configs_for_payment(payment_id: int) -> int:
+    """Count how many panel_configs have been created for this payment."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM panel_configs WHERE payment_id=?", (payment_id,)
+        ).fetchone()
+        return int(row["n"]) if row else 0
+
+
+def set_payment_delivery_status(payment_id: int, status: str,
+                                 delivered: int = None, refunded: int = None,
+                                 error: str = None, finished: bool = False):
+    """Update delivery tracking fields on a payment row."""
+    with get_conn() as conn:
+        parts = ["delivery_status=?"]
+        params = [status]
+        if delivered is not None:
+            parts.append("delivered_count=?")
+            params.append(delivered)
+        if refunded is not None:
+            parts.append("refunded_count=?")
+            params.append(refunded)
+        if error is not None:
+            parts.append("delivery_last_error=?")
+            params.append(str(error)[:1000])
+        if finished:
+            parts.append("delivery_finished_at=?")
+            params.append(now_str())
+        params.append(payment_id)
+        conn.execute(
+            f"UPDATE payments SET {', '.join(parts)} WHERE id=?",
+            params
+        )
+
+
+def increment_delivery_attempt(payment_id: int):
+    """Atomically increment delivery_attempts counter."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE payments SET delivery_attempts=delivery_attempts+1 WHERE id=?",
+            (payment_id,)
+        )
+
+
+def mark_delivery_started(payment_id: int):
+    """Record that direct delivery has begun for this payment."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE payments SET delivery_status='delivering', delivery_started_at=? WHERE id=?",
+            (now_str(), payment_id)
+        )
+
+
+def refund_undelivered_to_wallet(payment_id: int, user_id: int,
+                                  quantity: int, delivered_count: int,
+                                  total_amount: int) -> int:
+    """
+    Refund undelivered configs to user's wallet — idempotent.
+    Returns the amount refunded (0 if already refunded).
+    Must only be called once per payment; the delivery_status gate prevents double-refund.
+    """
+    undelivered = max(0, quantity - delivered_count)
+    if undelivered <= 0:
+        return 0
+
+    unit_price = max(0, total_amount // quantity) if quantity else total_amount
+    refund_amt = unit_price * undelivered
+
+    if refund_amt <= 0:
+        return 0
+
+    with get_conn() as conn:
+        # Atomic guard: only proceed if status is still 'delivering'
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT delivery_status, refunded_count FROM payments WHERE id=?", (payment_id,)
+        ).fetchone()
+        if not row or row["delivery_status"] not in ("delivering",):
+            conn.execute("ROLLBACK")
+            return 0  # already refunded or wrong status
+        final_status = "partially_refunded" if delivered_count > 0 else "delivery_failed_refunded"
+        conn.execute(
+            "UPDATE payments SET delivery_status=?, refunded_count=?, delivery_finished_at=? WHERE id=?",
+            (final_status, undelivered, now_str(), payment_id)
+        )
+        conn.execute(
+            "UPDATE users SET balance=balance+? WHERE user_id=?",
+            (refund_amt, user_id)
+        )
+        conn.execute("COMMIT")
+
+    return refund_amt
 
